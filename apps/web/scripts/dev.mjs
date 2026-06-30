@@ -1,10 +1,18 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, '..');
-const viteBin = path.resolve(appRoot, 'node_modules/.bin/vite');
+// vite is often hoisted to the repo-root node_modules under npm workspaces, so the
+// vite bin shim may live there rather than in apps/web/node_modules. Prefer the
+// workspace copy, fall back to the hoisted root copy.
+const viteBinCandidates = [
+  path.resolve(appRoot, 'node_modules/.bin/vite'),
+  path.resolve(appRoot, '../../node_modules/.bin/vite'),
+];
+const viteBin = viteBinCandidates.find((candidate) => fs.existsSync(candidate)) ?? viteBinCandidates[0];
 const viteCommand = process.platform === 'win32' ? `${viteBin}.cmd` : viteBin;
 
 const children = [
