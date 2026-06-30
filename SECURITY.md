@@ -21,7 +21,10 @@ a few days.
   `SELECT`/`WITH` statement and validated against a keyword/function denylist
   (no DML/DDL, file I/O, locking, server variables, metadata schemas, or
   timing/exfiltration functions) plus single-statement and table-scope checks
-  before execution. See `src/sql-guardrails.js` and `executeReadOnlySql`.
+  before execution. See `validateReadOnlySql` / `READ_ONLY_DENYLIST` /
+  `executeReadOnlySql` in `src/pipeline.js`, with `validateSqlGuardrails` in
+  `src/sql-guardrails.js` as a schema-aware second layer (columns, joins,
+  metrics, resolved candidate IDs).
 - **Least privilege is the real boundary.** The application guardrails are
   defense in depth, not a substitute for database isolation. Run against a
   dedicated database as a `SELECT`-only user (see the README "Demo data and

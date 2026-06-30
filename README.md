@@ -15,7 +15,7 @@ Most text-to-SQL demos stop at "dump the schema into the prompt, parse whatever 
 
 | Typical demo | This repo |
 |---|---|
-| Whole schema pasted into every prompt | **Semantic retrieval** selects only the in-scope tables a question needs (`metadata/semantic-layer.json`), so the prompt stays narrow even when the source ERP has hundreds of tables |
+| Whole schema pasted into every prompt | **Rule-based semantic retrieval** selects only the in-scope tables a question needs using lexical scoring plus the hand-curated `metadata/semantic-layer.json`, so the prompt stays narrow even when the source ERP has hundreds of tables |
 | Model output trusted and executed | **Deterministic guardrails** re-validate the SQL against the exact schema context the model saw — every table/column must exist, joins must match in-scope foreign keys or declared join hints, metrics must use their canonical columns, and filter IDs must come from a resolved candidate list |
 | "Read-only" assumed | **Read-only enforced**: first keyword must be `SELECT`/`WITH`, single statement only, plus a keyword/function denylist blocking DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@` variables, `information_schema`/`mysql`/`sys`, and timing/exfiltration functions |
 | Entity names guessed by the model | **Bounded master-data resolution**: ambiguous product terms are resolved against whitelisted columns *before* generation, and only the top candidate rows are passed to the prompt — the full product master never enters the context |
@@ -32,9 +32,9 @@ The guiding idea: the LLM proposes, but a small, testable, deterministic layer d
 ├── .env.example
 ├── .gitignore
 ├── README.md
+├── apps/web/         # React + Express streaming web app
 ├── datasets/
-├── dev-set.json
-├── docs/
+├── docs/             # architecture, evaluation/scoring, slide deck
 ├── metadata/
 ├── models/
 ├── scripts/
@@ -313,7 +313,7 @@ execution-verified `expected_sql`) before making any reliability claim.
 
 ## Web App
 
-A modular React fullstack app lives in `apps/web/`. The query console **streams over Server-Sent Events** (`POST /api/query/stream`): a live progress stepper, the generated SQL shown the instant the model returns it, then per-section results filling in via `columns → rows → viz → insights → layout` frames. It also includes an exact-match result cache (repeated questions replay in ~0ms), a virtualized results table, a deterministic Zod-validated adaptive layout rendered through a trusted block registry, deterministic insight cards, local dashboard pins, an optional debug trace view, and a gated client-side cross-filter for synthetic demo data. The blocking `POST /api/query` (JSON) is the same pipeline kept as a drift-free fallback for CLIs/curl/tests. See `apps/web/README.md` for details and configuration.
+A modular React fullstack app lives in `apps/web/`. The query console **streams over Server-Sent Events** (`POST /api/query/stream`): a live progress stepper, the generated SQL shown the instant the model returns it, then per-section results filling in via `columns → rows → viz → insights → layout` frames (a `residency` frame precedes `rows` and the `layout` frame is emitted only when present). It also includes an exact-match result cache (repeated questions replay in ~0ms), a virtualized results table, a deterministic Zod-validated adaptive layout rendered through a trusted block registry, deterministic insight cards, local dashboard pins, an optional debug trace view, and a gated client-side cross-filter for synthetic demo data. The blocking `POST /api/query` (JSON) is the same pipeline kept as a drift-free fallback for CLIs/curl/tests. See `apps/web/README.md` for details and configuration.
 
 Run it from the repository root:
 
@@ -341,7 +341,9 @@ The API server loads the repository root `.env` by default unless `ENV_FILE`, `E
 
 Every LLM call automatically estimates token costs based on the model used. Costs are printed per-call and as a run total.
 
-Supported models: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
+Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset. The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
+
+Supported cost estimates: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
 
 Example CLI output:
 
@@ -374,7 +376,9 @@ This runs the full unit test suite, including retrieval, semantic-layer, master-
 
 ## Semantic Retrieval And Master Data
 
-The optimized pipeline uses `metadata/semantic-layer.json` at runtime to map business phrasing to in-scope tables, joins, metrics, filters, and clarification hints. This supplements lexical table scoring so prompts such as `biggest buyers`, `SKUs moved`, and synthetic product requests retrieve the right demo context without exposing every table.
+The optimized pipeline uses `metadata/semantic-layer.json` at runtime to map business phrasing to in-scope tables, joins, metrics, filters, and clarification hints. This is deliberately **rule-based / hand-curated semantic retrieval**, not an embedding model and not a vector database. The runtime combines lexical token scoring with curated semantic boosts, so prompts such as `biggest buyers`, `SKUs moved`, and synthetic product requests retrieve the right demo context without exposing every table.
+
+This has a useful failure mode for a reference project: when a business term is missing, the fix is visible in metadata and tests. The tradeoff is that new vocabulary must be added deliberately; hybrid lexical + embedding retrieval is listed as future work rather than silently implied.
 
 For product-name ambiguity, the pipeline resolves bounded master-data candidates before generation:
 
@@ -477,7 +481,7 @@ The optimized pipeline requests a provider-enforced JSON schema with `sql`, `exp
 
 - Qualified table and column references must exist in the retrieved schema context.
 - Cross-table equality joins must match in-scope foreign keys or semantic join hints.
-- Semantic metrics must use their preferred columns, for example net sales uses `SalesDocument.NetAmount` or product net sales uses `NetAmount`.
+- Semantic metrics must use their preferred columns, for example net sales uses `SalesDocument.NetAmount` or product (line-grain) net sales uses `SalesDocumentLine.NetAmount`.
 - Resolved product master-data filters such as `ProductId` and product foreign keys like `ProductId` must come from the candidate list supplied to the prompt.
 - `tables_used` must stay inside the allowed table set and include every SQL table reference.
 
@@ -508,6 +512,7 @@ These checks are local JavaScript validation, so they do not add any extra LLM c
 - The local bootstrap uses the copied models to create a practical starter schema, not a byte-for-byte production clone.
 - Generated files are written to `generated/` and are excluded from git.
 - Benchmark datasets live under `datasets/`: `core-public` and `paraphrase-public` (smoke/paraphrase) plus `edge-cases-public` (public edge-case suite). Scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
+- The *why* behind the pipeline and the web app — design decisions, trade-offs, and the invariants — is in `docs/architecture.md`.
 
 ## License
 

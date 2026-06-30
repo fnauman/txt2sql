@@ -167,7 +167,8 @@ Generation is non-deterministic — one passing run is a **sample**, not proof.
 > 6/6 on one run has a true-pass-rate lower bound near **0.6**, not 1.0.
 
 A public **edge-case suite** targets the hard parts: metric/grain confusion,
-join-path traps, temporal parsing, fuzzy matching, empty-result robustness.
+join-path traps, temporal parsing, fuzzy matching, and stale-snapshot /
+wrong-date-column pitfalls.
 
 ---
 

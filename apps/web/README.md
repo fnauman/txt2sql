@@ -21,8 +21,9 @@ The API server loads the repository root `.env` by default unless `ENV_FILE`, `E
 
 The interactive UI streams over **`POST /api/query/stream`** (Server-Sent Events):
 stage frames drive a live progress stepper, the generated SQL is shown the instant
-the model returns it, then `columns → rows → viz → insights → layout → metrics`
-frames fill the result progressively. The blocking **`POST /api/query`** (JSON) is
+the model returns it, then `columns → residency → rows → viz → insights → layout → metrics`
+frames fill the result progressively (the `residency` and `layout` frames are emitted
+only when present). The blocking **`POST /api/query`** (JSON) is
 the same pipeline with a non-streaming serializer, kept for CLIs/curl/tests. Both
 share the auth + rate-limit middleware.
 
@@ -40,7 +41,7 @@ Additional server-side controls:
 | `WEB_MAX_QUESTION_LENGTH` | `2000` | Max question length. |
 | `WEB_QUERY_ROW_LIMIT` | `1000` | Max rows returned to the browser. |
 | `WEB_QUERY_STATEMENT_TIMEOUT_MS` | `8000` | MariaDB statement timeout for generated SQL (bounds the tail so a pathological join can't pin the shared instance). `0` disables. |
-| `WEB_RESULT_CACHE` | `1` | Exact-match NL→result cache for the web routes. `0` disables. |
+| `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. Enabled unless set to `0`. |
 | `WEB_RESULT_CACHE_TTL_MS` | `900000` | Cache entry TTL (15 min). Bounds staleness from column-level schema drift. |
 | `WEB_RESULT_CACHE_SIZE` | `200` | Max cached results (LRU). |
 
@@ -67,8 +68,9 @@ npm run web:test
 ## Features
 
 - **Streaming query console (SSE)** — live progress stepper, SQL shown the instant
-  the model returns it (before validation/execution), per-section skeletons, and an
-  `Enter`-key cancel that aborts the in-flight generation server-side.
+  the model returns it (before validation/execution), per-section skeletons, and a
+  **Stop** button that aborts the in-flight generation server-side (the
+  `AbortController` also fires on client disconnect).
 - **Exact-match result cache** — repeated questions (example chips, recents) replay
   in ~0ms with a `cached` badge; busts on schema drift; demo data only.
 - **Statement timeout** on generated SQL to bound the tail on the shared instance.
