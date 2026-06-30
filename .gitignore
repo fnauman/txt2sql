@@ -6,3 +6,7 @@ coverage/
 dist/
 *.log
 .DS_Store
+
+# Demo recorder output (regenerable). The README GIF (media/demo.gif) is tracked.
+media/*.mp4
+media/video/

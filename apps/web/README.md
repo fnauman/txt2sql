@@ -65,6 +65,28 @@ npm run web:build
 npm run web:test
 ```
 
+## Recording a demo
+
+`apps/web/scripts/record-web-demo.mjs` drives the running UI with a headless
+browser and produces `media/demo.mp4` (the GIF embedded in the root README was
+generated the same way). It is not part of the app's dependencies — install the
+tooling on demand:
+
+```bash
+npm i -D playwright && npx playwright install chromium   # one time; ffmpeg must also be on PATH
+```
+
+Then, with the app running against a real `.env` (so queries actually execute):
+
+```bash
+npm run web:dev                              # terminal 1
+node apps/web/scripts/record-web-demo.mjs    # terminal 2 → media/demo.mp4
+GIF=1 node apps/web/scripts/record-web-demo.mjs   # also writes media/demo.gif
+```
+
+Override the demo with `QUERIES='["…","…"]'`, and the frame with `WIDTH`/`HEIGHT`,
+`TYPE_DELAY`, or `READ_PAUSE`. See the script header for all options.
+
 ## Features
 
 - **Streaming query console (SSE)** — live progress stepper, SQL shown the instant
