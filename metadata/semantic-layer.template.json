@@ -1,0 +1,574 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "name": "customer",
+      "synonyms": [
+        "customer",
+        "customers",
+        "client",
+        "clients",
+        "account",
+        "accounts",
+        "buyer",
+        "buyers"
+      ],
+      "preferred_tables": [
+        "Customer"
+      ],
+      "display_columns": [
+        "Customer.CustomerName",
+        "Customer.CustomerCode"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "sales_document",
+      "synonyms": [
+        "document",
+        "documents",
+        "sales document",
+        "sales documents",
+        "invoice",
+        "invoices",
+        "order",
+        "orders",
+        "sale",
+        "sales",
+        "transaction",
+        "transactions"
+      ],
+      "preferred_tables": [
+        "SalesDocument"
+      ],
+      "display_columns": [
+        "SalesDocument.DocumentNo",
+        "SalesDocument.DocumentDate"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ]
+    },
+    {
+      "name": "document_type",
+      "synonyms": [
+        "document type",
+        "document types",
+        "document class",
+        "document classes",
+        "invoice type",
+        "credit memo",
+        "receipt"
+      ],
+      "preferred_tables": [
+        "DocumentType"
+      ],
+      "display_columns": [
+        "DocumentType.DocumentTypeName"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "product",
+      "synonyms": [
+        "product",
+        "products",
+        "item",
+        "items",
+        "sku",
+        "skus",
+        "merchandise",
+        "goods",
+        "sparkling water",
+        "protein bar",
+        "cold brew",
+        "trail mix"
+      ],
+      "preferred_tables": [
+        "Product"
+      ],
+      "display_columns": [
+        "Product.ProductName",
+        "Product.ProductCode"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "store_location",
+      "synonyms": [
+        "location",
+        "locations",
+        "branch",
+        "branches",
+        "warehouse",
+        "warehouses",
+        "store",
+        "stores"
+      ],
+      "preferred_tables": [
+        "StoreLocation"
+      ],
+      "display_columns": [
+        "StoreLocation.LocationName",
+        "StoreLocation.LocationCode"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "ledger_account",
+      "synonyms": [
+        "account",
+        "accounts",
+        "ledger",
+        "ledger account",
+        "ledger accounts",
+        "general ledger",
+        "gl account"
+      ],
+      "preferred_tables": [
+        "LedgerAccount"
+      ],
+      "display_columns": [
+        "LedgerAccount.AccountCode",
+        "LedgerAccount.AccountName"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "accounting_posting",
+      "synonyms": [
+        "posting",
+        "postings",
+        "accounting posting",
+        "accounting postings",
+        "journal"
+      ],
+      "preferred_tables": [
+        "AccountingPosting"
+      ],
+      "display_columns": [],
+      "default_filters": []
+    },
+    {
+      "name": "campaign",
+      "synonyms": [
+        "campaign",
+        "campaigns",
+        "program",
+        "programs",
+        "promotion",
+        "promotions"
+      ],
+      "preferred_tables": [
+        "Campaign"
+      ],
+      "display_columns": [
+        "Campaign.CampaignName",
+        "Campaign.CampaignCode"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "product_category",
+      "synonyms": [
+        "product category",
+        "product categories",
+        "category",
+        "categories",
+        "department",
+        "departments"
+      ],
+      "preferred_tables": [
+        "ProductCategory"
+      ],
+      "display_columns": [
+        "ProductCategory.CategoryName",
+        "ProductCategory.CategoryCode"
+      ],
+      "default_filters": []
+    },
+    {
+      "name": "brand",
+      "synonyms": [
+        "brand",
+        "brands",
+        "brand name",
+        "brand names",
+        "manufacturer brand",
+        "label",
+        "labels"
+      ],
+      "preferred_tables": [
+        "Brand",
+        "ProductBrand"
+      ],
+      "display_columns": [
+        "Brand.BrandName"
+      ],
+      "default_filters": []
+    }
+  ],
+  "metrics": [
+    {
+      "name": "net_sales",
+      "synonyms": [
+        "net sales",
+        "sales",
+        "sale",
+        "revenue",
+        "buyers",
+        "biggest buyers",
+        "top buyers"
+      ],
+      "preferred_expression": "COALESCE(SalesDocument.NetAmount, 0)",
+      "preferred_columns": [
+        "SalesDocument.NetAmount"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument",
+        "Customer"
+      ],
+      "notes": [
+        "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+      ]
+    },
+    {
+      "name": "line_net_sales",
+      "synonyms": [
+        "product sales",
+        "sku sales",
+        "item sales",
+        "merchandise sales",
+        "brand sales",
+        "category sales",
+        "campaign sales"
+      ],
+      "preferred_expression": "COALESCE(SalesDocumentLine.NetAmount, 0)",
+      "preferred_columns": [
+        "SalesDocumentLine.NetAmount"
+      ],
+      "grain": "sales_document_line",
+      "preferred_tables": [
+        "SalesDocumentLine",
+        "Product",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use sales document lines when sales/revenue is filtered or grouped by brand, product category, campaign, product, or SKU."
+      ]
+    },
+    {
+      "name": "quantity_sold",
+      "synonyms": [
+        "quantity sold",
+        "qty sold",
+        "units sold",
+        "sold",
+        "sell",
+        "moved",
+        "movement",
+        "stopped selling"
+      ],
+      "preferred_expression": "COALESCE(SalesDocumentLine.Quantity, 0)",
+      "preferred_columns": [
+        "SalesDocumentLine.Quantity"
+      ],
+      "grain": "sales_document_line",
+      "preferred_tables": [
+        "SalesDocumentLine",
+        "Product",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use SalesDocumentLine for product-level quantity analysis."
+      ]
+    },
+    {
+      "name": "document_count",
+      "synonyms": [
+        "document count",
+        "invoice count",
+        "order count",
+        "used the most",
+        "most used"
+      ],
+      "preferred_expression": "COUNT(*)",
+      "preferred_columns": [
+        "SalesDocument.SalesDocumentId"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument",
+        "DocumentType"
+      ],
+      "notes": [
+        "For document type/class questions, group by DocumentTypeName, not DocumentTypeClass."
+      ]
+    },
+    {
+      "name": "debit_amount",
+      "synonyms": [
+        "debit",
+        "debits",
+        "debit amount",
+        "biggest debits"
+      ],
+      "preferred_expression": "COALESCE(AccountingPosting.DebitAmount, 0)",
+      "preferred_columns": [
+        "AccountingPosting.DebitAmount"
+      ],
+      "grain": "accounting_posting",
+      "preferred_tables": [
+        "AccountingPosting",
+        "LedgerAccount",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use accounting postings with LedgerAccount for ledger debit analysis."
+      ]
+    },
+    {
+      "name": "credit_amount",
+      "synonyms": [
+        "credit",
+        "credits",
+        "credit amount",
+        "biggest credits"
+      ],
+      "preferred_expression": "COALESCE(AccountingPosting.CreditAmount, 0)",
+      "preferred_columns": [
+        "AccountingPosting.CreditAmount"
+      ],
+      "grain": "accounting_posting",
+      "preferred_tables": [
+        "AccountingPosting",
+        "LedgerAccount",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use accounting postings with LedgerAccount for ledger credit analysis."
+      ]
+    },
+    {
+      "name": "missing_accounting_postings",
+      "synonyms": [
+        "without postings",
+        "never made it into accounting postings",
+        "missing postings"
+      ],
+      "preferred_expression": "COUNT(*)",
+      "preferred_columns": [
+        "SalesDocument.SalesDocumentId",
+        "AccountingPosting.AccountingPostingId"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument",
+        "AccountingPosting"
+      ],
+      "notes": [
+        "Use an anti-join from SalesDocument to AccountingPosting for documents without postings."
+      ]
+    }
+  ],
+  "filter_hints": [
+    {
+      "name": "demo_product_terms",
+      "synonyms": [
+        "sparkling water",
+        "protein bar",
+        "cold brew",
+        "trail mix"
+      ],
+      "target_table": "Product",
+      "target_columns": [
+        "Product.ProductName",
+        "Product.ProductCode",
+        "Product.ProductTags",
+        "SalesDocumentLine.ProductNameSnapshot"
+      ],
+      "operator": "OR_LIKE",
+      "notes": [
+        "Treat these as alternative product search terms. Combine them with OR, not AND."
+      ]
+    },
+    {
+      "name": "product_category_terms",
+      "synonyms": [
+        "beverages",
+        "snacks",
+        "pantry",
+        "household"
+      ],
+      "target_table": "ProductCategory",
+      "target_columns": [
+        "ProductCategory.CategoryName",
+        "ProductCategory.CategoryCode"
+      ],
+      "operator": "OR_LIKE",
+      "notes": [
+        "Treat these as product category search terms. Combine them with OR LIKE filters against ProductCategory columns."
+      ]
+    }
+  ],
+  "value_aliases": [
+    {
+      "entity": "product",
+      "canonical_value": "sparkling water",
+      "aliases": [
+        "seltzer",
+        "carbonated water",
+        "fizzy water"
+      ],
+      "target_columns": [
+        "Product.ProductName",
+        "Product.ProductCode",
+        "Product.ProductTags",
+        "SalesDocumentLine.ProductNameSnapshot"
+      ]
+    },
+    {
+      "entity": "product",
+      "canonical_value": "protein bar",
+      "aliases": [
+        "energy bar",
+        "meal bar"
+      ],
+      "target_columns": [
+        "Product.ProductName",
+        "Product.ProductCode",
+        "Product.ProductTags",
+        "SalesDocumentLine.ProductNameSnapshot"
+      ]
+    },
+    {
+      "entity": "product",
+      "canonical_value": "cold brew",
+      "aliases": [
+        "iced coffee",
+        "ready to drink coffee"
+      ],
+      "target_columns": [
+        "Product.ProductName",
+        "Product.ProductCode",
+        "Product.ProductTags",
+        "SalesDocumentLine.ProductNameSnapshot"
+      ]
+    }
+  ],
+  "join_paths": [
+    {
+      "name": "document_to_customer",
+      "tables": [
+        "SalesDocument",
+        "Customer"
+      ],
+      "join_sql": "SalesDocument.CustomerId = Customer.CustomerId"
+    },
+    {
+      "name": "document_to_location",
+      "tables": [
+        "SalesDocument",
+        "StoreLocation"
+      ],
+      "join_sql": "SalesDocument.StoreLocationId = StoreLocation.StoreLocationId"
+    },
+    {
+      "name": "document_to_document_type",
+      "tables": [
+        "SalesDocument",
+        "DocumentType"
+      ],
+      "join_sql": "SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId"
+    },
+    {
+      "name": "document_line_to_product",
+      "tables": [
+        "SalesDocumentLine",
+        "Product"
+      ],
+      "join_sql": "SalesDocumentLine.ProductId = Product.ProductId"
+    },
+    {
+      "name": "document_line_to_document",
+      "tables": [
+        "SalesDocumentLine",
+        "SalesDocument"
+      ],
+      "join_sql": "SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId"
+    },
+    {
+      "name": "posting_to_account",
+      "tables": [
+        "AccountingPosting",
+        "LedgerAccount"
+      ],
+      "join_sql": "AccountingPosting.LedgerAccountId = LedgerAccount.LedgerAccountId"
+    },
+    {
+      "name": "posting_to_document",
+      "tables": [
+        "AccountingPosting",
+        "SalesDocument"
+      ],
+      "join_sql": "AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId"
+    },
+    {
+      "name": "product_to_campaign",
+      "tables": [
+        "Product",
+        "Campaign"
+      ],
+      "join_sql": "Product.CampaignId = Campaign.CampaignId"
+    },
+    {
+      "name": "product_to_category",
+      "tables": [
+        "Product",
+        "ProductCategory"
+      ],
+      "join_sql": "Product.ProductCategoryId = ProductCategory.ProductCategoryId"
+    },
+    {
+      "name": "product_to_brand",
+      "tables": [
+        "Product",
+        "Brand"
+      ],
+      "join_sql": "Product.BrandId = Brand.BrandId"
+    },
+    {
+      "name": "product_brand_to_product",
+      "tables": [
+        "ProductBrand",
+        "Product"
+      ],
+      "join_sql": "ProductBrand.ProductId = Product.ProductId"
+    },
+    {
+      "name": "product_brand_to_brand",
+      "tables": [
+        "ProductBrand",
+        "Brand"
+      ],
+      "join_sql": "ProductBrand.BrandId = Brand.BrandId"
+    },
+    {
+      "name": "brand_to_category",
+      "tables": [
+        "Brand",
+        "ProductCategory"
+      ],
+      "join_sql": "Brand.ProductCategoryId = ProductCategory.ProductCategoryId"
+    }
+  ],
+  "clarification_rules": [
+    {
+      "trigger": "revenue",
+      "questions": [
+        "Do you want document-level net sales, line-level net sales, bill total, or subtotal?"
+      ]
+    }
+  ]
+}

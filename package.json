@@ -1,0 +1,59 @@
+{
+  "name": "text-to-sql",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "Minimal MariaDB text-to-SQL starter driven by Sequelize model metadata",
+  "keywords": [
+    "text-to-sql",
+    "natural-language-to-sql",
+    "mariadb",
+    "llm",
+    "openai",
+    "sequelize",
+    "react",
+    "server-sent-events"
+  ],
+  "homepage": "https://github.com/fnauman/txt2sql#readme",
+  "bugs": {
+    "url": "https://github.com/fnauman/txt2sql/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fnauman/txt2sql.git"
+  },
+  "license": "MIT",
+  "author": "Farrukh Nauman (https://fnauman.com)",
+  "scripts": {
+    "build-schema": "node scripts/build-schema.js",
+    "bootstrap-db": "node scripts/bootstrap-db.js",
+    "basic": "node scripts/basic.js",
+    "optimized": "node scripts/optimized.js",
+    "benchmark": "node scripts/evaluate.js",
+    "evaluate": "node scripts/evaluate.js",
+    "verify-dataset": "node scripts/verify-dataset.js",
+    "build-edge-dataset": "node scripts/build-edge-dataset.mjs",
+    "test": "node --test",
+    "debug-retrieval": "node scripts/debug-retrieval.js",
+    "evaluate-retrieval": "node scripts/evaluate-retrieval.js",
+    "resolve-master-data": "node scripts/resolve-master-data.js",
+    "measure-prompt-cache": "node scripts/measure-prompt-cache.js",
+    "web:dev": "npm --workspace @text-to-sql/web run dev",
+    "web:build": "npm --workspace @text-to-sql/web run build",
+    "web:typecheck": "npm --workspace @text-to-sql/web run typecheck",
+    "web:test": "npm --workspace @text-to-sql/web run test",
+    "web:start": "npm --workspace @text-to-sql/web run server",
+    "seed-demo": "node scripts/seed-public-db.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "mysql2": "^3.11.3",
+    "openai": "^4.104.0"
+  },
+  "workspaces": [
+    "apps/web"
+  ]
+}

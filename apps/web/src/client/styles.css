@@ -1,0 +1,1131 @@
+:root {
+  color-scheme: light;
+  --ink: #171a17;
+  --muted: #667069;
+  --paper: #f6f7f2;
+  --panel: #ffffff;
+  --line: #d9dfd3;
+  --line-strong: #aeb8ad;
+  --green: #116149;
+  --green-soft: #dceee6;
+  --red: #c84c31;
+  --red-soft: #f6dfd9;
+  --blue: #315f9f;
+  --blue-soft: #dfe8f6;
+  --gold: #b68d1c;
+  --gold-soft: #f3ead0;
+  --shadow: 0 18px 40px rgba(23, 26, 23, 0.08);
+  /* Use a self-contained system UI stack so the shipped type matches the design.
+     The previous "Aptos" first choice was never bundled or linked, so most
+     visitors silently fell back to an undefined font. Headings use Georgia. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Accessible, keyboard-visible focus. Previously focus outlines were removed
+   (outline: 0) with nothing in their place, so keyboard users could not see
+   where focus was (WCAG 2.4.7). :focus-visible keeps mouse clicks clean while
+   restoring a clear ring for keyboard navigation. */
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.query-composer textarea:focus-visible,
+.search-field input:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.search-field:focus-within {
+  box-shadow: 0 0 0 2px var(--green-soft);
+  border-color: var(--green);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .primary-button,
+  .secondary-button,
+  .icon-button,
+  .prompt-strip button,
+  .recent-strip button,
+  .insight-card,
+  .chip {
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+
+  .insight-card:hover {
+    transform: translateY(-2px);
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  background:
+    linear-gradient(rgba(17, 97, 73, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49, 95, 159, 0.045) 1px, transparent 1px),
+    var(--paper);
+  background-size: 28px 28px;
+}
+
+.side-nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 12px;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  z-index: 10;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-family: Georgia, serif;
+  font-weight: 700;
+}
+
+.side-nav button,
+.icon-button {
+  width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.side-nav button.active,
+.icon-button:hover,
+.chip:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.icon-button.small {
+  width: 32px;
+  height: 32px;
+}
+
+.ask-view,
+.dashboard-view {
+  min-width: 0;
+  padding: 26px;
+}
+
+.query-band {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 24px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.query-copy {
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 24px 0;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 620px;
+  margin-bottom: 18px;
+  font-family: Georgia, serif;
+  font-size: 3rem;
+  line-height: 1.02;
+  letter-spacing: 0;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+h3 {
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+}
+
+.query-composer,
+.tool-panel,
+.debug-panel,
+.empty-dashboard,
+.blank-slate {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.query-composer {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.query-composer textarea {
+  min-height: 138px;
+  width: 100%;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.35rem;
+  line-height: 1.45;
+}
+
+.composer-actions,
+.panel-header,
+.pin-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.toggles,
+.run-actions,
+.toolbar,
+.status-bar,
+.status-detail,
+.status-pill,
+.table-controls,
+.recent-strip,
+.prompt-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.toggles input {
+  accent-color: var(--green);
+}
+
+.primary-button,
+.secondary-button,
+.prompt-strip button,
+.recent-strip button,
+.chip,
+.segmented button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.primary-button {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.secondary-button {
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.status-pill,
+.status-detail {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-weight: 800;
+}
+
+.status-pill.ready {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.status-pill.warning {
+  border-color: var(--gold);
+  color: #765c11;
+  background: var(--gold-soft);
+}
+
+.prompt-strip,
+.recent-strip {
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.prompt-strip button,
+.recent-strip button {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.error-banner {
+  margin: 14px 0;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--red-soft);
+  color: #7a2817;
+  font-weight: 800;
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.metric-strip div,
+.insight-card,
+.pin-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.metric-strip div {
+  padding: 14px;
+}
+
+.metric-strip span,
+.insight-card p {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric-strip strong,
+.insight-card strong {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.result-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.result-layout.with-debug {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.36fr);
+  align-items: start;
+}
+
+.result-main {
+  min-width: 0;
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.insight-card {
+  min-height: 132px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+}
+
+.insight-card span {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.insight-card.positive {
+  border-color: rgba(17, 97, 73, 0.35);
+}
+
+.insight-card.warning {
+  border-color: rgba(182, 141, 28, 0.55);
+}
+
+/* Actionable follow-up card: the whole card is a button that runs the suggestion. */
+.insight-card.actionable {
+  cursor: pointer;
+  border-color: rgba(49, 95, 159, 0.45);
+}
+
+.insight-card.actionable:hover {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px var(--blue-soft);
+}
+
+.insight-action {
+  flex: 1;
+  display: block;
+  text-align: left;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.insight-run-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-style: normal;
+  font-weight: 700;
+  color: var(--blue);
+}
+
+/* Inline hint shown when the composer is empty. */
+.composer-hint {
+  align-self: center;
+  margin-right: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.visual-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* Adaptive layout driven by the LayoutSpec (blocks/registry). full-width blocks
+   span the row; half-width blocks pair up — reproducing chart+table side-by-side
+   while staying data-driven. */
+.layout-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.layout-cell.full {
+  grid-column: 1 / -1;
+}
+
+.layout-cell.half {
+  grid-column: span 1;
+  min-width: 0;
+}
+
+.narrative-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+/* Gated client-side cross-filter bar. */
+.cross-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.cross-filter-field {
+  flex: 1;
+  min-width: min(360px, 100%);
+}
+
+.cross-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.cross-filter-count {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-panel,
+.debug-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.chart-stage {
+  margin-top: 16px;
+  min-height: 240px;
+}
+
+.segmented {
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.segmented button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.segmented button.active {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.table-panel {
+  overflow: hidden;
+}
+
+.table-controls {
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+}
+
+.search-field {
+  min-width: min(320px, 100%);
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #fff;
+}
+
+.search-field input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+}
+
+.column-toggles {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.chip.muted {
+  color: var(--muted);
+  background: #f4f5f1;
+}
+
+.table-wrap {
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef2eb;
+}
+
+th button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+td {
+  color: #2a302b;
+  line-height: 1.35;
+}
+
+td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Virtualized result table (TanStack Table + react-virtual). Uses the grid/flex
+   layout so absolutely-positioned virtual rows still align with the header. Rows
+   are a fixed height so the virtualizer estimate matches actual height exactly. */
+.table-scroll {
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.virtual-table {
+  display: grid;
+  min-width: 640px;
+}
+
+.virtual-table thead {
+  display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.virtual-table tbody {
+  display: grid;
+  position: relative;
+}
+
+/* Header + body rows share an identical grid-template-columns (set inline per
+   row) so columns stay aligned. minmax(140px, 1fr) guarantees columns never get
+   so narrow that numbers clip; when many columns exceed the width, .table-scroll
+   scrolls horizontally. */
+.virtual-table thead tr,
+.virtual-table tbody tr {
+  display: grid;
+  width: 100%;
+  align-items: stretch;
+}
+
+.virtual-table tbody tr {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 38px;
+}
+
+.virtual-table th,
+.virtual-table td {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.virtual-table th {
+  position: static; /* sticky lives on thead for the virtual layout */
+}
+
+.virtual-table td {
+  display: block;
+  align-self: center;
+}
+
+.virtual-table td.numeric {
+  text-align: right;
+}
+
+.empty-state,
+.empty-dashboard,
+.blank-slate {
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.blank-slate {
+  min-height: 260px;
+  grid-auto-flow: column;
+  gap: 18px;
+}
+
+.debug-panel {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+}
+
+.debug-section {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 14px;
+}
+
+.debug-section.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.debug-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+pre {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #101412;
+  color: #e9f2ec;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.event-list details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.event-list summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.event-list em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.82rem;
+}
+
+.dashboard-view {
+  max-width: 1500px;
+}
+
+.view-title {
+  margin-bottom: 18px;
+}
+
+.pin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start; /* don't stretch a short card to a tall neighbor's height */
+}
+
+.pin-card {
+  min-width: 0;
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.pin-card .tool-panel {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* The pin-card supplies its own header (type + title + remove). Hide the inner
+   component's panel-header so chart/table pins don't show a doubled header. */
+.pin-card .panel-header {
+  display: none;
+}
+
+.pin-card .toolbar,
+.pin-card .table-controls {
+  display: none;
+}
+
+.pin-card .table-wrap,
+.pin-card .table-scroll {
+  max-height: 280px;
+}
+
+/* Only animate the spinner when the user hasn't asked for reduced motion. With
+   reduced motion the loader icon stays static (still meaningful next to the
+   "Run"/stage labels). */
+@media (prefers-reduced-motion: no-preference) {
+  .spin {
+    animation: spin 0.9s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1180px) {
+  .query-band,
+  .visual-grid,
+  .layout-grid,
+  .result-layout.with-debug,
+  .pin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-panel {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .side-nav {
+    position: sticky;
+    top: 0;
+    height: auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .ask-view,
+  .dashboard-view {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+  }
+
+  .composer-actions,
+  .panel-header,
+  .pin-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .metric-strip,
+  .insight-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .visual-grid,
+  .layout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .layout-cell.half {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 520px) {
+  .metric-strip,
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .run-actions,
+  .toggles {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .primary-button,
+  .secondary-button {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Client-safe error banner: plain-language headline with optional raw detail. */
+.error-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error-banner .error-detail summary {
+  cursor: pointer;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.error-banner .error-detail pre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(23, 26, 23, 0.06);
+  border-radius: 6px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+/* Debug section header with an inline copy affordance. */
+.debug-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ---- Phase 1: streaming progress, SQL plan card, skeletons ---------------- */
+
+/* Live pipeline stepper shown while a query streams. */
+.progress-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0 0 4px;
+  padding: 12px 16px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.progress-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.progress-step.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.progress-step.done {
+  color: var(--green);
+}
+
+.progress-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.progress-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+/* The generated-SQL card — the keystone perceived-latency surface. */
+.sql-plan-card .sql-block {
+  margin: 0;
+  padding: 14px 16px;
+  background: #11211b;
+  color: #e9f3ee;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sql-plan-card .sql-explanation {
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sql-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cache-chip {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: transparent;
+}
+
+.warn-chip {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: transparent;
+}
+
+.empty-state.large {
+  padding: 40px 16px;
+  font-size: 0.95rem;
+}
+
+/* Skeleton placeholders shown per section until each frame lands. */
+.skeleton-line {
+  display: block;
+  width: 100%;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--line) 25%, #eef1ea 37%, var(--line) 63%);
+  background-size: 400% 100%;
+}
+
+.skeleton-line.short {
+  width: 45%;
+  height: 9px;
+  margin-bottom: 8px;
+}
+
+.skeleton-block {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--line) 25%, #eef1ea 37%, var(--line) 63%);
+  background-size: 400% 100%;
+}
+
+.skeleton-chart {
+  display: flex;
+}
+
+.skeleton-metric .skeleton-line {
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-line,
+  .skeleton-block {
+    animation: skeleton-shimmer 1.4s ease infinite;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
