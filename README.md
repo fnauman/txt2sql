@@ -2,7 +2,7 @@
 
 Minimal text-to-SQL starter for MariaDB 10.6 using OpenAI-compatible models and prompt context compiled from Sequelize model files.
 
-![text-to-SQL web app demo: a natural-language question streams through planning, entity resolution, and SQL generation, then fills in metrics, insights, a chart, and a results table](media/demo.gif)
+[![text-to-SQL web app demo: a natural-language question streams through planning, entity resolution, and SQL generation, then fills in metrics, insights, a chart, and a results table](media/demo.gif)](media/demo.mp4)
 
 *The web app answering live questions: the streaming progress stepper, the generated SQL (with temporal ranges and master-data terms resolved deterministically), and the adaptive result layout with per-query token/cost accounting.*
 

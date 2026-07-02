@@ -7,6 +7,8 @@ dist/
 *.log
 .DS_Store
 
-# Demo recorder output (regenerable). The README GIF (media/demo.gif) is tracked.
+# Demo recorder output. The README demo (media/demo.gif + media/demo.mp4) is tracked;
+# stray/intermediate recordings are not.
 media/*.mp4
+!media/demo.mp4
 media/video/
