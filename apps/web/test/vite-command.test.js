@@ -13,6 +13,13 @@ test('getViteCommandCandidates checks Windows command shims before selecting a f
   ]);
 });
 
+test('getViteCommandCandidates checks extensionless shims outside Windows', () => {
+  assert.deepEqual(getViteCommandCandidates(appRoot, 'linux'), [
+    path.resolve(appRoot, 'node_modules/.bin/vite'),
+    path.resolve(appRoot, '../../node_modules/.bin/vite'),
+  ]);
+});
+
 test('resolveViteCommand finds a hoisted Windows command shim', () => {
   const hoistedViteCommand = path.resolve(appRoot, '../../node_modules/.bin/vite.cmd');
   const checked = [];
@@ -59,4 +66,11 @@ test('resolveViteCommand defaults to the workspace shim for the active platform'
     }),
     path.resolve(appRoot, 'node_modules/.bin/vite.cmd')
   );
+});
+
+test('resolveViteCommand requires an app root', () => {
+  assert.throws(() => resolveViteCommand({}), {
+    name: 'TypeError',
+    message: 'appRoot is required to resolve the Vite command',
+  });
 });
