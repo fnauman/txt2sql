@@ -6,18 +6,19 @@
     <script>
       (() => {
         const key = 'text-to-sql.theme';
+        let stored = null;
         try {
-          const stored = window.localStorage.getItem(key);
-          const theme =
-            stored === 'light' || stored === 'dark'
-              ? stored
-              : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'dark'
-                : 'light';
-          document.documentElement.setAttribute('data-theme', theme);
+          stored = window.localStorage.getItem(key);
         } catch {
-          document.documentElement.setAttribute('data-theme', 'light');
+          // Storage may be unavailable; still fall back to the OS color scheme.
         }
+        const theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
       })();
     </script>
     <title>Text-to-SQL Console</title>
