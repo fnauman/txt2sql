@@ -1,10 +1,11 @@
 import { FormEvent, useState } from 'react';
-import { BarChart3, LayoutDashboard, Loader2, RefreshCcw, Search, TableProperties, X } from 'lucide-react';
+import { BarChart3, LayoutDashboard, Loader2, Moon, RefreshCcw, Search, Sun, TableProperties, X } from 'lucide-react';
 
 import { useHealth } from './hooks/useHealth';
 import { usePins } from './hooks/usePins';
 import { useQueryStream } from './hooks/useQueryStream';
 import { useRecentQueries } from './hooks/useRecentQueries';
+import { useTheme } from './hooks/useTheme';
 import { EXAMPLES } from './lib/constants';
 import { compactResultForPin, createId } from './lib/pin-utils';
 import type { DashboardPin, InsightCard, VisualizationSuggestion } from './types';
@@ -21,6 +22,7 @@ export default function App() {
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [includeInsights, setIncludeInsights] = useState(true);
   const health = useHealth();
+  const { theme, toggle: toggleTheme } = useTheme();
   const { recentQueries, pushRecent } = useRecentQueries();
   const { pins, addPin, removePin } = usePins();
   const { state, run, cancel } = useQueryStream();
@@ -83,6 +85,15 @@ export default function App() {
         </button>
         <button className={view === 'dashboard' ? 'active' : ''} type="button" onClick={() => setView('dashboard')} title="Dashboard" aria-label="Dashboard">
           <LayoutDashboard size={21} />
+        </button>
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
         </button>
       </nav>
 
