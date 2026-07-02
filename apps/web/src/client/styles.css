@@ -242,6 +242,7 @@ h3 {
   gap: 10px;
   padding: 16px 12px;
   border-right: 1px solid var(--border);
+  background: var(--surface);
   background: color-mix(in srgb, var(--surface) 72%, transparent);
   backdrop-filter: blur(16px) saturate(120%);
   z-index: 10;
@@ -464,12 +465,14 @@ h3 {
 }
 
 .secondary-button {
+  border-color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   color: var(--danger);
   background: var(--danger-soft);
 }
 
 .secondary-button:hover:not(:disabled) {
+  background: var(--danger-soft);
   background: color-mix(in srgb, var(--danger-soft) 70%, var(--danger) 12%);
 }
 
@@ -488,12 +491,14 @@ h3 {
 }
 
 .status-pill.ready {
+  border-color: var(--brand);
   border-color: color-mix(in srgb, var(--brand) 35%, transparent);
   color: var(--brand);
   background: var(--brand-soft);
 }
 
 .status-pill.warning {
+  border-color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
   color: var(--warn);
   background: var(--warn-soft);
@@ -521,6 +526,7 @@ h3 {
 .prompt-strip button:hover:not(:disabled),
 .recent-strip button:hover:not(:disabled) {
   color: var(--brand);
+  border-color: var(--brand);
   border-color: color-mix(in srgb, var(--brand) 35%, transparent);
   background: var(--brand-soft);
   transform: translateY(-1px);
@@ -533,11 +539,13 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border: 1px solid var(--danger);
   border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
   border-left: 4px solid var(--danger);
   border-radius: var(--r-md);
   padding: 12px 14px;
   background: var(--danger-soft);
+  color: var(--danger);
   color: color-mix(in srgb, var(--danger) 70%, var(--text) 30%);
   font-weight: 600;
 }
@@ -551,6 +559,7 @@ h3 {
 .error-banner .error-detail pre {
   margin: 8px 0 0;
   padding: 8px 10px;
+  background: var(--surface);
   background: color-mix(in srgb, var(--surface) 60%, transparent);
   border-radius: var(--r-sm);
   font-family: var(--font-mono);
@@ -596,7 +605,7 @@ h3 {
 .insight-card p {
   display: block;
   margin-bottom: 6px;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -679,6 +688,7 @@ h3 {
 
 .insight-card.actionable {
   cursor: pointer;
+  border-color: var(--info);
   border-color: color-mix(in srgb, var(--info) 40%, transparent);
 }
 

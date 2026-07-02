@@ -5,6 +5,11 @@ export type Theme = 'light' | 'dark';
 const THEME_KEY = 'text-to-sql.theme';
 
 function initialTheme(): Theme {
+  const bootstrapped = document.documentElement.getAttribute('data-theme');
+  if (bootstrapped === 'light' || bootstrapped === 'dark') {
+    return bootstrapped;
+  }
+
   try {
     const stored = window.localStorage.getItem(THEME_KEY);
     if (stored === 'light' || stored === 'dark') {
