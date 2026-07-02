@@ -10,7 +10,9 @@ export const EXAMPLES = [
   'Top customers by invoice value',
 ];
 
-export const CHART_COLORS = ['#116149', '#c84c31', '#315f9f', '#b68d1c', '#6d5f93'];
+// Chart palette tuned for legibility on both the light and dark console themes.
+// Order: brand emerald, coral, azure, amber, violet.
+export const CHART_COLORS = ['#1f9d6b', '#e0584a', '#3a7bd5', '#d4a72c', '#8a6fb0'];
 
 export const MAX_TABLE_RENDER_ROWS = 300;
 export const MAX_PINNED_ROWS = 300;
