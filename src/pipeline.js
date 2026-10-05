@@ -2713,10 +2713,14 @@ function selectScopeWarning(target, { database }) {
   if (!database) {
     return null;
   }
-  const prefix = grantNamePrefix(tokens);
-  const inScope = [database, PROVISIONED_DATABASE_PREFIX].some((allowed) => prefix.startsWith(allowed));
+  // In scope: a grant that names DB_NAME itself (a `%` pattern also reaches
+  // other databases, e.g. `foo%` reaches foobar), or the provisioned
+  // demo_retail* family.
+  const hasPercent = tokens.some((token) => token.wildcard === '%');
+  const namesDatabase = !hasPercent && grantNameMatches(tokens, database);
+  const inScope = namesDatabase || grantNamePrefix(tokens).startsWith(PROVISIONED_DATABASE_PREFIX);
   if (!inScope) {
-    const reach = tokens.some((token) => token.wildcard === '%') ? 'matches databases beyond' : 'is a database other than';
+    const reach = hasPercent ? 'matches databases beyond' : 'is a database other than';
     return `SELECT on ${target} ${reach} DB_NAME (${database}): the query user should only read the configured database.`;
   }
   return null;

@@ -217,6 +217,10 @@ test('with DB_NAME given, SELECT on other databases is flagged; the demo_retail 
   }
   // A non-demo deployment reading its own database is fine.
   assert.deepEqual(check('GRANT SELECT ON `erp`.* TO `x`@`%`', 'erp'), []);
+  assert.deepEqual(check('GRANT SELECT ON `ERP`.`Orders` TO `x`@`%`', 'erp'), []);
+  // DB_NAME is compared as a whole name, not a prefix.
+  assert.match(check('GRANT SELECT ON `erpbackup`.* TO `x`@`%`', 'erp')[0], /is a database other than DB_NAME \(erp\)/);
+  assert.match(check('GRANT SELECT ON `erp%`.* TO `x`@`%`', 'erp')[0], /matches databases beyond DB_NAME \(erp\)/);
   // Without DB_NAME only the system-schema and *.* checks apply.
   assert.deepEqual(analyzeQueryUserGrants([READONLY_GRANTS[0], 'GRANT SELECT ON `other_db`.* TO `x`@`%`']).warnings, []);
 });
