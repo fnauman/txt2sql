@@ -114,6 +114,8 @@ test('loadEnvironment loads the selected file without overriding existing values
 // Regression: Node (20.6+) scans the whole command line for --env-file, even
 // after the script path, and exits "node: <path>: not found" before the script
 // runs. --dotenv must reach the script untouched.
+// (Behavior change: a missing --dotenv file used to be ignored silently; the
+// script now fails with its own error naming the path.)
 test('a CLI script receives --dotenv=<missing path> instead of Node intercepting it', () => {
   const missing = path.join(os.tmpdir(), 'txt2sql-definitely-missing', 'none.env');
   const result = spawnSync(process.execPath, ['scripts/resolve-master-data.js', `--dotenv=${missing}`], {
@@ -124,9 +126,44 @@ test('a CLI script receives --dotenv=<missing path> instead of Node intercepting
   });
   assert.equal(result.status, 1);
   assert.doesNotMatch(result.stderr, /node: .*not found/);
-  // The script itself ran: no question was given, so it prints its usage.
-  assert.match(result.stderr, /Pass a question to resolve/);
-  assert.match(result.stderr, /--dotenv <path>/);
+  // The script itself ran and refused the missing file.
+  assert.match(result.stderr, new RegExp(`--dotenv: env file not found: ${missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+test('a CLI script loads an existing --dotenv file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txt2sql-dotenv-'));
+  try {
+    const file = path.join(dir, 'cli.env');
+    fs.writeFileSync(file, 'QUERY_STATEMENT_TIMEOUT_MS=not-a-number\n');
+    const result = spawnSync(process.execPath, ['scripts/resolve-master-data.js', '--dotenv', file, 'sparkling water'], {
+      cwd: repoRoot,
+      env: { PATH: process.env.PATH, HOME: os.tmpdir() },
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+    // The value can only come from the file, and the script validated it.
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /QUERY_STATEMENT_TIMEOUT_MS must be an integer/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an explicit --dotenv / --env-dir path must exist and have a value; ENV_FILE may point nowhere', async () => {
+  const missing = path.join(os.tmpdir(), 'txt2sql-definitely-missing', 'none.env');
+  await assert.rejects(loadEnvironment(['--dotenv', missing], { env: {} }), { code: 'ENV_FILE_NOT_FOUND' });
+  await assert.rejects(loadEnvironment([`--env-dir=${path.dirname(missing)}`], { env: {} }), (error) => {
+    assert.equal(error.code, 'ENV_FILE_NOT_FOUND');
+    assert.match(error.message, /^--env-dir: env file not found/);
+    return true;
+  });
+  for (const argv of [['--dotenv'], ['--dotenv', '--trace'], ['--dotenv='], ['question', '--env-dir']]) {
+    await assert.rejects(loadEnvironment(argv, { env: {} }), { code: 'ENV_OPTION_MISSING_VALUE' }, argv.join(' '));
+  }
+
+  // ENV_FILE and the defaults stay lenient (tests use ENV_FILE=<missing> to load nothing).
+  const env = { ENV_FILE: missing };
+  assert.deepEqual(await loadEnvironment([], { env }), { loaded: false, path: null, candidate: missing });
 });
 
 test('CLI usage strings document --dotenv', () => {

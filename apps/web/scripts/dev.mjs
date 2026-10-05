@@ -19,9 +19,10 @@ const viteCommand = resolveViteCommand({ appRoot, existsSync: fs.existsSync });
 // Load the same env file the API server will use, so both children agree on the
 // ports: the API listens on WEB_API_PORT, Vite serves WEB_FRONTEND_PORT and
 // proxies /api to the API (VITE_API_PROXY overrides the target).
-const envInfo = await loadEnvironment(process.argv.slice(2), { defaultPath: path.resolve(repoRoot, '.env') });
+let envInfo;
 let config;
 try {
+  envInfo = await loadEnvironment(process.argv.slice(2), { defaultPath: path.resolve(repoRoot, '.env') });
   config = loadWebConfig(process.env);
 } catch (error) {
   console.error(error.message);
