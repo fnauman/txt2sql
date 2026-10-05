@@ -115,6 +115,31 @@ test('case summary: pass rate over counted repetitions, strict majority, failure
   assert.deepEqual([excluded.counted, excluded.passRate, excluded.majorityPass, excluded.outcome, excluded.bucket], [0, null, null, 'infra_error', 'infra']);
 });
 
+test('a case without a majority pass never shows pass as its outcome, even when pass is the most frequent', () => {
+  const pass = attributeRepetition(repetition('pass', [accepted('x')]), testCase);
+  const wrong = attributeRepetition(repetition('result_mismatch', [accepted('x')]), testCase);
+  const unsafe = attributeRepetition(repetition('validation_error', [rejected('SELECT 1', 'safety', 'MULTI_STATEMENT')]), testCase);
+  const timeout = attributeRepetition(repetition('aborted', [], { timed_out: true }), testCase);
+  assert.deepEqual([wrong.outcome, unsafe.outcome, timeout.outcome], ['wrong_result', 'safety_rejection', 'timeout']);
+
+  // 2 passes vs two different failures: pass is the most frequent single
+  // outcome, but 2 of 4 is not a majority.
+  const split = summarizeCaseRepetitions([pass, pass, wrong, unsafe]);
+  assert.deepEqual([split.passes, split.counted, split.passRate, split.majorityPass], [2, 4, 0.5, false]);
+  assert.deepEqual([split.outcome, split.bucket], ['wrong_result', 'model'], 'the most frequent failure (ties: OUTCOME_ORDER) stands for a failed case');
+  assert.deepEqual(split.outcomes, { wrong_result: 1, safety_rejection: 1, pass: 2 });
+
+  // The most frequent failure wins over one listed earlier.
+  const mostly = summarizeCaseRepetitions([pass, pass, unsafe, unsafe, wrong]);
+  assert.deepEqual([mostly.majorityPass, mostly.outcome], [false, 'safety_rejection']);
+  const late = summarizeCaseRepetitions([pass, timeout]);
+  assert.deepEqual([late.majorityPass, late.outcome, late.bucket], [false, 'timeout', 'infra']);
+
+  // A majority pass is shown as pass even when the failures are spread out.
+  const passing = summarizeCaseRepetitions([pass, pass, pass, wrong, unsafe]);
+  assert.deepEqual([passing.majorityPass, passing.outcome, passing.bucket], [true, 'pass', 'pass']);
+});
+
 test('guardrail rejections are re-run through the oracle only when they pass the safety layer', async () => {
   const scored = [];
   const score = async ({ predictedSql }) => {

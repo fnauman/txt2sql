@@ -241,14 +241,20 @@ function pickMajority(outcomes) {
 /**
  * Per-case summary over attributed repetitions: pass rate over the counted
  * repetitions, majority pass (more than half passed), and the case's
- * representative outcome (the most frequent counted outcome; ties go to the
- * failure listed first in OUTCOME_ORDER).
+ * representative outcome, which always agrees with majorityPass:
+ * - majority pass: 'pass';
+ * - counted but no majority pass: the most frequent FAILING counted outcome
+ *   (ties go to the failure listed first in OUTCOME_ORDER), even when 'pass'
+ *   is the most frequent single outcome (2 passes against two different
+ *   failures is 50%, a failed case);
+ * - nothing counted: the most frequent outcome of all repetitions (same ties).
  */
 export function summarizeCaseRepetitions(repetitions) {
   const list = repetitions || [];
   const counted = list.filter((repetition) => repetition.counted);
   const passes = counted.filter((repetition) => repetition.outcome === 'pass').length;
-  const pool = counted.length > 0 ? counted : list;
+  const majorityPass = counted.length ? passes * 2 > counted.length : null;
+  const pool = majorityPass === null ? list : majorityPass ? counted.filter((repetition) => repetition.outcome === 'pass') : counted.filter((repetition) => repetition.outcome !== 'pass');
   const outcome = pickMajority(pool.map((repetition) => repetition.outcome));
   const representative = pool.find((repetition) => repetition.outcome === outcome) || null;
   const tags = [...new Set(pool.filter((repetition) => repetition.outcome === outcome).flatMap((repetition) => repetition.outcome_tags || []))].sort();
@@ -257,7 +263,7 @@ export function summarizeCaseRepetitions(repetitions) {
     counted: counted.length,
     passes,
     passRate: counted.length ? Number((passes / counted.length).toFixed(4)) : null,
-    majorityPass: counted.length ? passes * 2 > counted.length : null,
+    majorityPass,
     outcome,
     bucket: representative?.bucket || (outcome ? OUTCOME_BUCKETS[outcome] : null),
     tags,

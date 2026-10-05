@@ -593,8 +593,12 @@ there too.
   rejection rate. Attempts of unknown correctness (rejected SQL that fails the
   safety layer today, a failed re-check, a database failure, a run cut short)
   and safety-layer rejections are counted separately, with the reason.
-- **Cases**: id, question, passes / counted repetitions, the majority outcome
-  and its attribution.
+- **Cases**: id, question, passes / counted repetitions, the case outcome
+  and its attribution. The case outcome agrees with the majority pass: `pass`
+  only when more than half of the counted repetitions passed, otherwise the
+  most frequent failing outcome (ties: the order of the table above), even
+  when `pass` is the most frequent single outcome (2 passes against two
+  different failures is a failed case).
 - **By failure class, difficulty and tag**: cases, accuracy, majority passes.
 - **Cost, latency, retries, tokens**: total cost, cost per question and per
   correct answer, p50/p95 wall time per question (the product loop alone:
