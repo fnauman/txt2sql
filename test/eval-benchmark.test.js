@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { extractAttempts } from '../src/eval/case-trace.js';
-import { createGoldCache } from '../src/eval/oracle.js';
+import { createGoldCache, GOLD_STATEMENT_TIMEOUT_MS } from '../src/eval/oracle.js';
 import { runOptimizedQuestion } from '../src/query-service.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
-import { evaluateQuestion } from '../scripts/evaluate.js';
+import { assertSharedMasterData, describeFixtureStatus, evaluateQuestion } from '../scripts/evaluate.js';
 
 // The benchmark must exercise the product loop itself (EVAL-3 / EVAL-ENG-3):
 // same prompt, same retry message, same retry budget, same statement timeout.
@@ -174,8 +174,11 @@ test('per-attempt data: generated SQL, validation code/layer, execution, usage a
   assert.deepEqual(result.oracle.per_fixture.map((entry) => [entry.fixture, entry.match]), [['seed', true]]);
   assert.deepEqual(result.oracle.assignment, { active_customer_count: 'active_customers' });
 
-  // The product loop ran under the default statement timeout and row cap.
+  // The product loop ran under the default statement timeout and row cap;
+  // the gold under its own, longer timeout (GOLD_STATEMENT_TIMEOUT_MS).
   assert.ok(database.sent.includes(`SET STATEMENT max_statement_time=8.000, sql_select_limit=1001 FOR ${GOOD}`));
+  assert.ok(database.sent.includes(`SET STATEMENT max_statement_time=${(GOLD_STATEMENT_TIMEOUT_MS / 1000).toFixed(3)} FOR ${GOLD}`));
+  assert.equal(GOLD_STATEMENT_TIMEOUT_MS, 30_000);
 
   // Product-loop events reach the run trace, tagged with the case.
   const forwarded = runTrace.events.filter((entry) => entry.event === 'sql.validation_failed');
@@ -327,6 +330,74 @@ test('multi-fixture: a prediction that coincides on the primary fixture fails on
   assert.deepEqual(v2.sent.map(strip), [GOLD, WRONG], 'only gold and the oracle run on other fixtures');
   assert.deepEqual(seed.sent.map(strip), [GOLD, WRONG, WRONG], 'the product loop runs on the primary fixture');
   assert.equal(goldCache.size, 2);
+});
+
+test('an infrastructure failure while the oracle re-runs the prediction on another fixture is infra_error', async () => {
+  const seed = fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [GOOD]: [{ active_customers: 7 }] });
+  const v2 = fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [GOOD]: Object.assign(new Error('reset'), { code: 'ECONNRESET' }) });
+  const result = await evaluateQuestion({
+    client: scriptedClient([GOOD]),
+    connections: [
+      { name: 'seed', database: 'demo_retail', connection: seed },
+      { name: 'v2', database: 'demo_retail_v2', connection: v2 },
+    ],
+    schema,
+    model: 'gpt-4o-mini',
+    testCase: activeCase,
+    caseIndex: 1,
+    trace: collector().trace,
+  });
+  assert.equal(result.status, 'infra_error', 'not a model mismatch');
+  assert.equal(result.attempt_count, 1, 'the product loop itself succeeded');
+  assert.deepEqual(result.oracle.per_fixture.map((entry) => [entry.fixture, entry.match, entry.error?.code ?? null]), [
+    ['seed', true, null],
+    ['v2', false, 'ECONNRESET'],
+  ]);
+
+  // A query error there (not infrastructure) is an ordinary mismatch.
+  const v2Timeout = fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [GOOD]: Object.assign(new Error('interrupted'), { code: 'ER_STATEMENT_TIMEOUT', errno: 1969 }) });
+  const timedOut = await evaluateQuestion({
+    client: scriptedClient([GOOD]),
+    connections: [
+      { name: 'seed', database: 'demo_retail', connection: fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [GOOD]: [{ active_customers: 7 }] }) },
+      { name: 'v2', database: 'demo_retail_v2', connection: v2Timeout },
+    ],
+    schema,
+    model: 'gpt-4o-mini',
+    testCase: activeCase,
+    caseIndex: 1,
+    trace: collector().trace,
+  });
+  assert.equal(timedOut.status, 'result_mismatch');
+});
+
+test('fixture status comes from the deep content check; differing master data stops the benchmark', async () => {
+  const connections = [
+    { name: 'seed', database: 'demo_retail', connection: {} },
+    { name: 'v2', database: 'demo_retail_v2', connection: {} },
+  ];
+  const results = {
+    demo_retail: { status: 'current', masterDataMatches: true, contentHash: 'a', expected: { contentHash: 'a' }, meta: { contentHash: 'a' } },
+    demo_retail_v2: { status: 'drifted', masterDataMatches: true, contentHash: 'b', expected: { contentHash: 'c' }, meta: { contentHash: 'c' } },
+  };
+  const status = await describeFixtureStatus(connections, { check: async (_connection, fixture) => results[fixture.database] });
+  assert.deepEqual(status.map((entry) => [entry.name, entry.status, entry.masterDataMatches]), [
+    ['seed', 'current', true],
+    ['v2', 'drifted', true],
+  ]);
+  assert.doesNotThrow(() => assertSharedMasterData(status), 'drifted facts only warn');
+
+  results.demo_retail_v2.masterDataMatches = false;
+  const broken = await describeFixtureStatus(connections, { check: async (_connection, fixture) => results[fixture.database] });
+  assert.throws(() => assertSharedMasterData(broken), /master data differs .* v2 \(demo_retail_v2\).*npm run seed-fixtures/);
+
+  const failing = await describeFixtureStatus(connections, {
+    check: async () => {
+      throw new Error('SELECT denied');
+    },
+  });
+  assert.deepEqual(failing.map((entry) => entry.status), ['unknown', 'unknown']);
+  assert.doesNotThrow(() => assertSharedMasterData(failing), 'an unknown status is not a master-data mismatch');
 });
 
 test('extractAttempts tolerates partial traces', () => {

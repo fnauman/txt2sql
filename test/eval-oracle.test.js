@@ -240,6 +240,28 @@ test('signal checks resolve through the assignment and, like the lint, never cha
   assert.deepEqual(unmapped.signalWarnings, []);
 });
 
+test('signal checks run per fixture through the matched column mapping and are keyed by the gold column', async () => {
+  // A renamed-alias prediction that matches everywhere; on v2 the gold (and
+  // so the prediction) is all zero, which the gold-named check reports there.
+  const testCase = caseWith({ signal_checks: { require_nonzero_columns: ['total'] } });
+  const v2Zero = [{ CustomerName: 'A', total: 0 }];
+  const renamed = (rows) => rows.map((row) => ({ customer: row.CustomerName, revenue: row.total }));
+  const result = await scoreAgainstGold({
+    testCase,
+    predictedSql: PRED,
+    connections: [
+      fakeFixture('seed', { [GOLD]: seedGold, [PRED]: renamed(seedGold) }),
+      fakeFixture('v2', { [GOLD]: v2Zero, [PRED]: renamed(v2Zero) }),
+    ],
+  });
+  assert.equal(result.match, true, 'warnings never change the verdict');
+  assert.deepEqual(result.assignment, { CustomerName: 'customer', total: 'revenue' });
+  assert.deepEqual(
+    result.signalWarnings.map(({ fixture, code, column }) => ({ fixture, code, column })),
+    [{ fixture: 'v2', code: 'require_nonzero_columns', column: 'total' }]
+  );
+});
+
 test('openFixtureConnections opens one query connection per fixture database and cleans up on failure', async () => {
   const calls = [];
   const fixtures = [
