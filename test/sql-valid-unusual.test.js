@@ -218,6 +218,21 @@ const VALID = [
   ],
   [Q_LIST, 'an alias named minus', 'SELECT minus.CustomerName FROM Customer minus ORDER BY minus.CustomerName'],
   [Q_LIST, 'an alias that is a non-reserved keyword', 'SELECT year.CustomerName FROM Customer year ORDER BY year.CustomerName'],
+  // Positive controls of the evaluation oracle (datasets/controls) that the
+  // unknown-identifier guardrail used to reject: an output alias in backticks
+  // with a space was split at the space ("unknown identifier Name"), and an
+  // output alias without AS was not known at all (SAFE-8).
+  [
+    Q_CUST,
+    'backtick output aliases with spaces (control core_public_001/a5)',
+    "SELECT c.CustomerName AS `Customer Name`, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS `Total Net Sales` FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY `Total Net Sales` DESC, `Customer Name` ASC LIMIT 10",
+  ],
+  [
+    'Show the top customers by gross amount in March 2026.',
+    'CamelCase output alias without AS (control edge_public_005/a3)',
+    "SELECT c.CustomerName CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) TotalGrossAmount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY TotalGrossAmount DESC LIMIT 10",
+  ],
+  [Q_LIST, 'implicit alias after a quoted expression', 'SELECT c.CustomerName `Display Name`, c.CustomerCode Code FROM Customer c ORDER BY `Display Name`'],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,

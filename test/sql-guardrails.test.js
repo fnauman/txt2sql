@@ -365,6 +365,10 @@ test('guardrail rejections carry error.code and error.layer', () => {
     ['SELECT c.CustomerDisplayName FROM Customer c', 'UNKNOWN_COLUMN'],
     ['SELECT x.CustomerName FROM Customer c', 'UNKNOWN_TABLE_ALIAS'],
     ['SELECT CustomerDisplayName FROM Customer', 'UNKNOWN_IDENTIFIER'],
+    // Still unknown after the output-alias fix: not an alias, a reference.
+    ['SELECT c.CustomerName FROM Customer c WHERE CustomerDisplayName = 1', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT `Customer Display` FROM Customer', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT c.CustomerName AS shown FROM Customer c ORDER BY CustomerRank', 'UNKNOWN_IDENTIFIER'],
     [
       'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
       'JOIN_PATH',

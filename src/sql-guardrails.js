@@ -701,14 +701,66 @@ function extractTableContext(sql, knownTables, promptContext = {}) {
   };
 }
 
+function significantTokensOf(sql) {
+  return tokenizeSql(String(sql || ''), { tolerant: true }).filter(
+    (token) => token.type !== 'whitespace' && token.type !== 'comment' && token.type !== 'executable_comment'
+  );
+}
+
+function identifierTokenName(token) {
+  if (token?.type === 'quoted_identifier') {
+    return token.name;
+  }
+  return token?.type === 'word' ? token.value : null;
+}
+
+// Keywords after which an implicit alias can follow (`CASE ... END total`,
+// `NULL AS x` is explicit anyway).
+const EXPRESSION_END_KEYWORDS = new Set(['END', 'NULL', 'TRUE', 'FALSE']);
+
+function endsExpression(token) {
+  if (!token) {
+    return false;
+  }
+  if (token.type === 'punct') {
+    return token.value === ')';
+  }
+  if (token.type === 'number' || token.type === 'string' || token.type === 'quoted_identifier') {
+    return true;
+  }
+  if (token.type === 'word') {
+    return token.afterDot || EXPRESSION_END_KEYWORDS.has(token.upper) || !SQL_KEYWORDS.has(token.upper);
+  }
+  return false;
+}
+
+function closesSelectItem(token) {
+  return !token || (token.type === 'punct' && [',', ')', ';'].includes(token.value)) || isKeywordToken(token, 'FROM');
+}
+
+// Output aliases, read from tokens: `expr AS alias` and the implicit
+// `expr alias` form at the end of a select item (followed by ',' or FROM).
+// Quoted aliases keep their full name, spaces included (`AS \`Total Net\``).
 function extractOutputAliases(sql) {
   const aliases = new Set();
-  const cleaned = stripSqlLiterals(sql);
-  const aliasRegex = /\bAS\s+`?([A-Za-z][A-Za-z0-9_]*)`?/gi;
-  let match;
+  const tokens = significantTokensOf(sql);
 
-  while ((match = aliasRegex.exec(cleaned)) !== null) {
-    aliases.add(normalizeIdentifier(match[1]));
+  for (let index = 0; index < tokens.length; index += 1) {
+    const name = identifierTokenName(tokens[index]);
+    if (!name || tokens[index].afterDot) {
+      continue;
+    }
+    const previous = tokens[index - 1];
+    if (isKeywordToken(previous, 'AS')) {
+      aliases.add(name);
+      continue;
+    }
+    if (tokens[index].type === 'word' && SQL_KEYWORDS.has(tokens[index].upper)) {
+      continue;
+    }
+    if (endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens[index + 1])) {
+      aliases.add(name);
+    }
   }
 
   return aliases;
@@ -789,32 +841,33 @@ function validateQualifiedColumns(analysis, knownTables, model) {
 }
 
 function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, qualifiers, derivedTables) {
-  const cleaned = stripSqlLiterals(sql);
   const knownColumns = new Set([...knownTables.values()].flatMap((columns) => [...columns]));
   const knownIdentifiers = new Set([
     ...knownTables.keys(),
     ...qualifiers,
     ...knownColumns,
     ...[...derivedTables.values()].flatMap((table) => [...(table.columns || [])]),
-    ...extractOutputAliases(cleaned),
-    ...extractCteNames(cleaned),
+    ...extractOutputAliases(sql),
+    ...extractCteNames(sql),
   ]);
-  const identifierRegex = /`?([A-Za-z][A-Za-z0-9_]*)`?/g;
-  let match;
+  // Tokens, not a regex over the text: string literals and comments are
+  // skipped, and a quoted identifier is one name even when it contains spaces.
+  const tokens = significantTokensOf(sql);
 
-  while ((match = identifierRegex.exec(cleaned)) !== null) {
-    const identifier = normalizeIdentifier(match[1]);
-    const upper = identifier.toUpperCase();
-    const before = cleaned.slice(Math.max(0, match.index - 2), match.index);
-    const after = cleaned.slice(match.index + match[0].length, match.index + match[0].length + 2);
-
-    if (before.includes('.') || after.includes('.')) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const identifier = identifierTokenName(tokens[index]);
+    if (!identifier) {
       continue;
     }
+    // Qualified references are checked by validateQualifiedColumns.
+    if (isPunctToken(tokens[index - 1], '.') || isPunctToken(tokens[index + 1], '.')) {
+      continue;
+    }
+    const upper = identifier.toUpperCase();
     if (SQL_KEYWORDS.has(upper) || knownIdentifiers.has(identifier)) {
       continue;
     }
-    if (KNOWN_SQL_FUNCTIONS.has(upper) && /^\s*\(/.test(cleaned.slice(match.index + match[0].length))) {
+    if (KNOWN_SQL_FUNCTIONS.has(upper) && isPunctToken(tokens[index + 1], '(')) {
       continue;
     }
     if (/[A-Z]/.test(identifier) && !/^[A-Z_]+$/.test(identifier)) {
