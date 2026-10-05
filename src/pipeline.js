@@ -2196,6 +2196,7 @@ export function untilAborted(promise, signal, { onLate = null, abortError = () =
 // connection to the pool (it is destroyed instead, see below).
 const KILL_SETTLE_TIMEOUT_MS = 2000;
 
+// Resolves with `promise`'s value, or with 'timeout' if it takes longer.
 function waitForSettle(promise, timeoutMs) {
   let timer;
   // Not unref'd: the connection must be released or destroyed before the
@@ -2203,7 +2204,7 @@ function waitForSettle(promise, timeoutMs) {
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs);
   });
-  return Promise.race([promise.then(() => 'settled'), timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // Reads one statement's rows. Without maxRows (or on a connection without the
@@ -2341,16 +2342,20 @@ async function executeOnPoolConnection(pool, statement, params, { signal, maxRow
       // Cancelled. The caller is answered now; the thread goes back to the pool
       // only once the KILL has landed (or failed) AND the statement has ended
       // while we still own it, so neither can hit the next query on it.
-      // Otherwise it is dropped.
-      const ended = Promise.all([killPromise, reading?.then(noop, noop)]);
-      void waitForSettle(ended, killSettleTimeoutMs).then((outcome) =>
-        outcome === 'settled' ? connection.release() : connection.destroy()
+      // Otherwise it is dropped. A streamed read that overflows the cap after
+      // the abort has NOT ended (readRows resolves on row maxRows + 1 while the
+      // server keeps sending, e.g. because the KILL failed): it is dropped at
+      // once, like an overflow before the abort.
+      const statement = reading
+        ? reading.then((late) => (late.overflowed && late.streamed ? 'overflow' : 'ended'), () => 'ended')
+        : Promise.resolve('ended');
+      const outcome = statement.then((state) => (state === 'overflow' ? state : killPromise.then(() => state)));
+      void waitForSettle(outcome, killSettleTimeoutMs).then((state) =>
+        state === 'ended' ? connection.release() : connection.destroy()
       );
     }
   }
 }
-
-function noop() {}
 
 // Executes model-authored, already-validated SQL with server-side bounds.
 // - timeoutMs: per-statement max_statement_time. Omitted/null uses

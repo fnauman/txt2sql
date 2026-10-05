@@ -498,3 +498,56 @@ test('KILL QUERY uses the pool\'s dedicated killQuery() so a saturated pool cann
   assert.ok(!pool.events.some(([kind]) => kind === 'pool.query'), 'no pooled KILL');
   assert.equal(pool.connection.released, true);
 });
+
+test('a cancelled read that overflows the cap after a failed KILL is dropped, never handed back to the pool', async () => {
+  // The statement keeps streaming after the abort (the KILL failed), and row
+  // maxRows + 1 arrives well inside the KILL settle window.
+  const core = { finished: false, stopped: false };
+  core.query = () => {
+    const query = new EventEmitter();
+    let index = 0;
+    const next = () => {
+      if (core.stopped) {
+        return;
+      }
+      if (index === 300) {
+        core.finished = true;
+        query.emit('end');
+        return;
+      }
+      index += 1;
+      query.emit('result', { n: index });
+      setTimeout(next, 1);
+    };
+    setImmediate(next);
+    return query;
+  };
+  const events = [];
+  const connection = {
+    threadId: 9,
+    connection: core,
+    release: () => events.push('release'),
+    destroy: () => {
+      events.push('destroy');
+      core.stopped = true;
+    },
+  };
+  const pool = {
+    async getConnection() {
+      return connection;
+    },
+    async killQuery() {
+      throw Object.assign(new Error('Too many connections'), { code: 'ER_CON_COUNT_ERROR' });
+    },
+  };
+  const controller = new AbortController();
+  const running = executeReadOnlySql(pool, 'SELECT n FROM r LIMIT 5000', { timeoutMs: 0, maxRows: 6, signal: controller.signal });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(deadline());
+
+  await assert.rejects(settlesWithin(running, 500), isDeadlineAbort);
+  await delay(60);
+  assert.equal(core.finished, false, 'the statement is still streaming rows');
+  assert.deepEqual(events, ['destroy'], 'a still-streaming thread must not go back to the pool');
+  core.stopped = true;
+});
