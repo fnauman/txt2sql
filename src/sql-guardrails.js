@@ -386,41 +386,118 @@ function extractRealTableAliases(sql, knownTables) {
   return aliases;
 }
 
-// Aliases, derived tables and CTEs for the whole statement. CTEs are registered
-// like derived tables (name -> projected columns), so qualified CTE references
-// such as `mar.ProductId` resolve instead of failing as unknown aliases.
-function extractTableContext(sql, knownTables) {
-  const analysis = analyzeSqlStructure(String(sql || ''), { tolerant: true });
-  const aliases = new Map();
+/**
+ * Name resolution per SELECT block, the way MariaDB 10.6 scopes it (verified
+ * on the server):
+ * - a block sees the tables, derived tables and CTE references of its own FROM
+ *   clause, then those of the enclosing blocks, innermost first, so a
+ *   correlated subquery can use an outer alias unless its own FROM shadows it;
+ * - a derived table or CTE body sees nothing outside itself, and UNION
+ *   branches do not see each other's FROM;
+ * - a reference is qualified by its alias, or by its name as written when it
+ *   has none. Table names and aliases are case-sensitive
+ *   (lower_case_table_names=0); a CTE is found case-insensitively, but its
+ *   columns are then qualified by the spelling used in FROM (`FROM X` ->
+ *   `X.col`, while `x.col` is unknown).
+ * Derived tables and CTEs resolve to DERIVED_TABLE_PREFIX + a per-body key, so
+ * two derived tables that share an alias in different scopes stay distinct.
+ */
+function buildRelationModel(analysis, knownTables) {
+  const { tokens, groups } = analysis;
+  const blocksById = new Map(analysis.blocks.map((block) => [block.id, block]));
   const derivedTables = new Map();
+  const bodyGroups = new Set();
 
-  for (const tableName of knownTables.keys()) {
-    aliases.set(tableName, tableName);
-  }
+  const relationOfBody = (openIndex, label, parse) => {
+    const key = `${label}@${openIndex}`;
+    if (!derivedTables.has(key)) {
+      derivedTables.set(key, { label, ...parse() });
+    }
+    return DERIVED_TABLE_PREFIX + key;
+  };
 
-  for (const cte of analysis.ctes) {
-    const bodyText = tokensToText(analysis.tokens, cte.bodyOpen + 1, cte.bodyClose);
-    derivedTables.set(cte.name, parseCteColumns(cte, bodyText, knownTables));
-    aliases.set(cte.name, DERIVED_TABLE_PREFIX + cte.name);
-  }
+  // The innermost CTE that a `kind: 'cte'` reference names.
+  const cteOf = (ref) => {
+    const lower = String(ref.name).toLowerCase();
+    return analysis.ctes
+      .filter((cte) => cte.name.toLowerCase() === lower && ref.index >= cte.visibleFrom && ref.index < cte.visibleTo)
+      .sort((left, right) => right.visibleFrom - left.visibleFrom)[0];
+  };
 
-  for (const ref of analysis.tableRefs) {
+  const bindRef = (ref) => {
+    const alias = isUsableAlias(ref.alias, knownTables) ? ref.alias : null;
     if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
-      if (isUsableAlias(ref.alias, knownTables)) {
-        aliases.set(ref.alias, ref.name);
+      return [alias || ref.name, ref.name];
+    }
+    if (ref.kind === 'cte') {
+      const cte = cteOf(ref);
+      if (!cte) {
+        return null;
       }
-    } else if (ref.kind === 'cte') {
-      if (isUsableAlias(ref.alias, knownTables) && ref.alias !== ref.cteName) {
-        aliases.set(ref.alias, DERIVED_TABLE_PREFIX + ref.cteName);
-      }
-    } else if (ref.kind === 'derived' && isUsableAlias(ref.alias, knownTables)) {
-      const bodyText = tokensToText(analysis.tokens, ref.open + 1, ref.close);
-      derivedTables.set(ref.alias, parseDerivedTableColumns(bodyText, knownTables));
-      aliases.set(ref.alias, DERIVED_TABLE_PREFIX + ref.alias);
+      bodyGroups.add(tokens[cte.bodyOpen].groupId);
+      const relation = relationOfBody(cte.bodyOpen, cte.name, () =>
+        parseCteColumns(cte, tokensToText(tokens, cte.bodyOpen + 1, cte.bodyClose), knownTables)
+      );
+      return [alias || ref.name, relation];
+    }
+    if (ref.kind === 'derived') {
+      bodyGroups.add(tokens[ref.open].groupId);
+      const relation = relationOfBody(ref.open, alias || 'derived', () =>
+        parseDerivedTableColumns(tokensToText(tokens, ref.open + 1, ref.close), knownTables)
+      );
+      return alias ? [alias, relation] : null;
+    }
+    return null;
+  };
+
+  const bindings = new Map();
+  for (const ref of analysis.tableRefs) {
+    const binding = bindRef(ref);
+    if (!binding) {
+      continue;
+    }
+    if (!bindings.has(ref.blockId)) {
+      bindings.set(ref.blockId, new Map());
+    }
+    const blockBindings = bindings.get(ref.blockId);
+    if (!blockBindings.has(binding[0])) {
+      blockBindings.set(binding[0], binding[1]);
     }
   }
+  // CTEs that are declared but never referenced still get their columns parsed.
+  for (const cte of analysis.ctes) {
+    bodyGroups.add(tokens[cte.bodyOpen].groupId);
+    relationOfBody(cte.bodyOpen, cte.name, () =>
+      parseCteColumns(cte, tokensToText(tokens, cte.bodyOpen + 1, cte.bodyClose), knownTables)
+    );
+  }
 
-  return { aliases, derivedTables, analysis };
+  const enclosingBlock = (blockId) => {
+    const block = blocksById.get(blockId);
+    if (!block || block.scopeId === 'top' || bodyGroups.has(block.scopeId)) {
+      return null;
+    }
+    return tokens[groups[block.scopeId].open].blockId;
+  };
+
+  // Table name or derived-relation name that `qualifier` denotes in a block.
+  const resolve = (blockId, qualifier) => {
+    for (let current = blockId; current; current = enclosingBlock(current)) {
+      const relation = bindings.get(current)?.get(qualifier);
+      if (relation) {
+        return relation;
+      }
+    }
+    return null;
+  };
+
+  const qualifiers = new Set([...bindings.values()].flatMap((blockBindings) => [...blockBindings.keys()]));
+  return { resolve, derivedTables, qualifiers };
+}
+
+function extractTableContext(sql, knownTables) {
+  const analysis = analyzeSqlStructure(String(sql || ''), { tolerant: true });
+  return { analysis, model: buildRelationModel(analysis, knownTables) };
 }
 
 function extractOutputAliases(sql) {
@@ -441,34 +518,52 @@ export function extractCteNames(sql) {
 }
 
 function columnExists(knownTables, tableName, columnName, derivedTables = new Map()) {
-  const derivedAlias = derivedAliasFromTableName(tableName);
-  if (derivedAlias) {
-    return Boolean(derivedTables.get(derivedAlias)?.columns?.has(columnName));
+  const derivedKey = derivedAliasFromTableName(tableName);
+  if (derivedKey) {
+    return Boolean(derivedTables.get(derivedKey)?.columns?.has(columnName));
   }
 
   const columns = knownTables.get(tableName);
   return columns instanceof Set && columns.has(columnName);
 }
 
-function validateQualifiedColumns(sql, knownTables, aliases, derivedTables) {
-  const cleaned = stripSqlLiterals(sql);
+function describeRelation(tableName, derivedTables) {
+  const derivedKey = derivedAliasFromTableName(tableName);
+  return derivedKey ? `derived table or CTE "${derivedTables.get(derivedKey)?.label ?? derivedKey}"` : `table "${tableName}"`;
+}
+
+// Each `qualifier.column` reference, resolved in the SELECT block it appears in.
+function collectQualifiedColumnTokens(analysis) {
+  const { tokens } = analysis;
+  const references = [];
+  for (let index = 0; index + 2 < tokens.length; index += 1) {
+    const qualifier = tokenIdentifierName(tokens[index]);
+    const columnName = tokenIdentifierName(tokens[index + 2]);
+    if (!qualifier || tokens[index].afterDot || !isPunctToken(tokens[index + 1], '.') || !columnName) {
+      continue;
+    }
+    references.push({ index, blockId: tokens[index].blockId, qualifier, columnName });
+    index += 2;
+  }
+  return references;
+}
+
+function validateQualifiedColumns(analysis, knownTables, model) {
   const usedColumns = [];
-  const columnRegex = /`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*`?([A-Za-z][A-Za-z0-9_]*)`?/g;
-  let match;
 
-  while ((match = columnRegex.exec(cleaned)) !== null) {
-    const qualifier = normalizeIdentifier(match[1]);
-    const columnName = normalizeIdentifier(match[2]);
-    const tableName = aliases.get(qualifier);
-
+  for (const { blockId, qualifier, columnName } of collectQualifiedColumnTokens(analysis)) {
+    const tableName = model.resolve(blockId, qualifier);
     if (!tableName) {
       throw guardrailError(
         'UNKNOWN_TABLE_ALIAS',
         `SQL references unknown table or alias "${qualifier}" in qualified column "${qualifier}.${columnName}".`
       );
     }
-    if (!columnExists(knownTables, tableName, columnName, derivedTables)) {
-      throw guardrailError('UNKNOWN_COLUMN', `SQL references unknown column "${columnName}" on table "${tableName}".`);
+    if (!columnExists(knownTables, tableName, columnName, model.derivedTables)) {
+      throw guardrailError(
+        'UNKNOWN_COLUMN',
+        `SQL references unknown column "${columnName}" on ${describeRelation(tableName, model.derivedTables)}.`
+      );
     }
 
     usedColumns.push({ tableName, columnName, qualifier });
@@ -477,12 +572,12 @@ function validateQualifiedColumns(sql, knownTables, aliases, derivedTables) {
   return usedColumns;
 }
 
-function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, derivedTables) {
+function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, qualifiers, derivedTables) {
   const cleaned = stripSqlLiterals(sql);
   const knownColumns = new Set([...knownTables.values()].flatMap((columns) => [...columns]));
   const knownIdentifiers = new Set([
     ...knownTables.keys(),
-    ...aliases.keys(),
+    ...qualifiers,
     ...knownColumns,
     ...[...derivedTables.values()].flatMap((table) => [...(table.columns || [])]),
     ...extractOutputAliases(cleaned),
@@ -552,29 +647,36 @@ function collectRelationshipKeys(promptContext = {}) {
 }
 
 function resolveJoinColumnReferences(tableName, columnName, derivedTables) {
-  const derivedAlias = derivedAliasFromTableName(tableName);
-  if (!derivedAlias) {
+  const derivedKey = derivedAliasFromTableName(tableName);
+  if (!derivedKey) {
     return [{ tableName, columnName }];
   }
 
-  return derivedTables.get(derivedAlias)?.origins?.get(columnName) || [];
+  return derivedTables.get(derivedKey)?.origins?.get(columnName) || [];
 }
 
-function validateJoinGuardrails(sql, knownTables, aliases, derivedTables, promptContext) {
+// Every `a.x = b.y` comparison, each side resolved in its own SELECT block.
+function validateJoinGuardrails(analysis, model, promptContext) {
   const relationshipKeys = collectRelationshipKeys(promptContext);
-  const cleaned = stripSqlLiterals(sql);
-  const equalityRegex =
-    /`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*=\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*`?([A-Za-z][A-Za-z0-9_]*)`?/g;
-  let match;
+  const { tokens } = analysis;
+  const { derivedTables } = model;
+  const references = collectQualifiedColumnTokens(analysis);
   const checkedJoins = [];
 
-  while ((match = equalityRegex.exec(cleaned)) !== null) {
-    const leftQualifier = normalizeIdentifier(match[1]);
-    const leftTable = aliases.get(leftQualifier);
-    const leftColumn = normalizeIdentifier(match[2]);
-    const rightQualifier = normalizeIdentifier(match[3]);
-    const rightTable = aliases.get(rightQualifier);
-    const rightColumn = normalizeIdentifier(match[4]);
+  for (let position = 0; position + 1 < references.length; position += 1) {
+    const left = references[position];
+    const right = references[position + 1];
+    if (!isOperatorToken(tokens[left.index + 3], '=') || right.index !== left.index + 4) {
+      continue;
+    }
+    position += 1;
+
+    const leftQualifier = left.qualifier;
+    const leftTable = model.resolve(left.blockId, leftQualifier);
+    const leftColumn = left.columnName;
+    const rightQualifier = right.qualifier;
+    const rightTable = model.resolve(right.blockId, rightQualifier);
+    const rightColumn = right.columnName;
 
     if (!leftTable || !rightTable || leftTable === rightTable) {
       continue;
@@ -1832,11 +1934,11 @@ export function validateSqlGuardrails(
   }
 
   const knownTables = collectPromptTables(promptContext, allowedTables);
-  const { aliases, derivedTables, analysis } = extractTableContext(sql, knownTables);
+  const { analysis, model } = extractTableContext(sql, knownTables);
   const cteNames = new Set(analysis.ctes.map((cte) => cte.name));
-  const qualifiedColumns = validateQualifiedColumns(sql, knownTables, aliases, derivedTables);
-  validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, derivedTables);
-  const joinChecks = validateJoinGuardrails(sql, knownTables, aliases, derivedTables, promptContext);
+  const qualifiedColumns = validateQualifiedColumns(analysis, knownTables, model);
+  validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, model.qualifiers, model.derivedTables);
+  const joinChecks = validateJoinGuardrails(analysis, model, promptContext);
   const fanOutChecks = validateFanOut(analysis, knownTables, promptContext);
   const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);

@@ -417,6 +417,44 @@ test('validateReadOnlySql resolves qualified CTE references through both layers'
   );
 });
 
+test('qualifiers resolve in their own SELECT scope, the way MariaDB resolves them', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validate = (sql) => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context });
+
+  // The CTE's `d` (SalesDocument) and the outer `d` (Customer) do not collide.
+  const scoped = validate(
+    'WITH t AS (SELECT d.CustomerId, SUM(d.NetAmount) AS net FROM SalesDocument d GROUP BY d.CustomerId) SELECT d.CustomerName, t.net FROM t JOIN Customer d ON d.CustomerId = t.CustomerId'
+  );
+  assert.deepEqual(
+    scoped.guardrails.columnChecks.qualifiedColumns.map(({ tableName, columnName }) => `${tableName}.${columnName}`).slice(0, 3),
+    ['SalesDocument.CustomerId', 'SalesDocument.NetAmount', 'SalesDocument.CustomerId']
+  );
+  assert.ok(scoped.guardrails.columnChecks.qualifiedColumns.some((column) => column.tableName === 'Customer' && column.columnName === 'CustomerName'));
+
+  // Each of these fails on MariaDB 10.6 with "Unknown column": a CTE or derived
+  // body cannot see outer or sibling aliases, UNION branches do not share FROM
+  // clauses, aliases are case-sensitive, an aliased table is no longer
+  // reachable by its name, and a CTE is qualified by its FROM spelling.
+  for (const [sql, qualifier] of [
+    ['WITH x AS (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) SELECT 1 FROM x JOIN Customer c ON c.CustomerId = x.CustomerId', 'c'],
+    ['SELECT 1 FROM Customer c JOIN (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) x ON x.CustomerId = c.CustomerId', 'c'],
+    ['SELECT c.CustomerId FROM Customer c WHERE EXISTS (SELECT 1 FROM (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) x)', 'c'],
+    ['SELECT c.CustomerId FROM Customer c UNION SELECT c.CustomerId FROM SalesDocument d', 'c'],
+    ['SELECT D.CustomerId FROM SalesDocument d', 'D'],
+    ['SELECT SalesDocument.CustomerId FROM SalesDocument d', 'SalesDocument'],
+    ['SELECT Customer.CustomerName FROM SalesDocument d', 'Customer'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT x.CustomerId FROM X', 'x'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT X.CustomerId FROM x', 'X'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT x.CustomerId FROM x y', 'x'],
+  ]) {
+    assert.throws(
+      () => validate(sql),
+      (error) => error.code === 'UNKNOWN_TABLE_ALIAS' && error.message.includes(`"${qualifier}"`),
+      sql
+    );
+  }
+});
+
 test('the ProductId candidate check ignores numbers inside IN (SELECT ...) subqueries', () => {
   const prompt = buildSparklingWaterSalesPrompt();
   const validated = validateReadOnlySql(

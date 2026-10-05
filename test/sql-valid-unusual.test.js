@@ -58,8 +58,26 @@ const VALID = [
     'WITH m (CustomerId, Net) AS (SELECT d.CustomerId, SUM(COALESCE(d.NetAmount, 0)) FROM SalesDocument d GROUP BY d.CustomerId) SELECT c.CustomerName, ROUND(m.Net, 2) AS total_net_amount FROM m JOIN Customer c ON m.CustomerId = c.CustomerId LIMIT 10',
   ],
   [Q_LIST, 'simple CTE', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM x'],
-  // MariaDB resolves CTE names case-insensitively.
+  // MariaDB resolves CTE names case-insensitively; qualifiers follow the FROM spelling.
   [Q_LIST, 'CTE referenced in another case', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM X'],
+  [Q_LIST, 'CTE columns qualified by the FROM spelling', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT X.CustomerId FROM X'],
+  [Q_LIST, 'CTE referenced in another case with an alias', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT y.CustomerId FROM X y'],
+  // Aliases are scoped per SELECT: `d` is SalesDocument inside the CTE and Customer outside.
+  [
+    Q_CUST,
+    'one alias bound to different tables in a CTE and the outer query',
+    'WITH t AS (SELECT d.CustomerId, SUM(d.NetAmount) AS net FROM SalesDocument d GROUP BY d.CustomerId) SELECT d.CustomerName, t.net FROM t JOIN Customer d ON d.CustomerId = t.CustomerId',
+  ],
+  [
+    Q_CUST,
+    'a subquery alias shadowing an outer alias',
+    'SELECT d.CustomerName FROM Customer d WHERE EXISTS (SELECT 1 FROM SalesDocument d WHERE d.NetAmount > 0)',
+  ],
+  [
+    Q_CUST,
+    'a correlated subquery using an outer alias',
+    'SELECT c.CustomerName, (SELECT SUM(d.NetAmount) FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) AS net FROM Customer c',
+  ],
   [
     Q_CUST,
     'window RANK() OVER',
