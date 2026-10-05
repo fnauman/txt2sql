@@ -530,7 +530,8 @@ question and gold SQL scored the same way (same alternatives and comparison
 spec; the same question and gold scored differently stays a separate case).
 Today that is 26 cases over 17 intents. `--case-id` with the id of a dropped
 duplicate selects the case kept in its place (the console says so). A case id with a
-different question or gold in two datasets is a dataset conflict (exit 2).
+different question or gold in two datasets is a dataset conflict (exit 2),
+also when its first appearance was dropped as a duplicate of another id.
 Filters: `--dataset a,b` or `--dataset-file`, `--split dev|holdout|all` (a case
 without a `split` field is dev; default all), `--case-id`, `--tag` (any of),
 `--intent`. `--fixtures` scores on a subset (it must include `seed`).

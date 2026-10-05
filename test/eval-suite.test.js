@@ -128,3 +128,35 @@ test('the same question and gold scored differently is a separate case; a droppe
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('an id dropped as a question duplicate is still registered: reusing it for another question is a conflict', async () => {
+  // a/Q1, then b/Q1 (dropped: same question and gold as a), then b/Q2.
+  const datasets = [
+    { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1')] },
+    { name: 'd2', cases: [makeCase('b', 'Q1?', 'SELECT 1')] },
+    { name: 'd3', cases: [makeCase('b', 'Q2?', 'SELECT 2')] },
+  ];
+  const { entries, conflicts } = dedupeSuiteCases(datasets);
+  assert.deepEqual(conflicts, [{ id: 'b', datasets: ['d2', 'd3'], reason: 'different question and gold SQL' }]);
+  assert.deepEqual(entries.map((entry) => entry.testCase.id), ['a'], 'the second b is not kept as a new case');
+
+  // The same dropped id repeated verbatim is one more copy of the kept case.
+  const repeated = dedupeSuiteCases([datasets[0], datasets[1], { name: 'd3', cases: [makeCase('b', 'Q1?', 'SELECT  1')] }]);
+  assert.deepEqual(repeated.conflicts, []);
+  assert.deepEqual(repeated.entries.map((entry) => [entry.testCase.id, entry.datasets]), [['a', ['d1', 'd2', 'd3']]]);
+  assert.deepEqual(repeated.duplicates.map((entry) => [entry.id, entry.dataset, entry.keptAs]), [
+    ['b', 'd2', 'a'],
+    ['b', 'd3', 'a'],
+  ]);
+
+  // selectSuite stops the run instead of letting --case-id b pick Q1 or Q2.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
+  try {
+    await fs.writeFile(path.join(dir, 'd1.json'), JSON.stringify([{ id: 'a', question: 'Q1?', expected_sql: 'SELECT 1' }]));
+    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b', question: 'Q1?', expected_sql: 'SELECT 1' }]));
+    await fs.writeFile(path.join(dir, 'd3.json'), JSON.stringify([{ id: 'b', question: 'Q2?', expected_sql: 'SELECT 2' }]));
+    await assert.rejects(selectSuite({ datasetsDir: dir, caseIds: ['b'] }), (error) => error.code === 'DATASET_CONFLICT' && /b has a different question and gold SQL in d2 and d3/.test(error.message));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

@@ -10,7 +10,9 @@
 //   two. The same question and gold scored differently stays a separate case.
 // --case-id resolves a dropped duplicate to the case kept in its place.
 // A case id that appears with a different question or gold in two datasets is
-// a dataset conflict: comparisons align cases by id, so it must be fixed.
+// a dataset conflict: comparisons align cases by id, so it must be fixed. The
+// id of a dropped duplicate is registered too, with the definition it was
+// dropped with, so a later dataset cannot reuse it for another question.
 //
 // Filters: --split dev|holdout|all (a case without `split` counts as dev),
 // --case-id, --tag (any of), --intent (any of); list values are comma-separated.
@@ -98,6 +100,8 @@ export async function loadSuiteDatasets({ datasetsDir = DEFAULT_DATASETS_DIR, da
  * keptAs, keptFrom, reason }], conflicts: [{ id, datasets, reason }] }.
  */
 export function dedupeSuiteCases(datasets) {
+  // id -> { testCase: its first definition, firstDataset, keptEntry: the entry
+  // that runs for it (itself, or the case it duplicates) }.
   const byId = new Map();
   const byQuestion = new Map();
   const entries = [];
@@ -120,10 +124,17 @@ export function dedupeSuiteCases(datasets) {
           differs.push('alternatives or comparison spec');
         }
         if (differs.length > 0) {
-          conflicts.push({ id: testCase.id, datasets: [sameId.datasets[0], dataset.name], reason: `different ${differs.join(' and ')}` });
+          conflicts.push({ id: testCase.id, datasets: [sameId.firstDataset, dataset.name], reason: `different ${differs.join(' and ')}` });
         } else {
-          sameId.datasets.push(dataset.name);
-          duplicates.push({ id: testCase.id, dataset: dataset.name, keptAs: kept.id, keptFrom: sameId.datasets[0], reason: 'same case id' });
+          const target = sameId.keptEntry;
+          target.datasets.push(dataset.name);
+          duplicates.push({
+            id: testCase.id,
+            dataset: dataset.name,
+            keptAs: target.testCase.id,
+            keptFrom: target.datasets[0],
+            reason: target.testCase.id === testCase.id ? 'same case id' : 'same question and gold SQL',
+          });
         }
         continue;
       }
@@ -137,10 +148,13 @@ export function dedupeSuiteCases(datasets) {
           keptFrom: sameQuestion.datasets[0],
           reason: 'same question and gold SQL',
         });
+        // The dropped id keeps its definition: reusing it later for another
+        // question or gold is a conflict, like any other id.
+        byId.set(testCase.id, { testCase, firstDataset: dataset.name, keptEntry: sameQuestion });
         continue;
       }
       const entry = { testCase, datasets: [dataset.name] };
-      byId.set(testCase.id, entry);
+      byId.set(testCase.id, { testCase, firstDataset: dataset.name, keptEntry: entry });
       byQuestion.set(questionKey(testCase), entry);
       entries.push(entry);
     }
