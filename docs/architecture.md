@@ -17,14 +17,17 @@ question
    ▼  semantic retrieval          pick only the in-scope tables a question needs
    ▼  master-data resolution      resolve "sparkling water" → bounded candidate rows
    ▼  LLM (structured JSON out)    { sql, explanation, tables_used, assumptions }
-   ▼  deterministic guardrails     re-validate SQL vs the exact schema it saw
-   ▼  read-only execution          single SELECT/WITH, table allow-list, statement timeout
-   ▼  value-aware result scoring
+   ▼  deterministic validation     read-only safety layer + schema guardrails vs the exact schema it saw
+   ▼  bounded execution            SELECT-only DB user, statement timeout; web: row cap, KILL on cancel
+   ▼  value-aware result scoring   (benchmark only)
 ```
 
-The CLI (`scripts/*`) and the web server (`apps/web/`) call the **same** core
-pipeline in `src/`. The orchestration lives in `src/query-service.js`; the heavy
-lifting (retrieval, prompt construction, safety) lives in `src/pipeline.js`.
+The optimized CLI (`scripts/optimized.js`) and the web server (`apps/web/`) call
+the **same** orchestration, `runOptimizedQuestion` in `src/query-service.js`. The
+basic CLI and the benchmark (`scripts/evaluate.js`) have their own loops over the
+same building blocks (prompt builders, validator, executor), so their retry
+behavior can differ. The heavy lifting (retrieval, prompt construction, safety)
+lives in `src/pipeline.js`, `src/sql-tokenizer.js` and `src/sql-guardrails.js`.
 
 ---
 
@@ -49,32 +52,78 @@ not an embedding model or a vector database:
 The deliberate trade-off: new vocabulary must be added on purpose. The payoff is
 the failure mode — when a business term is missing, the fix is a **visible,
 testable edit** in `metadata/semantic-layer.json` plus a retrieval test, not an
-opaque vector nudge. Hybrid lexical + embedding retrieval is listed as future
-work rather than silently implied.
+opaque vector nudge. Embedding or hybrid retrieval is not implemented.
+
+Retrieval narrows rather than minimizes: "How many active customers do we
+have?" still retrieves 5 of the 13 tables. The point is that the prompt does not
+grow with the whole schema.
 
 ### Why guardrails re-validate the model's SQL deterministically
 
 Structured output (a provider-enforced JSON schema with `sql`, `explanation`,
 `tables_used`, `assumptions`) makes the model's answer *parseable*, not
-*trustworthy*. Two deterministic layers re-check it before anything runs:
+*trustworthy*. Two deterministic layers re-check it before anything runs. Both
+read the SQL through **one MariaDB-faithful tokenizer** (`src/sql-tokenizer.js`):
+earlier, three regex lexers disagreed about comments, quotes and parentheses,
+which is where bypasses and false rejections came from. The tokenizer follows
+MariaDB's rules (for example, `--` is a comment only when followed by whitespace,
+a control character or the end of input) and throws on unterminated strings,
+identifiers and comments, so validation fails closed.
 
-1. **Read-only enforcement** (`validateReadOnlySql` + `READ_ONLY_DENYLIST` in
-   `src/pipeline.js`): the first keyword must be `SELECT`/`WITH`, it must be a
-   single statement, and a keyword/function denylist blocks DML/DDL,
-   `INTO OUTFILE`/`DUMPFILE`, locking reads, `@`/`@@` variables,
-   `information_schema`/`performance_schema`/`mysql`/`sys`, and
-   timing/exfiltration functions. The table allow-set is enforced **fail-closed**,
-   which is also what rejects cross-database references like `FROM otherdb.Table`.
-2. **Schema-aware validation** (`validateSqlGuardrails` in
-   `src/sql-guardrails.js`): every qualified table/column must exist in the
-   *exact* schema context the model saw, joins must match in-scope foreign keys
-   or declared join hints, metrics must use their canonical columns, filter IDs
-   must come from the resolved candidate list, and `tables_used` must stay inside
-   the allowed set and cover every table the SQL references. Query-local CTE
-   names from `WITH … AS (…)` are recognized as temporary identifiers.
+1. **Safety** (`validateSqlSafety` in `src/pipeline.js`, every path): a single
+   `SELECT`/`WITH` statement; no comments of any kind (`SQL_COMMENT`,
+   `EXECUTABLE_COMMENT`); no `WITH RECURSIVE`; every table inside the allowed
+   set, with CTE names treated as query-local and the tables inside CTE bodies
+   checked; any `db.table` or `db.fn()` rejected as `CROSS_DATABASE` and the
+   metadata schemas as `METADATA_SCHEMA`; and a word-token denylist for
+   DML/DDL, any `INTO`, `SET`, `PROCEDURE`, locking reads, index hints,
+   `FOR SYSTEM_TIME`, table functions, `@`/`@@` variables, and timing, locking,
+   file, sequence and session-information functions (also when backtick-quoted,
+   since MariaDB runs `` `SLEEP`(5) ``). Words inside string literals are not
+   tokens, so they no longer trigger the denylist.
+2. **Schema-aware guardrails** (`validateSqlGuardrails` in
+   `src/sql-guardrails.js`, optimized pipeline only): qualified table/column
+   references must exist in the *exact* schema context the model saw (unknown
+   unqualified names are caught only when mixed-case); joins must match in-scope
+   foreign keys or declared join hints; explicitly named metrics must use their
+   canonical columns; `SUM`/`AVG` over a parent table's column while a 1:N child
+   is joined in the same `SELECT` scope is rejected as `FAN_OUT`; product IDs
+   must come from the resolved candidate list; and `tables_used` must stay
+   inside the allowed set and cover every table the SQL references.
+
+Every rejection is a `SqlValidationError` with a stable `code` and a `layer`
+(`safety` or `guardrail`), which the trace, the API (`errorCode`, `error.layer`)
+and the web client's error headline use instead of message text.
+
+**Enforced vs advisory.** Metric matching arbitrates overlapping phrases
+(longest span wins, so "sales documents" does not fire net sales). Explicit
+metric phrases ("net sales", "revenue") are *enforced* and reject SQL that does
+not use the preferred column. Metrics matched only through generic words
+("sales", "sold") or in count/list/existence questions are *advisory*: they stay
+prompt hints, and a miss is recorded as a `METRIC_COLUMN_NOT_USED` entry in
+`guardrails.warnings[]` instead of an error. This removed false rejections of
+correct `COUNT` queries without loosening the explicit cases.
 
 Rationale: defense-in-depth beats trusting a schema-shaped JSON blob. These are
-local checks, so they cost nothing and are covered by the `test/sql-*` suites.
+local checks, so they cost nothing; they are covered by the `test/sql-*` suites,
+a bypass battery (`test/sql-bypass-battery.test.js`), a must-accept corpus of
+unusual valid SQL (`test/sql-valid-unusual.test.js`), every gold query in its
+real prompt context (`test/gold-sql-validator.test.js`) and recorded live model
+generations (`test/live-generations.test.js`).
+
+They are not the security boundary. The **database grants** are: the query
+paths connect as a `SELECT`-only user (Docker Compose creates `demo_readonly`
+with `SELECT` on `` `demo\_retail%`.* `` and nothing else), and the admin
+credentials are used only by `bootstrap-db` and `seed-demo`. Known gaps in the
+validator, which only the grants and the execution bounds cover:
+
+- Resource-heavy read-only SQL (a `REPEAT()` memory bomb, a cartesian self-join)
+  is accepted; the statement timeout and the web row cap bound it.
+- The function check is a denylist; there is no allowlist yet.
+- The master-data ID check covers product ID literals only, so a subquery or a
+  join on the product name bypasses it, and other entities' IDs are unchecked.
+- Unqualified column checks are partial (lower-case unknown names pass to
+  MariaDB, which rejects them at execution).
 
 ### Why master-data resolution is product-only (today)
 
@@ -158,9 +207,14 @@ progressively, showing the generated SQL **the instant the model returns it**
 sql → columns → [residency] → rows → viz → insights → [layout] → metrics → [debug] → [error] → done
 ```
 
-`residency` and `layout` frames are emitted only when present. Cancellation is
-real: a **Stop** button (and client disconnect) fires an `AbortController` that
-reaches the in-flight OpenAI call and the DB driver server-side.
+`residency` and `layout` frames are emitted only when present. A failed question
+ends with an `error` frame carrying the stage it stopped in (`llm`, `validation`,
+`execution`, `aborted`, `infra`) and an error code. Cancellation is real: a
+**Stop** button, a client disconnect or the request deadline
+(`WEB_REQUEST_TIMEOUT_MS`) fires an `AbortController` that aborts the in-flight
+OpenAI call and, if the SQL is already running, sends `KILL QUERY` for it over a
+separate short-lived connection (a pool slot could be queued behind the very
+query it should stop).
 
 ### Exact-match result cache — demo-gated
 
@@ -171,7 +225,8 @@ Example chips and recents replay in ~0ms via an in-memory NL→result cache
   row limit, and the insights flag, so adding/removing a table busts it; a 15-min
   TTL bounds staleness from finer column-level drift.
 - It **only caches `demo_retail` results** (`DB_NAME === demo_retail` AND
-  `DB_USER === demo_readonly`) and never caches failures.
+  `DB_USER === demo_readonly`) and never caches failures. The admin schema
+  refresh (`POST /api/admin/refresh-schema`) clears it.
 - There is deliberately **no per-identity key** — the threat model is a
   single-user local demo. Multi-tenant use would require an identity component in
   the key first.
@@ -193,8 +248,9 @@ Results are composed from an ordered, Zod-validated **`LayoutSpec`** of typed
 blocks (`src/result-layout.js` → `lib/layout-schema.ts`), rendered through a
 hard-coded `{ blockType → Component }` registry (`blocks/registry.tsx`) — **no
 `eval`, no `dangerouslySetInnerHTML`**. The deterministic first paint is decided
-from the data *shape*; any LLM `layout_hint` is optional, validated against the
-real columns, and may only *refine* the layout, never block first paint. Unknown
+from the data *shape*. An LLM `layout_hint` is **planned, not implemented**: the
+schema leaves room for one that would be validated against the real columns and
+could only *refine* the layout, never block first paint. Unknown
 block types fall back to a typed placeholder. This is also the seam that future
 csv/xlsx/pdf agents can reuse.
 
@@ -202,14 +258,43 @@ csv/xlsx/pdf agents can reuse.
 
 The results table renders **all** returned rows via TanStack Table +
 `react-virtual` (filter, sort, column visibility, full-set CSV export), replacing
-an earlier hand-sliced 300-row table that silently dropped data.
+an earlier hand-sliced 300-row table that silently dropped data. The server caps
+results at `WEB_QUERY_ROW_LIMIT` rows; it asks for one row more than it shows, so
+a capped result is reported as `truncated: true` with `totalRowCount: null`, and
+the UI says "1,000+ rows" instead of a number that would understate it.
 
 ### Bounding the tail
 
-A model-generated cartesian join can't pin a shared instance: generated SQL runs
-under a MariaDB statement timeout (`SET STATEMENT max_statement_time …`, default
-8000 ms), and the API is loopback-bound with opt-in bearer auth that is **never
-shipped to the browser**.
+A model-generated cartesian join can't pin a shared instance for long. On every
+path (web, CLIs, benchmark, master-data lookups) generated SQL runs under a
+MariaDB statement timeout (`SET STATEMENT max_statement_time …`,
+`QUERY_STATEMENT_TIMEOUT_MS`, default 8000 ms). The web path adds
+`sql_select_limit` as a server-side row cap, which applies only to the outermost
+result (subqueries, window functions and `GROUP BY` still see every row), and
+stops reading at the cap even when the SQL has a larger explicit `LIMIT`.
+
+The OpenAI transport is bounded too: `OPENAI_TIMEOUT_MS` per attempt and
+`OPENAI_MAX_RETRIES` transport retries. A truncated or refused response becomes
+a typed failure (`LLM_TRUNCATED`, `LLM_REFUSED`) instead of being parsed, and
+provider outages fail fast without an app-level retry.
+
+The HTTP surface is loopback-bound by default. Requests whose `Host` header is
+not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403 (DNS-rebinding
+protection), API requests from an origin outside `WEB_ALLOWED_ORIGINS` get 403,
+and responses carry `nosniff`, `no-referrer`, `X-Frame-Options: DENY` and a
+same-origin resource policy. Bearer auth (`WEB_API_TOKEN`) is opt-in and
+**never shipped to the browser**; it also gates the deep health check and is
+required for the admin schema refresh. Debug payloads are honored only when
+`WEB_ALLOW_DEBUG` allows them (by default only on a loopback bind).
+
+### Config is read after the env file
+
+`main.js` loads the env file, then builds a validated, frozen config with
+`loadWebConfig`, then creates the app. Nothing in the server reads `process.env`
+at import time: ESM evaluates static imports before an entry point's
+`await loadEnvironment()`, so settings that lived only in `.env` (including
+`WEB_API_TOKEN`) used to be silently ignored. An invalid value stops startup with
+one error listing every problem.
 
 ---
 
@@ -219,13 +304,21 @@ shipped to the browser**.
   `DB_USER === demo_readonly` AND `DB_NAME === demo_retail`, default-deny. Never
   ship non-demo data to the browser.
 - **NL-only in.** The browser sends a natural-language question only — never SQL.
-  Read-only guardrails run unchanged on the *complete* SQL before any execution.
+  Read-only validation runs unchanged on the *complete* SQL before any execution.
   There is no raw-SQL endpoint.
+- **Least privilege.** Every path that runs model-authored SQL connects as the
+  query user (`DB_USER`, default `demo_readonly`), which must be `SELECT`-only;
+  admin credentials (`DB_ADMIN_*`) are for `bootstrap-db` and `seed-demo` only.
+- **Bounded execution.** Model-authored SQL always runs through
+  `executeReadOnlySql`, so the statement timeout applies on every path.
 - **One pipeline, two serializers.** The streaming route must wrap the same
   pipeline as the blocking route; keep the blocking JSON route as a drift-free
   fallback.
 - **Auth.** `WEB_API_TOKEN` is never shipped to the browser; new routes must be
-  covered by the same auth/rate-limit middleware.
+  covered by the same auth/rate-limit middleware, and admin routes must refuse
+  to run when no token is configured.
+- **Config after env.** No server module reads `process.env` at import time;
+  settings come from `loadWebConfig` after the env file is loaded.
 
 ## Known limitations & risks
 
@@ -239,6 +332,14 @@ shipped to the browser**.
 - Semantic metadata is intentionally **small and curated**; grow it from observed
   user language, with tests, rather than synthetic prompts alone.
 - The result cache has **no per-identity key** (single-user scope by design).
+- The SQL validator has known gaps (resource-heavy read-only SQL, no function
+  allowlist, product-only and literal-only master-data ID checks, partial
+  unqualified-column checks); see the guardrails section above. The database
+  grants and execution bounds are what cover them.
+- Some valid SQL is still rejected on the optimized path: backtick-quoted
+  aliases containing spaces, and implicit aliases without `AS`.
+- The benchmark has its own orchestration loop rather than calling
+  `runOptimizedQuestion`, so its retry behavior can drift from the web/CLI path.
 
 ## Diagnosing a failure
 
@@ -249,8 +350,11 @@ fixing anything:
    `npm run debug-retrieval -- "<question>"` and inspect semantic matches,
    temporal normalization, retrieved examples, and expanded tables. Fix semantic
    metadata or scoring.
-2. **Validation error** — the model's SQL failed a guardrail. Inspect the
-   `sql.validated.validation.guardrails` trace event and the model's assumptions.
+2. **Validation error** — the model's SQL failed a check. The
+   `sql.validation_failed` trace event carries `error.code` and `error.layer`
+   (`safety` or `guardrail`); for SQL that passed, advisory metric warnings are
+   in `sql.validated.validation.guardrails.warnings`. Check the model's
+   assumptions too.
 3. **Execution error / result mismatch** — the SQL ran but returned the wrong
    shape or values. Use `npm run benchmark -- --trace` to separate retrieval
    misses, validation errors, execution errors, low-signal successes, and result
