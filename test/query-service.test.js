@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test, { after, before } from 'node:test';
 
 import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
@@ -173,17 +174,46 @@ test('runOptimizedQuestion caps rows server-side only when rowLimit is provided'
   assert.equal(exactResult.totalRowCount, 1005);
 });
 
-test('an explicit LIMIT larger than the cap still yields an exact total', async () => {
-  const rows = Array.from({ length: 30 }, (_value, index) => ({ CustomerId: index + 1 }));
-  // MariaDB lets an explicit LIMIT outrank sql_select_limit, so all 30 arrive.
-  const connection = { async query() { return [rows]; } };
+// Behavior change: an explicit LIMIT outranks sql_select_limit in MariaDB, so
+// all 30 rows used to be buffered and reported as an exact total of 30. The
+// read now stops after rowLimit + 1 rows, so the total is unknown (null) and
+// the rest is never materialized.
+test('an explicit LIMIT larger than the cap cannot lift the row cap', async () => {
+  const emitted = { count: 0 };
+  const connection = {
+    // Buffered queries (master-data lookups have no row cap) find nothing.
+    async query() {
+      return [[]];
+    },
+    // Minimal mysql2 core connection: streams 30 rows one at a time, ignoring
+    // sql_select_limit the way MariaDB does under an explicit LIMIT.
+    connection: {
+      query() {
+        const query = new EventEmitter();
+        let index = 0;
+        const next = () => {
+          if (index === 30) {
+            query.emit('end');
+            return;
+          }
+          index += 1;
+          emitted.count = index;
+          query.emit('result', { CustomerId: index });
+          setImmediate(next);
+        };
+        setImmediate(next);
+        return query;
+      },
+    },
+  };
   const client = createMockClient(
     JSON.stringify({ sql: 'SELECT CustomerId FROM Customer LIMIT 30', explanation: '', tables_used: ['Customer'], assumptions: [] })
   );
   const result = await runOptimizedQuestion({ client, connection, schema, question: 'List customers', rowLimit: 10 });
   assert.equal(result.rows.length, 10);
   assert.equal(result.truncated, true);
-  assert.equal(result.totalRowCount, 30);
+  assert.equal(result.totalRowCount, null, 'only "more than 10" is known');
+  assert.ok(emitted.count < 30, `the read stopped early (resolved after ${emitted.count} rows)`);
 });
 
 test('runOptimizedQuestion short-circuits an already-aborted signal before any LLM or DB work', async () => {

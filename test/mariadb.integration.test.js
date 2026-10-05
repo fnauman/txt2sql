@@ -43,15 +43,65 @@ test('sql_select_limit caps only the outermost result and keeps ORDER BY', { ski
     const scalar = await executeReadOnlySql(connection, `${numbers(50)}SELECT (SELECT COUNT(*) FROM r) AS c`, { maxRows: 5 });
     assert.equal(Number(scalar[0].c), 50);
 
-    // An explicit LIMIT in the query takes precedence over the cap.
+    // An explicit LIMIT in the query outranks sql_select_limit on the server,
+    // but the read still stops after maxRows rows.
     const explicit = await executeReadOnlySql(connection, `${numbers(50)}SELECT n FROM r LIMIT 20`, { maxRows: 5 });
-    assert.equal(explicit.length, 20);
+    assert.deepEqual(explicit.map((row) => row.n), [1, 2, 3, 4, 5]);
 
     // The cap does not leak into the next statement on the same connection.
     const after = await executeReadOnlySql(connection, `${numbers(50)}SELECT n FROM r`, { timeoutMs: 0 });
     assert.equal(after.length, 50);
   } finally {
     await connection.end();
+  }
+});
+
+test('a pool stops a huge explicit-LIMIT result after maxRows rows and stays usable', { skip }, async () => {
+  const pool = createMariaDbPool({ env, connectionLimit: 1 });
+  try {
+    const started = Date.now();
+    // 1000^2 = 1,000,000 rows on the wire if the read were not capped.
+    const rows = await executeReadOnlySql(pool, `${numbers(1000)}SELECT a.n AS a, b.n AS b FROM r a, r b LIMIT 18446744073709551615`, {
+      timeoutMs: 30_000,
+      maxRows: 11,
+    });
+    assert.equal(rows.length, 11);
+    assert.ok(Date.now() - started < 5000, `stopped early (${Date.now() - started} ms)`);
+    // ...and the server stopped producing rows too (the statement was killed;
+    // the KILL is not awaited by the read, so poll briefly).
+    let running = 1;
+    for (let attempt = 0; attempt < 40 && running > 0; attempt += 1) {
+      const [[row]] = await pool.query(
+        "SELECT COUNT(*) AS running FROM information_schema.PROCESSLIST WHERE COMMAND = 'Query' AND INFO LIKE 'SET STATEMENT%'"
+      );
+      running = Number(row.running);
+      if (running > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    assert.equal(running, 0);
+    // The overflowing connection was dropped; the single slot is reusable.
+    assert.deepEqual(await executeReadOnlySql(pool, 'SELECT 1 AS ok', { maxRows: 5 }), [{ ok: 1 }]);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('KILL-on-abort still works when every pool slot is busy', { skip }, async () => {
+  const pool = createMariaDbPool({ env, connectionLimit: 1 });
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(Object.assign(new Error('deadline'), { code: 'REQUEST_TIMEOUT' })), 200);
+    const started = Date.now();
+    await assert.rejects(
+      executeReadOnlySql(pool, 'SELECT SLEEP(3) AS s', { timeoutMs: 60_000, signal: controller.signal }),
+      (error) => error.code === 'REQUEST_TIMEOUT'
+    );
+    // A pooled KILL would wait for the only slot, i.e. the full SLEEP(3).
+    assert.ok(Date.now() - started < 2000, `killed promptly (${Date.now() - started} ms)`);
+    assert.deepEqual(await executeReadOnlySql(pool, 'SELECT 1 AS ok'), [{ ok: 1 }], 'the pool stays usable');
+  } finally {
+    await pool.end();
   }
 });
 

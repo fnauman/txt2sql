@@ -2114,8 +2114,9 @@ export function resolveStatementTimeoutMs(env = process.env) {
 // - max_statement_time (seconds, fractional allowed) bounds the execution tail.
 // - sql_select_limit caps the rows the server returns WITHOUT rewriting the
 //   query: it applies only to the outermost SELECT (subqueries, derived tables,
-//   CTEs and window frames still see every row), keeps ORDER BY, and an
-//   explicit LIMIT in the query takes precedence. Verified on MariaDB 10.6.
+//   CTEs and window frames still see every row) and keeps ORDER BY. Verified on
+//   MariaDB 10.6. An explicit LIMIT in the query takes precedence over it, so
+//   executeReadOnlySql also stops reading after maxRows rows (see readRows).
 export function buildBoundedStatement(sql, { timeoutMs = 0, maxRows = null } = {}) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
     throw new TypeError(`timeoutMs must be a non-negative number of milliseconds; got ${timeoutMs}.`);
@@ -2159,42 +2160,118 @@ function waitForSettle(promise, timeoutMs) {
   return Promise.race([promise.then(() => 'settled'), timeout]).finally(() => clearTimeout(timer));
 }
 
-// Best-effort cancellation for pools: run the statement on a dedicated pool
-// connection and, if the signal aborts mid-query, issue `KILL QUERY <threadId>`
-// through a separate pool connection (MariaDB lets a user kill its own threads
-// without extra privileges). The killed statement fails with
-// ER_QUERY_INTERRUPTED and its connection stays usable.
-async function executeKillableQuery(pool, statement, params, signal, killSettleTimeoutMs) {
+// Reads one statement's rows. Without maxRows (or on a connection without the
+// mysql2 core API, e.g. a test fake) it is a plain buffered query.
+//
+// With maxRows, rows arrive as a stream through the mysql2 core connection and
+// at most maxRows are kept. sql_select_limit already caps the result, but an
+// explicit LIMIT in model SQL overrides it (`... LIMIT 100000000` would still
+// pull the whole table into Node), so the read itself is bounded too: when row
+// maxRows + 1 arrives the promise resolves with `overflowed: true` and every
+// later row is dropped as it is parsed, never materialized. A pool caller then
+// destroys the connection to stop the transfer (see executeOnPoolConnection);
+// a single connection keeps draining (and discarding) in the background, so its
+// next statement simply queues behind this one.
+function readRows(connection, statement, params, { maxRows = null } = {}) {
+  const core = connection?.connection;
+  if (maxRows == null || typeof core?.query !== 'function') {
+    const pending = params === undefined ? connection.query(statement) : connection.query(statement, params);
+    return Promise.resolve(pending).then(([rows]) => {
+      if (maxRows != null && Array.isArray(rows) && rows.length > maxRows) {
+        return { rows: rows.slice(0, maxRows), overflowed: true, streamed: false };
+      }
+      return { rows, overflowed: false, streamed: false };
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    let settled = false;
+    const query = params === undefined ? core.query(statement) : core.query(statement, params);
+    query.on('result', (row) => {
+      if (settled) {
+        return; // past the cap (or failed): drop it
+      }
+      if (rows.length < maxRows) {
+        rows.push(row);
+        return;
+      }
+      settled = true;
+      resolve({ rows, overflowed: true, streamed: true });
+    });
+    // Always listened to, even after settling: an unhandled 'error' event on
+    // the query would crash the process.
+    query.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    query.on('end', () => {
+      if (!settled) {
+        settled = true;
+        resolve({ rows, overflowed: false, streamed: true });
+      }
+    });
+  });
+}
+
+// KILL QUERY for a cancelled request. Pools from createMariaDbPool provide
+// killQuery(), which uses its own short-lived connection: a pool slot could be
+// queued behind the very queries it should stop when the pool is saturated.
+function killQuery(pool, threadId) {
+  return typeof pool.killQuery === 'function' ? pool.killQuery(threadId) : pool.query(`KILL QUERY ${threadId}`);
+}
+
+// Runs a statement on a dedicated pool connection, which makes it
+// - killable: if the signal aborts mid-query, `KILL QUERY <threadId>` is sent
+//   (MariaDB lets a user kill its own threads without extra privileges). The
+//   killed statement fails with ER_QUERY_INTERRUPTED and its connection stays
+//   usable.
+// - row-capped: when the server sends more than maxRows rows (an explicit
+//   LIMIT in the SQL), the statement is killed and the connection dropped
+//   instead of drained; the pool opens a fresh one when needed. (Dropping alone
+//   is not enough: mysql2's destroy() only half-closes the socket, and MariaDB
+//   keeps producing rows into it until the statement ends.)
+async function executeOnPoolConnection(pool, statement, params, { signal, maxRows, killSettleTimeoutMs }) {
   const connection = await pool.getConnection();
   let killPromise = null;
+  let overflowed = false;
 
-  const onAbort = () => {
+  const startKill = () => {
     const threadId = Number(connection.threadId);
-    if (!Number.isInteger(threadId) || threadId <= 0) {
-      return;
+    if (!killPromise && Number.isInteger(threadId) && threadId > 0) {
+      killPromise = Promise.resolve()
+        .then(() => killQuery(pool, threadId))
+        .catch(() => null);
     }
-    killPromise = Promise.resolve()
-      .then(() => pool.query(`KILL QUERY ${threadId}`))
-      .catch(() => null);
   };
+  const onAbort = () => startKill();
 
-  if (signal.aborted) {
+  if (signal?.aborted) {
     connection.release();
     throw createQueryAbortError(signal);
   }
 
-  signal.addEventListener('abort', onAbort, { once: true });
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    const [rows] = params === undefined ? await connection.query(statement) : await connection.query(statement, params);
-    return rows;
+    const result = await readRows(connection, statement, params, { maxRows });
+    overflowed = result.overflowed && result.streamed;
+    return result.rows;
   } catch (error) {
-    if (signal.aborted) {
+    if (signal?.aborted) {
       throw createQueryAbortError(signal, error);
     }
     throw error;
   } finally {
-    signal.removeEventListener('abort', onAbort);
-    if (!killPromise) {
+    signal?.removeEventListener('abort', onAbort);
+    if (overflowed) {
+      // The server is still sending rows nobody will read. Never reuse this
+      // thread, and stop the statement; the caller does not wait for the KILL
+      // (thread ids are not reused, so a late KILL cannot hit another query).
+      connection.destroy();
+      startKill();
+    } else if (!killPromise) {
       connection.release();
     } else if ((await waitForSettle(killPromise, killSettleTimeoutMs)) === 'settled') {
       // The KILL has landed (or failed) while we still own the thread, so it
@@ -2211,8 +2288,10 @@ async function executeKillableQuery(pool, statement, params, signal, killSettleT
 // Executes model-authored, already-validated SQL with server-side bounds.
 // - timeoutMs: per-statement max_statement_time. Omitted/null uses
 //   QUERY_STATEMENT_TIMEOUT_MS (default 8000); 0 disables.
-// - maxRows: server-side cap on returned rows (sql_select_limit). Callers that
-//   display N rows pass N + 1 so truncation is detectable without fetching more.
+// - maxRows: at most this many rows are returned: sql_select_limit caps the
+//   result server-side, and the read stops after maxRows rows when an explicit
+//   LIMIT overrides it. Callers that display N rows pass N + 1 so truncation is
+//   detectable without fetching more.
 // - signal: when it aborts during execution on a pool, the query is killed.
 // - params: optional placeholders (client-side escaped by mysql2), used by the
 //   parameterized master-data lookups.
@@ -2225,16 +2304,17 @@ export async function executeReadOnlySql(
   const effectiveTimeoutMs = timeoutMs == null ? resolveStatementTimeoutMs() : timeoutMs;
   const statement = buildBoundedStatement(sql, { timeoutMs: effectiveTimeoutMs, maxRows });
 
-  if (signal) {
-    if (signal.aborted) {
-      throw createQueryAbortError(signal);
-    }
-    if (typeof connection.getConnection === 'function') {
-      return executeKillableQuery(connection, statement, params, signal, killSettleTimeoutMs);
-    }
+  if (signal?.aborted) {
+    throw createQueryAbortError(signal);
   }
 
-  const [rows] = params === undefined ? await connection.query(statement) : await connection.query(statement, params);
+  // Pools run the statement on a dedicated connection whenever it must be
+  // killable or row-capped; a plain pool.query() could do neither.
+  if (typeof connection.getConnection === 'function' && (signal || maxRows != null)) {
+    return executeOnPoolConnection(connection, statement, params, { signal, maxRows, killSettleTimeoutMs });
+  }
+
+  const { rows } = await readRows(connection, statement, params, { maxRows });
   return rows;
 }
 
@@ -2484,15 +2564,34 @@ export async function createMariaDbConnection({ includeDatabase = true, role = '
   }
 }
 
+// Connect timeout for the short-lived KILL QUERY connection.
+const KILL_CONNECT_TIMEOUT_MS = 5000;
+
 export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5, role = 'query', env = process.env } = {}) {
   assertMariaDbConfigured({ includeDatabase, role, env });
 
-  return mysql.createPool({
-    ...buildMariaDbConnectionOptions({ includeDatabase, role, env }),
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
+  const pool = mysql.createPool({
+    ...connectionOptions,
     waitForConnections: true,
     connectionLimit,
     queueLimit: 20,
   });
+
+  // Cancelling a request's query must not wait for a free pool slot: when every
+  // slot is busy, a pooled KILL would queue behind the very query it should
+  // stop. It runs on its own short-lived connection (same user, so it may kill
+  // that user's threads).
+  pool.killQuery = async (threadId) => {
+    const killer = await mysql.createConnection({ ...connectionOptions, connectTimeout: KILL_CONNECT_TIMEOUT_MS });
+    try {
+      await killer.query(`KILL QUERY ${Number(threadId)}`);
+    } finally {
+      await killer.end().catch(() => killer.destroy());
+    }
+  };
+
+  return pool;
 }
 
 // The DB grants are the real boundary for model-authored SQL; the validator is

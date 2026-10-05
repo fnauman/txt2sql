@@ -233,17 +233,16 @@ function createEmptyResult({ question, questionIndex, error, stage, response = n
   };
 }
 
-function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, masterDataCandidates, attemptCount, rowLimit, maxRows, includeInsights }) {
+function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, masterDataCandidates, attemptCount, rowLimit, includeInsights }) {
   const fetchedRowCount = Array.isArray(rawRows) ? rawRows.length : 0;
   const hasRowLimit = Number.isInteger(rowLimit) && rowLimit >= 0;
   const rows = normalizeRows(rawRows, { limit: hasRowLimit ? rowLimit : null });
   const truncated = hasRowLimit && fetchedRowCount > rows.length;
-  // The server caps the fetch at maxRows (= rowLimit + 1), so a truncated result
-  // only proves there are MORE than rowLimit rows: the exact total is unknown and
-  // is reported as null rather than a misleading number. (An explicit LIMIT in
-  // the SQL takes precedence over the cap; if more than maxRows came back, the
-  // fetched count is the exact total.)
-  const totalRowCount = truncated && maxRows != null && fetchedRowCount <= maxRows ? null : fetchedRowCount;
+  // The read is capped at maxRows (= rowLimit + 1) rows, server-side and while
+  // streaming (an explicit LIMIT in the SQL cannot lift it), so a truncated
+  // result only proves there are MORE than rowLimit rows: the exact total is
+  // unknown and is reported as null rather than a misleading number.
+  const totalRowCount = truncated ? null : fetchedRowCount;
   const columns = inferColumns(rows);
   const visualizations = suggestVisualizations(rows, columns);
   const insights = includeInsights
@@ -702,7 +701,6 @@ export async function runOptimizedQuestion({
         masterDataCandidates,
         attemptCount: attempt + 1,
         rowLimit,
-        maxRows,
         includeInsights,
       });
 

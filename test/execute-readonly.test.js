@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
 import { buildBoundedStatement, executeReadOnlySql, resolveStatementTimeoutMs } from '../src/pipeline.js';
@@ -240,4 +241,146 @@ test('an already-aborted signal never reaches the database', async () => {
   controller.abort();
   await assert.rejects(executeReadOnlySql(connection, 'SELECT 1', { signal: controller.signal }), { name: 'AbortError' });
   assert.equal(connection.calls.length, 0);
+});
+
+// --- Row cap while reading (explicit LIMIT overrides sql_select_limit) -------
+
+// Minimal mysql2 core connection: query() returns an emitter that streams
+// `total` rows one per tick (like MariaDB does when an explicit LIMIT in the
+// SQL outranks sql_select_limit), or fails after `failAfter` rows.
+function createStreamingCore({ total, failAfter = null }) {
+  const core = { statements: [], emitted: 0, finished: false };
+  core.query = (sql, params) => {
+    core.statements.push(params === undefined ? sql : { sql, params });
+    const query = new EventEmitter();
+    let index = 0;
+    const next = () => {
+      if (failAfter !== null && index === failAfter) {
+        core.finished = true;
+        query.emit('error', Object.assign(new Error('Query execution was interrupted'), { code: 'ER_QUERY_INTERRUPTED' }));
+        return;
+      }
+      if (index === total) {
+        core.finished = true;
+        query.emit('end');
+        return;
+      }
+      index += 1;
+      core.emitted = index;
+      query.emit('result', { n: index });
+      setImmediate(next);
+    };
+    setImmediate(next);
+    return query;
+  };
+  return core;
+}
+
+function createStreamingPool(core) {
+  const events = [];
+  const connection = {
+    threadId: 9,
+    connection: core,
+    release() {
+      events.push('release');
+    },
+    destroy() {
+      events.push('destroy');
+    },
+  };
+  return {
+    events,
+    async getConnection() {
+      events.push('getConnection');
+      return connection;
+    },
+    async query() {
+      throw new Error('a capped read must not use pool.query()');
+    },
+    async killQuery(threadId) {
+      events.push(`kill ${threadId}`);
+    },
+  };
+}
+
+test('maxRows stops reading after maxRows rows even when the server sends more', async () => {
+  const core = createStreamingCore({ total: 50 });
+  const rows = await executeReadOnlySql({ connection: core, query: () => assert.fail('must stream') }, 'SELECT n FROM r LIMIT 50', {
+    timeoutMs: 0,
+    maxRows: 5,
+  });
+  assert.deepEqual(rows.map((row) => row.n), [1, 2, 3, 4, 5]);
+  assert.equal(core.emitted, 6, 'resolved as soon as row maxRows + 1 arrived');
+  assert.equal(core.statements[0], 'SET STATEMENT sql_select_limit=5 FOR SELECT n FROM r LIMIT 50');
+
+  // A single connection drains the rest in the background, keeping none of it.
+  while (!core.finished) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(rows.length, 5);
+});
+
+test('a pool drops the connection that overflowed the cap and releases one that did not', async () => {
+  const overflowing = createStreamingPool(createStreamingCore({ total: 1000 }));
+  const capped = await executeReadOnlySql(overflowing, 'SELECT n FROM r LIMIT 1000', { timeoutMs: 1000, maxRows: 3 });
+  assert.equal(capped.length, 3);
+  await new Promise((resolve) => setImmediate(resolve));
+  // destroy() only half-closes the socket, so the statement is killed as well.
+  assert.deepEqual(overflowing.events, ['getConnection', 'destroy', 'kill 9']);
+
+  const fitting = createStreamingPool(createStreamingCore({ total: 2 }));
+  assert.deepEqual(await executeReadOnlySql(fitting, 'SELECT n FROM r', { timeoutMs: 1000, maxRows: 3 }), [{ n: 1 }, { n: 2 }]);
+  assert.deepEqual(fitting.events, ['getConnection', 'release']);
+});
+
+test('a streamed read rejects on a statement error before the cap and ignores one after it', async () => {
+  const failing = createStreamingPool(createStreamingCore({ total: 10, failAfter: 2 }));
+  await assert.rejects(executeReadOnlySql(failing, 'SELECT n FROM r', { timeoutMs: 1000, maxRows: 5 }), { code: 'ER_QUERY_INTERRUPTED' });
+  assert.deepEqual(failing.events, ['getConnection', 'release']);
+
+  // The error after the cap (e.g. the socket being dropped) is swallowed.
+  const core = createStreamingCore({ total: 10, failAfter: 4 });
+  const rows = await executeReadOnlySql({ connection: core, query: () => assert.fail('must stream') }, 'SELECT n FROM r', {
+    timeoutMs: 0,
+    maxRows: 2,
+  });
+  assert.equal(rows.length, 2);
+  while (!core.finished) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});
+
+test('a buffered connection without the core API is still sliced to maxRows', async () => {
+  const connection = {
+    async query() {
+      return [[{ n: 1 }, { n: 2 }, { n: 3 }]];
+    },
+  };
+  assert.deepEqual(await executeReadOnlySql(connection, 'SELECT n FROM r LIMIT 3', { timeoutMs: 0, maxRows: 2 }), [{ n: 1 }, { n: 2 }]);
+});
+
+test('KILL QUERY uses the pool\'s dedicated killQuery() so a saturated pool cannot block it', async () => {
+  const pool = createKillablePool({ killBehavior: 'hang' }); // every pool slot is busy
+  const killed = [];
+  pool.killQuery = async (threadId) => {
+    killed.push(threadId);
+    // The dedicated connection interrupts the running statement.
+    pool.connection.interrupt();
+  };
+  pool.connection.query = (sql) => {
+    pool.events.push(['query', sql]);
+    return new Promise((_resolve, reject) => {
+      pool.connection.interrupt = () =>
+        reject(Object.assign(new Error('Query execution was interrupted'), { code: 'ER_QUERY_INTERRUPTED', errno: 1317 }));
+    });
+  };
+  const controller = new AbortController();
+  const running = executeReadOnlySql(pool, 'SELECT SLEEP(10)', { timeoutMs: 8000, signal: controller.signal });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+
+  await assert.rejects(running, { name: 'AbortError' });
+  assert.deepEqual(killed, [42]);
+  assert.ok(!pool.events.some(([kind]) => kind === 'pool.query'), 'no pooled KILL');
+  assert.equal(pool.connection.released, true);
 });
