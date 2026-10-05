@@ -123,7 +123,12 @@
         "ledger account",
         "ledger accounts",
         "general ledger",
-        "gl account"
+        "gl account",
+        "sales revenue account",
+        "sales revenue ledger",
+        "accounts receivable",
+        "cost of goods sold",
+        "sales tax payable"
       ],
       "preferred_tables": [
         "LedgerAccount"
@@ -326,6 +331,10 @@
         "debit amount",
         "biggest debits"
       ],
+      "count_advisory_synonyms": [
+        "debit",
+        "debits"
+      ],
       "preferred_expression": "COALESCE(AccountingPosting.DebitAmount, 0)",
       "preferred_columns": [
         "AccountingPosting.DebitAmount"
@@ -348,6 +357,10 @@
         "credit amount",
         "biggest credits"
       ],
+      "count_advisory_synonyms": [
+        "credit",
+        "credits"
+      ],
       "preferred_expression": "COALESCE(AccountingPosting.CreditAmount, 0)",
       "preferred_columns": [
         "AccountingPosting.CreditAmount"
@@ -367,7 +380,13 @@
       "synonyms": [
         "without postings",
         "never made it into accounting postings",
-        "missing postings"
+        "missing postings",
+        "without accounting postings",
+        "no accounting postings",
+        "no postings",
+        "not have any accounting postings",
+        "don't have any accounting postings",
+        "not posted to accounting"
       ],
       "preferred_expression": "COUNT(*)",
       "preferred_columns": [

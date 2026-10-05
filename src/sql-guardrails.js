@@ -621,10 +621,11 @@ function metricEnforcement(metric) {
  * - ADVISORY metrics (matched only through generic words such as "sales" or
  *   "sold", or through a count/existence question) never reject; a missing
  *   preferred column is recorded as a warning instead.
- * - ENFORCED metrics (explicit phrases such as "net sales", "quantity sold")
- *   reject the SQL when none of them is used. When several enforced metrics
- *   matched, using one satisfies the check and the others become warnings, so
- *   a stray second match cannot veto otherwise-correct SQL.
+ * - ENFORCED metrics (explicit phrases such as "net sales", "revenue",
+ *   "quantity sold") each reject the SQL when none of their preferred columns
+ *   is used. A word that only looks like a metric inside a longer name ("Sales
+ *   Revenue" ledger account) is removed earlier, by span arbitration in
+ *   buildSemanticPlan, so it never reaches this check.
  */
 function validateMetricGuardrails(sql, promptContext = {}) {
   const metrics = promptContext.semanticPlan?.metrics || [];
@@ -655,9 +656,8 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     });
   }
 
-  const enforced = checkedMetrics.filter((metric) => metric.enforcement === 'enforced');
-  if (enforced.length > 0 && !enforced.some((metric) => metric.satisfied)) {
-    const [metric] = enforced;
+  const metric = checkedMetrics.find((checked) => checked.enforcement === 'enforced' && !checked.satisfied);
+  if (metric) {
     throw guardrailError(
       'METRIC_COLUMN',
       `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
@@ -665,17 +665,18 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     );
   }
 
-  for (const metric of checkedMetrics) {
-    if (metric.satisfied) {
+  // Only advisory metrics can be unsatisfied here.
+  for (const checked of checkedMetrics) {
+    if (checked.satisfied) {
       continue;
     }
     warnings.push({
       code: 'METRIC_COLUMN_NOT_USED',
       layer: 'guardrail',
-      metric: metric.name,
-      enforcement: metric.enforcement,
-      reason: metric.enforcement === 'advisory' ? metric.enforcementReason || 'advisory_match' : 'another_enforced_metric_used',
-      message: `SQL does not use a preferred column for ${metric.enforcement} semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
+      metric: checked.name,
+      enforcement: checked.enforcement,
+      reason: checked.enforcementReason || 'advisory_match',
+      message: `SQL does not use a preferred column for ${checked.enforcement} semantic metric "${checked.name}" (${checked.preferredColumns.join(', ')}).`,
     });
   }
 

@@ -414,9 +414,9 @@ function arbitrateSemanticSpans(candidates) {
   return { active, suppressed };
 }
 
-// Count / list / existence phrasings. In such a question a matched amount or
-// quantity metric describes which rows to count, not the measure to aggregate,
-// so it is only enforced when an explicit multi-word metric phrase is present.
+// Count / list / existence phrasings. In such a question a metric word can
+// describe which rows to count ("How many debit postings") rather than the
+// measure to aggregate; see classifyMetricEnforcement.
 const COUNT_OR_EXISTENCE_INTENT_PATTERNS = [
   /\bhow many\b/,
   /\bnumber of\b/,
@@ -437,21 +437,27 @@ export function detectCountOrExistenceIntent(question) {
 
 /**
  * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
- * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning).
- * - Synonyms listed in the metric's `advisory_synonyms` (generic words such as
- *   "sales", "sold", "moved") never enforce on their own.
- * - In a count/list/existence question only an explicit multi-word metric
- *   phrase ("units sold", "net sales") enforces.
+ * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning). Both
+ * lists are data-driven, per metric, in the semantic layer:
+ * - `advisory_synonyms`: generic words ("sales", "sold", "moved") that never
+ *   enforce on their own.
+ * - `count_advisory_synonyms`: words that name the measure in an aggregate
+ *   question but only select rows in a count/list/existence question
+ *   ("debit" in "How many debit postings"). They enforce unless the question
+ *   has count/existence intent.
+ * Every other synonym is an explicit metric phrase ("net sales", "revenue",
+ * "units sold") and enforces in every kind of question.
  */
 function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
   const advisory = new Set(uniqueStrings(entry.advisory_synonyms).map(normalizedPhrase));
+  const countAdvisory = new Set(uniqueStrings(entry.count_advisory_synonyms).map(normalizedPhrase));
   const advisoryMatches = matchedSynonyms.filter((synonym) => advisory.has(normalizedPhrase(synonym)));
   const explicitMatches = matchedSynonyms.filter((synonym) => !advisory.has(normalizedPhrase(synonym)));
 
   if (explicitMatches.length === 0) {
     return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
   }
-  if (countIntent && !explicitMatches.some((synonym) => splitWords(synonym).length > 1)) {
+  if (countIntent && explicitMatches.every((synonym) => countAdvisory.has(normalizedPhrase(synonym)))) {
     return { enforcement: 'advisory', enforcementReason: 'count_or_existence_intent', explicitMatches, advisoryMatches };
   }
   return { enforcement: 'enforced', enforcementReason: 'explicit_metric_phrase', explicitMatches, advisoryMatches };
