@@ -76,3 +76,42 @@ test('entries expire after the TTL', () => {
   assert.deepEqual(cache.get('q', schema, 1000, true, 1000), ok); // within TTL
   assert.equal(cache.get('q', schema, 1000, true, 60 * 60 * 1000), null); // past TTL
 });
+
+test('the constructor takes the loaded config: disabled caches store nothing', () => {
+  const cache = new ResultCache({ enabled: false });
+  cache.set('q', schema, 1000, true, ok);
+  assert.equal(cache.get('q', schema, 1000, true), null);
+  assert.equal(cache.enabled, false);
+  assert.equal(new ResultCache({ maxEntries: 0 }).enabled, false, 'size 0 disables');
+});
+
+test('maxEntries and ttlMs come from the constructor', () => {
+  const cache = new ResultCache({ maxEntries: 1, ttlMs: 10 });
+  cache.set('a', schema, 1000, true, ok, 0);
+  cache.set('b', schema, 1000, true, ok, 0);
+  assert.equal(cache.size, 1);
+  assert.equal(cache.get('a', schema, 1000, true, 5), null, 'evicted (LRU)');
+  assert.deepEqual(cache.get('b', schema, 1000, true, 5), ok);
+  assert.equal(cache.get('b', schema, 1000, true, 50), null, 'expired');
+});
+
+test('an injected demo-source check replaces the env lookup', () => {
+  const cache = new ResultCache({ isDemoSource: () => false });
+  cache.set('q', schema, 1000, true, ok);
+  assert.equal(cache.get('q', schema, 1000, true), null);
+});
+
+test('clear() drops entries and rejects writes computed before it (schema refresh race)', () => {
+  const cache = new ResultCache();
+  const generation = cache.generation;
+  cache.set('q', schema, 1000, true, ok);
+  cache.clear();
+  assert.equal(cache.size, 0);
+  assert.notEqual(cache.generation, generation);
+
+  // A request that started before the clear finishes afterwards.
+  cache.set('late', schema, 1000, true, ok, Date.now(), { generation });
+  assert.equal(cache.get('late', schema, 1000, true), null);
+  cache.set('fresh', schema, 1000, true, ok, Date.now(), { generation: cache.generation });
+  assert.deepEqual(cache.get('fresh', schema, 1000, true), ok);
+});

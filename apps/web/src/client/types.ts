@@ -129,6 +129,7 @@ export interface HealthResponse {
   // Whether the server honors the Debug toggle (WEB_ALLOW_DEBUG).
   debugAllowed?: boolean;
   cacheEnabled?: boolean;
+  dataResidency?: DataResidency['engine'];
   dbReachable?: boolean;
   error?: { message: string; code?: string | null };
 }
