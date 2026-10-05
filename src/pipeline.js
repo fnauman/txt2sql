@@ -7,6 +7,7 @@ import {
   BUSINESS_RULES,
   DEFAULT_INCLUDED_TABLES,
   FEW_SHOT_EXAMPLES,
+  NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
 import { calculateCost } from './pricing.js';
@@ -1312,6 +1313,7 @@ export function buildBasicPrompt(schema, question) {
 
 Write one read-only SQL query that answers the user's question.
 Return ONLY the SQL query.
+${NO_SQL_COMMENTS_RULE}
 ${EXACT_SCHEMA_GUARD}
 
 Resolved temporal references:

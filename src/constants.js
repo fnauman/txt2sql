@@ -30,8 +30,14 @@ export const TABLE_ALIASES = {
   ProductBrand: ['product brand', 'product brands', 'brand assignment', 'brand bridge'],
 };
 
+// The read-only validator rejects any SQL comment (SQL_COMMENT, EXECUTABLE_COMMENT),
+// so both the basic and the optimized prompt tell the model not to write one.
+export const NO_SQL_COMMENTS_RULE =
+  'Do not write SQL comments (--, #, /* */) anywhere in the query: SQL that contains a comment is rejected.';
+
 export const BUSINESS_RULES = [
   'Write MariaDB 10.6 compatible SQL only.',
+  NO_SQL_COMMENTS_RULE,
   'Use only the tables and foreign keys provided in the prompt context. Ignore all missing or implied relationships.',
   'If the prompt resolves temporal references, use those exact normalized interpretations and do not reinterpret ambiguous dates or years.',
   'For month or date filters, prefer half-open ranges like date_col >= start_date AND date_col < end_exclusive instead of MONTH() or YEAR() wrappers.',

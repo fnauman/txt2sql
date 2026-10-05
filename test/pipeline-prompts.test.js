@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildBasicPrompt, buildOptimizedPrompt } from '../src/pipeline.js';
+import { NO_SQL_COMMENTS_RULE } from '../src/constants.js';
+import { buildBasicPrompt, buildOptimizedPrompt, validateSqlSafety } from '../src/pipeline.js';
 
 function createWideTable(tableName, columnCount = 30) {
   return {
@@ -62,4 +63,17 @@ test('buildOptimizedPrompt keeps question-ranked columns out of cacheable prefix
   assert.notEqual(column20Prompt.user, column30Prompt.user);
   assert.match(column30Prompt.user.slice(cacheableUserPrefix(column30Prompt).length), /Question-ranked schema details:/);
   assert.match(column30Prompt.user.slice(cacheableUserPrefix(column30Prompt).length), /CustomerColumn30/);
+});
+
+test('basic and optimized prompts both tell the model not to write SQL comments', () => {
+  const basic = buildBasicPrompt(wideSchema, 'List customers');
+  const optimized = buildOptimizedPrompt(wideSchema, 'List customers');
+
+  assert.ok(basic.system.includes(NO_SQL_COMMENTS_RULE), 'basic prompt is missing the no-comments rule');
+  assert.ok(optimized.system.includes(NO_SQL_COMMENTS_RULE), 'optimized prompt is missing the no-comments rule');
+  assert.match(NO_SQL_COMMENTS_RULE, /--/);
+  assert.match(NO_SQL_COMMENTS_RULE, /#/);
+  assert.match(NO_SQL_COMMENTS_RULE, /\/\* \*\//);
+  // The rule matches the validator: a commented query is rejected.
+  assert.throws(() => validateSqlSafety('SELECT 1 -- note', []), { code: 'SQL_COMMENT' });
 });
