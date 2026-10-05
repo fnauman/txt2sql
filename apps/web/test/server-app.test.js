@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { APIConnectionTimeoutError, APIUserAbortError } from 'openai';
 
-import { validateReadOnlySql } from '../../../src/pipeline.js';
+import { createOpenAiClient, validateReadOnlySql } from '../../../src/pipeline.js';
 import { errorCodeOf } from '../../../src/query-service.js';
 import { serializeError } from '../../../src/trace.js';
 
@@ -813,6 +815,41 @@ test('the request deadline bounds the wait for a pool slot in the real pipeline;
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(events, ['getConnection', 'release'], 'the connection that arrived late went straight back');
   });
+});
+
+test('the request deadline bounds the OpenAI SDK retry backoff (429 with retry-after)', async () => {
+  // A local fake provider (no paid calls) rate-limits every attempt. The real
+  // SDK client sleeps for retry-after before its retry, and that sleep does
+  // not observe the abort signal on its own.
+  let attempts = 0;
+  const provider = http.createServer((req, res) => {
+    attempts += 1;
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '1' });
+      res.end(JSON.stringify({ error: { message: 'Rate limit reached', type: 'requests', code: 'rate_limit_exceeded' } }));
+    });
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  try {
+    const runtime = createFakeRuntime();
+    runtime.client = createOpenAiClient({
+      timeoutMs: 60000,
+      maxRetries: 1,
+      env: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `http://127.0.0.1:${provider.address().port}/v1` },
+    });
+    const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+    await withApp({ config, runtimeFactory: async () => runtime }, async (app) => {
+      const ask = (route) => timed(app.request({ method: 'POST', path: route, body: { question: 'How many active customers do we have?' } }));
+      assertDeadlineJson(await ask('/api/query'));
+      assertDeadlineSse(await ask('/api/query/stream'));
+      assert.ok(attempts >= 1, 'the provider was called');
+    });
+  } finally {
+    provider.closeAllConnections();
+    provider.close();
+  }
 });
 
 test('a success that arrives after the request deadline is neither returned nor cached', async () => {

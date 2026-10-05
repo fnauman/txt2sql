@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import OpenAI from 'openai';
+import OpenAI, { APIUserAbortError } from 'openai';
 import mysql from 'mysql2/promise';
 
 import {
@@ -1677,8 +1677,13 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   };
 
   // Pass the abort signal so a disconnected client (SSE closed) stops the
-  // in-flight generation instead of burning the full completion's tokens.
-  const response = await client.chat.completions.create(request, signal ? { signal } : undefined);
+  // in-flight generation instead of burning the full completion's tokens. The
+  // SDK only checks it per HTTP attempt: its retry backoff sleep (retry-after
+  // is honoured up to 60 s) ignores it, so the wait is bounded here as well;
+  // the SDK's own late rejection is then ignored.
+  const response = await untilAborted(client.chat.completions.create(request, signal ? { signal } : undefined), signal, {
+    abortError: () => new APIUserAbortError(),
+  });
   const rawText = extractMessageText(response.choices[0]?.message?.content);
   const usage = response.usage || null;
   const responseModel = response.model || model;
