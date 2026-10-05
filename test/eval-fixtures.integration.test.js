@@ -203,7 +203,7 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
   const goldCache = createGoldCache();
   const validate = createValidatorProbe({ schema, connection: connections[0].connection });
   try {
-    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
+    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public']) {
       const { cases } = await loadBenchmarkDataset({ datasetName });
       const results = [];
       for (const testCase of cases) {
@@ -214,8 +214,10 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
       const summary = summarizeControls(results, { fixtureNames: FIXTURES.map((fixture) => fixture.name) });
       assert.ok(summary.design.rate >= 0.95, `${datasetName} design kill rate ${summary.design.rate}`);
       assert.equal(summary.positive.matched, summary.positive.total);
-      // Every positive passes the validator except the flagged known false rejections.
-      const flagged = results.flatMap((result) => result.notes.filter((note) => /known validator false rejection/.test(note)));
+      // Every positive passes the validator except the flagged known false
+      // rejections and those of a question whose gold the validator rejects
+      // too (known_validator_rejection: a measured product gap).
+      const flagged = results.flatMap((result) => result.notes.filter((note) => /^positive control .*known validator (false )?rejection/.test(note)));
       assert.equal(summary.positive.validatorAccepted + flagged.length, summary.positive.total);
       // The point of the extra fixtures: the seed alone catches far less.
       assert.ok(summary.design.seedOnlyRate < summary.design.rate);
