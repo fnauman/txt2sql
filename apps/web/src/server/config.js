@@ -181,7 +181,7 @@ export function loadWebConfig(env = process.env) {
   const rateLimitMax = read.integer('WEB_RATE_LIMIT_MAX', defaults.rateLimitMax, { min: 0 });
 
   const resultCacheEnabled = read.boolean('WEB_RESULT_CACHE', true);
-  // 0 entries disables the cache, like WEB_RESULT_CACHE=0.
+  // 0 entries or a 0 ms TTL disables the cache, like WEB_RESULT_CACHE=0.
   const resultCacheSize = read.integer('WEB_RESULT_CACHE_SIZE', defaults.resultCacheSize, { min: 0 });
   const resultCacheTtlMs = read.integer('WEB_RESULT_CACHE_TTL_MS', defaults.resultCacheTtlMs, { min: 0 });
 
@@ -221,7 +221,7 @@ export function loadWebConfig(env = process.env) {
     dbConnectionLimit,
     rateLimit: { windowMs: rateLimitWindowMs, max: rateLimitMax },
     resultCache: {
-      enabled: resultCacheEnabled && resultCacheSize > 0,
+      enabled: resultCacheEnabled && resultCacheSize > 0 && resultCacheTtlMs > 0,
       maxEntries: resultCacheSize,
       ttlMs: resultCacheTtlMs,
     },

@@ -58,7 +58,10 @@ export class ResultCache {
   constructor({ enabled = true, maxEntries = DEFAULT_MAX_ENTRIES, ttlMs = DEFAULT_TTL_MS, isDemoSource = () => isDemoSourceEnv() } = {}) {
     this.#maxEntries = Number.isInteger(maxEntries) && maxEntries >= 0 ? maxEntries : DEFAULT_MAX_ENTRIES;
     this.#ttlMs = Number.isFinite(ttlMs) && ttlMs >= 0 ? ttlMs : DEFAULT_TTL_MS;
-    this.#enabled = Boolean(enabled) && this.#maxEntries > 0;
+    // A zero size or a zero TTL keeps nothing, so either disables the cache
+    // (an entry with a 0 ms TTL would still be stored and replayed in the same
+    // millisecond).
+    this.#enabled = Boolean(enabled) && this.#maxEntries > 0 && this.#ttlMs > 0;
     this.#isDemoSource = isDemoSource;
   }
 

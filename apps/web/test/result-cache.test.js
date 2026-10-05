@@ -85,6 +85,14 @@ test('the constructor takes the loaded config: disabled caches store nothing', (
   assert.equal(new ResultCache({ maxEntries: 0 }).enabled, false, 'size 0 disables');
 });
 
+test('a zero TTL disables the cache: nothing is stored or replayed', () => {
+  const cache = new ResultCache({ ttlMs: 0 });
+  assert.equal(cache.enabled, false);
+  cache.set('q', schema, 1000, true, ok, 0);
+  assert.equal(cache.size, 0, 'nothing kept in memory');
+  assert.equal(cache.get('q', schema, 1000, true, 0), null, 'not even within the same millisecond');
+});
+
 test('maxEntries and ttlMs come from the constructor', () => {
   const cache = new ResultCache({ maxEntries: 1, ttlMs: 10 });
   cache.set('a', schema, 1000, true, ok, 0);

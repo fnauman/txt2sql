@@ -64,7 +64,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 | `WEB_REQUEST_TIMEOUT_MS` | `120000` | Per-request deadline; when it passes, the OpenAI call is aborted and the running query killed. `0` disables. It also bounds how long a schema refresh lets in-flight questions keep the old runtime: it is closed when they finish, or at the latest this deadline + 30 s after the refresh; with `0` it waits for them however long they run (only shutdown closes it earlier). |
 | `WEB_DB_CONNECTION_LIMIT` | `5` | MariaDB pool size. |
 | `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. On by default; set to `0` (or `false`/`no`/`off`) to disable. It only caches results from `demo_retail` read as `demo_readonly`. |
-| `WEB_RESULT_CACHE_TTL_MS` | `900000` | Cache entry TTL (15 min). Bounds staleness from column-level schema drift. |
+| `WEB_RESULT_CACHE_TTL_MS` | `900000` | Cache entry TTL (15 min). Bounds staleness from column-level schema drift. `0` disables the cache. |
 | `WEB_RESULT_CACHE_SIZE` | `200` | Max cached results (LRU). `0` disables the cache. |
 | `WEB_SHUTDOWN_TIMEOUT_MS` | `10000` | On SIGTERM/SIGINT the server stops accepting connections and drains in-flight requests for up to this long, then closes the query runtimes (their DB pools, including one an admin schema refresh is still building), waiting up to this long again; a runtime still loading then is closed as soon as it finishes. A second signal within 1 s counts as a duplicate; one after that exits immediately. |
 | `OPENAI_TIMEOUT_MS` / `OPENAI_MAX_RETRIES` | `60000` / `1` | OpenAI SDK timeout per HTTP attempt and transport retries. |

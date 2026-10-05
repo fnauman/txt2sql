@@ -113,6 +113,12 @@ test('a zero-size result cache is disabled', () => {
   assert.equal(loadWebConfig({ WEB_RESULT_CACHE_SIZE: '0' }).resultCache.enabled, false);
 });
 
+test('a zero result-cache TTL disables the cache', () => {
+  const config = loadWebConfig({ WEB_RESULT_CACHE_TTL_MS: '0' });
+  assert.equal(config.resultCache.enabled, false);
+  assert.match(describeWebConfig(config), /cache=off/);
+});
+
 test('loadWebConfig reports every invalid value in one startup error', () => {
   assert.throws(
     () =>

@@ -809,6 +809,22 @@ test('WEB_RESULT_CACHE=0 from config disables replay', async () => {
   });
 });
 
+test('WEB_RESULT_CACHE_TTL_MS=0 disables the cache: nothing is stored or replayed', async () => {
+  const { factory } = createRuntimeFactory();
+  const { runQuestion, calls } = recordingRunner();
+  await withApp({ config: testConfig({ WEB_RESULT_CACHE_TTL_MS: '0' }), runtimeFactory: factory, runQuestion }, async (app) => {
+    await Promise.all([
+      app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } }),
+      app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'top customers' } }),
+    ]);
+    const again = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(again.json.cacheHit, undefined);
+    assert.equal(calls.length, 3);
+    assert.equal(app.resultCache.size, 0, 'no result rows kept in memory');
+    assert.equal((await app.request({ path: '/api/health' })).json.cacheEnabled, false);
+  });
+});
+
 test('data residency follows the configured query user (DB_USER defaults to demo_readonly)', async () => {
   const { factory } = createRuntimeFactory();
   const { runQuestion } = recordingRunner();
