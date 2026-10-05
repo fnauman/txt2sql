@@ -362,6 +362,44 @@ test('a derived or CTE child is exempt only when it is unique on the columns tha
   }
 });
 
+test('a relation that filters, renames or re-projects a unique CTE or derived table stays unique on its key', () => {
+  const CUSTOMER_QUESTION = 'Show the top customers by total net sales amount in March 2026.';
+  const HEADER = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d';
+  const LINE_TOTALS = 'WITH line_totals AS (SELECT SalesDocumentId, SUM(NetAmount) AS line_net FROM SalesDocumentLine GROUP BY SalesDocumentId)';
+  // Pre-aggregation read through another CTE or derived table: no inflation
+  // on the seeded demo DB (1700/1700/650 by customer, 5500 in total).
+  for (const [question, sql] of [
+    [
+      CUSTOMER_QUESTION,
+      `${LINE_TOTALS}, big AS (SELECT * FROM line_totals WHERE line_net > 500) SELECT d.CustomerId, SUM(d.NetAmount) AS net FROM SalesDocument d JOIN big ON big.SalesDocumentId = d.SalesDocumentId GROUP BY d.CustomerId`,
+    ],
+    [
+      CUSTOMER_QUESTION,
+      `${LINE_TOTALS} SELECT d.CustomerId, SUM(d.NetAmount) AS net FROM SalesDocument d JOIN (SELECT lt.SalesDocumentId FROM line_totals lt WHERE lt.line_net > 500) big ON big.SalesDocumentId = d.SalesDocumentId GROUP BY d.CustomerId`,
+    ],
+    [LINES_QUESTION, `WITH a AS (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine), b AS (SELECT * FROM a) ${HEADER} JOIN b ON b.SalesDocumentId = d.SalesDocumentId`],
+    [
+      LINES_QUESTION,
+      `${HEADER} JOIN (SELECT y.SalesDocumentId FROM (SELECT SalesDocumentId FROM SalesDocumentLine GROUP BY SalesDocumentId) y) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    ],
+    [
+      LINES_QUESTION,
+      `WITH a AS (SELECT SalesDocumentId AS sid, SUM(Quantity) AS q FROM SalesDocumentLine GROUP BY SalesDocumentId), b AS (SELECT sid AS doc, q FROM a) ${HEADER} JOIN b ON b.doc = d.SalesDocumentId`,
+    ],
+  ]) {
+    assert.doesNotThrow(() => validateFor(question, sql), sql);
+  }
+
+  // A re-projection is only as unique as what it reads (6500 instead of 5500).
+  for (const sql of [
+    `WITH a AS (SELECT SalesDocumentId, ProductId FROM SalesDocumentLine GROUP BY SalesDocumentId, ProductId), b AS (SELECT * FROM a) ${HEADER} JOIN b ON b.SalesDocumentId = d.SalesDocumentId`,
+    `WITH a AS (SELECT DISTINCT SalesDocumentId, ProductId FROM SalesDocumentLine), b AS (SELECT SalesDocumentId FROM a) ${HEADER} JOIN b ON b.SalesDocumentId = d.SalesDocumentId`,
+    `WITH a AS (SELECT SalesDocumentId FROM SalesDocumentLine GROUP BY SalesDocumentId), b AS (SELECT a.SalesDocumentId FROM a JOIN SalesDocumentLine l2 ON l2.SalesDocumentId = a.SalesDocumentId) ${HEADER} JOIN b ON b.SalesDocumentId = d.SalesDocumentId`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+});
+
 test('one-to-one keys are skipped only when the FK is the sole primary-key column', () => {
   const column = (name, extra = {}) => ({ name, type: 'INTEGER', primaryKey: false, allowNull: true, ...extra });
   const promptContext = {
