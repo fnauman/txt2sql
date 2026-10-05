@@ -27,7 +27,7 @@ import { expandProductSearchTerms, rankProductCandidates } from '../src/master-d
 // FIXTURE_GENERATOR_VERSION when the change is intentional.
 const EXPECTED_CONTENT_HASHES = {
   seed: '094282546fe55afd',
-  v2: '9eb81d9084a0f015',
+  v2: '7d4f6a4818f481aa',
   v3: '74d0d295b559986f',
 };
 
@@ -92,9 +92,9 @@ test('v2 ports the audit fixture: separated metrics, header discounts, boundary 
   const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
   const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
 
-  assert.equal(facts.SalesDocument.length, 49);
-  assert.equal(facts.SalesDocumentLine.length, 69);
-  assert.equal(facts.AccountingPosting.length, 63);
+  assert.equal(facts.SalesDocument.length, 53);
+  assert.equal(facts.SalesDocumentLine.length, 73);
+  assert.equal(facts.AccountingPosting.length, 71);
   for (const document of facts.SalesDocument) {
     assert.ok(Math.abs(document.NetPayableAmount - document.NetAmount - 12.5) < 1e-9, `doc ${document.SalesDocumentId} NetPayable`);
     assert.ok(Math.abs(document.BillTotalAmount - document.GrossAmount - 7.25) < 1e-9, `doc ${document.SalesDocumentId} BillTotal`);
@@ -175,7 +175,7 @@ test('v2d separates the families the templated controls found surviving', () => 
   const inMonth = (document, month) => document.DocumentDate.startsWith(month);
   const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
   const v2d = facts.SalesDocument.filter((document) => document.SalesDocumentId >= 34);
-  assert.equal(v2d.length, 16);
+  assert.equal(v2d.length, 20);
 
   // Every non-canceled v2d document is posted (the all-time "documents without
   // postings" count is unchanged); the canceled ones are not.
@@ -214,6 +214,15 @@ test('v2d separates the families the templated controls found surviving', () => 
   assert.ok(facts.SalesDocument.some((entry) => !live(entry) && inMonth(entry, '2026-04')));
   assert.ok(facts.SalesDocument.some((entry) => !live(entry) && inMonth(entry, '2025-12')));
   assert.equal(facts.SalesDocument.filter((entry) => live(entry) && inMonth(entry, '2025-12')).length, 5);
+
+  // Prior-year rows for every single-month window (MONTH() without YEAR()),
+  // and none in 2023 (an empty year for the zero-row case).
+  for (const month of ['2024-11', '2024-12', '2025-01', '2025-02', '2025-03', '2025-04', '2025-05']) {
+    if (month !== '2025-01') {
+      assert.ok(facts.SalesDocument.some((entry) => live(entry) && inMonth(entry, month)), `v2 sells in ${month}`);
+    }
+  }
+  assert.ok(!facts.SalesDocument.some((entry) => entry.DocumentDate.startsWith('2023')));
 
   // Manual journals on 2026-01-01 and in April 2026.
   const journals = facts.AccountingPosting.filter((posting) => posting.SalesDocumentId === null).map((posting) => posting.PostingDate);

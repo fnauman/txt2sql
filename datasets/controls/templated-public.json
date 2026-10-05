@@ -25,7 +25,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -169,42 +169,42 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 4 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC",
         "note": "gross instead of net"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "sum of line net amounts instead of the document net amount (misses header discounts and fees)"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "sum_distinct",
         "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(DISTINCT COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "group_by",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "grouped by CustomerName only: the two customers named Summit Grocers are merged"
       }
     ],
-    "positive": [],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      }
-    ]
+    "positive": []
   },
   "tpl_customer_net_sales_top3_dec_2025_6c6fbf": {
     "intentId": "customer_net_sales_top3_dec_2025",
@@ -230,42 +230,48 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 12 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "gross instead of net"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "sum of line net amounts instead of the document net amount (misses header discounts and fees)"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "sum_distinct",
         "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(DISTINCT COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "group_by",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "grouped by CustomerName only: the two customers named Summit Grocers are merged"
       },
       {
-        "id": "n9",
+        "id": "n10",
         "type": "order_limit",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) ASC, c.CustomerName ASC LIMIT 3",
         "note": "sorted ascending instead of descending"
       },
       {
-        "id": "n10",
+        "id": "n11",
         "type": "order_limit",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "LIMIT 3 missing"
@@ -276,12 +282,6 @@
         "id": "p1",
         "sql": "SELECT x.CustomerName, x.total_net_amount FROM (SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY c.CustomerId, c.CustomerName) AS x ORDER BY x.total_net_amount DESC, x.CustomerName ASC LIMIT 3",
         "note": "the gold as a derived table, sorted and limited outside"
-      }
-    ],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
       }
     ]
   },
@@ -309,48 +309,48 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 11 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC",
         "note": "gross instead of net"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "sum of line net amounts instead of the document net amount (misses header discounts and fees)"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "sum_distinct",
         "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(DISTINCT COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "group_by",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
         "note": "grouped by CustomerName only: the two customers named Summit Grocers are merged"
       },
       {
-        "id": "n9",
+        "id": "n10",
         "type": "order_limit",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) ASC, c.CustomerName ASC",
         "note": "sorted ascending instead of descending"
       }
     ],
-    "positive": [],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      }
-    ]
+    "positive": []
   },
   "tpl_doctype_net_sales_q1_2026_f42a7c": {
     "intentId": "doctype_net_sales_q1_2026",
@@ -431,36 +431,42 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 5 GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC LIMIT 1",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, t.DocumentTypeName ASC LIMIT 1",
         "note": "gross instead of net"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC LIMIT 1",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "grain",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, t.DocumentTypeName ASC LIMIT 1",
         "note": "sum of line net amounts instead of the document net amount (misses header discounts and fees)"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "sum_distinct",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(DISTINCT COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(DISTINCT COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC LIMIT 1",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "order_limit",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) ASC, t.DocumentTypeName ASC LIMIT 1",
         "note": "sorted ascending instead of descending"
       },
       {
-        "id": "n9",
+        "id": "n10",
         "type": "order_limit",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
         "note": "LIMIT 1 missing"
@@ -474,10 +480,6 @@
       }
     ],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -510,7 +512,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -982,7 +984,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 AND s.LocationName LIKE '%South Store%'",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1043,7 +1045,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 AND t.DocumentTypeName LIKE '%Sales Invoice%' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1226,7 +1228,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT c.CustomerName, s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY c.CustomerId, c.CustomerName, s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC, s.LocationName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1291,48 +1293,48 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 4 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "net instead of gross"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(DISTINCT COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "group_by",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
         "note": "grouped by CustomerName only: the two customers named Summit Grocers are merged"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "order_limit",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) ASC, c.CustomerName ASC LIMIT 3",
         "note": "sorted ascending instead of descending"
       },
       {
-        "id": "n9",
+        "id": "n10",
         "type": "order_limit",
         "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC",
         "note": "LIMIT 3 missing"
       }
     ],
-    "positive": [],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      }
-    ]
+    "positive": []
   },
   "tpl_total_gross_q1_2026_3c6ada": {
     "intentId": "total_gross_q1_2026",
@@ -1403,7 +1405,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, s.LocationName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1505,18 +1507,24 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 12 GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, t.DocumentTypeName ASC",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
         "note": "net instead of gross"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, t.DocumentTypeName ASC",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(DISTINCT COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(DISTINCT COALESCE(d.GrossAmount, 0)) DESC, t.DocumentTypeName ASC",
         "note": "SUM(DISTINCT ...) drops repeated values"
@@ -1524,10 +1532,6 @@
     ],
     "positive": [],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -1560,7 +1564,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC LIMIT 5",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1692,24 +1696,30 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 12 GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, p.ProductName ASC",
         "note": "line TotalAmount (before adjustments) instead of line NetAmount"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, p.ProductName ASC",
         "note": "the document net amount summed for every line instead of the line net amount"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT p.ProductName, ROUND(SUM(DISTINCT COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(DISTINCT COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "order_limit",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) ASC, p.ProductName ASC",
         "note": "sorted ascending instead of descending"
@@ -1717,10 +1727,6 @@
     ],
     "positive": [],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -1753,7 +1759,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -1946,30 +1952,36 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 4 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, pc.CategoryName ASC",
         "note": "line TotalAmount (before adjustments) instead of line NetAmount"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, pc.CategoryName ASC",
         "note": "the document net amount summed for every line instead of the line net amount"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(DISTINCT COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(DISTINCT COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "stale_snapshot",
         "sql": "SELECT l.CategoryNameSnapshot AS CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY l.CategoryNameSnapshot ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, l.CategoryNameSnapshot ASC",
         "note": "grouped by the stale l.CategoryNameSnapshot instead of the category master data"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "join_path",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId JOIN ProductCategory pc ON b.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
         "note": "category through the brand's default category instead of Product.ProductCategoryId"
@@ -1983,10 +1995,6 @@
       }
     ],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -2017,42 +2025,48 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 11 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC LIMIT 2",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, pc.CategoryName ASC LIMIT 2",
         "note": "line TotalAmount (before adjustments) instead of line NetAmount"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, pc.CategoryName ASC LIMIT 2",
         "note": "the document net amount summed for every line instead of the line net amount"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(DISTINCT COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(DISTINCT COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC LIMIT 2",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "order_limit",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) ASC, pc.CategoryName ASC LIMIT 2",
         "note": "sorted ascending instead of descending"
       },
       {
-        "id": "n8",
+        "id": "n9",
         "type": "order_limit",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
         "note": "LIMIT 2 missing"
       },
       {
-        "id": "n9",
+        "id": "n10",
         "type": "stale_snapshot",
         "sql": "SELECT l.CategoryNameSnapshot AS CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY l.CategoryNameSnapshot ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, l.CategoryNameSnapshot ASC LIMIT 2",
         "note": "grouped by the stale l.CategoryNameSnapshot instead of the category master data"
       },
       {
-        "id": "n10",
+        "id": "n11",
         "type": "join_path",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId JOIN ProductCategory pc ON b.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC LIMIT 2",
         "note": "category through the brand's default category instead of Product.ProductCategoryId"
@@ -2060,10 +2074,6 @@
     ],
     "positive": [],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -2267,7 +2277,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 AND s.LocationName LIKE '%Online Fulfillment%' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC LIMIT 5",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2413,7 +2423,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT pc.CategoryName, s.LocationName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY pc.ProductCategoryId, pc.CategoryName, s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC, s.LocationName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2480,7 +2490,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 AND pc.CategoryName LIKE '%Household%'",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2590,7 +2600,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 5",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2649,24 +2659,30 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 4 GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 3",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "count",
         "sql": "SELECT p.ProductName, ROUND(COUNT(*), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY p.ProductId, p.ProductName ORDER BY COUNT(*) DESC, p.ProductName ASC LIMIT 3",
         "note": "number of lines instead of the quantity"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "sum_distinct",
         "sql": "SELECT p.ProductName, ROUND(SUM(DISTINCT COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(DISTINCT COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 3",
         "note": "SUM(DISTINCT ...) drops repeated values"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "order_limit",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) ASC, p.ProductName ASC LIMIT 3",
         "note": "sorted ascending instead of descending"
       },
       {
-        "id": "n7",
+        "id": "n8",
         "type": "order_limit",
         "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC",
         "note": "LIMIT 3 missing"
@@ -2674,10 +2690,6 @@
     ],
     "positive": [],
     "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -2771,7 +2783,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2832,7 +2844,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT cp.CampaignName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY cp.CampaignId, cp.CampaignName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, cp.CampaignName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -2979,7 +2991,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, s.LocationName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3087,24 +3099,24 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 12",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "count",
         "sql": "SELECT ROUND(COUNT(*), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01'",
         "note": "number of lines instead of the quantity"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "sum_distinct",
         "sql": "SELECT ROUND(SUM(DISTINCT COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01'",
         "note": "SUM(DISTINCT ...) drops repeated values"
       }
     ],
-    "positive": [],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      }
-    ]
+    "positive": []
   },
   "tpl_store_document_count_q1_2026_de8eff": {
     "intentId": "store_document_count_q1_2026",
@@ -3167,6 +3179,12 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 5",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "grain",
         "sql": "SELECT COUNT(*) AS document_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01'",
         "note": "the header row repeated for every line (joined to SalesDocumentLine)"
@@ -3177,12 +3195,6 @@
         "id": "p1",
         "sql": "WITH totals AS (SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01') SELECT totals.document_count FROM totals",
         "note": "the gold as a CTE, sorted and limited outside"
-      }
-    ],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
       }
     ]
   },
@@ -3391,7 +3403,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.PostingDate) = 2",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3432,18 +3444,18 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DueDate) = 4",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "grain",
         "sql": "SELECT COUNT(*) AS document_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
         "note": "the header row repeated for every line (joined to SalesDocumentLine)"
       }
     ],
-    "positive": [],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
-      }
-    ]
+    "positive": []
   },
   "tpl_distinct_customers_feb_2026_20cd13": {
     "intentId": "distinct_customers_feb_2026",
@@ -3471,7 +3483,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3600,7 +3612,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT pc.CategoryName, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY COUNT(DISTINCT d.CustomerId) DESC, pc.CategoryName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3747,7 +3759,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3876,7 +3888,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT t.DocumentTypeName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -3986,7 +3998,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -4082,18 +4094,24 @@
       },
       {
         "id": "n4",
+        "type": "date_filter",
+        "sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DueDate) = 4",
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
+      },
+      {
+        "id": "n5",
         "type": "metric",
         "sql": "SELECT ROUND(SUM(COALESCE(d.NetPayableAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
         "note": "payable amount instead of the outstanding balance"
       },
       {
-        "id": "n5",
+        "id": "n6",
         "type": "grain",
         "sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
         "note": "the header amount repeated for every line (joined to SalesDocumentLine)"
       },
       {
-        "id": "n6",
+        "id": "n7",
         "type": "sum_distinct",
         "sql": "SELECT ROUND(SUM(DISTINCT COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
         "note": "SUM(DISTINCT ...) drops repeated values"
@@ -4104,12 +4122,6 @@
         "id": "p1",
         "sql": "SELECT x.outstanding_balance FROM (SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01') AS x",
         "note": "the gold as a derived table, sorted and limited outside"
-      }
-    ],
-    "not_emitted": [
-      {
-        "type": "date_filter",
-        "reason": "no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer"
       }
     ]
   },
@@ -4139,7 +4151,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 2 GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.BalanceAmount, 0)) DESC, t.DocumentTypeName ASC",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -4237,7 +4249,7 @@
         "id": "n4",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS total_paid_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3",
-        "note": "MONTH() without YEAR(): the same month of 2025 is included"
+        "note": "MONTH() without YEAR(): the same month of the previous year is included"
       },
       {
         "id": "n5",
@@ -4315,12 +4327,18 @@
       },
       {
         "id": "n3",
+        "type": "date_filter",
+        "sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE MONTH(p.PostingDate) = 4 GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
+        "note": "MONTH() without YEAR()"
+      },
+      {
+        "id": "n4",
         "type": "metric",
         "sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
         "note": "debit and credit swapped"
       },
       {
-        "id": "n4",
+        "id": "n5",
         "type": "join_type",
         "sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
         "note": "inner join to SalesDocument drops manual journals"

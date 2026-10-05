@@ -971,11 +971,11 @@
     }
   },
   {
-    "id": "hard_zero_total_net_sales_2024",
-    "intentId": "total_net_sales_2024",
+    "id": "hard_zero_total_net_sales_2023",
+    "intentId": "total_net_sales_2023",
     "split": "dev",
-    "question": "What were total net sales in 2024?",
-    "canonicalQuestion": "What were total net sales in 2024?",
+    "question": "What were total net sales in 2023?",
+    "canonicalQuestion": "What were total net sales in 2023?",
     "difficulty": "medium",
     "tags": [
       "hard_case",
@@ -984,10 +984,10 @@
       "scalar"
     ],
     "failure_class": "empty_result",
-    "notes": "No fixture has a 2024 document: SUM over no rows is one NULL row. null_as_zero accepts 0 for it, and an empty result is accepted too (alternative_expected_sql with HAVING COUNT(*) > 0 returns no row).",
-    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2024-01-01' AND d.DocumentDate < '2025-01-01'",
+    "notes": "No fixture has a 2023 document: SUM over no rows is one NULL row. null_as_zero accepts 0 for it, and an empty result is accepted too (alternative_expected_sql with HAVING COUNT(*) > 0 returns no row).",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2023-01-01' AND d.DocumentDate < '2024-01-01'",
     "alternative_expected_sql": [
-      "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2024-01-01' AND d.DocumentDate < '2025-01-01' HAVING COUNT(*) > 0"
+      "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2023-01-01' AND d.DocumentDate < '2024-01-01' HAVING COUNT(*) > 0"
     ],
     "expected_tables": [
       "SalesDocument"

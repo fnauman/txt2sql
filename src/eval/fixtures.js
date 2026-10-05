@@ -401,7 +401,12 @@ function addV2cFacts(facts) {
  *   350, both Summit Grocers (300 and 250: merged by name they would rank
  *   first) and a canceled 900 for the inactive customer (its only 2025
  *   document);
- * - manual journals (NULL SalesDocumentId) on 2026-01-01 and 2026-04-20.
+ * - manual journals (NULL SalesDocumentId) on 2026-01-01 and 2026-04-20;
+ * - 50-53: prior-year sales in November and December 2024 and April and May
+ *   2025, so MONTH() without YEAR() changes the answer for every single-month
+ *   window of the templated set (Metro Online Store's 500.00 in December 2024
+ *   would enter December 2025's top three). No fixture has a 2023 document,
+ *   so "net sales in 2023" stays an empty answer everywhere.
  * Documents keep v2's conventions: NetPayable = Net + 12.50, BillTotal =
  * Gross + 7.25, line TotalAmount = Net x 1.05.
  */
@@ -445,6 +450,10 @@ function addV2dFacts(facts) {
     [47, '2025-12-12', '2025-12-12', 5, 1, 1, 3, 0, 300.0, 330.0, 0],
     [48, '2025-12-15', '2025-12-15', 8, 2, 4, 1, 0, 250.0, 275.0, 250.0],
     [49, '2025-12-18', '2025-12-18', 6, 3, 2, 2, 1, 900.0, 990.0, 0],
+    [50, '2024-11-14', '2024-11-14', 2, 1, 1, 3, 0, 210.0, 231.0, 210.0],
+    [51, '2024-12-10', '2024-12-10', 3, 3, 2, 1, 0, 500.0, 550.0, 500.0],
+    [52, '2025-04-16', '2025-04-16', 1, 2, 4, 2, 0, 240.0, 264.0, 240.0],
+    [53, '2025-05-20', '2025-05-20', 4, 1, 3, 1, 0, 160.0, 176.0, 160.0],
   ];
   facts.SalesDocument.push(...v2dDocuments.map(document));
 
@@ -487,6 +496,10 @@ function addV2dFacts(facts) {
     [67, 47, 7, 6, 50, 300.0],
     [68, 48, 8, 10, 25, 250.0],
     [69, 49, 11, 8, 112.5, 900.0],
+    [70, 50, 5, 2, 105, 210.0],
+    [71, 51, 8, 20, 25, 500.0],
+    [72, 52, 3, 6, 40, 240.0],
+    [73, 53, 2, 2, 80, 160.0],
   ];
   facts.SalesDocumentLine.push(...v2dLines.map(line));
 

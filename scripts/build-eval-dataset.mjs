@@ -148,16 +148,18 @@ export function semanticLayerPhrasesIn(question, phrases) {
 // `boundary` picks the off-by-one mutant that can change the answer: 'start'
 // (the first day dropped: v3 has documents on the first day of every month)
 // or 'end' (the day after the window included). `prior` marks single months
-// whose calendar month also has 2025 rows (MONTH() without YEAR()).
+// whose calendar month also has rows a year earlier on some fixture, so
+// MONTH() without YEAR() changes the answer (v2 has 2024-11, 2024-12 and
+// 2025-02 to 2025-05 rows; v3 has 2025-01 to 2025-03).
 const WINDOWS = {
-  '2025-11': { start: '2025-11-01', end: '2025-12-01', month: 11, boundary: 'start' },
-  '2025-12': { start: '2025-12-01', end: '2026-01-01', month: 12, boundary: 'start' },
+  '2025-11': { start: '2025-11-01', end: '2025-12-01', month: 11, prior: true, boundary: 'start' },
+  '2025-12': { start: '2025-12-01', end: '2026-01-01', month: 12, prior: true, boundary: 'start' },
   '2025-03': { start: '2025-03-01', end: '2025-04-01', month: 3, boundary: 'start' },
   '2026-01': { start: '2026-01-01', end: '2026-02-01', month: 1, prior: true, boundary: 'start' },
   '2026-02': { start: '2026-02-01', end: '2026-03-01', month: 2, prior: true, boundary: 'start' },
   '2026-03': { start: '2026-03-01', end: '2026-04-01', month: 3, prior: true, boundary: 'start' },
-  '2026-04': { start: '2026-04-01', end: '2026-05-01', month: 4, boundary: 'start' },
-  '2026-05': { start: '2026-05-01', end: '2026-06-01', month: 5, boundary: 'start' },
+  '2026-04': { start: '2026-04-01', end: '2026-05-01', month: 4, prior: true, boundary: 'start' },
+  '2026-05': { start: '2026-05-01', end: '2026-06-01', month: 5, prior: true, boundary: 'start' },
   'q4-2025': { start: '2025-10-01', end: '2026-01-01', boundary: 'end' },
   'q1-2025': { start: '2025-01-01', end: '2025-04-01', boundary: 'start' },
   'q1-2026': { start: '2026-01-01', end: '2026-04-01', boundary: 'start' },
@@ -1584,9 +1586,7 @@ function mutationsFor(intent) {
       boundary,
     });
     if (window.prior) {
-      add('date_filter', 'MONTH() without YEAR(): the same month of 2025 is included', { monthOnly: true });
-    } else if (window.month) {
-      skip('date_filter', 'no fixture has rows in this calendar month of another year, so MONTH() without YEAR() cannot change the answer');
+      add('date_filter', 'MONTH() without YEAR(): the same month of the previous year is included', { monthOnly: true });
     }
     if (METRIC_SWAPS[intent.metric]) {
       add('metric', METRIC_SWAPS[intent.metric].note, { metricColumn: METRIC_SWAPS[intent.metric].column });

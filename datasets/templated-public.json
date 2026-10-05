@@ -889,7 +889,7 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 2,
+      "v2": 3,
       "v3": 2
     }
   },
@@ -920,7 +920,7 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 2,
+      "v2": 3,
       "v3": 2
     }
   },
@@ -1708,7 +1708,7 @@
     },
     "expected_row_counts": {
       "seed": 0,
-      "v2": 3,
+      "v2": 5,
       "v3": 5
     }
   },
@@ -1742,7 +1742,7 @@
     },
     "expected_row_counts": {
       "seed": 0,
-      "v2": 3,
+      "v2": 5,
       "v3": 5
     }
   },

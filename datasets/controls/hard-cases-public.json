@@ -326,21 +326,21 @@
     ],
     "positive": []
   },
-  "hard_zero_total_net_sales_2024": {
-    "intentId": "total_net_sales_2024",
-    "gold_fingerprint": "618626c85fe055d9",
+  "hard_zero_total_net_sales_2023": {
+    "intentId": "total_net_sales_2023",
+    "gold_fingerprint": "22844fafe2343a7f",
     "negative": [
       {
         "id": "x1",
         "type": "date_filter",
-        "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01'",
-        "note": "2025 instead of 2024"
+        "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2024-01-01' AND d.DocumentDate < '2025-01-01'",
+        "note": "the year after (2024: v2 has late-2024 sales) instead of 2023"
       },
       {
         "id": "x2",
         "type": "date_filter",
         "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0",
-        "note": "all time instead of 2024"
+        "note": "all time instead of 2023"
       }
     ],
     "positive": []
