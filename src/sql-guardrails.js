@@ -121,16 +121,6 @@ const KNOWN_SQL_FUNCTIONS = new Set([
   'JSON_ARRAY', 'JSON_EXTRACT', 'JSON_OBJECT', 'JSON_UNQUOTE', 'JSON_VALUE',
 ]);
 
-const TABLE_ALIAS_STOPWORDS = new Set([
-  'FULL',
-  'INNER',
-  'JOIN',
-  'LEFT',
-  'ON',
-  'RIGHT',
-  'WHERE',
-]);
-
 const DERIVED_TABLE_PREFIX = '__derived_table__:';
 
 // Modifiers between SELECT and the select list.
@@ -198,14 +188,6 @@ function collectPromptTables(promptContext = {}, allowedTables = []) {
   return tables;
 }
 
-function isUsableAlias(alias, knownTables) {
-  if (!alias) {
-    return false;
-  }
-  const upper = alias.toUpperCase();
-  return !TABLE_ALIAS_STOPWORDS.has(upper) && !SQL_KEYWORDS.has(upper) && !knownTables.has(alias);
-}
-
 /**
  * Name resolution per SELECT block, the way MariaDB 10.6 scopes it (verified
  * on the server):
@@ -248,7 +230,9 @@ function buildRelationModel(analysis, knownTables) {
   };
 
   const bindRef = (ref) => {
-    const alias = isUsableAlias(ref.alias, knownTables) ? ref.alias : null;
+    // The tokenizer only takes a word as an alias where MariaDB does, so a
+    // non-reserved keyword such as `date` is an alias too.
+    const alias = ref.alias || null;
     if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
       return [alias || ref.name, ref.name];
     }
@@ -312,7 +296,14 @@ function buildRelationModel(analysis, knownTables) {
     const key = derivedAliasFromTableName(relationName);
     if (!derivedTables.has(key)) {
       // A body that (indirectly) reads itself projects nothing.
-      derivedTables.set(key, { label: bodies.get(key).label, columns: new Set(), origins: new Map(), orderedColumns: [] });
+      derivedTables.set(key, {
+        label: bodies.get(key).label,
+        columns: new Set(),
+        origins: new Map(),
+        orderedColumns: [],
+        sourceTables: new Set(),
+        uniqueness: null,
+      });
       derivedTables.set(key, { label: bodies.get(key).label, ...projectBody(bodies.get(key)) });
     }
     return derivedTables.get(key);
@@ -340,16 +331,40 @@ function buildRelationModel(analysis, knownTables) {
       ? projectRelation(relationName).columns.has(columnName)
       : Boolean(findColumnName(knownTables, relationName, columnName));
 
-  // One select-list item: { outputName, origins } (outputName null for an
+  // What an expression reads, so GROUP BY keys can be matched with select
+  // items: `col:<qualifier>.<column>` for a column of one FROM reference, the
+  // normalized token text otherwise.
+  const columnKey = (qualifier, columnName) => `col:${qualifier}.${String(columnName).toLowerCase()}`;
+  const expressionKey = (block, from, to) => {
+    const qualified = to - from === 3 ? walker.qualifiedColumnAt(from) : null;
+    if (qualified) {
+      return columnKey(qualified.qualifier, qualified.column);
+    }
+    const name = to - from === 1 && !tokens[from].afterDot ? tokenIdentifierName(tokens[from]) : null;
+    if (name) {
+      const owners = [...(bindings.get(block.id) || new Map())].filter(([, relationName]) => hasColumn(relationName, name));
+      return owners.length === 1 ? columnKey(owners[0][0], name) : `name:${name.toLowerCase()}`;
+    }
+    const text = [];
+    for (let index = from; index < to; index += 1) {
+      const token = tokens[index];
+      text.push(token.type === 'word' ? (token.afterDot ? token.value.toLowerCase() : token.upper) : tokenIdentifierName(token) ?? token.value);
+    }
+    return `expr:${text.join(' ')}`;
+  };
+  const withKeys = (qualifier, columns) => columns.map((column) => ({ ...column, key: columnKey(qualifier, column.outputName) }));
+
+  // One select-list item: { outputName, origins, key } (outputName null for an
   // unnamed expression), or the expanded columns of `*` / `q.*`.
   const projectItem = (block, [from, to]) => {
     const blockBindings = bindings.get(block.id) || new Map();
     if (to - from === 1 && isOperatorToken(tokens[from], '*')) {
-      return [...blockBindings.values()].flatMap(relationColumns);
+      return [...blockBindings].flatMap(([qualifier, relationName]) => withKeys(qualifier, relationColumns(relationName)));
     }
     if (to - from === 3 && tokenIdentifierName(tokens[from]) && isPunctToken(tokens[from + 1], '.') && isOperatorToken(tokens[from + 2], '*')) {
-      const relationName = resolve(block.id, tokenIdentifierName(tokens[from]));
-      return relationName ? relationColumns(relationName) : [];
+      const qualifier = tokenIdentifierName(tokens[from]);
+      const relationName = resolve(block.id, qualifier);
+      return relationName ? withKeys(qualifier, relationColumns(relationName)) : [];
     }
 
     let alias = null;
@@ -364,43 +379,97 @@ function buildRelationModel(analysis, knownTables) {
       end = to - 1;
     }
 
+    const key = expressionKey(block, from, end);
     const qualified = end - from === 3 ? walker.qualifiedColumnAt(from) : null;
     if (qualified) {
       const relationName = resolve(block.id, qualified.qualifier);
-      return [{ outputName: alias || qualified.column, origins: relationName ? columnOrigins(relationName, qualified.column) : [] }];
+      return [{ outputName: alias || qualified.column, origins: relationName ? columnOrigins(relationName, qualified.column) : [], key }];
     }
     const name = end - from === 1 && !tokens[from].afterDot ? tokenIdentifierName(tokens[from]) : null;
     if (name) {
       const owners = [...blockBindings.values()].filter((relationName) => hasColumn(relationName, name));
-      return [{ outputName: alias || name, origins: owners.length === 1 ? columnOrigins(owners[0], name) : [] }];
+      return [{ outputName: alias || name, origins: owners.length === 1 ? columnOrigins(owners[0], name) : [], key }];
     }
-    return [{ outputName: alias, origins: [] }];
+    return [{ outputName: alias, origins: [], key }];
+  };
+
+  // Positions of the select items each GROUP BY key matches: the same column
+  // or expression, a position (`GROUP BY 1`) or an output alias that is not a
+  // FROM column. An empty list means the key is not projected.
+  const groupKeyPositions = (block, projected) => {
+    const range = findGroupByRange(walker, block);
+    if (!range) {
+      return null;
+    }
+    return walker.splitList(range[0], range[1]).map((item) => {
+      let [from, to] = walker.unwrapParens(item);
+      if (to - from > 1 && isKeywordToken(tokens[to - 1], 'ASC', 'DESC')) {
+        to -= 1;
+      }
+      if (to - from === 1 && tokens[from].type === 'number') {
+        const position = Number(tokens[from].value) - 1;
+        return projected[position] ? [position] : [];
+      }
+      const key = expressionKey(block, from, to);
+      const matches = (column) => column.key === key || (key.startsWith('name:') && column.outputName?.toLowerCase() === key.slice(5));
+      return projected.flatMap((column, position) => (matches(column) ? [position] : []));
+    });
   };
 
   // Columns of a derived table or CTE body: the select list of its first SELECT
   // block, resolved against that block's FROM (which may name earlier CTEs),
-  // renamed positionally by a CTE column list.
+  // renamed positionally by a CTE column list. Also records the tables the
+  // body reads and what makes its rows unique (see isDerivedUniqueOn).
   const projectBody = ({ openIndex, columnList }) => {
     const scopeId = tokens[openIndex].groupId;
-    const block = analysis.blocks.find((candidate) => candidate.scopeId === scopeId);
-    const range = block ? findSelectListRange(walker, block) : null;
-    const orderedColumns = [];
-    for (const item of range ? walker.splitList(range[0], range[1]) : []) {
-      for (const column of projectItem(block, item)) {
-        orderedColumns.push(column.outputName ? column : null);
-      }
+    const bodyBlocks = analysis.blocks.filter((candidate) => candidate.scopeId === scopeId);
+    const [block] = bodyBlocks;
+    const selectList = block ? findSelectListRange(walker, block) : null;
+    const projected = [];
+    for (const item of selectList ? walker.splitList(selectList.start, selectList.end) : []) {
+      projected.push(...projectItem(block, item));
     }
 
     const renamed = Array.isArray(columnList) && columnList.length > 0
-      ? columnList.map((outputName, index) => ({ outputName, origins: orderedColumns[index]?.origins || [] }))
-      : orderedColumns;
+      ? columnList.map((outputName, index) => ({ outputName, origins: projected[index]?.origins || [] }))
+      : projected.map((column) => (column.outputName ? { outputName: column.outputName, origins: column.origins } : null));
     const columns = new Set();
     const origins = new Map();
     for (const column of renamed.filter(Boolean)) {
       columns.add(column.outputName);
       origins.set(column.outputName, column.origins);
     }
-    return { columns, origins, orderedColumns: renamed };
+
+    const sourceTables = new Set();
+    for (const ref of analysis.tableRefs.filter((candidate) => bodyBlocks.some((bodyBlock) => bodyBlock.id === candidate.blockId))) {
+      const relationName = relationOfRef.get(ref);
+      if (relationName && isDerivedTableName(relationName)) {
+        projectRelation(relationName).sourceTables.forEach((tableName) => sourceTables.add(tableName));
+      } else if (relationName) {
+        sourceTables.add(relationName);
+      }
+    }
+
+    let uniqueness = null;
+    if (bodyBlocks.length === 1 && selectList) {
+      const blockRefs = analysis.tableRefs.filter((candidate) => candidate.blockId === block.id);
+      const groupKeys = groupKeyPositions(block, projected);
+      const aggregated = block.tokenIndexes.some(
+        (index) =>
+          isKeywordToken(tokens[index], ...ROW_COLLAPSING_AGGREGATES) &&
+          isPunctToken(tokens[index + 1], '(') &&
+          !isKeywordToken(tokens[walker.closeOf(index + 1) + 1], 'OVER')
+      );
+      const limit = findLimitCount(walker, block);
+      uniqueness = {
+        singleRow: (aggregated && !groupKeys) || (limit !== null && limit <= 1),
+        groupKeys: groupKeys && groupKeys.map((positions) => positions.map((position) => renamed[position]?.outputName).filter(Boolean)),
+        distinct: selectList.distinct,
+        rowLevel: !groupKeys && !aggregated && !selectList.distinct,
+        sourceTable: blockRefs.length === 1 && relationOfRef.get(blockRefs[0]) === blockRefs[0].name ? blockRefs[0].name : null,
+      };
+    }
+    return { columns, origins, orderedColumns: renamed, sourceTables, uniqueness };
   };
 
   for (const key of bodies.keys()) {
@@ -431,7 +500,8 @@ function isTrailingAlias(last, previous) {
   );
 }
 
-// [start, end) of a SELECT block's select list (after SELECT and its options).
+// { start, end, distinct } of a SELECT block's select list (after SELECT and
+// its options), or null.
 function findSelectListRange(walker, block) {
   const { tokens } = walker;
   const baseGroup = blockBaseGroup(block);
@@ -441,7 +511,9 @@ function findSelectListRange(walker, block) {
     return null;
   }
   let start = indexes[selectAt] + 1;
+  let distinct = false;
   while (isKeywordToken(tokens[start], ...SELECT_OPTION_WORDS)) {
+    distinct = distinct || isKeywordToken(tokens[start], 'DISTINCT', 'DISTINCTROW');
     start += 1;
   }
   let end = block.tokenIndexes[block.tokenIndexes.length - 1] + 1;
@@ -451,7 +523,7 @@ function findSelectListRange(walker, block) {
       break;
     }
   }
-  return [start, end];
+  return { start, end, distinct };
 }
 
 function extractTableContext(sql, knownTables) {
@@ -1082,6 +1154,23 @@ function findGroupByRange(walker, block) {
   return [start, end];
 }
 
+// The row count of the block's `LIMIT n`, `LIMIT offset, n` or `LIMIT n OFFSET
+// m`, or null.
+function findLimitCount(walker, block) {
+  const { tokens } = walker;
+  const baseGroup = blockBaseGroup(block);
+  const limitIndex = block.tokenIndexes.find(
+    (index) => tokens[index].parentGroupId === baseGroup && isKeywordToken(tokens[index], 'LIMIT')
+  );
+  if (limitIndex === undefined || tokens[limitIndex + 1]?.type !== 'number') {
+    return null;
+  }
+  if (isPunctToken(tokens[limitIndex + 2], ',')) {
+    return tokens[limitIndex + 3]?.type === 'number' ? Number(tokens[limitIndex + 3].value) : null;
+  }
+  return Number(tokens[limitIndex + 1].value);
+}
+
 /**
  * The entries whose columns the block's GROUP BY keys read ([] when there is
  * no GROUP BY), or null when a key cannot be attributed to a joined table: a
@@ -1335,69 +1424,50 @@ function collectAntiJoinedRefs(walker, block, entries, columnMetadata) {
 }
 
 /**
- * A derived table or CTE whose body is a plain row-level projection of exactly
- * one table (no GROUP BY, DISTINCT, row-collapsing aggregate, LIMIT or set
- * operator) has one row per source row, so for fan-out purposes it IS that
- * table: `JOIN (SELECT * FROM SalesDocumentLine) x` multiplies like the table.
- * Returns the source table name or null.
+ * Whether a derived table or CTE has at most one row per value of its `pinned`
+ * output columns (those equated to constants or to the parent's columns), so
+ * joining it cannot repeat a parent row. Only a single SELECT qualifies, when
+ * - it returns at most one row (an aggregate without GROUP BY, or LIMIT 0/1),
+ * - every GROUP BY key is projected as a pinned column (GROUP BY
+ *   SalesDocumentId joined on SalesDocumentId; not GROUP BY SalesDocumentId,
+ *   ProductId),
+ * - it is DISTINCT and every output column is pinned, or
+ * - it passes one table's rows through with that table's whole primary key
+ *   projected and pinned.
+ * DISTINCT, GROUP BY or LIMIT n alone do not make a child unique per parent.
  */
-function resolvePassThroughTable(walker, analysis, ref, knownTables, depth = 0) {
-  if (depth > 5) {
-    return null;
+function isDerivedUniqueOn(relation, pinned, columnMetadata) {
+  const uniqueness = relation?.uniqueness;
+  if (!uniqueness) {
+    return false;
   }
-  const { tokens } = walker;
-  let openIndex = null;
-  if (ref.kind === 'derived') {
-    openIndex = ref.open;
-  } else if (ref.kind === 'cte') {
-    const cte = analysis.ctes.find(
-      (candidate) =>
-        candidate.name.toLowerCase() === String(ref.cteName || ref.name).toLowerCase() &&
-        ref.index >= candidate.visibleFrom &&
-        ref.index < candidate.visibleTo
-    );
-    openIndex = cte ? cte.bodyOpen : null;
+  if (uniqueness.singleRow) {
+    return true;
   }
-  if (openIndex === null || !isPunctToken(tokens[openIndex], '(')) {
-    return null;
+  if (uniqueness.groupKeys?.length > 0 && uniqueness.groupKeys.every((names) => names.some((name) => pinned.has(name)))) {
+    return true;
   }
-
-  const scopeId = tokens[openIndex].groupId;
-  const bodyBlocks = analysis.blocks.filter((block) => block.scopeId === scopeId);
-  if (bodyBlocks.length !== 1) {
-    return null;
+  const outputs = relation.orderedColumns;
+  if (uniqueness.distinct && outputs.length > 0 && outputs.every((column) => column && pinned.has(column.outputName))) {
+    return true;
   }
-  const [block] = bodyBlocks;
-  for (const index of block.tokenIndexes) {
-    const token = tokens[index];
-    if (token.parentGroupId !== scopeId) {
-      continue;
-    }
-    if (isKeywordToken(token, 'DISTINCT', 'DISTINCTROW', 'LIMIT', 'HAVING')) {
-      return null;
-    }
-    if (isKeywordToken(token, 'GROUP') && isKeywordToken(tokens[index + 1], 'BY')) {
-      return null;
-    }
-    if (
-      token.type === 'word' &&
-      ROW_COLLAPSING_AGGREGATES.has(token.upper) &&
-      isPunctToken(tokens[index + 1], '(') &&
-      !isKeywordToken(tokens[walker.closeOf(index + 1) + 1], 'OVER')
-    ) {
-      return null;
-    }
+  if (!uniqueness.rowLevel || !uniqueness.sourceTable) {
+    return false;
   }
-
-  const bodyRefs = analysis.tableRefs.filter((candidate) => candidate.blockId === block.id);
-  if (bodyRefs.length !== 1) {
-    return null;
-  }
-  const [source] = bodyRefs;
-  if (source.kind === 'table') {
-    return !source.schema && knownTables.has(source.name) ? source.name : null;
-  }
-  return resolvePassThroughTable(walker, analysis, source, knownTables, depth + 1);
+  const keyColumns = primaryKeyColumnsOf(columnMetadata, uniqueness.sourceTable);
+  return (
+    keyColumns.length > 0 &&
+    keyColumns.every((keyColumn) =>
+      outputs.some(
+        (column) =>
+          column &&
+          pinned.has(column.outputName) &&
+          column.origins.length === 1 &&
+          column.origins[0].tableName === uniqueness.sourceTable &&
+          column.origins[0].columnName === keyColumn
+      )
+    )
+  );
 }
 
 /**
@@ -1420,9 +1490,9 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
     grains.includes('fine') ? 'fine' : grains.find((grain) => grain.coarse) || 'const';
 
   const columnGrain = (entry, tableName, columnName) => {
-    const coarse = isCoarse(tableName);
+    const coarse = isCoarse(tableName, entry);
     references.push({ entry, tableName, columnName, coarse });
-    return coarse ? { coarse: { tableName, columnName } } : 'fine';
+    return coarse ? { coarse: { tableName, columnName, entry } } : 'fine';
   };
 
   // SUM(MAX(d.NetAmount)) OVER (): the inner, non-window MIN/MAX ignores the
@@ -1540,11 +1610,15 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
         const { qualifier, column } = walker.qualifiedColumnAt(index);
         const entry = qualifierEntries.get(qualifier);
         if (entry?.viaDerived) {
-          // A derived column that copies one column of its source table is that
-          // column (`h.amt` for `d.NetAmount AS amt` is SalesDocument.NetAmount).
+          // A derived column that copies one table column is that column (`h.amt`
+          // for `d.NetAmount AS amt` is SalesDocument.NetAmount); any other
+          // column of a single-table body is at that table's grain.
           const [origin, ...more] = entry.relation?.origins.get(column) || [];
-          const sourceColumn = origin && more.length === 0 && origin.tableName === entry.tableName ? origin.columnName : column;
-          grains.push(columnGrain(entry, entry.tableName, sourceColumn));
+          if (origin && more.length === 0) {
+            grains.push(columnGrain(entry, origin.tableName, origin.columnName));
+          } else if (entry.tableName) {
+            grains.push(columnGrain(entry, entry.tableName, column));
+          }
         } else if (entry && knownTables.get(entry.tableName)?.has(column)) {
           grains.push(columnGrain(entry, entry.tableName, column));
         }
@@ -1591,8 +1665,9 @@ function describeFanOut({ aggregate, tableName, columnName, edge, knownTables })
  * key to it): every parent value is repeated once per child row. COUNT/MIN/MAX
  * are not affected, children referenced only inside EXISTS/IN subqueries live
  * in a different block, an anti-joined child (LEFT JOIN ... WHERE key IS NULL)
- * keeps one row per parent, and a derived table or CTE that merely projects a
- * child table counts as that child.
+ * or a child pinned to one row by its key keeps one row per parent, and a
+ * derived table or CTE counts as every table it reads unless it is provably
+ * unique on the columns that join it to the parent (isDerivedUniqueOn).
  */
 function validateFanOut(analysis, knownTables, promptContext, model) {
   const columnMetadata = collectColumnMetadata(promptContext);
@@ -1609,13 +1684,16 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
     const entries = [];
     for (const ref of analysis.tableRefs.filter((candidate) => candidate.blockId === block.id)) {
       if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
-        entries.push({ ref, tableName: ref.name, qualifier: ref.alias || ref.name, viaDerived: false });
+        entries.push({ ref, tableName: ref.name, childTables: new Set([ref.name]), qualifier: ref.alias || ref.name, viaDerived: false });
       } else if (ref.kind === 'derived' || ref.kind === 'cte') {
-        const tableName = resolvePassThroughTable(walker, analysis, ref, knownTables);
+        // A derived table or CTE stands for the tables it reads; tableName is
+        // set when it reads exactly one.
+        const relationName = model.relationOf(ref);
+        const relation = relationName ? model.derivedTables.get(derivedAliasFromTableName(relationName)) : null;
         const qualifier = ref.alias || (ref.kind === 'cte' ? ref.name : null);
-        if (tableName && qualifier) {
-          const relation = model.derivedTables.get(derivedAliasFromTableName(model.relationOf(ref)));
-          entries.push({ ref, tableName, qualifier, viaDerived: true, relation });
+        if (relation?.sourceTables.size > 0 && qualifier) {
+          const tableName = relation.sourceTables.size === 1 ? [...relation.sourceTables][0] : null;
+          entries.push({ ref, tableName, childTables: relation.sourceTables, qualifier, viaDerived: true, relation });
         }
       }
     }
@@ -1646,8 +1724,9 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
     };
     // A joined child whose whole primary key is pinned to constants or to the
     // parent's columns (`LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId =
-    // d.SalesDocumentId AND l.SalesDocumentLineId = 1`) has at most one row
-    // per parent row, so it cannot repeat the parent's values.
+    // d.SalesDocumentId AND l.SalesDocumentLineId = 1`), or a derived child
+    // that is unique on its pinned columns, has at most one row per parent
+    // row, so it cannot repeat the parent's values.
     let restrictingEqualities;
     const pinnedColumns = (entry, parentTable) => {
       if (!restrictingEqualities) {
@@ -1684,19 +1763,26 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
     };
     const restrictedToOneRow = (entry, parentTable) => {
       if (entry.viaDerived) {
-        return false;
+        return isDerivedUniqueOn(entry.relation, pinnedColumns(entry, parentTable), columnMetadata);
       }
       const keyColumns = primaryKeyColumnsOf(columnMetadata, entry.tableName);
       const pinned = keyColumns.length > 0 ? pinnedColumns(entry, parentTable) : null;
       return Boolean(pinned) && keyColumns.every((columnName) => pinned.has(columnName));
     };
-    const childEdgesOf = (tableName) =>
+    // Edges from `tableName` to a child joined here by an entry other than
+    // `owner` (a derived table that reads both a parent and its child does not
+    // repeat its own rows).
+    const childEdgesOf = (tableName, owner = null) =>
       edges.filter(
         (edge) =>
           edge.parentTable === tableName &&
           edge.childTable !== tableName &&
           entries.some(
-            (entry) => entry.tableName === edge.childTable && !antiJoined.has(entry) && !restrictedToOneRow(entry, tableName)
+            (entry) =>
+              entry !== owner &&
+              entry.childTables.has(edge.childTable) &&
+              !antiJoined.has(entry) &&
+              !restrictedToOneRow(entry, tableName)
           )
       );
 
@@ -1720,7 +1806,7 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         qualifierEntries,
         unqualifiedOwners,
         knownTables,
-        isCoarse: (tableName) => childEdgesOf(tableName).length > 0,
+        isCoarse: (tableName, owner) => childEdgesOf(tableName, owner).length > 0,
         isGroupedWithin,
       });
       const grain = evaluator.evaluateExpression(group.open + 1, group.close);
@@ -1734,8 +1820,8 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         continue;
       }
 
-      const { tableName, columnName } = grain.coarse;
-      const [edge] = childEdgesOf(tableName);
+      const { tableName, columnName, entry } = grain.coarse;
+      const [edge] = childEdgesOf(tableName, entry);
       throw guardrailError(
         'FAN_OUT',
         describeFanOut({ aggregate: token.upper, tableName, columnName, edge, knownTables }),

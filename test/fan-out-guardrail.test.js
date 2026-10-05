@@ -284,12 +284,68 @@ test('a derived table or CTE that only projects a child table counts as that chi
     'SELECT SUM(x.NetAmount) AS n FROM (SELECT * FROM SalesDocument) x JOIN SalesDocumentLine l ON l.SalesDocumentId = x.SalesDocumentId'
   );
 
-  // DISTINCT / GROUP BY collapse the child rows first, so they do not fan out.
+  // DISTINCT / GROUP BY on the join key collapse the child rows to one per document.
   for (const sql of [
     'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT DISTINCT l.SalesDocumentId FROM SalesDocumentLine l) x ON x.SalesDocumentId = d.SalesDocumentId',
     'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT l.SalesDocumentId, COUNT(*) AS c FROM SalesDocumentLine l GROUP BY l.SalesDocumentId) x ON x.SalesDocumentId = d.SalesDocumentId',
   ]) {
     assert.doesNotThrow(() => validateFor(BRAND_QUESTION, sql), sql);
+  }
+});
+
+test('a derived or CTE child is exempt only when it is unique on the columns that join it to the parent', () => {
+  const HEADER = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d';
+  // Each of these returned 6500 instead of 5500 on the seeded demo DB:
+  // DISTINCT, GROUP BY or LIMIT n keep several rows per document unless the
+  // output is unique on the join key alone.
+  for (const sql of [
+    `${HEADER} JOIN (SELECT DISTINCT SalesDocumentId, SalesDocumentLineId FROM SalesDocumentLine) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT SalesDocumentId, SalesDocumentLineId FROM SalesDocumentLine GROUP BY SalesDocumentId, SalesDocumentLineId) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine LIMIT 100) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT SalesDocumentLineId, SalesDocumentId FROM SalesDocumentLine LIMIT 1000) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT DISTINCT l.SalesDocumentId, l.ProductId FROM SalesDocumentLine l) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT l.SalesDocumentId, l.ProductId, SUM(l.Quantity) AS q FROM SalesDocumentLine l GROUP BY l.SalesDocumentId, l.ProductId) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    // A GROUP BY key that is not projected cannot make the output unique.
+    `${HEADER} JOIN (SELECT l.SalesDocumentId FROM SalesDocumentLine l GROUP BY l.SalesDocumentId, l.ProductId) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `WITH x AS (SELECT DISTINCT SalesDocumentId, SalesDocumentLineId FROM SalesDocumentLine) ${HEADER} JOIN x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `WITH a AS (SELECT DISTINCT SalesDocumentId, ProductId FROM SalesDocumentLine), b AS (SELECT * FROM a) ${HEADER} JOIN b ON b.SalesDocumentId = d.SalesDocumentId`,
+    // A non-reserved keyword is a valid alias; USING needs no qualifier.
+    `${HEADER} JOIN (SELECT DISTINCT SalesDocumentId, ProductId FROM SalesDocumentLine) date USING (SalesDocumentId)`,
+    // A body that joins other tables or is a UNION is still at line grain.
+    `${HEADER} JOIN (SELECT l.SalesDocumentId FROM SalesDocumentLine l JOIN Product p ON p.ProductId = l.ProductId) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine UNION ALL SELECT SalesDocumentId FROM SalesDocumentLine WHERE 1 = 0) x ON x.SalesDocumentId = d.SalesDocumentId`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+
+  // A collapsed header is still the header when joined to its lines (6500).
+  for (const sql of [
+    'SELECT SUM(x.net) AS n FROM (SELECT SalesDocumentId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY SalesDocumentId) x JOIN SalesDocumentLine l ON l.SalesDocumentId = x.SalesDocumentId',
+    'SELECT SUM(x.NetAmount) AS n FROM (SELECT DISTINCT SalesDocumentId, NetAmount FROM SalesDocument) x JOIN SalesDocumentLine l ON l.SalesDocumentId = x.SalesDocumentId',
+  ]) {
+    assert.throws(
+      () => validateFor(LINES_QUESTION, sql),
+      (error) => error.code === 'FAN_OUT' && error.details.table === 'SalesDocument' && error.details.childTable === 'SalesDocumentLine',
+      sql
+    );
+  }
+
+  // Unique on the join key, wherever the join condition is written, or at
+  // most one row: each returns 5500 (1000 for the LIMIT 1 and pinned-key rows).
+  for (const sql of [
+    `${HEADER} JOIN (SELECT l.SalesDocumentId AS doc, SUM(l.Quantity) AS qty FROM SalesDocumentLine l GROUP BY doc) x ON x.doc = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT l.SalesDocumentId, SUM(l.Quantity) AS qty FROM SalesDocumentLine l GROUP BY 1) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT l.SalesDocumentId, SUM(l.NetAmount) AS net FROM SalesDocumentLine l JOIN Product p ON p.ProductId = l.ProductId WHERE p.ProductId > 0 GROUP BY l.SalesDocumentId) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    'SELECT SUM(d.NetAmount) AS n FROM (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) x JOIN SalesDocument d ON d.SalesDocumentId = x.SalesDocumentId',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d, (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) x WHERE x.SalesDocumentId = d.SalesDocumentId',
+    `${HEADER} JOIN (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) x USING (SalesDocumentId)`,
+    `WITH x (doc_id) AS (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) ${HEADER} JOIN x ON x.doc_id = d.SalesDocumentId`,
+    'WITH line_totals AS (SELECT SalesDocumentId, SUM(NetAmount) AS line_net FROM SalesDocumentLine GROUP BY SalesDocumentId) SELECT SUM(d.NetAmount) AS header_net, SUM(t.line_net) AS line_net FROM SalesDocument d JOIN line_totals t ON t.SalesDocumentId = d.SalesDocumentId',
+    'SELECT SUM(d.NetAmount) AS n, MAX(t.total_qty) AS q FROM SalesDocument d CROSS JOIN (SELECT SUM(Quantity) AS total_qty FROM SalesDocumentLine) t',
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine ORDER BY SalesDocumentLineId LIMIT 1) x ON x.SalesDocumentId = d.SalesDocumentId`,
+    `${HEADER} JOIN (SELECT * FROM SalesDocumentLine) x ON x.SalesDocumentId = d.SalesDocumentId AND x.SalesDocumentLineId = 1`,
+  ]) {
+    assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
   }
 });
 

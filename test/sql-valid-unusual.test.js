@@ -192,6 +192,16 @@ const VALID = [
   ],
   [
     Q_LINES,
+    'header SUM next to line totals pre-aggregated per document in a CTE',
+    'WITH line_totals AS (SELECT SalesDocumentId, SUM(NetAmount) AS line_net FROM SalesDocumentLine GROUP BY SalesDocumentId) SELECT SUM(d.NetAmount) AS header_net, SUM(t.line_net) AS line_net FROM SalesDocument d JOIN line_totals t ON t.SalesDocumentId = d.SalesDocumentId',
+  ],
+  [
+    Q_LINES,
+    'distinct child keys first in FROM, joined by the header ON clause',
+    'SELECT SUM(d.NetAmount) AS n FROM (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) x JOIN SalesDocument d ON d.SalesDocumentId = x.SalesDocumentId',
+  ],
+  [
+    Q_LINES,
     'line value scaled by a header ratio (line grain)',
     'SELECT ROUND(SUM(l.NetAmount * d.NetAmount / NULLIF(d.GrossAmount, 0)), 2) AS adjusted FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId',
   ],
@@ -202,6 +212,7 @@ const VALID = [
     'SELECT YearWeek(d.DocumentDate) AS wk, AVG(DateDiff(d.DueDate, d.DocumentDate)) AS days, Round(Sum(d.NetAmount), 2) AS net FROM SalesDocument d GROUP BY wk',
   ],
   [Q_LIST, 'an alias named minus', 'SELECT minus.CustomerName FROM Customer minus ORDER BY minus.CustomerName'],
+  [Q_LIST, 'an alias that is a non-reserved keyword', 'SELECT year.CustomerName FROM Customer year ORDER BY year.CustomerName'],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,
