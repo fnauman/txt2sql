@@ -77,6 +77,11 @@ test('unqualified columns resolve to the only joined table that has them', () =>
     'SELECT SUM(GrossAmount) AS gross FROM SalesDocument JOIN SalesDocumentLine USING (SalesDocumentId)',
     { column: 'GrossAmount' }
   );
+  // Backtick-quoted and differently cased spellings name the same column; both
+  // returned 7130 instead of 6010 on the seeded demo DB.
+  assertFanOut(BRAND_QUESTION, `SELECT SUM(\`GrossAmount\`) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
+  assertFanOut(BRAND_QUESTION, `SELECT SUM(grossamount) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
+  assertFanOut(BRAND_QUESTION, `SELECT AVG(\`GrossAmount\` - 0) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
 });
 
 test('fan-out inside a CTE body or a derived table is rejected', () => {

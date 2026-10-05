@@ -789,6 +789,20 @@ function tokenIdentifierName(token) {
   return token.type === 'word' ? token.value : null;
 }
 
+// The table's own spelling of `columnName` (column names are case-insensitive
+// in MariaDB), or null when the table has no such column.
+function findColumnName(knownTables, tableName, columnName) {
+  const columns = knownTables.get(tableName);
+  if (!columns || !columnName) {
+    return null;
+  }
+  if (columns.has(columnName)) {
+    return columnName;
+  }
+  const lower = String(columnName).toLowerCase();
+  return [...columns].find((candidate) => candidate.toLowerCase() === lower) || null;
+}
+
 // tableName -> Map(columnName -> { primaryKey, allowNull }) for the prompt tables.
 function collectColumnMetadata(promptContext = {}) {
   const metadata = new Map();
@@ -1238,10 +1252,14 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNam
         }
         index += 3;
         continue;
-      } else if (token.type === 'word' && !token.afterDot) {
-        const owners = blockTableNames.filter((tableName) => knownTables.get(tableName)?.has(token.value));
+      } else if (tokenIdentifierName(token) && !token.afterDot) {
+        // Unqualified column, plain or backtick-quoted; MariaDB column names are
+        // case-insensitive (`grossamount` is SalesDocument.GrossAmount).
+        const owners = blockTableNames
+          .map((tableName) => [tableName, findColumnName(knownTables, tableName, tokenIdentifierName(token))])
+          .filter(([, columnName]) => columnName);
         if (owners.length === 1) {
-          grains.push(columnGrain(owners[0], token.value));
+          grains.push(columnGrain(...owners[0]));
         }
       }
       index = next;
