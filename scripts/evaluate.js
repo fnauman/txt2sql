@@ -39,6 +39,30 @@ export function applyEvaluationFailureExitCode(failed, processLike = process) {
   }
 }
 
+function abortCode(signal) {
+  return typeof signal?.reason?.code === 'string' ? signal.reason.code : 'QUERY_ABORTED';
+}
+
+function stopReason(signal) {
+  return signal?.reason?.message || 'the case was aborted';
+}
+
+// A case whose signal fired before the product loop ran (during the gold runs).
+function abortedResult(signal, extra = {}) {
+  return {
+    status: 'aborted',
+    warnings: [],
+    error: `Stopped during the gold runs: ${stopReason(signal)}.`,
+    error_stage: 'aborted',
+    error_code: abortCode(signal),
+    attempts: [],
+    attempt_count: 0,
+    llm_usage: null,
+    llm_cost: null,
+    ...extra,
+  };
+}
+
 function sumDurations(attempts, step) {
   return Number(attempts.reduce((total, attempt) => total + (attempt[step]?.durationMs || 0), 0).toFixed(3));
 }
@@ -61,8 +85,11 @@ function sumDurations(attempts, step) {
  * - Gold runs first (with its own timeout), so a broken gold costs no LLM call
  *   and is reported as 'expected_sql_error', never as a model failure.
  * - `signal` (optional AbortSignal, e.g. the runner's per-case deadline) is
- *   passed to the product loop, which stops the in-flight LLM call (and kills
- *   a running query on a pool) and reports the case as 'aborted'.
+ *   passed to the gold runs, the product loop (which stops the in-flight LLM
+ *   call and kills a running query on a pool) and the oracle's scoring. A
+ *   case whose signal fired before it finished is reported as 'aborted' (with
+ *   whatever it recorded): a gold run or a scoring cut short is neither a
+ *   broken gold nor a verdict.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  */
@@ -105,7 +132,7 @@ export async function evaluateQuestion({
   try {
     for (const variant of listGoldVariants(testCase)) {
       for (const fixtureConnection of fixtureConnections) {
-        const rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label });
+        const rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label, signal });
         await trace.emit('expected_sql.executed', {
           ...caseContext,
           fixture: fixtureConnection.name,
@@ -116,6 +143,12 @@ export async function evaluateQuestion({
       }
     }
   } catch (error) {
+    if (signal?.aborted) {
+      // The deadline (or a stop) cut the gold run short: not a broken gold.
+      const result = abortedResult(signal, { timings: { totalMs: caseTimer.stop().durationMs } });
+      await trace.emit('case.completed', { ...caseContext, success: false, status: result.status, error: result.error, attempts: 0 });
+      return result;
+    }
     await trace.emit('expected_sql.failed', {
       ...caseContext,
       ...goldTimer.stop(),
@@ -177,15 +210,31 @@ export async function evaluateQuestion({
   let score = null;
   const oracleTimer = createTimer();
   if (run.success) {
-    score = await scorePrediction({
-      testCase,
-      predictedSql: run.sql,
-      connections: fixtureConnections,
-      goldCache,
-      timeoutMs: statementTimeoutMs,
-      goldTimeoutMs,
-      schema,
-    });
+    try {
+      score = await scorePrediction({
+        testCase,
+        predictedSql: run.sql,
+        connections: fixtureConnections,
+        goldCache,
+        timeoutMs: statementTimeoutMs,
+        goldTimeoutMs,
+        schema,
+        signal,
+      });
+    } catch (error) {
+      // Scoring cut short by the signal is handled below; anything else is
+      // the runner's evaluation_error.
+      if (!signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+  // The signal fired while the fixtures were being scored: whatever the
+  // oracle returned (or threw) is not a verdict.
+  const abortedWhileScoring = run.success && Boolean(signal?.aborted);
+  if (abortedWhileScoring) {
+    status = 'aborted';
+  } else if (run.success) {
     status = score.match
       ? 'pass'
       : score.infraError
@@ -237,13 +286,19 @@ export async function evaluateQuestion({
     master_data_candidates: run.masterDataCandidates || [],
     attempts,
     attempt_count: run.attemptCount ?? attempts.length,
-    ...(run.success
-      ? {}
-      : {
-          error: run.error?.message || 'Unknown error',
-          error_stage: run.errorStage || null,
-          error_code: run.errorCode || null,
-        }),
+    ...(abortedWhileScoring
+      ? {
+          error: `Stopped while scoring on the fixtures: ${stopReason(signal)}.`,
+          error_stage: 'aborted',
+          error_code: abortCode(signal),
+        }
+      : run.success
+        ? {}
+        : {
+            error: run.error?.message || 'Unknown error',
+            error_stage: run.errorStage || null,
+            error_code: run.errorCode || null,
+          }),
     oracle: score
       ? {
           matched_gold: score.matchedGold,

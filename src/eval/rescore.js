@@ -304,6 +304,7 @@ export async function rescoreRepetition(repetition, {
   delete base.error_stage;
   delete base.error_code;
   delete base.timed_out;
+  delete base.late_status;
 
   const rescore = {
     replayed: true,

@@ -6,9 +6,11 @@ import {
   GOLD_STATEMENT_TIMEOUT_MS,
   GoldSqlError,
   createGoldCache,
+  executeGoldSql,
   openFixtureConnections,
   scoreAgainstGold,
 } from '../src/eval/oracle.js';
+import { CaseTimeoutError } from '../src/eval/pool.js';
 
 // The statement timeout default (8000 ms) is part of what these tests pin.
 const savedTimeout = process.env.QUERY_STATEMENT_TIMEOUT_MS;
@@ -345,4 +347,56 @@ test('openFixtureConnections opens one query connection per fixture database and
     return true;
   });
   assert.deepEqual(calls, [{ closed: 'demo_retail' }], 'the already-open connection is closed');
+});
+
+// A fixture whose statements wait until released.
+function gatedFixture(name, answers) {
+  const gates = [];
+  const fixture = fakeFixture(name, answers);
+  const answer = fixture.connection.query.bind(fixture.connection);
+  fixture.connection.query = (statement) => new Promise((resolve) => gates.push(() => resolve(answer(statement))));
+  fixture.release = () => gates.splice(0).forEach((open) => open());
+  return fixture;
+}
+const settleWithin = (promise, ms, what) =>
+  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not settle within ${ms} ms`)), ms).unref())]);
+
+test('the case signal reaches gold execution; a cached gold run cut short by one case is rerun for the others', async () => {
+  const fixture = gatedFixture('seed', { [GOLD]: seedGold });
+  const goldCache = createGoldCache();
+  const owner = new AbortController();
+  const ownerRun = executeGoldSql(fixture, GOLD, { goldCache, signal: owner.signal });
+  const sharing = executeGoldSql(fixture, GOLD, { goldCache });
+  owner.abort(new CaseTimeoutError(10));
+  await assert.rejects(settleWithin(ownerRun, 1000, 'the aborted gold'), (error) => error instanceof GoldSqlError && error.cause?.code === 'CASE_TIMEOUT');
+  // The other case waited on the same run; it is run again, not failed.
+  await new Promise((resolve) => setImmediate(resolve));
+  fixture.release();
+  assert.deepEqual(await settleWithin(sharing, 1000, 'the shared gold'), seedGold);
+
+  // A case whose own signal fires while it waits on another case's run stops
+  // waiting at once; the other case is not affected.
+  const other = gatedFixture('v2', { [GOLD]: v2Gold });
+  const first = executeGoldSql(other, GOLD, { goldCache, signal: new AbortController().signal });
+  const mine = new AbortController();
+  const second = executeGoldSql(other, GOLD, { goldCache, signal: mine.signal });
+  mine.abort(new Error('the run was stopped'));
+  await assert.rejects(settleWithin(second, 1000, 'the waiting gold'), (error) => error instanceof GoldSqlError && error.cause?.name === 'AbortError');
+  other.release();
+  assert.deepEqual(await first, v2Gold);
+});
+
+test('the case signal reaches the prediction on every fixture: scoring stops at the deadline', async () => {
+  const fixture = gatedFixture('seed', { [GOLD]: seedGold, [PRED]: seedGold });
+  const goldCache = createGoldCache();
+  // Gold is cached; only the prediction hangs.
+  const warm = executeGoldSql(fixture, GOLD, { goldCache });
+  fixture.release();
+  await warm;
+  const controller = new AbortController();
+  const scoring = scoreAgainstGold({ testCase: caseWith(), predictedSql: PRED, connections: [fixture], goldCache, signal: controller.signal });
+  setTimeout(() => controller.abort(new CaseTimeoutError(10)), 20);
+  const score = await settleWithin(scoring, 1000, 'scoring');
+  assert.equal(score.match, false);
+  assert.equal(score.perFixture[0].error.code, 'CASE_TIMEOUT');
 });

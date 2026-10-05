@@ -27,7 +27,7 @@ import {
   matchResultSets,
   runSignalChecksThroughAssignment,
 } from '../benchmark.js';
-import { createMariaDbConnection, executeReadOnlySql } from '../pipeline.js';
+import { createMariaDbConnection, executeReadOnlySql, untilAborted } from '../pipeline.js';
 import { errorCodeOf } from '../query-service.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { FIXTURES } from './fixtures.js';
@@ -88,22 +88,60 @@ export class GoldSqlError extends Error {
   }
 }
 
-/** Gold rows on one fixture, cached by (fixture, SQL). Throws GoldSqlError. */
-export async function executeGoldSql(fixtureConnection, sql, { goldCache = null, timeoutMs = GOLD_STATEMENT_TIMEOUT_MS, label = 'expected_sql' } = {}) {
-  const key = `${fixtureConnection.name}\u0000${sql}`;
-  if (goldCache?.has(key)) {
-    return goldCache.get(key);
-  }
-  const pending = executeReadOnlySql(fixtureConnection.connection, sql, { timeoutMs }).catch((error) => {
-    goldCache?.delete(key);
-    throw new GoldSqlError(`Gold SQL (${label}) failed on fixture ${fixtureConnection.name}: ${error.message}`, {
-      fixture: fixtureConnection.name,
-      label,
-      cause: error,
-    });
+function goldError(fixtureConnection, label, error) {
+  return new GoldSqlError(`Gold SQL (${label}) failed on fixture ${fixtureConnection.name}: ${error.message}`, {
+    fixture: fixtureConnection.name,
+    label,
+    cause: error,
   });
-  goldCache?.set(key, pending);
-  return pending;
+}
+
+function abortErrorOf(signal) {
+  const reason = signal?.reason;
+  const error = new Error('The database query was cancelled because the request was aborted.');
+  error.name = 'AbortError';
+  error.code = typeof reason?.code === 'string' ? reason.code : 'QUERY_ABORTED';
+  error.cause = reason ?? null;
+  return error;
+}
+
+/**
+ * Gold rows on one fixture, cached by (fixture, SQL). Throws GoldSqlError.
+ *
+ * `signal` (a case's deadline or the run's stop) stops the caller's wait at
+ * once and, for the run this caller started, the statement too. The cache is
+ * shared by concurrent cases, so a cached run that another case's signal cut
+ * short is run again for this caller instead of failing it.
+ */
+export async function executeGoldSql(fixtureConnection, sql, { goldCache = null, timeoutMs = GOLD_STATEMENT_TIMEOUT_MS, label = 'expected_sql', signal = null } = {}) {
+  const key = `${fixtureConnection.name}\u0000${sql}`;
+  for (;;) {
+    if (signal?.aborted) {
+      throw goldError(fixtureConnection, label, abortErrorOf(signal));
+    }
+    let pending = goldCache?.get(key);
+    if (!pending) {
+      const started = executeReadOnlySql(fixtureConnection.connection, sql, { timeoutMs, signal }).catch((error) => {
+        if (goldCache?.get(key) === started) {
+          goldCache.delete(key);
+        }
+        throw goldError(fixtureConnection, label, error);
+      });
+      started.ownerSignal = signal;
+      goldCache?.set(key, started);
+      pending = started;
+    }
+    try {
+      return await (signal && pending.ownerSignal !== signal
+        ? untilAborted(pending, signal, { abortError: () => goldError(fixtureConnection, label, abortErrorOf(signal)) })
+        : pending);
+    } catch (error) {
+      if (pending.ownerSignal && pending.ownerSignal !== signal && pending.ownerSignal.aborted && !signal?.aborted) {
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 function describeError(error) {
@@ -114,9 +152,9 @@ function describeError(error) {
   };
 }
 
-async function executePrediction(fixtureConnection, sql, { timeoutMs, maxRows }) {
+async function executePrediction(fixtureConnection, sql, { timeoutMs, maxRows, signal = null }) {
   try {
-    const rows = await executeReadOnlySql(fixtureConnection.connection, sql, { timeoutMs, maxRows });
+    const rows = await executeReadOnlySql(fixtureConnection.connection, sql, { timeoutMs, maxRows, signal });
     return { rows, truncated: Array.isArray(rows) && rows.length >= maxRows, error: null };
   } catch (error) {
     return { rows: null, truncated: false, error: describeError(error) };
@@ -141,7 +179,10 @@ function toAssignmentObject(goldColumns, assignment) {
  *   fixture matches alone, 'inconsistent_assignment' (no one mapping fits
  *   every fixture) or 'assignment_search_exhausted' (the bounded search gave
  *   up; never a pass).
- * Throws GoldSqlError when a gold variant itself fails.
+ * Throws GoldSqlError when a gold variant itself fails. `signal` (the case
+ * deadline) reaches every gold and prediction statement: once it fires the
+ * gold throws and a prediction becomes an execution error, so the caller
+ * must check the signal before trusting the verdict.
  */
 export async function scoreAgainstGold({
   testCase,
@@ -151,6 +192,7 @@ export async function scoreAgainstGold({
   timeoutMs = null,
   goldTimeoutMs = GOLD_STATEMENT_TIMEOUT_MS,
   schema = null,
+  signal = null,
 } = {}) {
   if (!Array.isArray(connections) || connections.length === 0) {
     throw new Error('scoreAgainstGold needs at least one fixture connection.');
@@ -164,7 +206,7 @@ export async function scoreAgainstGold({
     variants.map((variant) =>
       Promise.all(
         connections.map((fixtureConnection) =>
-          executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label })
+          executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label, signal })
         )
       )
     )
@@ -173,7 +215,7 @@ export async function scoreAgainstGold({
   const predictions = await Promise.all(
     connections.map((fixtureConnection, fixtureIndex) => {
       const largestGold = Math.max(...goldRows.map((rowsByFixture) => rowsByFixture[fixtureIndex].length));
-      return executePrediction(fixtureConnection, predictedSql, { timeoutMs, maxRows: largestGold + 1 });
+      return executePrediction(fixtureConnection, predictedSql, { timeoutMs, maxRows: largestGold + 1, signal });
     })
   );
 

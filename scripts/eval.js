@@ -432,7 +432,7 @@ function formatProgress({ testCase, repetition, result, completed, total, repeat
   const width = String(total).length;
   const status =
     result.status === 'aborted' && result.timed_out
-      ? 'timeout'
+      ? `timeout${result.late_status ? ` (finished late: ${result.late_status})` : ''}`
       : result.status === 'expected_sql_error' && result.error_infra
         ? 'expected_sql_error (the database failed)'
         : result.status;

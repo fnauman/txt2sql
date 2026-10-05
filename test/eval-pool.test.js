@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { CaseTimeoutError, createDeadline, runCaseRepetitions, runPool } from '../src/eval/pool.js';
+import { attributeCaseRuns } from '../src/eval/runner.js';
+import { summarizeRunStatistics } from '../src/eval/stats.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
 
@@ -237,4 +239,127 @@ test('a deadline during a stopped run is still a timeout, and a stop signal neve
   assert.equal(run.repetitions[0][0].timed_out, true);
   assert.equal(run.stopped, null);
   assert.ok(listeners <= 0, `listeners left on the stop signal: ${listeners}`);
+});
+
+const within = (promise, ms, what) =>
+  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not settle within ${ms} ms`)), ms).unref())]);
+
+test('a result that arrives after the case deadline is a timeout, never a pass; its attempts and cost are kept', async () => {
+  const late = { status: 'pass', attempts: [{ attempt: 1, generatedSql: 'SELECT 1' }], attempt_count: 1, llm_cost: { totalCost: 0.25 }, llm_usage: { total_tokens: 9 }, timings: { totalMs: 60 } };
+  const run = await runCaseRepetitions({
+    cases: cases(3),
+    concurrency: 3,
+    caseTimeoutMs: 30,
+    graceMs: 1000,
+    runRepetition: async ({ testCase }) => {
+      if (testCase.id === 'case_1') {
+        return passResult(0.25);
+      }
+      // Gold execution or oracle scoring that does not notice the signal and
+      // finishes inside the grace period.
+      await tick(60);
+      if (testCase.id === 'case_3') {
+        throw Object.assign(new Error('scoring failed after the deadline'), { code: 'X' });
+      }
+      return late;
+    },
+  });
+  assert.equal(run.repetitions[0][0].status, 'pass');
+  const timedOut = run.repetitions[1][0];
+  assert.deepEqual([timedOut.status, timedOut.timed_out, timedOut.error_code, timedOut.late_status], ['aborted', true, 'CASE_TIMEOUT', 'pass']);
+  assert.match(timedOut.error, /Case deadline of 30 ms exceeded; the case finished late \(pass\), which counts as a timeout/);
+  assert.deepEqual(timedOut.attempts, late.attempts, 'what the case recorded is kept');
+  assert.deepEqual([timedOut.llm_cost, timedOut.llm_usage, timedOut.attempt_count], [late.llm_cost, late.llm_usage, 1]);
+  assert.equal(run.spentUsd, 0.5, 'the late case still spent its cost');
+  // A case that throws after its deadline is a timeout too, not an evaluation error.
+  assert.deepEqual([run.repetitions[2][0].status, run.repetitions[2][0].timed_out, run.repetitions[2][0].error_code], ['aborted', true, 'CASE_TIMEOUT']);
+
+  // Slow cases cannot inflate accuracy: 1 of 3 passed in time.
+  const records = await attributeCaseRuns(
+    run.repetitions.map((repetitions, index) => ({ entry: { testCase: normalizeBenchmarkCase({ id: `case_${index + 1}`, question: `Q${index}?`, expected_sql: 'SELECT 1' }), datasets: ['d'] }, repetitions })),
+    { checkGuardrails: false }
+  );
+  assert.deepEqual(records.map((record) => record.summary.outcome), ['pass', 'timeout', 'timeout']);
+  assert.equal(summarizeRunStatistics(records, { resamples: 50 }).strictAccuracy.value, 0.3333);
+});
+
+test('evaluateQuestion: the deadline reaches gold execution; a gold run cut short is a timeout, not a broken gold', async () => {
+  const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
+  const testCase = normalizeBenchmarkCase({ id: 'c', question: 'How many customers?', expected_sql: 'SELECT 1 AS n', comparison: { mode: 'scalar' } });
+  const deadline = createDeadline(20);
+  let asked = false;
+  const result = await within(
+    evaluateQuestion({
+      client: {},
+      // The gold never answers (a slow gold on a busy database).
+      connection: { query: () => new Promise(() => {}) },
+      schema,
+      model: 'gpt-4o-mini',
+      testCase,
+      caseIndex: 1,
+      trace: { emit: async () => {} },
+      signal: deadline.signal,
+      dependencies: {
+        runQuestion: async () => {
+          asked = true;
+          return { success: true, sql: 'SELECT 1 AS n', promptTables: [] };
+        },
+      },
+    }),
+    2000,
+    'evaluateQuestion'
+  );
+  deadline.clear();
+  assert.deepEqual([result.status, result.error_stage, result.error_code], ['aborted', 'aborted', 'CASE_TIMEOUT']);
+  assert.equal(asked, false, 'no LLM call after the deadline');
+});
+
+test('evaluateQuestion: the deadline reaches oracle scoring; a case whose deadline fired while scoring is aborted', async () => {
+  const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
+  const testCase = normalizeBenchmarkCase({ id: 'c', question: 'How many customers?', expected_sql: 'SELECT 1 AS n', comparison: { mode: 'scalar' } });
+  const controller = new AbortController();
+  let seen = null;
+  const result = await evaluateQuestion({
+    client: {},
+    connection: { query: async () => [[{ n: 1 }]] },
+    schema,
+    model: 'gpt-4o-mini',
+    testCase,
+    caseIndex: 1,
+    trace: { emit: async () => {} },
+    signal: controller.signal,
+    dependencies: {
+      runQuestion: async () => ({ success: true, sql: 'SELECT 1 AS n', promptTables: [], llmCost: { totalCost: 0.01 }, attemptCount: 1 }),
+      scorePrediction: async (options) => {
+        seen = options.signal;
+        // The deadline fires while the fixtures are being scored.
+        controller.abort(new CaseTimeoutError(10));
+        return { match: true, matchedGold: 'expected_sql', reason: 'match', perFixture: [], signalWarnings: [], disallowedWarnings: [], killedOn: [], assignment: {} };
+      },
+    },
+  });
+  assert.equal(seen, controller.signal);
+  assert.deepEqual([result.status, result.error_stage, result.error_code], ['aborted', 'aborted', 'CASE_TIMEOUT']);
+  assert.deepEqual(result.llm_cost, { totalCost: 0.01 }, 'the cost of the answered question is kept');
+
+  // Scoring that throws because the deadline cut it short is aborted as well.
+  const second = new AbortController();
+  const thrown = await evaluateQuestion({
+    client: {},
+    connection: { query: async () => [[{ n: 1 }]] },
+    schema,
+    model: 'gpt-4o-mini',
+    testCase,
+    caseIndex: 1,
+    trace: { emit: async () => {} },
+    signal: second.signal,
+    dependencies: {
+      runQuestion: async () => ({ success: true, sql: 'SELECT 1 AS n', promptTables: [] }),
+      scorePrediction: async () => {
+        second.abort(new CaseTimeoutError(10));
+        throw new Error('The database query was cancelled because the request was aborted.');
+      },
+    },
+  });
+  assert.deepEqual([thrown.status, thrown.error_code], ['aborted', 'CASE_TIMEOUT']);
 });

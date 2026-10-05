@@ -2,10 +2,16 @@
 //
 // Tasks are scheduled case-major (every repetition of case 1, then case 2,
 // ...) on `concurrency` workers. Each task gets an AbortSignal that fires
-// after `caseTimeoutMs`; it is passed down to runOptimizedQuestion, which stops
-// the in-flight LLM call (a query already running ends at its statement
-// timeout). A task that ignores the signal is abandoned `graceMs` later and
-// recorded as a timeout.
+// after `caseTimeoutMs`; evaluateQuestion passes it to the gold runs, to
+// runOptimizedQuestion (which stops the in-flight LLM call) and to the
+// oracle's scoring (a query already running on a plain connection ends at its
+// statement timeout). The deadline covers the whole task: a result that
+// arrives after it, whatever its status (a late pass included), or a task that
+// throws after it, is recorded as a timeout (status 'aborted', timed_out,
+// error_code CASE_TIMEOUT, the late status in `late_status`), keeping the
+// attempts and cost it recorded, so a slow case can never count as a pass.
+// A task that ignores the signal is abandoned `graceMs` later and recorded as
+// a timeout too; the grace only lets a task stop and report what it did.
 //
 // Budget: once the cumulative LLM cost of finished tasks reaches `budgetUsd`,
 // no NEW case is started; every repetition of a case that has not started is
@@ -143,6 +149,23 @@ function abortedPromise(signal) {
   };
 }
 
+// A result (or a throw) that arrived after the deadline: a timeout that keeps
+// what the task recorded.
+function lateTimeoutResult(result, timeoutMs) {
+  if (result.status === 'aborted') {
+    return { ...result, timed_out: true };
+  }
+  return {
+    ...result,
+    status: 'aborted',
+    timed_out: true,
+    late_status: result.status,
+    error: `Case deadline of ${timeoutMs} ms exceeded; the case finished late (${result.status}), which counts as a timeout.`,
+    error_stage: 'aborted',
+    error_code: 'CASE_TIMEOUT',
+  };
+}
+
 function timeoutResult(timeoutMs) {
   return {
     status: 'aborted',
@@ -233,8 +256,10 @@ export async function runCaseRepetitions({
         pending.catch(() => {});
         return wasStopped() ? cancelledResult(stopReasonOf(stopSignal), { cancelled_in_flight: true }) : timeoutResult(caseTimeoutMs);
       }
-      if (raced?.status === 'aborted' && deadline.timedOut) {
-        return { ...raced, timed_out: true };
+      // Checked as the result arrives: the deadline timer cannot fire between
+      // the task settling and this line (no macrotask runs in between).
+      if (deadline.timedOut) {
+        return lateTimeoutResult(raced, caseTimeoutMs);
       }
       if (raced?.status === 'aborted' && wasStopped()) {
         // Keep what the task recorded (attempts, cost) but not as a verdict.
@@ -242,6 +267,12 @@ export async function runCaseRepetitions({
       }
       return raced;
     } catch (error) {
+      if (deadline.timedOut) {
+        return { ...timeoutResult(caseTimeoutMs), error: `Case deadline of ${caseTimeoutMs} ms exceeded; the case then failed: ${error?.message || String(error)}` };
+      }
+      if (wasStopped()) {
+        return cancelledResult(stopReasonOf(stopSignal), { cancelled_in_flight: true });
+      }
       return {
         status: 'evaluation_error',
         warnings: [],

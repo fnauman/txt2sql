@@ -187,6 +187,8 @@ test('runs cut short keep their status unless a recorded attempt now completes; 
       { ...source.results[0], id: 'legacy_pass', repetitions: undefined, summary: undefined, ...base },
       { ...source.results[0], id: 'timed_out', repetitions: [{ ...base, status: 'aborted', timed_out: true, error_code: 'CASE_TIMEOUT', attempts: [rejectedAttempt] }] },
       { ...source.results[0], id: 'db_was_down', repetitions: [{ ...base, status: 'infra_error', error_code: 'ECONNRESET' }] },
+      // A live run's late answer, recorded as a timeout (the pool's late_status).
+      { ...source.results[0], id: 'late', repetitions: [{ ...base, status: 'aborted', timed_out: true, late_status: 'pass', error_stage: 'aborted', error_code: 'CASE_TIMEOUT' }] },
       {
         ...source.results[0],
         id: 'outage',
@@ -215,6 +217,10 @@ test('runs cut short keep their status unless a recorded attempt now completes; 
   const outage = records.outage.repetitions[0];
   assert.deepEqual([outage.status, outage.outcome, outage.error_code, outage.counted, outage.rescore.inherited], ['llm_error', 'llm_outage', 'HTTP_429', false, true]);
   assert.deepEqual([records.db_was_down.repetitions[0].status, records.db_was_down.repetitions[0].outcome], ['pass', 'pass']);
+  // A late answer's recorded attempts completed, so it is re-judged like any
+  // run cut short after its answer; none of the live timeout's fields remain.
+  const late = records.late.repetitions[0];
+  assert.deepEqual([late.status, late.rescore.originalStatus, 'timed_out' in late, 'late_status' in late, late.error_code], ['pass', 'aborted', false, false, undefined]);
 
   // An infrastructure failure during the replay stops it as infra_error.
   const { report: down } = await rescoreToReport(legacy, { down: new Set(['v2']) });
