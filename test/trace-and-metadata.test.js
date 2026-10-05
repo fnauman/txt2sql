@@ -520,6 +520,10 @@ test('serializeError keeps the validation code, layer and any failure stage for 
   assert.equal(serializeError(truncated).errorStage, 'llm');
   assert.equal(serializeError(truncated).code, 'LLM_TRUNCATED');
 
+  // An unrelated `stage` (e.g. from a third-party library) is not a pipeline stage.
+  const foreign = Object.assign(new Error('upload failed'), { stage: 'multipart-upload' });
+  assert.equal('errorStage' in serializeError(foreign), false);
+
   // Plain errors keep the old shape: no empty layer/errorStage keys.
   const plain = serializeError(new Error('boom'));
   assert.equal('layer' in plain, false);

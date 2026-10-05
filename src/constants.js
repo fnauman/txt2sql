@@ -123,3 +123,8 @@ export const DEFAULT_OPTIMIZED_QUESTIONS = [
   'How many sales documents do we have by document type?',
   'Show outstanding balance by customer',
 ];
+
+// Where a failed question stopped. Returned on every failed result (and by the
+// web API) so callers can tell "blocked by guardrails" from "MariaDB error" or
+// "LLM unavailable" without parsing message text.
+export const ERROR_STAGES = Object.freeze(['llm', 'validation', 'execution', 'aborted', 'infra']);

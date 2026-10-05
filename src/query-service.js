@@ -25,10 +25,9 @@ export const REPO_ROOT = path.resolve(__dirname, '..');
 export const DEFAULT_MODELS_DIR = path.resolve(REPO_ROOT, 'models');
 export const DEFAULT_SCHEMA_PATH = path.resolve(REPO_ROOT, 'generated/schema.json');
 
-// Where a failed question stopped. Returned on every failed result (and by the
-// web API) so callers can tell "blocked by guardrails" from "MariaDB error" or
-// "LLM unavailable" without parsing message text.
-export const ERROR_STAGES = Object.freeze(['llm', 'validation', 'execution', 'aborted', 'infra']);
+// Where a failed question stopped (defined in constants.js so trace.js can use
+// it without an import cycle).
+export { ERROR_STAGES } from './constants.js';
 
 export const DEFAULT_MAX_RETRIES = 1;
 const MAX_RETRIES_LIMIT = 5;

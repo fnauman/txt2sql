@@ -4,6 +4,7 @@ import { Console } from 'node:console';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
+import { ERROR_STAGES } from './constants.js';
 import { getOptionValue, hasOptionFlag } from './env.js';
 
 function roundDurationMs(value) {
@@ -60,8 +61,10 @@ export function serializeError(error) {
     serialized.layer = error.layer;
   }
   // LlmResponseError names it `stage`; results and API payloads `errorStage`.
+  // Only the pipeline's own stage names count: a third-party error may carry an
+  // unrelated `stage` property.
   const stage = error.errorStage || error.stage;
-  if (typeof stage === 'string' && stage) {
+  if (ERROR_STAGES.includes(stage)) {
     serialized.errorStage = stage;
   }
   return serialized;
