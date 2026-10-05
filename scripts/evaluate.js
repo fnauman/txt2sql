@@ -14,8 +14,8 @@ import {
   summarizeBenchmarkResults,
 } from '../src/benchmark.js';
 import { createCaseTraceLogger, extractAttempts } from '../src/eval/case-trace.js';
-import { checkFixtureMeta } from '../src/eval/fixture-seeder.js';
-import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
+import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
+import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import {
   closeFixtureConnections,
   createGoldCache,
@@ -402,23 +402,44 @@ export function summarizeReliability(perRepetition, repeat) {
 }
 
 
-async function describeFixtureStatus(fixtureConnections) {
+// Deep fixture check (checkFixtureContent re-hashes every row): status
+// 'current' | 'drifted' | 'stale' | 'missing' (or 'unknown' when the check
+// itself failed) and whether the master data is the shared MASTER_DATA.
+export async function describeFixtureStatus(fixtureConnections, { check = checkFixtureContent } = {}) {
   const statuses = [];
   for (const fixtureConnection of fixtureConnections) {
     try {
-      const check = await checkFixtureMeta(fixtureConnection.connection, fixtureConnection);
+      const result = await check(fixtureConnection.connection, fixtureConnection);
       statuses.push({
         name: fixtureConnection.name,
         database: fixtureConnection.database,
-        status: check.status,
-        contentHash: check.meta?.contentHash || null,
-        expectedContentHash: check.expected.contentHash,
+        status: result.status,
+        contentHash: result.contentHash,
+        metaContentHash: result.meta?.contentHash || null,
+        expectedContentHash: result.expected.contentHash,
+        masterDataMatches: result.masterDataMatches,
       });
     } catch (error) {
-      statuses.push({ name: fixtureConnection.name, database: fixtureConnection.database, status: 'unknown', error: error.message });
+      statuses.push({ name: fixtureConnection.name, database: fixtureConnection.database, status: 'unknown', masterDataMatches: null, error: error.message });
     }
   }
   return statuses;
+}
+
+/**
+ * The benchmark refuses to run when a fixture's master data is not the shared
+ * MASTER_DATA: the model's prompt context comes from the primary fixture's
+ * master data, so a fixture with other dimension rows would score a different
+ * question than the one the model was asked. Drifted facts only warn.
+ */
+export function assertSharedMasterData(fixtureStatus) {
+  const differing = fixtureStatus.filter((entry) => entry.masterDataMatches === false);
+  if (differing.length > 0) {
+    throw new Error(
+      `Fixture master data differs from the shared master data on ${differing.map((entry) => `${entry.name} (${entry.database})`).join(', ')}. ` +
+        'Every fixture must carry identical dimension rows; run "npm run seed-fixtures" (admin credentials) to rebuild them.'
+    );
+  }
 }
 
 export async function main() {
@@ -581,6 +602,13 @@ export async function main() {
     target: describeMariaDbConnectionTarget({ includeDatabase: false }),
     fixtures: fixtureStatus,
   });
+  try {
+    assertSharedMasterData(fixtureStatus);
+  } catch (error) {
+    await trace.emit('fixtures.master_data_mismatch', { fixtures: fixtureStatus, error: serializeError(error) });
+    await closeFixtureConnections(fixtureConnections);
+    throw error;
+  }
 
   const perRepetition = [];
 
@@ -594,6 +622,12 @@ export async function main() {
   cli.log(`Fixtures: ${fixtureStatus.map((entry) => `${entry.name}=${entry.database} (${entry.status})`).join(', ')}`);
   for (const entry of fixtureStatus.filter((status) => status.status !== 'current')) {
     cli.log(`  warning: fixture ${entry.name} is ${entry.status}; run "npm run seed-fixtures" so its content matches the pins.`);
+  }
+  if (process.env.DB_NAME && !FIXTURES.some((fixture) => fixture.database === process.env.DB_NAME)) {
+    cli.log(
+      `  note: DB_NAME is ${process.env.DB_NAME}; the benchmark runs the product loop on ${PRIMARY_FIXTURE.database} ` +
+        `and scores on ${fixtureStatus.map((entry) => entry.database).join(', ')}, not on DB_NAME.`
+    );
   }
   if (repeat > 1) {
     cli.log(`Repetitions: ${repeat} (reliability mode)`);

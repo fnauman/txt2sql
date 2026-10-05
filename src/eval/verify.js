@@ -20,7 +20,7 @@ import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
-import { createGoldCache, executeGoldSql, GoldSqlError, scoreAgainstGold } from './oracle.js';
+import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 
 /**
  * Validates SQL the way the product does for `question`: master-data
@@ -79,7 +79,7 @@ function checkComparisonColumns(testCase, rows, label, fixture) {
   }
   const columns = new Set(goldColumnsOf(rows));
   const problems = [];
-  for (const key of ['compare_columns', 'value_columns', 'column_order']) {
+  for (const key of ['compare_columns', 'value_columns', 'column_order', 'null_as_zero']) {
     for (const column of testCase.comparison[key] || []) {
       if (!columns.has(column)) {
         problems.push(`comparison.${key} names "${column}", which ${label} does not return on ${fixture}`);
@@ -111,7 +111,7 @@ export async function verifyCase(testCase, {
     for (const fixtureConnection of connections) {
       let rows;
       try {
-        rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, label: variant.label });
+        rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: GOLD_STATEMENT_TIMEOUT_MS, label: variant.label });
       } catch (error) {
         problems.push(error instanceof GoldSqlError ? error.message : `gold error on ${fixtureConnection.name}: ${error.message}`);
         goldFailed = true;
@@ -150,7 +150,7 @@ export async function verifyCase(testCase, {
     }
     const positive = [];
     for (const control of resolved.positive) {
-      const score = await scoreAgainstGold({ testCase, predictedSql: control.sql, connections, goldCache });
+      const score = await scoreAgainstGold({ testCase, predictedSql: control.sql, connections, goldCache, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS });
       const rejection = validate ? await validate(testCase.question, control.sql) : null;
       positive.push({ id: control.id, match: score.match, matchedGold: score.matchedGold, reason: score.reason, perFixture: score.perFixture, rejection });
       if (!score.match) {
@@ -167,7 +167,7 @@ export async function verifyCase(testCase, {
     }
     const negative = [];
     for (const control of resolved.negative) {
-      const score = await scoreAgainstGold({ testCase, predictedSql: control.sql, connections, goldCache });
+      const score = await scoreAgainstGold({ testCase, predictedSql: control.sql, connections, goldCache, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS });
       negative.push({
         id: control.id,
         type: control.type,
@@ -253,4 +253,46 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
       validatorAccepted: positives.filter((control) => !control.rejection).length,
     },
   };
+}
+
+const percent = (value) => (value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`);
+
+/**
+ * verify-dataset's kill-rate gate for one dataset's controls summary: the
+ * design (non-held-out) kill rate must reach `minKillRate` and the held-out
+ * rate `minHeldoutKillRate`. A group without controls is not gated. Returns
+ * the failure messages (empty when the gate passes).
+ */
+export function killRateGateFailures(summary, { datasetName, minKillRate, minHeldoutKillRate = 0 }) {
+  const failures = [];
+  if (!summary) {
+    return failures;
+  }
+  if (summary.design.total > 0 && summary.design.rate < minKillRate) {
+    failures.push(`${datasetName}: design kill rate ${percent(summary.design.rate)} < ${percent(minKillRate)}`);
+  }
+  if (summary.heldout.total > 0 && summary.heldout.rate < minHeldoutKillRate) {
+    failures.push(`${datasetName}: held-out kill rate ${percent(summary.heldout.rate)} < ${percent(minHeldoutKillRate)}`);
+  }
+  return failures;
+}
+
+/**
+ * verify-dataset's fixture gate over checkFixtureContent results
+ * ([{ name, status, masterDataMatches }]): every fixture must hold exactly the
+ * generated content, and its master data must be the shared MASTER_DATA.
+ */
+export function fixtureGateFailures(checks) {
+  const failures = [];
+  for (const check of checks) {
+    if (check.masterDataMatches === false) {
+      failures.push(
+        `fixture ${check.name}: master data differs from the shared MASTER_DATA (every fixture must carry identical dimension rows; run "npm run seed-fixtures")`
+      );
+    }
+    if (check.status !== 'current') {
+      failures.push(`fixture ${check.name}: content is ${check.status}, not what the generator writes (run "npm run seed-fixtures")`);
+    }
+  }
+  return failures;
 }

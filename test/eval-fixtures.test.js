@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { FACT_TABLES, MASTER_DATA, MASTER_TABLES, SEED_FACTS } from '../src/eval/fixture-data.js';
+import { checkFixtureContent, seedFixture } from '../src/eval/fixture-seeder.js';
 import {
+  FIXTURE_GENERATOR_VERSION,
+  FIXTURE_META_TABLE,
   FIXTURES,
   PRIMARY_FIXTURE,
+  SHARED_MASTER_DATA_HASH,
   V3_PRNG_SEED,
   buildFixtureRows,
   buildV2Facts,
@@ -262,4 +266,88 @@ test('master data stays consistent with the semantic layer: sparkling water reso
   );
   const [trail] = rankProductCandidates(MASTER_DATA.Product, expandProductSearchTerms(['trail mix']));
   assert.deepEqual(trail.candidates.map((candidate) => candidate.ProductName), ['Trail Mix Pouch']);
+});
+
+// --- deep content checks (fake connection: no database needed) -------------
+
+// A fake admin/query connection over in-memory tables: answers the meta-row
+// SELECT and the per-table SELECTs readFixtureTables issues, records writes.
+function fakeFixtureDatabase({ tables, meta }) {
+  const statements = [];
+  return {
+    statements,
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes(FIXTURE_META_TABLE) && sql.startsWith('SELECT')) {
+        if (!meta) {
+          throw Object.assign(new Error('no meta table'), { code: 'ER_NO_SUCH_TABLE' });
+        }
+        return [[meta]];
+      }
+      const read = /^SELECT .* FROM `[^`]+`\.`([^`]+)` ORDER BY/.exec(sql);
+      if (read) {
+        if (!tables) {
+          throw Object.assign(new Error('no such table'), { code: 'ER_NO_SUCH_TABLE' });
+        }
+        return [tables[read[1]].map((row) => ({ ...row }))];
+      }
+      return [[]];
+    },
+  };
+}
+
+const metaRowFor = (name, contentHash = describeFixtureContent(name).contentHash) => ({
+  name,
+  content_hash: contentHash,
+  generator_version: FIXTURE_GENERATOR_VERSION,
+  prng_seed: null,
+  row_counts: '{}',
+  created_at: new Date(),
+});
+
+test('checkFixtureContent re-hashes the rows: current, drifted, stale, missing, and master-data drift', async () => {
+  const v2 = FIXTURES[1];
+  const rows = buildFixtureRows('v2');
+
+  const current = await checkFixtureContent(fakeFixtureDatabase({ tables: rows, meta: metaRowFor('v2') }), v2);
+  assert.equal(current.status, 'current');
+  assert.equal(current.masterDataMatches, true);
+  assert.equal(current.masterDataHash, SHARED_MASTER_DATA_HASH);
+
+  // A fact row edited after seeding: the meta row still claims the content.
+  const editedFacts = { ...rows, SalesDocument: rows.SalesDocument.map((row) => (row.SalesDocumentId === 1 ? { ...row, NetAmount: row.NetAmount + 1 } : row)) };
+  const drifted = await checkFixtureContent(fakeFixtureDatabase({ tables: editedFacts, meta: metaRowFor('v2') }), v2);
+  assert.equal(drifted.status, 'drifted');
+  assert.equal(drifted.masterDataMatches, true);
+
+  // A master row deleted: the identical-master-data invariant is broken.
+  const editedMaster = { ...rows, Customer: rows.Customer.filter((row) => row.CustomerId !== 7) };
+  const brokenMaster = await checkFixtureContent(fakeFixtureDatabase({ tables: editedMaster, meta: metaRowFor('v2') }), v2);
+  assert.equal(brokenMaster.status, 'drifted');
+  assert.equal(brokenMaster.masterDataMatches, false);
+
+  assert.equal((await checkFixtureContent(fakeFixtureDatabase({ tables: editedFacts, meta: metaRowFor('v2', 'old') }), v2)).status, 'stale');
+  assert.equal((await checkFixtureContent(fakeFixtureDatabase({ tables: editedFacts, meta: null }), v2)).status, 'missing');
+  // Correct rows without a meta row (e.g. written by an older seed script) are current.
+  assert.equal((await checkFixtureContent(fakeFixtureDatabase({ tables: rows, meta: null }), v2)).status, 'current');
+  const empty = await checkFixtureContent(fakeFixtureDatabase({ tables: null, meta: null }), v2);
+  assert.equal(empty.status, 'missing');
+  assert.equal(empty.masterDataMatches, false);
+});
+
+test('seedFixture skips a database only when its rows hash to the generated content', async () => {
+  const schema = { tables: [] };
+  const seed = FIXTURES[0];
+  const rows = buildFixtureRows('seed');
+  const writes = (connection) => connection.statements.filter((sql) => /^(DELETE|INSERT)/.test(sql));
+
+  const untouched = fakeFixtureDatabase({ tables: rows, meta: metaRowFor('seed') });
+  assert.equal((await seedFixture(untouched, seed, { schema })).action, 'unchanged');
+  assert.deepEqual(writes(untouched), []);
+
+  // Same meta row and the same row counts, but a value edited after seeding.
+  const edited = { ...rows, Product: rows.Product.map((row) => (row.ProductId === 3 ? { ...row, IsActive: 0 } : row)) };
+  const tampered = fakeFixtureDatabase({ tables: edited, meta: metaRowFor('seed') });
+  assert.equal((await seedFixture(tampered, seed, { schema })).action, 'seeded');
+  assert.ok(writes(tampered).some((sql) => sql.startsWith('INSERT INTO `Product`')), 'the rows are rewritten');
 });

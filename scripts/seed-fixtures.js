@@ -1,8 +1,10 @@
 // Create, bootstrap and seed every evaluation fixture database from code:
 // demo_retail (seed), demo_retail_v2 and demo_retail_v3 (src/eval/fixtures.js).
 // All three share the same master data and differ only in the fact tables.
-// Idempotent: a database whose _fixture_meta row already records the content
-// the code generates is left alone (pass --force to rewrite it anyway).
+// Idempotent: a database whose rows already hash to the content the code
+// generates (and whose _fixture_meta row records it) is left alone; any other
+// database, including one whose rows were edited after seeding, is rewritten
+// (pass --force to rewrite it anyway).
 //
 // Uses the admin role (DB_ADMIN_USER / DB_ADMIN_PASSWORD, default root /
 // MARIADB_ROOT_PASSWORD); the SELECT-only query user can read every fixture

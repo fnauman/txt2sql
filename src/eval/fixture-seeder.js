@@ -7,9 +7,11 @@ import { PRIMARY_KEYS, SEEDED_TABLES, TABLE_COLUMNS } from './fixture-data.js';
 import {
   FIXTURE_GENERATOR_VERSION,
   FIXTURE_META_TABLE,
+  SHARED_MASTER_DATA_HASH,
   buildFixtureRows,
   describeFixtureContent,
   fixtureContentHash,
+  masterDataHash,
 } from './fixtures.js';
 
 const INSERT_BATCH_SIZE = 200;
@@ -118,7 +120,8 @@ export async function readFixtureTables(connection, database) {
 
 /**
  * Compares a fixture database's meta row with the content the code would
- * generate today. Returns { status: 'current' | 'stale' | 'missing', ... }.
+ * generate today (meta row only; checkFixtureContent also reads the rows).
+ * Returns { status: 'current' | 'stale' | 'missing', ... }.
  */
 export async function checkFixtureMeta(connection, fixture, { expected = describeFixtureContent(fixture.name) } = {}) {
   const meta = await readFixtureMeta(connection, fixture.database);
@@ -130,11 +133,58 @@ export async function checkFixtureMeta(connection, fixture, { expected = describ
 }
 
 /**
+ * Deep check: re-hashes every seeded table of the fixture database and
+ * compares the result with the content the code generates, so rows edited
+ * after seeding are caught even when the meta row still claims the right
+ * content (about 1.2k rows in all; cheap). Returns
+ * { status, expected, meta, contentHash, masterDataHash, masterDataMatches }:
+ * - status 'current': the database holds exactly the generated content;
+ * - 'drifted': the meta row records the generated content but the rows differ;
+ * - 'stale': the meta row records other content (an older generator);
+ * - 'missing': no meta row and different (or no) content.
+ * masterDataMatches: the master (dimension) tables equal MASTER_DATA, the
+ * invariant every fixture must keep, since the model's prompt context comes
+ * from the primary fixture's master data.
+ */
+export async function checkFixtureContent(connection, fixture, { expected = describeFixtureContent(fixture.name) } = {}) {
+  const meta = await readFixtureMeta(connection, fixture.database);
+  let tables = null;
+  try {
+    tables = await readFixtureTables(connection, fixture.database);
+  } catch (error) {
+    if (error?.code !== 'ER_NO_SUCH_TABLE' && error?.code !== 'ER_BAD_DB_ERROR') {
+      throw error;
+    }
+  }
+  const contentHash = tables ? fixtureContentHash(tables) : null;
+  const actualMasterHash = tables ? masterDataHash(tables) : null;
+  const metaCurrent = Boolean(meta && meta.name === fixture.name && meta.contentHash === expected.contentHash);
+  let status;
+  if (contentHash === expected.contentHash) {
+    status = 'current';
+  } else if (!meta) {
+    status = 'missing';
+  } else {
+    status = metaCurrent ? 'drifted' : 'stale';
+  }
+  return {
+    status,
+    expected,
+    meta,
+    contentHash,
+    masterDataHash: actualMasterHash,
+    masterDataMatches: actualMasterHash === SHARED_MASTER_DATA_HASH,
+  };
+}
+
+/**
  * Idempotently creates, bootstraps and seeds one fixture database: CREATE
  * DATABASE / TABLE IF NOT EXISTS from the compiled schema, then (unless the
- * meta row already records this exact content and `force` is off) replaces
- * the rows and the meta row. `connection` must be an admin connection; the
- * schema comes from loadNarrowSchema. Returns what happened.
+ * database already holds exactly the generated content, checked by
+ * re-hashing its rows, and its meta row records it, and `force` is off)
+ * replaces the rows and the meta row. Rows edited after seeding are
+ * therefore repaired by the next run. `connection` must be an admin
+ * connection; the schema comes from loadNarrowSchema. Returns what happened.
  */
 export async function seedFixture(connection, fixture, { schema, force = false } = {}) {
   if (!schema || !Array.isArray(schema.tables)) {
@@ -149,13 +199,12 @@ export async function seedFixture(connection, fixture, { schema, force = false }
   const description = describeFixtureContent(fixture.name, rows);
   if (!force) {
     const meta = await readFixtureMeta(connection, fixture.database);
-    const counts = meta ? await countSeededRows(connection, fixture.database) : null;
     if (
       meta &&
       meta.name === fixture.name &&
       meta.contentHash === description.contentHash &&
       meta.generatorVersion === FIXTURE_GENERATOR_VERSION &&
-      SEEDED_TABLES.every((table) => counts[table] === description.rowCounts[table])
+      (await hashFixtureDatabase(connection, fixture.database)) === description.contentHash
     ) {
       return { fixture: fixture.name, database: fixture.database, action: 'unchanged', ...description };
     }
@@ -165,15 +214,6 @@ export async function seedFixture(connection, fixture, { schema, force = false }
   await writeFixtureRows(connection, rows);
   await writeFixtureMeta(connection, description);
   return { fixture: fixture.name, database: fixture.database, action: 'seeded', ...description };
-}
-
-async function countSeededRows(connection, database) {
-  const counts = {};
-  for (const table of SEEDED_TABLES) {
-    const [[row]] = await connection.query(`SELECT COUNT(*) AS n FROM ${quoteIdentifier(database)}.${quoteIdentifier(table)}`);
-    counts[table] = Number(row.n);
-  }
-  return counts;
 }
 
 /** Hash of what a database actually holds (deep check, reads every row). */

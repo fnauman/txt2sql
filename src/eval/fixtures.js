@@ -29,7 +29,7 @@
 
 import crypto from 'node:crypto';
 
-import { FACT_TABLES, MASTER_DATA, PRIMARY_KEYS, SEED_FACTS, SEEDED_TABLES, TABLE_COLUMNS } from './fixture-data.js';
+import { FACT_TABLES, MASTER_DATA, MASTER_TABLES, PRIMARY_KEYS, SEED_FACTS, SEEDED_TABLES, TABLE_COLUMNS } from './fixture-data.js';
 import { createPrng } from './prng.js';
 
 // Bump when the generated content of any fixture changes on purpose; the
@@ -850,12 +850,13 @@ function canonicalCell(value) {
 }
 
 /**
- * sha256 over every seeded table, row and column in a canonical order.
- * `tables` may be generated rows or rows read back from the database.
+ * sha256 over every seeded table (or only `tableNames`), row and column in a
+ * canonical order. `tables` may be generated rows or rows read back from the
+ * database.
  */
-export function fixtureContentHash(tables) {
+export function fixtureContentHash(tables, { tableNames = SEEDED_TABLES } = {}) {
   const hash = crypto.createHash('sha256');
-  for (const table of SEEDED_TABLES) {
+  for (const table of tableNames) {
     const columns = TABLE_COLUMNS[table];
     const key = PRIMARY_KEYS[table];
     const rows = [...(tables[table] || [])].sort((left, right) => Number(left[key]) - Number(right[key]));
@@ -864,6 +865,14 @@ export function fixtureContentHash(tables) {
   }
   return hash.digest('hex');
 }
+
+/** sha256 over the master (dimension) tables only: what every fixture shares. */
+export function masterDataHash(tables) {
+  return fixtureContentHash(tables, { tableNames: MASTER_TABLES });
+}
+
+/** The master-data hash every fixture database must have (MASTER_DATA). */
+export const SHARED_MASTER_DATA_HASH = masterDataHash(MASTER_DATA);
 
 export function fixtureRowCounts(tables) {
   return Object.fromEntries(SEEDED_TABLES.map((table) => [table, (tables[table] || []).length]));

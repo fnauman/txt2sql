@@ -12,7 +12,11 @@
 // non-held-out negatives must reach --min-kill-rate (default 0.95).
 //
 // Schema/data drift that would silently break a gold query is caught here
-// instead of being misread as a model failure during evaluation.
+// instead of being misread as a model failure during evaluation: every
+// fixture database is re-hashed and must hold exactly the generated content,
+// with master data identical to the shared MASTER_DATA. The fixture databases
+// are always demo_retail, demo_retail_v2 and demo_retail_v3; DB_NAME is not
+// used.
 //
 // Usage:
 //   npm run verify-dataset                           # all datasets in datasets/
@@ -28,10 +32,16 @@ import { fileURLToPath } from 'node:url';
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
-import { checkFixtureMeta } from '../src/eval/fixture-seeder.js';
-import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
+import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
+import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
-import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
+import {
+  createValidatorProbe,
+  fixtureGateFailures,
+  killRateGateFailures,
+  summarizeControls,
+  verifyCase,
+} from '../src/eval/verify.js';
 import { loadNarrowSchema, writeJsonFile } from '../src/pipeline.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -158,6 +168,13 @@ export async function main(argv = process.argv.slice(2)) {
   const targets = await resolveDatasetTargets(argv);
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH });
 
+  if (process.env.DB_NAME && !FIXTURES.some((fixture) => fixture.database === process.env.DB_NAME)) {
+    console.log(
+      `Note: DB_NAME is ${process.env.DB_NAME}; verify-dataset reads the fixture databases ` +
+        `(${fixtures.map((fixture) => fixture.database).join(', ')}), not DB_NAME.\n`
+    );
+  }
+
   const connections = await openFixtureConnections({ fixtures });
   const goldCache = createGoldCache();
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
@@ -169,17 +186,26 @@ export async function main(argv = process.argv.slice(2)) {
   const report = { generatedAt: new Date().toISOString(), fixtures: [], minKillRate, minHeldoutKillRate, datasets: [] };
 
   try {
-    console.log('Fixtures:');
+    console.log('Fixtures (content re-hashed):');
+    const fixtureChecks = [];
     for (const fixtureConnection of connections) {
-      const check = await checkFixtureMeta(fixtureConnection.connection, fixtureConnection);
-      report.fixtures.push({ name: fixtureConnection.name, database: fixtureConnection.database, status: check.status, contentHash: check.meta?.contentHash || null });
-      console.log(`  ${fixtureConnection.name.padEnd(4)} ${fixtureConnection.database.padEnd(15)} ${check.status}`);
-      if (check.status === 'stale') {
-        gateFailures.push(`fixture ${fixtureConnection.name} holds different content than the generator (run "npm run seed-fixtures")`);
-      } else if (check.status === 'missing') {
-        console.log(`       (no ${'_fixture_meta'} row: content not verified; "npm run seed-fixtures" writes it)`);
-      }
+      const check = await checkFixtureContent(fixtureConnection.connection, fixtureConnection);
+      fixtureChecks.push({ name: fixtureConnection.name, status: check.status, masterDataMatches: check.masterDataMatches });
+      report.fixtures.push({
+        name: fixtureConnection.name,
+        database: fixtureConnection.database,
+        status: check.status,
+        contentHash: check.contentHash,
+        metaContentHash: check.meta?.contentHash || null,
+        expectedContentHash: check.expected.contentHash,
+        masterDataMatches: check.masterDataMatches,
+      });
+      console.log(
+        `  ${fixtureConnection.name.padEnd(4)} ${fixtureConnection.database.padEnd(15)} ${check.status.padEnd(8)} ` +
+          `master data ${check.masterDataMatches ? 'shared' : 'DIFFERS'}`
+      );
     }
+    gateFailures.push(...fixtureGateFailures(fixtureChecks));
 
     for (const target of targets) {
       const info = await loadBenchmarkDataset(target);
@@ -214,12 +240,7 @@ export async function main(argv = process.argv.slice(2)) {
       const summary = checkControls ? summarizeControls(caseResults, { fixtureNames }) : null;
       if (summary && summary.design.total + summary.heldout.total + summary.positive.total > 0) {
         printControlsSummary(summary, fixtureNames);
-        if (summary.design.total > 0 && summary.design.rate < minKillRate) {
-          gateFailures.push(`${info.datasetName}: design kill rate ${percent(summary.design.rate)} < ${percent(minKillRate)}`);
-        }
-        if (summary.heldout.total > 0 && summary.heldout.rate < minHeldoutKillRate) {
-          gateFailures.push(`${info.datasetName}: held-out kill rate ${percent(summary.heldout.rate)} < ${percent(minHeldoutKillRate)}`);
-        }
+        gateFailures.push(...killRateGateFailures(summary, { datasetName: info.datasetName, minKillRate, minHeldoutKillRate }));
       }
       report.datasets.push({ name: info.datasetName, path: info.datasetPath, cases: caseResults, controls: summary });
     }
