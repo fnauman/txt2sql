@@ -43,7 +43,7 @@ import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
-import { attributeCaseRuns, buildReport, describeSuite } from '../src/eval/runner.js';
+import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { describeFilters, filterSuiteEntries, parseList, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
@@ -397,9 +397,48 @@ function markdownPathFor(reportPath) {
 }
 
 /**
+ * With --gate, the paired comparison must cover at least this fraction of the
+ * run's cases. Below it (and always when no case pairs: an unrelated or empty
+ * baseline, renamed ids, or changed gold for every shared case) the
+ * regression gate has not tested the run, so the run exits 2 instead of
+ * passing. Half is the floor: a baseline that cannot pair most of the suite is
+ * stale and must be refreshed (npm run eval -- --write-baseline).
+ */
+export const MIN_GATE_PAIRED_FRACTION = 0.5;
+
+/** Why --gate cannot trust this comparison (null when it can). */
+export function gatePairingFailure(comparison, { minFraction = MIN_GATE_PAIRED_FRACTION } = {}) {
+  const goldChanged = comparison.excluded?.goldChanged?.length || 0;
+  const notCounted = comparison.excluded?.notCounted?.length || 0;
+  const newCases = comparison.newCases?.length || 0;
+  const paired = comparison.paired || 0;
+  const total = comparison.candidateCases ?? paired + goldChanged + notCounted + newCases;
+  const why = [
+    goldChanged ? `${goldChanged} with changed gold or scoring` : null,
+    notCounted ? `${notCounted} not counted or timed out in one report` : null,
+    newCases ? `${newCases} not in the baseline` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const label = comparison.baseline?.label ? ` ${comparison.baseline.label}` : '';
+  const advice = 'refresh the baseline (npm run eval -- --write-baseline) or pass --compare <report.json> with a baseline of this suite';
+  if (paired === 0 || comparison.verdict === 'no_paired_cases') {
+    return `--gate compared no case with the baseline${label}: 0 of this run's ${total} case(s) paired${why ? ` (${why})` : ''}; ${advice}`;
+  }
+  if (paired < minFraction * total) {
+    return (
+      `--gate compared only ${paired} of this run's ${total} case(s) with the baseline${label} (below ${Math.round(minFraction * 100)}%)` +
+      `${why ? `: ${why}` : ''}; ${advice}`
+    );
+  }
+  return null;
+}
+
+/**
  * Exit code of a finished run: { code, reasons }. 2 for harness, dataset or
- * infrastructure failures; 1 for a failed --gate (or, in the benchmark
- * profile, any failed case in a single-repetition run); else 0.
+ * infrastructure failures, and for a --gate whose baseline pairs too few cases
+ * (gatePairingFailure); 1 for a failed --gate (or, in the benchmark profile,
+ * any failed case in a single-repetition run); else 0.
  */
 export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false } = {}) {
   // A rescore keeps outcomes it could not re-check (a recorded outage or a
@@ -436,6 +475,12 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (report.stats?.strictAccuracy?.value == null) {
     harness.push('no case was counted, so there is no accuracy to report');
   }
+  if (gate && report.comparison) {
+    const pairing = gatePairingFailure(report.comparison);
+    if (pairing) {
+      harness.push(pairing);
+    }
+  }
   if (harness.length > 0) {
     return { code: 2, reasons: harness };
   }
@@ -471,6 +516,40 @@ async function readJson(filePath, what) {
   } catch (error) {
     throw new HarnessError(`${what} ${filePath} is not valid JSON: ${error.message}`, { code: 'REPORT_INVALID', cause: error });
   }
+}
+
+/**
+ * Throws REPORT_INVALID unless `report` reads as an evaluation report.json:
+ * an object with a non-empty results[] whose entries carry a case id and a
+ * summary (report version 2) or a status (a pre-runner report), and no
+ * report version newer than this runner's. `{}`, another JSON file or an
+ * empty report would otherwise compare as "no paired cases".
+ */
+export function validateBaselineReport(report, filePath) {
+  const fail = (message) => new HarnessError(message, { code: 'REPORT_INVALID' });
+  if (!report || typeof report !== 'object' || Array.isArray(report) || !Array.isArray(report.results)) {
+    throw fail(`${filePath} is not an evaluation report (no results[]); pass a report.json written by npm run eval.`);
+  }
+  if ('reportVersion' in report && !(Number.isInteger(report.reportVersion) && report.reportVersion >= 1 && report.reportVersion <= REPORT_VERSION)) {
+    const version = typeof report.reportVersion === 'number' ? report.reportVersion : JSON.stringify(report.reportVersion);
+    throw fail(`${filePath} has report version ${version} (unknown: this runner reads up to ${REPORT_VERSION}).`);
+  }
+  if (report.results.length === 0) {
+    throw fail(`${filePath} has no cases (results[] is empty).`);
+  }
+  for (const [index, result] of report.results.entries()) {
+    if (!result || typeof result.id !== 'string' || result.id === '') {
+      throw fail(`${filePath}: results[${index}] has no case id; is it an evaluation report.json?`);
+    }
+    if (!result.summary && typeof result.status !== 'string') {
+      throw fail(`${filePath}: results[${index}] (${result.id}) has neither a summary nor a status; is it an evaluation report.json?`);
+    }
+  }
+  return report;
+}
+
+async function readBaselineReport(filePath) {
+  return validateBaselineReport(await readJson(filePath, 'baseline report'), filePath);
 }
 
 async function fileExists(filePath) {
@@ -577,7 +656,7 @@ async function loadBaseline(options, model, cli) {
   if (!baselinePath) {
     return null;
   }
-  const report = await readJson(baselinePath, 'baseline report');
+  const report = await readBaselineReport(baselinePath);
   cli.log(`Baseline: ${baselinePath}`);
   if (report.model && report.model !== model) {
     cli.log(`  note: the baseline was run with ${report.model}, this run uses ${model}.`);
@@ -970,7 +1049,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   });
   const generatedAt = new Date().toISOString();
   const baseline = options.compare
-    ? { path: options.compare, report: await readJson(options.compare, 'baseline report') }
+    ? { path: options.compare, report: await readBaselineReport(options.compare) }
     : { path: sourcePath, report: source };
   const comparison = compareReports(
     baseline.report,

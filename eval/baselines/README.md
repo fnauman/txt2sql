@@ -31,7 +31,8 @@ How it is used (details in
 - **Comparison**: cases are paired by id; a case whose gold changed since the
   baseline is excluded and listed. Flips are tested with an exact McNemar test;
   `--gate` fails a run that is significantly worse (and stops with exit 2 when
-  there is no baseline to compare with).
+  there is no baseline to compare with, when the file is not a report, or when
+  it pairs fewer than half of the run's cases).
 - **Rescore**: `--offline` re-validates, re-executes and re-scores the
   baseline's recorded SQL with today's validator, fixtures and oracle, so a
   guardrail, comparator or fixture change shows its effect on real generations

@@ -11,10 +11,13 @@ import {
   createRunStopper,
   defaultBaselinePath,
   describeRunnerFlags,
+  MIN_GATE_PAIRED_FRACTION,
   parseEvalArgs,
   runEval,
+  validateBaselineReport,
   verificationRefusal,
 } from '../scripts/eval.js';
+import { compareReports } from '../src/eval/compare.js';
 
 test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline', () => {
   const options = parseEvalArgs([], { env: {} });
@@ -102,12 +105,12 @@ test('exit codes: 2 for harness/infra, 1 for a failed gate, else 0', () => {
     assert.match(timedOut.reasons[0], /6 repetition\(s\): hit the case deadline; raise --case-timeout-ms or check the provider \(timeout\)/);
   }
 
-  const worse = { verdict: 'worse', mcnemar: { regressions: 6, improvements: 0, p: 0.03125 } };
+  const worse = { verdict: 'worse', paired: 8, candidateCases: 8, mcnemar: { regressions: 6, improvements: 0, p: 0.03125 } };
   assert.equal(computeExitCode(fakeReport({ comparison: worse })).code, 0, 'no gate, no failure');
   const gated = computeExitCode(fakeReport({ comparison: worse }), { gate: true });
   assert.equal(gated.code, 1);
   assert.match(gated.reasons[0], /significantly worse than the baseline: 6 regression\(s\) vs 0 improvement\(s\), exact McNemar p = 0\.03125/);
-  assert.equal(computeExitCode(fakeReport({ comparison: { verdict: 'no_significant_difference' } }), { gate: true }).code, 0);
+  assert.equal(computeExitCode(fakeReport({ comparison: { verdict: 'no_significant_difference', paired: 3, candidateCases: 3 } }), { gate: true }).code, 0);
   assert.equal(computeExitCode(fakeReport({ strict: 0.5 }), { gate: true, minAccuracy: 0.6 }).code, 1);
   assert.equal(computeExitCode(fakeReport({ strict: 0.6 }), { gate: true, minAccuracy: 0.6 }).code, 0);
 
@@ -344,6 +347,57 @@ test('the in-process verify gate: invalid and unscored controls are problems (ex
   assert.match(verificationRefusal({ problems: [{ id: 'c1' }], gateFailures: ['core: design kill rate 50.0% < 95.0%'], controlStatus: { undecided: [], invalid: [], unscored: [] } }), /1 case\(s\) with problems, 1 gate failure\(s\)/);
   // A pre-status verification result (no controlStatus) is read as none.
   assert.equal(verificationRefusal({ problems: [], gateFailures: [] }), null);
+});
+
+test('--gate fails (exit 2) when the baseline pairs no case, or fewer than half of the run\'s cases', () => {
+  assert.equal(MIN_GATE_PAIRED_FRACTION, 0.5);
+  const record = (id, passes, gold = `SELECT '${id}'`) => ({ id, question: `${id}?`, gold_fingerprint: gold, summary: { counted: 1, passes, passRate: passes, majorityPass: passes === 1, outcome: passes ? 'pass' : 'wrong_result' } });
+  const ids = (prefix, count) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+  const candidate = { results: ids('c', 10).map((id) => record(id, 1)) };
+  const gateWith = (baseline, options = { gate: true }) => computeExitCode({ ...fakeReport(), comparison: compareReports(baseline, candidate, { resamples: 50 }) }, options);
+
+  // An unrelated baseline: valid, but no case in common.
+  const unrelated = gateWith({ results: ids('other', 5).map((id) => record(id, 1)) });
+  assert.equal(unrelated.code, 2);
+  assert.match(unrelated.reasons.join('\n'), /--gate compared no case with the baseline: 0 of this run's 10 case\(s\) paired \(10 not in the baseline\)/);
+  // Every shared case changed its gold.
+  const regolded = gateWith({ results: ids('c', 10).map((id) => record(id, 1, 'old gold')) });
+  assert.equal(regolded.code, 2);
+  assert.match(regolded.reasons.join('\n'), /10 with changed gold or scoring/);
+  // Fewer than half paired: the baseline is stale for this suite.
+  const stale = gateWith({ results: ids('c', 4).map((id) => record(id, 1)) });
+  assert.equal(stale.code, 2);
+  assert.match(stale.reasons.join('\n'), /--gate compared only 4 of this run's 10 case\(s\) with the baseline \(below 50%\).*6 not in the baseline/);
+  // Half is enough; without --gate nothing is gated.
+  assert.equal(gateWith({ results: ids('c', 5).map((id) => record(id, 1)) }).code, 0);
+  assert.equal(gateWith({ results: ids('other', 5).map((id) => record(id, 1)) }, { gate: false }).code, 0);
+  // --min-accuracy does not rescue a comparison that was asked for but compared nothing.
+  assert.equal(gateWith({ results: [] }, { gate: true, minAccuracy: 0.1 }).code, 2);
+});
+
+test('a baseline must be an evaluation report: results[] with case ids, a known report version', () => {
+  const invalid = (report) => {
+    try {
+      validateBaselineReport(report, 'base.json');
+    } catch (error) {
+      assert.equal(error.code, 'REPORT_INVALID');
+      assert.equal(error.exitCode, 2);
+      return error.message;
+    }
+    return null;
+  };
+  assert.match(invalid({}), /base\.json is not an evaluation report \(no results\[\]\)/);
+  assert.match(invalid([]), /is not an evaluation report/);
+  assert.match(invalid(null), /is not an evaluation report/);
+  assert.match(invalid({ name: 'text-to-sql', version: '1.0.0' }), /no results\[\]/);
+  assert.match(invalid({ reportVersion: 2, results: [] }), /has no cases/);
+  assert.match(invalid({ reportVersion: 2, results: [{ question: 'q' }] }), /results\[0\] has no case id/);
+  assert.match(invalid({ reportVersion: 3, results: [{ id: 'a', summary: {} }] }), /report version 3 .* this runner reads up to 2/);
+  assert.match(invalid({ reportVersion: 'x', results: [{ id: 'a', summary: {} }] }), /report version "x"/);
+  assert.match(invalid({ results: [{ id: 'a' }] }), /results\[0\] \(a\) has neither a summary nor a status/);
+  // A version 2 report, and a pre-runner one (no version, a status per case).
+  assert.equal(invalid({ reportVersion: 2, results: [{ id: 'a', summary: { counted: 1 } }] }), null);
+  assert.equal(invalid({ results: [{ id: 'a', status: 'pass' }] }), null);
 });
 
 test('unknown flags name the closest known one', () => {

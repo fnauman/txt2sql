@@ -703,7 +703,15 @@ With `--gate` the run exits 1 when the candidate is significantly worse (p <
 when strict accuracy is below X. `--gate` with no baseline to compare with
 (no `--compare` and no `eval/baselines/<model>.json`, or `--no-baseline`)
 stops with exit 2 before anything starts, instead of passing silently; with
-`--min-accuracy` it only warns and gates on accuracy. With 26 cases a significant change needs at
+`--min-accuracy` it only warns and gates on accuracy. A baseline that is
+loaded must be an evaluation report (a non-empty `results[]` of cases with
+ids, a known `reportVersion`), else exit 2. And `--gate` exits 2, not 0, when
+the comparison pairs no case (an unrelated or empty baseline, renamed ids,
+changed gold for every shared case) or fewer than half of the run's cases
+(`MIN_GATE_PAIRED_FRACTION` = 0.5 in scripts/eval.js): the regression gate has
+then not tested the run, and a baseline that pairs less than half the suite is
+stale, so refresh it. `--min-accuracy` does not stand in for a comparison
+that was asked for. With 26 cases a significant change needs at
 least 6 unanimous flips in one direction (p = 0.031); 5 give p = 0.0625.
 
 Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed

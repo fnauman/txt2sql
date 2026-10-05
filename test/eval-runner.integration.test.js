@@ -359,3 +359,19 @@ test('npm run eval --write-baseline: a run of one dataset never replaces the def
     await fs.rm(target, { force: true });
   }
 });
+
+test('--gate exits 2 when the baseline is not a report, or pairs no case with the run', { skip }, async () => {
+  assert.ok(first, 'needs the first run');
+  const empty = path.join(outputRoot, 'empty-baseline.json');
+  await fs.writeFile(empty, '{}');
+  const invalid = await runEval(['--rescore', first.reportPath, '--compare', empty, '--gate'], 'gate-invalid');
+  assert.equal(invalid.code, 2, invalid.stdout + invalid.stderr);
+  assert.match(invalid.stdout + invalid.stderr, /empty-baseline\.json is not an evaluation report \(no results\[\]\)/);
+
+  // Every case id renamed: a valid report, but nothing to pair.
+  const renamed = path.join(outputRoot, 'renamed-baseline.json');
+  await fs.writeFile(renamed, JSON.stringify({ ...first.report, results: first.report.results.map((record) => ({ ...record, id: `renamed_${record.id}` })) }));
+  const unpaired = await runEval(['--rescore', first.reportPath, '--compare', renamed, '--gate'], 'gate-unpaired');
+  assert.equal(unpaired.code, 2, unpaired.stdout + unpaired.stderr);
+  assert.match(unpaired.stdout, /HARNESS: --gate compared no case with the baseline \S*renamed-baseline\.json: 0 of this run's 26 case\(s\) paired \(26 not in the baseline\)/);
+});

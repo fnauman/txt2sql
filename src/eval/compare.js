@@ -89,7 +89,8 @@ function describeReport(report, label) {
 
 /**
  * Compares a candidate report with a baseline report. Returns
- * { baseline, candidate, paired, excluded: { goldChanged, notCounted },
+ * { baseline, candidate, baselineCases, candidateCases, paired,
+ *   excluded: { goldChanged, notCounted },
  *   newCases, removedCases, flips: { regressions, improvements },
  *   rateChanges, accuracy: { baseline, candidate, delta, deltaCi95 },
  *   majority: { baselinePasses, candidatePasses },
@@ -167,6 +168,10 @@ export function compareReports(baselineReport, candidateReport, {
     baseline: describeReport(baselineReport, baselineLabel),
     candidate: describeReport(candidateReport, candidateLabel),
     alpha,
+    // Case counts of both reports: the gate needs to know how much of the
+    // run the pairing covers.
+    baselineCases: baseline.size,
+    candidateCases: candidate.size,
     paired: paired.length,
     pairedCases: paired.map(pick),
     excluded: { goldChanged, notCounted },
