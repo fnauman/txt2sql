@@ -65,25 +65,34 @@ export const BUSINESS_RULES = [
   'When sorting ranking queries, sort rounded aggregate outputs by the underlying unrounded aggregate expression first, then use a secondary deterministic sort key (e.g., entity name/code like CustomerName, ProductName, AccountCode) in ASC order to handle equal values cleanly.',
 ];
 
+// Few-shot examples teach patterns (anti-joins, header grain with a dimension,
+// HAVING) with intents that appear in NO benchmark dataset: an example equal
+// or near-equal to a gold query would make the benchmark measure recall of the
+// prompt (test/few-shot-leakage.test.js enforces it).
 export const FEW_SHOT_EXAMPLES = [
   {
-    question: 'How many active customers do we have?',
-    tables: ['Customer'],
-    sql: `SELECT COUNT(*) AS active_customer_count
-FROM Customer
-WHERE IsActive = 1`,
+    question: 'Which products have never been sold?',
+    tables: ['Product', 'SalesDocumentLine', 'SalesDocument'],
+    sql: `SELECT p.ProductName
+FROM Product p
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM SalesDocumentLine l
+  JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId
+  WHERE l.ProductId = p.ProductId
+    AND IFNULL(d.IsCanceled, 0) = 0
+)
+ORDER BY p.ProductName ASC`,
   },
   {
-    question: 'What are the top 10 products by quantity sold?',
-    tables: ['SalesDocumentLine', 'Product', 'SalesDocument'],
-    sql: `SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty
-FROM SalesDocumentLine l
-JOIN Product p ON l.ProductId = p.ProductId
-JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId
+    question: 'Show net sales by store location',
+    tables: ['SalesDocument', 'StoreLocation'],
+    sql: `SELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount
+FROM SalesDocument d
+JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId
 WHERE IFNULL(d.IsCanceled, 0) = 0
-GROUP BY p.ProductId, p.ProductName
-ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC
-LIMIT 10`,
+GROUP BY s.StoreLocationId, s.LocationName
+ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC`,
   },
   {
     question: 'Show outstanding balance by customer',
@@ -97,17 +106,17 @@ GROUP BY c.CustomerId, c.CustomerName
 ORDER BY SUM(COALESCE(d.BalanceAmount, 0)) DESC, c.CustomerName ASC`,
   },
   {
-    question: 'Show debit and credit totals by ledger account',
-    tables: ['AccountingPosting', 'LedgerAccount'],
-    sql: `SELECT
-  a.AccountCode,
-  a.AccountName,
-  ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit,
-  ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit
-FROM AccountingPosting p
-LEFT JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId
-GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName
-ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC`,
+    question: 'Which customers had more than 2 sales documents in 2026?',
+    tables: ['SalesDocument', 'Customer'],
+    sql: `SELECT c.CustomerName, COUNT(*) AS document_count
+FROM SalesDocument d
+JOIN Customer c ON d.CustomerId = c.CustomerId
+WHERE IFNULL(d.IsCanceled, 0) = 0
+  AND d.DocumentDate >= '2026-01-01'
+  AND d.DocumentDate < '2027-01-01'
+GROUP BY c.CustomerId, c.CustomerName
+HAVING COUNT(*) > 2
+ORDER BY COUNT(*) DESC, c.CustomerName ASC`,
   },
 ];
 
