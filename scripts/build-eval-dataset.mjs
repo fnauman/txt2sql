@@ -1598,6 +1598,9 @@ function mutationsFor(intent) {
     if (intent.metric === 'qty') {
       add('count', 'number of lines instead of the quantity', { countStar: true });
     }
+    if (intent.metric === 'docs') {
+      skip('count', 'COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control');
+    }
     if (metric.grain === 'header' && ['sum', 'avg', 'count'].includes(metric.agg)) {
       add('grain', `the header ${metric.agg === 'count' ? 'row' : 'amount'} repeated for every line (joined to SalesDocumentLine)`, { fanOut: true });
     }

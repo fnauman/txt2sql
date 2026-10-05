@@ -3150,6 +3150,10 @@
     "positive": [],
     "not_emitted": [
       {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      },
+      {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
       }
@@ -3196,6 +3200,12 @@
         "sql": "WITH totals AS (SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01') SELECT totals.document_count FROM totals",
         "note": "the gold as a CTE, sorted and limited outside"
       }
+    ],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
     ]
   },
   "tpl_document_count_monthly_2026_bd4fed": {
@@ -3227,7 +3237,13 @@
         "note": "the header row repeated for every line (joined to SalesDocumentLine)"
       }
     ],
-    "positive": []
+    "positive": [],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
+    ]
   },
   "tpl_doctype_document_count_q1_2026_d80afd": {
     "intentId": "doctype_document_count_q1_2026",
@@ -3260,6 +3276,10 @@
     ],
     "positive": [],
     "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      },
       {
         "type": "group_by",
         "reason": "the dimension names are unique, so grouping by the name alone gives the same groups"
@@ -3307,6 +3327,12 @@
         "sql": "SELECT x.document_count FROM (SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Store Receipt%') AS x",
         "note": "the gold as a derived table, sorted and limited outside"
       }
+    ],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
     ]
   },
   "tpl_north_district_document_count_q1_2026_2f136d": {
@@ -3344,7 +3370,13 @@
         "note": "filter on North District Market dropped"
       }
     ],
-    "positive": []
+    "positive": [],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
+    ]
   },
   "tpl_document_count_mar01_10_2026_785050": {
     "intentId": "document_count_mar01_10_2026",
@@ -3375,7 +3407,13 @@
         "note": "the header row repeated for every line (joined to SalesDocumentLine)"
       }
     ],
-    "positive": []
+    "positive": [],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
+    ]
   },
   "tpl_documents_posted_feb_2026_95c3ed": {
     "intentId": "documents_posted_feb_2026",
@@ -3418,6 +3456,12 @@
         "sql": "SELECT COUNT(*) AS metric_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-02-01' AND d.PostingDate < '2026-03-01'",
         "note": "the gold with another output alias"
       }
+    ],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
     ]
   },
   "tpl_documents_due_apr_2026_6be86c": {
@@ -3455,7 +3499,13 @@
         "note": "the header row repeated for every line (joined to SalesDocumentLine)"
       }
     ],
-    "positive": []
+    "positive": [],
+    "not_emitted": [
+      {
+        "type": "count",
+        "reason": "COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control"
+      }
+    ]
   },
   "tpl_distinct_customers_feb_2026_20cd13": {
     "intentId": "distinct_customers_feb_2026",
