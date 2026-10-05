@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "description": "Minimal MariaDB text-to-SQL starter driven by Sequelize model metadata",
   "keywords": [
@@ -36,7 +36,7 @@
     "evaluate": "node scripts/evaluate.js",
     "verify-dataset": "node scripts/verify-dataset.js",
     "build-edge-dataset": "node scripts/build-edge-dataset.mjs",
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.js\" \"apps/web/test/**/*.test.js\" \"apps/web/test/**/*.test.ts\"",
     "debug-retrieval": "node scripts/debug-retrieval.js",
     "evaluate-retrieval": "node scripts/evaluate-retrieval.js",
     "resolve-master-data": "node scripts/resolve-master-data.js",
