@@ -12,8 +12,15 @@ import {
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { loadSemanticLayerSync } from './semantic-layer.js';
-import { validateSqlGuardrails } from './sql-guardrails.js';
-import { escapeRegExp, uniqueStrings } from './utils.js';
+import { SqlValidationError, validateSqlGuardrails } from './sql-guardrails.js';
+import {
+  SqlTokenizeError,
+  analyzeSqlStructure,
+  isKeywordToken,
+  stripSqlTokens,
+  tokenizeSql,
+} from './sql-tokenizer.js';
+import { uniqueStrings } from './utils.js';
 
 function splitWords(value) {
   return String(value || '')
@@ -155,16 +162,6 @@ export function tokenVariants(token) {
   return variants;
 }
 
-function buildVariantSet(tokens) {
-  const variantSet = new Set();
-  for (const token of tokens) {
-    for (const variant of tokenVariants(token)) {
-      variantSet.add(variant);
-    }
-  }
-  return variantSet;
-}
-
 export function normalizeTokens(text) {
   const tokens = [];
 
@@ -301,44 +298,169 @@ export function buildQuestionContext(question) {
   };
 }
 
-function findMatchedSynonyms(entry, questionContext) {
-  const normalizedQuestionText = splitWords(questionContext.normalizedQuestion).join(' ');
-  const questionTokenSet = new Set(questionContext.questionTokens);
-  const questionVariantSet = buildVariantSet(questionContext.questionTokens);
-  const synonyms = uniqueStrings([entry.name, ...(entry.synonyms || [])]);
-  const matched = [];
+function normalizedPhrase(value) {
+  return splitWords(value).join(' ');
+}
+
+function buildQuestionWordIndex(questionContext) {
+  return splitWords(questionContext.normalizedQuestion).map((word) => ({
+    word,
+    singular: singularTokenVariant(word),
+    variants: tokenVariants(word),
+    isStopword: STOPWORDS.has(word),
+  }));
+}
+
+function buildSynonymWord(word) {
+  return {
+    word,
+    singular: singularTokenVariant(word),
+    variants: tokenVariants(word),
+    exactOnly: word.length <= 1 || STOPWORDS.has(word),
+  };
+}
+
+// One synonym word against one question word: exact, singular/plural, or a
+// shared morphological variant ("moved" ~ "move", "selling" ~ "sell").
+// Stopwords and one-letter words must match exactly, so the "without" in
+// "without postings" is significant.
+function synonymWordMatches(questionWord, synonymWord) {
+  if (questionWord.word === synonymWord.word) {
+    return true;
+  }
+  if (synonymWord.exactOnly || questionWord.isStopword) {
+    return false;
+  }
+  if (questionWord.singular === synonymWord.singular) {
+    return true;
+  }
+  for (const variant of questionWord.variants) {
+    if (synonymWord.variants.has(variant)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every place a synonym occurs in the question, as word spans [start, end).
+// Multi-word synonyms must match as a contiguous phrase (with per-word
+// inflection tolerance). Earlier versions matched multi-word synonyms as an
+// unordered bag of non-stopword tokens, so "without postings" fired on any
+// question that mentioned postings.
+function findSynonymSpans(synonyms, questionWords) {
+  const spans = [];
 
   for (const synonym of synonyms) {
-    const synonymTokens = normalizeTokens(synonym);
-    if (synonymTokens.length === 0) {
+    if (normalizeTokens(synonym).length === 0) {
       continue;
     }
 
-    const normalizedSynonymText = splitWords(synonym).join(' ');
-    const phraseMatched =
-      normalizedSynonymText.length > 0 &&
-      new RegExp(`(^|\\s)${escapeRegExp(normalizedSynonymText)}(\\s|$)`, 'i').test(normalizedQuestionText);
-    const tokenMatched = synonymTokens.every((token) => questionTokenSet.has(token));
-    // Morphological fallback: every synonym token must share a stem/inflection
-    // variant with some question token. This only ever adds matches the exact
-    // and singularized passes missed (e.g. "biggest buyers" -> "buyer").
-    const stemMatched =
-      !tokenMatched &&
-      synonymTokens.every((token) => {
-        for (const variant of tokenVariants(token)) {
-          if (questionVariantSet.has(variant)) {
-            return true;
-          }
-        }
-        return false;
-      });
-
-    if (phraseMatched || tokenMatched || stemMatched) {
-      matched.push(synonym);
+    const synonymWords = splitWords(synonym).map(buildSynonymWord);
+    for (let start = 0; start + synonymWords.length <= questionWords.length; start += 1) {
+      if (synonymWords.every((synonymWord, offset) => synonymWordMatches(questionWords[start + offset], synonymWord))) {
+        spans.push({ synonym, start, end: start + synonymWords.length });
+      }
     }
   }
 
-  return matched;
+  return spans;
+}
+
+function findMatchedSynonyms(entry, questionContext) {
+  const synonyms = uniqueStrings([entry.name, ...(entry.synonyms || [])]);
+  const matched = new Set(findSynonymSpans(synonyms, buildQuestionWordIndex(questionContext)).map((span) => span.synonym));
+  return synonyms.filter((synonym) => matched.has(synonym));
+}
+
+/**
+ * Longest-span arbitration across semantic-layer entries.
+ *
+ * When a multi-word synonym of one entry covers a span of the question, shorter
+ * synonyms of OTHER entries that fall entirely inside that span do not match:
+ * "sales documents" (entity) consumes "sales", so metric net_sales does not
+ * fire, and "credit memo" (document type) consumes "credit". Spans are resolved
+ * longest first and only surviving spans can suppress others.
+ *
+ * Exception: metric phrases are compositional ("brand sales", "biggest buyers",
+ * "product sales" name a dimension plus a measure), so a metric span does not
+ * suppress the entity it mentions.
+ */
+function arbitrateSemanticSpans(candidates) {
+  const spanLength = (span) => span.end - span.start;
+  const ordered = [...candidates].sort(
+    (left, right) => spanLength(right) - spanLength(left) || left.start - right.start
+  );
+  const active = [];
+  const suppressed = [];
+
+  for (const candidate of ordered) {
+    const suppressor = active.find(
+      (other) =>
+        other.key !== candidate.key &&
+        spanLength(other) >= 2 &&
+        spanLength(other) > spanLength(candidate) &&
+        other.start <= candidate.start &&
+        candidate.end <= other.end &&
+        !(other.kind === 'metric' && candidate.kind === 'entity')
+    );
+
+    if (suppressor) {
+      suppressed.push({ ...candidate, suppressedBy: { key: suppressor.key, synonym: suppressor.synonym } });
+      continue;
+    }
+    active.push(candidate);
+  }
+
+  return { active, suppressed };
+}
+
+// Count / list / existence phrasings. In such a question a metric word can
+// describe which rows to count ("How many debit postings") rather than the
+// measure to aggregate; see classifyMetricEnforcement.
+const COUNT_OR_EXISTENCE_INTENT_PATTERNS = [
+  /\bhow many\b/,
+  /\bnumber of\b/,
+  /\bcount\b/,
+  /\b(?:do|does|did) not have\b/,
+  /\b(?:don|doesn|didn) t have\b/,
+  /\b(?:have|has|had) no\b/,
+  /\bwithout\b/,
+  /\bnever\b/,
+  /\bwhich\b.*\bdid we\b/,
+  /\b(?:is|are|was|were) there\b/,
+];
+
+export function detectCountOrExistenceIntent(question) {
+  const text = normalizedPhrase(question);
+  return COUNT_OR_EXISTENCE_INTENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
+ * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning). Both
+ * lists are data-driven, per metric, in the semantic layer:
+ * - `advisory_synonyms`: generic words ("sales", "sold", "moved") that never
+ *   enforce on their own.
+ * - `count_advisory_synonyms`: words that name the measure in an aggregate
+ *   question but only select rows in a count/list/existence question
+ *   ("debit" in "How many debit postings"). They enforce unless the question
+ *   has count/existence intent.
+ * Every other synonym is an explicit metric phrase ("net sales", "revenue",
+ * "units sold") and enforces in every kind of question.
+ */
+function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
+  const advisory = new Set(uniqueStrings(entry.advisory_synonyms).map(normalizedPhrase));
+  const countAdvisory = new Set(uniqueStrings(entry.count_advisory_synonyms).map(normalizedPhrase));
+  const advisoryMatches = matchedSynonyms.filter((synonym) => advisory.has(normalizedPhrase(synonym)));
+  const explicitMatches = matchedSynonyms.filter((synonym) => !advisory.has(normalizedPhrase(synonym)));
+
+  if (explicitMatches.length === 0) {
+    return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
+  }
+  if (countIntent && explicitMatches.every((synonym) => countAdvisory.has(normalizedPhrase(synonym)))) {
+    return { enforcement: 'advisory', enforcementReason: 'count_or_existence_intent', explicitMatches, advisoryMatches };
+  }
+  return { enforcement: 'enforced', enforcementReason: 'explicit_metric_phrase', explicitMatches, advisoryMatches };
 }
 
 function semanticMatchScore(matchedSynonyms) {
@@ -427,10 +549,16 @@ function addDerivedMetrics(metrics, semanticLayer) {
 
   if (hasGeneralSalesMetric && !metricNames.has('line_net_sales')) {
     const lineMetric = (semanticLayer.metrics || []).find((metric) => metric.name === 'line_net_sales');
+    const salesMetric = derivedMetrics.find((metric) => metric.name === 'net_sales');
     if (lineMetric) {
-      derivedMetrics.push(
-        summarizeSemanticEntry(lineMetric, ['sales with product filter context'])
-      );
+      // The derived line-level metric is exactly as strong as the sales match
+      // that triggered it.
+      derivedMetrics.push({
+        ...summarizeSemanticEntry(lineMetric, ['sales with product filter context']),
+        enforcement: salesMetric.enforcement,
+        enforcementReason: salesMetric.enforcementReason,
+        derivedFrom: 'net_sales',
+      });
     }
   }
 
@@ -463,21 +591,67 @@ function findMatchedClarificationRules(clarificationRules, questionContext) {
     .filter((rule) => rule.matchedTriggers.length > 0);
 }
 
+function matchSemanticLayer(semanticLayer, questionContext) {
+  const questionWords = buildQuestionWordIndex(questionContext);
+  const sources = [
+    ...(semanticLayer.entities || []).map((entry) => ({ kind: 'entity', entry, matchEntry: entry })),
+    ...(semanticLayer.metrics || []).map((entry) => ({ kind: 'metric', entry, matchEntry: entry })),
+    ...(semanticLayer.filter_hints || []).map((entry) => ({
+      kind: 'filter',
+      entry,
+      matchEntry: buildFilterHintMatchEntry(entry, semanticLayer),
+    })),
+  ].map((source, index) => ({
+    ...source,
+    key: `${source.kind}:${source.entry.name}:${index}`,
+    synonyms: uniqueStrings([source.matchEntry.name, ...(source.matchEntry.synonyms || [])]),
+  }));
+
+  const candidates = sources.flatMap((source) =>
+    findSynonymSpans(source.synonyms, questionWords).map((span) => ({
+      ...span,
+      key: source.key,
+      kind: source.kind,
+      entryName: source.entry.name,
+    }))
+  );
+  const { active, suppressed } = arbitrateSemanticSpans(candidates);
+
+  const matches = sources
+    .map((source) => {
+      const activeSynonyms = new Set(active.filter((span) => span.key === source.key).map((span) => span.synonym));
+      return { ...source, matchedSynonyms: source.synonyms.filter((synonym) => activeSynonyms.has(synonym)) };
+    })
+    .filter((source) => source.matchedSynonyms.length > 0);
+
+  return {
+    matches,
+    suppressedMatches: suppressed.map((span) => ({
+      kind: span.kind,
+      name: span.entryName,
+      synonym: span.synonym,
+      suppressedBy: sources.find((source) => source.key === span.suppressedBy.key)?.entry.name || null,
+      suppressedBySynonym: span.suppressedBy.synonym,
+    })),
+  };
+}
+
 export function buildSemanticPlan(question, { questionContext = null, semanticLayer = loadSemanticLayerSync() } = {}) {
   const context = questionContext || buildQuestionContext(question);
-  const entities = (semanticLayer.entities || [])
-    .map((entry) => [entry, findMatchedSynonyms(entry, context)])
-    .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
-    .map(([entry, matchedSynonyms]) => summarizeSemanticEntry(entry, matchedSynonyms));
-  let metrics = (semanticLayer.metrics || [])
-    .map((entry) => [entry, findMatchedSynonyms(entry, context)])
-    .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
-    .map(([entry, matchedSynonyms]) => summarizeSemanticEntry(entry, matchedSynonyms));
-  const filterHints = (semanticLayer.filter_hints || [])
-    .map((entry) => {
-      const matchEntry = buildFilterHintMatchEntry(entry, semanticLayer);
-      return [entry, removeSubsumedAliasMatches(findMatchedSynonyms(matchEntry, context), matchEntry.aliasOnlyValues)];
-    })
+  const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
+  const { matches, suppressedMatches } = matchSemanticLayer(semanticLayer, context);
+  const entities = matches
+    .filter((match) => match.kind === 'entity')
+    .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
+  let metrics = matches
+    .filter((match) => match.kind === 'metric')
+    .map((match) => ({
+      ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
+      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
+    }));
+  const filterHints = matches
+    .filter((match) => match.kind === 'filter')
+    .map((match) => [match.entry, removeSubsumedAliasMatches(match.matchedSynonyms, match.matchEntry.aliasOnlyValues)])
     .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
     .map(([entry, matchedSynonyms]) => summarizeFilterHint(entry, matchedSynonyms));
   const hasProductContext =
@@ -511,6 +685,8 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     defaultFilters,
     clarificationRules: findMatchedClarificationRules(semanticLayer.clarification_rules || [], context),
     joinHints: findSemanticJoinHints(semanticLayer.join_paths || [], requiredTables),
+    countIntent,
+    suppressedMatches,
   };
 }
 
@@ -956,93 +1132,22 @@ export function retrieveRelevantTables(
   };
 }
 
-// Keywords that end a FROM table-list. A JOIN/STRAIGHT_JOIN starts a fresh table
-// reference (captured by the keyword regex below); the rest close the FROM clause.
-const FROM_LIST_TERMINATOR =
-  /^(?:WHERE|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|EXCEPT|INTERSECT|WINDOW|FOR|INTO|ON|USING|JOIN|INNER|LEFT|RIGHT|FULL|CROSS|NATURAL|STRAIGHT_JOIN)$/i;
-
-// Tables in a comma-separated FROM list (`FROM a, b, c`). The keyword regex only
-// sees the table immediately after FROM/JOIN, so without this a comma-joined
-// table would slip the allowed-table check entirely (a real, if grant-contained,
-// guardrail bypass). Walk each FROM clause depth-aware — so subquery and
-// SELECT-list commas are ignored — and take the leading identifier of every
-// top-level comma segment. Erring toward over-extraction is safe: an extra
-// candidate that is not in the allow-set just triggers a fail-closed rejection.
-function extractFromListTables(sql) {
-  const tables = [];
-  const isWord = (char) => char !== undefined && /[A-Za-z0-9_]/.test(char);
-  const pushLeading = (start, end) => {
-    const match = sql.slice(start, end).match(/^\s*`?([A-Za-z][A-Za-z0-9_]*)`?/);
-    if (match) {
-      tables.push(match[1]);
-    }
-  };
-
-  const fromRegex = /\bFROM\b/gi;
-  let from;
-  while ((from = fromRegex.exec(sql)) !== null) {
-    let depth = 0;
-    let segmentStart = fromRegex.lastIndex;
-    let i = segmentStart;
-
-    while (i < sql.length) {
-      const char = sql[i];
-      if (char === '(') {
-        depth += 1;
-        i += 1;
-        continue;
-      }
-      if (char === ')') {
-        if (depth === 0) {
-          break; // closing paren of an enclosing subquery — FROM list ends here
-        }
-        depth -= 1;
-        i += 1;
-        continue;
-      }
-      if (depth === 0 && char === ',') {
-        pushLeading(segmentStart, i);
-        segmentStart = i + 1;
-        i += 1;
-        continue;
-      }
-      if (depth === 0 && /[A-Za-z_]/.test(char) && !isWord(sql[i - 1])) {
-        let end = i + 1;
-        while (end < sql.length && isWord(sql[end])) {
-          end += 1;
-        }
-        if (FROM_LIST_TERMINATOR.test(sql.slice(i, end))) {
-          break;
-        }
-        i = end; // skip the rest of this identifier (a table name or alias)
-        continue;
-      }
-      i += 1;
-    }
-
-    pushLeading(segmentStart, i);
-  }
-
-  return tables;
-}
-
+// Tables referenced by a SQL statement, read from the shared MariaDB tokenizer:
+// FROM / JOIN / STRAIGHT_JOIN targets and every table of a comma-separated FROM
+// list, in order of appearance. CTE names (query-local), derived tables and DUAL
+// are not tables; FROM inside EXTRACT/TRIM/SUBSTRING(...) is not a table keyword.
+// A db-qualified reference is returned as "db.table".
+//
+// This is a best-effort helper for trusted SQL (few-shot examples, gold SQL in
+// benchmarks): it never throws. The read-only safety layer (validateSqlSafety)
+// runs the same analysis in strict mode and fails closed on anything it cannot
+// classify.
 export function extractTablesFromSql(sql, { alreadyCleaned = false } = {}) {
   const normalizedSql = alreadyCleaned ? String(sql || '') : cleanModelOutput(sql);
-  const tables = [];
-
-  // FROM / JOIN / STRAIGHT_JOIN each introduce a table. STRAIGHT_JOIN must be
-  // matched explicitly: `\bJOIN` does not match inside STRAIGHT_JOIN because the
-  // preceding underscore is a word character, so there is no word boundary.
-  const keywordRegex = /\b(?:FROM|STRAIGHT_JOIN|JOIN)\s+`?([A-Za-z][A-Za-z0-9_]*)`?/gi;
-  let match;
-  while ((match = keywordRegex.exec(normalizedSql)) !== null) {
-    tables.push(match[1]);
-  }
-
-  // Add the 2nd+ tables of any comma-separated FROM list.
-  for (const table of extractFromListTables(normalizedSql)) {
-    tables.push(table);
-  }
+  const analysis = analyzeSqlStructure(normalizedSql, { tolerant: true });
+  const tables = analysis.tableRefs
+    .filter((ref) => ref.kind === 'table')
+    .map((ref) => (ref.schema ? `${ref.schema}.${ref.name}` : ref.name));
 
   return [...new Set(tables)];
 }
@@ -1122,8 +1227,15 @@ function formatSemanticHints(semanticPlan) {
   }
 
   for (const metric of semanticPlan.metrics || []) {
+    // An advisory metric matched only generic wording ("sales", "sold") or a
+    // count/existence question, so say so instead of steering a COUNT query
+    // toward an amount column.
+    const advisoryNote =
+      metric.enforcement === 'advisory'
+        ? ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)'
+        : '';
     lines.push(
-      `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
+      `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}${advisoryNote}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
         metric.preferredTables.length > 0 ? ` using tables ${metric.preferredTables.join(', ')}` : ''
       }.`
     );
@@ -1553,101 +1665,354 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   }
 }
 
-// Strip string literals, quoted identifiers, and comments so the safety scan
-// matches only executable SQL tokens. This avoids false positives on harmless
-// literals (e.g. WHERE note = 'DELETE later') and prevents comment-obfuscated
-// payloads from sneaking past the keyword/function denylist.
+// Strip string literals, quoted identifiers, and comments using the shared
+// MariaDB tokenizer. Kept for diagnostics and callers that want a literal-free
+// view of the SQL; the safety layer itself works on tokens.
 export function stripSqlForSafetyScan(sql) {
-  return String(sql || '')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/`(?:[^`]|``)*`/g, '``')
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/#[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ');
+  return stripSqlTokens(tokenizeSql(String(sql || ''), { tolerant: true }), { blankQuotedIdentifiers: true });
 }
 
-// Patterns that must never appear in a read-only analytics query. The validator
-// is intentionally conservative: the first keyword must already be SELECT/WITH
-// and only a single statement is permitted, so this list targets the residual
-// ways a SELECT can still write, exfiltrate, lock, or denial-of-service.
-const READ_ONLY_DENYLIST = [
-  {
-    pattern:
-      /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|CALL|DO|HANDLER|RENAME|PREPARE|EXECUTE|DEALLOCATE|SHUTDOWN|KILL|FLUSH|INSTALL|UNINSTALL|LOAD)\b/i,
-    message: 'Only read-only SQL is allowed.',
-  },
-  { pattern: /\bINTO\s+(OUTFILE|DUMPFILE)\b/i, message: 'Writing query output to files is not allowed.' },
-  { pattern: /\bFOR\s+UPDATE\b/i, message: 'Locking reads (FOR UPDATE) are not allowed.' },
-  { pattern: /\bLOCK\s+IN\s+SHARE\s+MODE\b/i, message: 'Locking reads (LOCK IN SHARE MODE) are not allowed.' },
-  { pattern: /@/, message: 'User-defined and server (@/@@) variables are not allowed.' },
-  {
-    pattern: /\b(INFORMATION_SCHEMA|PERFORMANCE_SCHEMA|MYSQL|SYS)\s*\./i,
-    message: 'Querying server metadata schemas is not allowed.',
-  },
-  {
-    pattern:
-      /\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|IS_FREE_LOCK|IS_USED_LOCK|LOAD_FILE|MASTER_POS_WAIT|NAME_CONST|EXTRACTVALUE|UPDATEXML|WAIT_FOR_EXECUTED_GTID_SET)\s*\(/i,
-    message: 'Use of restricted SQL functions (locking, file, timing, or XML) is not allowed.',
-  },
-  {
-    pattern: /\b(USER|CURRENT_USER|SESSION_USER|SYSTEM_USER|VERSION|DATABASE|SCHEMA|CONNECTION_ID|CURRENT_ROLE)\s*\(/i,
-    message: 'Server/session information functions are not allowed.',
-  },
-];
+function safetyError(code, message, details = null) {
+  return new SqlValidationError(message, { code, layer: 'safety', details });
+}
 
-export function validateReadOnlySql(sql, allowedTables, { promptContext = null, response = null } = {}) {
-  const cleaned = cleanModelOutput(sql).replace(/;+\s*$/, '');
-  if (!cleaned) {
-    throw new Error('Model did not return SQL.');
+// Layer-1 policy over significant tokens. Keywords are matched on bare word
+// tokens only (never inside strings or quoted identifiers, and never on an
+// identifier that directly follows `ident.`); function names are matched on bare
+// and backtick-quoted identifiers followed by '('.
+// The validator is intentionally conservative: the first keyword must already be
+// SELECT/WITH and only a single statement is permitted, so these lists target
+// the residual ways a SELECT can still write, exfiltrate, lock, or stall.
+const WRITE_KEYWORDS = new Set([
+  'INSERT',
+  'UPDATE',
+  'DELETE',
+  'DROP',
+  'ALTER',
+  'CREATE',
+  'TRUNCATE',
+  'REPLACE',
+  'MERGE',
+  'GRANT',
+  'REVOKE',
+  'CALL',
+  'DO',
+  'HANDLER',
+  'RENAME',
+  'PREPARE',
+  'EXECUTE',
+  'DEALLOCATE',
+  'SHUTDOWN',
+  'KILL',
+  'FLUSH',
+  'INSTALL',
+  'UNINSTALL',
+  'LOAD',
+]);
+
+// String functions that share a name with a write statement: REPLACE(str, a, b)
+// and INSERT(str, pos, len, new) are read-only when called as functions.
+const WRITE_KEYWORD_STRING_FUNCTIONS = new Set(['REPLACE', 'INSERT']);
+
+const RESTRICTED_FUNCTIONS = new Set([
+  // timing / denial of service
+  'SLEEP',
+  'BENCHMARK',
+  // locking
+  'GET_LOCK',
+  'RELEASE_LOCK',
+  'RELEASE_ALL_LOCKS',
+  'IS_FREE_LOCK',
+  'IS_USED_LOCK',
+  // file access
+  'LOAD_FILE',
+  // replication waits (block until a position/GTID or the timeout)
+  'MASTER_POS_WAIT',
+  'MASTER_GTID_WAIT',
+  'WAIT_FOR_EXECUTED_GTID_SET',
+  // error-based / XML exfiltration
+  'NAME_CONST',
+  'EXTRACTVALUE',
+  'UPDATEXML',
+  // sequence state changes (MariaDB 10.3+) and session state
+  'NEXTVAL',
+  'SETVAL',
+  'LASTVAL',
+  'LAST_INSERT_ID',
+]);
+
+const SESSION_INFO_FUNCTIONS = new Set([
+  'USER',
+  'CURRENT_USER',
+  'SESSION_USER',
+  'SYSTEM_USER',
+  'VERSION',
+  'DATABASE',
+  'SCHEMA',
+  'CONNECTION_ID',
+  'CURRENT_ROLE',
+]);
+
+// MariaDB also accepts these without parentheses (SELECT CURRENT_USER).
+const BARE_SESSION_INFO_KEYWORDS = new Set(['CURRENT_USER', 'CURRENT_ROLE']);
+
+const METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys']);
+// Unambiguous schema names are rejected anywhere; mysql/sys only when used as a
+// qualifier (`mysql.user`) so a column alias named "sys" stays legal.
+const ALWAYS_METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema']);
+
+const SAFETY_MESSAGES = {
+  NOT_READ_ONLY: 'Only read-only SQL is allowed.',
+  FILE_OUTPUT: 'Writing query output to files is not allowed.',
+  SELECT_INTO: 'SELECT ... INTO (variables or files) is not allowed.',
+  SERVER_VARIABLE: 'User-defined and server (@/@@) variables are not allowed.',
+  METADATA_SCHEMA: 'Querying server metadata schemas is not allowed.',
+  DENYLISTED_FUNCTION:
+    'Use of restricted SQL functions (locking, file, timing, replication, sequence, or XML) is not allowed.',
+  SESSION_INFO_FUNCTION: 'Server/session information functions are not allowed.',
+  PROCEDURE_CLAUSE: 'PROCEDURE clauses are not allowed.',
+  RECURSIVE_CTE: 'Recursive CTEs (WITH RECURSIVE) are not allowed.',
+  INDEX_HINT: 'Index hints (USE/FORCE/IGNORE INDEX or KEY) are not allowed.',
+  SYSTEM_TIME: 'System-versioned table queries (FOR SYSTEM_TIME) are not allowed.',
+  CROSS_DATABASE: 'Cross-database references (db.table or db.function()) are not allowed.',
+};
+
+function isPunctToken(token, value) {
+  return Boolean(token) && token.type === 'punct' && token.value === value;
+}
+
+function isCallToken(tokens, index) {
+  return isPunctToken(tokens[index + 1], '(');
+}
+
+function lowerIdentifier(token) {
+  if (token?.type === 'quoted_identifier') {
+    return token.name.toLowerCase();
   }
+  return token?.type === 'word' ? token.value.toLowerCase() : null;
+}
 
-  // Reject MySQL/MariaDB executable comments (/*! ... */) before they are
-  // stripped; their payload runs on the server but hides from naive scanners.
-  if (/\/\*!/.test(cleaned)) {
-    throw new Error('Executable SQL comments (/*! ... */) are not allowed.');
-  }
+// Returns the first layer-1 violation among the significant tokens, scanning in
+// order so the reported error is the leftmost offending construct.
+function findTokenPolicyViolation(tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const next = tokens[index + 1];
 
-  const scanText = stripSqlForSafetyScan(cleaned);
+    if (token.type === 'variable') {
+      return ['SERVER_VARIABLE'];
+    }
 
-  for (const { pattern, message } of READ_ONLY_DENYLIST) {
-    if (pattern.test(scanText)) {
-      throw new Error(message);
+    const lower = lowerIdentifier(token);
+    if (lower && METADATA_SCHEMAS.has(lower) && (ALWAYS_METADATA_SCHEMAS.has(lower) || isPunctToken(next, '.'))) {
+      return ['METADATA_SCHEMA'];
+    }
+
+    const isIdentifier = (token.type === 'word' && !token.afterDot) || token.type === 'quoted_identifier';
+    if (!isIdentifier) {
+      continue;
+    }
+    if (isPunctToken(next, '.') && tokens[index + 2] && isCallToken(tokens, index + 2)) {
+      // db.function(...) calls a stored function in another schema.
+      return ['CROSS_DATABASE'];
+    }
+    if (isCallToken(tokens, index)) {
+      // MariaDB resolves a backtick-quoted built-in name too: `SLEEP`(5) and
+      // `LOAD_FILE`('/etc/passwd') run the real functions (verified on 10.6).
+      const functionName = token.type === 'quoted_identifier' ? token.name.toUpperCase() : token.upper;
+      if (RESTRICTED_FUNCTIONS.has(functionName)) {
+        return ['DENYLISTED_FUNCTION'];
+      }
+      if (SESSION_INFO_FUNCTIONS.has(functionName)) {
+        return ['SESSION_INFO_FUNCTION'];
+      }
+    }
+
+    if (token.type !== 'word') {
+      continue;
+    }
+
+    const word = token.upper;
+    if (word === 'FOR' && isKeywordToken(next, 'UPDATE', 'SHARE')) {
+      return ['LOCKING_READ', `Locking reads (FOR ${next.upper}) are not allowed.`];
+    }
+    // Index hints and FOR SYSTEM_TIME sit inside a FROM list and may be followed
+    // by `, another_table`. Generated analytics SQL never needs them, so they are
+    // rejected outright instead of being parsed (USE, FORCE and IGNORE are
+    // reserved, so `USE INDEX` cannot be an alias followed by a column).
+    if ((word === 'USE' || word === 'FORCE' || word === 'IGNORE') && isKeywordToken(next, 'INDEX', 'KEY')) {
+      return ['INDEX_HINT'];
+    }
+    if (word === 'FOR' && isKeywordToken(next, 'SYSTEM_TIME')) {
+      return ['SYSTEM_TIME'];
+    }
+    if (word === 'LOCK') {
+      return ['LOCKING_READ', 'Locking reads (LOCK IN SHARE MODE) are not allowed.'];
+    }
+    if (word === 'INTO') {
+      return isKeywordToken(next, 'OUTFILE', 'DUMPFILE') ? ['FILE_OUTPUT'] : ['SELECT_INTO'];
+    }
+    if (word === 'SET' && !isKeywordToken(tokens[index - 1], 'CHARACTER')) {
+      // Only CHARACTER SET is legal inside a read query; SET STATEMENT etc. is not.
+      return ['NOT_READ_ONLY'];
+    }
+    if (WRITE_KEYWORDS.has(word) && !(WRITE_KEYWORD_STRING_FUNCTIONS.has(word) && isCallToken(tokens, index))) {
+      return ['NOT_READ_ONLY'];
+    }
+    if (word === 'PROCEDURE') {
+      return ['PROCEDURE_CLAUSE'];
+    }
+    if (word === 'WITH' && isKeywordToken(next, 'RECURSIVE')) {
+      return ['RECURSIVE_CTE'];
+    }
+    if ((word === 'NEXT' || word === 'PREVIOUS') && isKeywordToken(next, 'VALUE') && isKeywordToken(tokens[index + 2], 'FOR')) {
+      return ['DENYLISTED_FUNCTION'];
+    }
+    if (BARE_SESSION_INFO_KEYWORDS.has(word)) {
+      return ['SESSION_INFO_FUNCTION'];
     }
   }
 
-  const firstKeyword = scanText.match(/^\s*(WITH|SELECT)\b/i)?.[1]?.toUpperCase();
+  return null;
+}
+
+/**
+ * Layer 1: read-only safety and table scope, computed from MariaDB-faithful
+ * tokens. Rejects (with error.code and error.layer = 'safety'):
+ * - any comment and any executable comment (generated analytics SQL never needs
+ *   comments, and comment-lexing differences are how payloads hide),
+ * - unterminated strings/identifiers/comments, control characters, and
+ *   backslash-escaped quotes (ambiguous under NO_BACKSLASH_ESCAPES),
+ * - write/DDL keywords, SELECT ... INTO, locking reads, PROCEDURE, SET,
+ *   @/@@ variables, restricted and session-information functions, sequences,
+ *   WITH RECURSIVE, index hints, FOR SYSTEM_TIME, metadata schemas and
+ *   cross-database references,
+ * - anything but a single SELECT/WITH statement (one trailing ';' is allowed;
+ *   the statement may open with parentheses, as in `(SELECT ...) UNION (...)`),
+ * - table references outside `allowedTables`, including parenthesized table
+ *   references and table functions after FROM/JOIN (fail closed). CTE names are
+ *   query-local and are not checked, but the tables inside CTE bodies are.
+ */
+export function validateSqlSafety(sql, allowedTables = []) {
+  const cleaned = cleanModelOutput(sql);
+  if (cleaned.includes('\u0000')) {
+    throw safetyError('INVALID_CHARACTER', 'SQL contains a NUL character.');
+  }
+
+  let tokens;
+  try {
+    tokens = tokenizeSql(cleaned);
+  } catch (error) {
+    if (error instanceof SqlTokenizeError) {
+      throw safetyError(error.code, error.message, { position: error.position, tokenType: error.tokenType });
+    }
+    throw error;
+  }
+
+  if (tokens.some((token) => token.type === 'executable_comment')) {
+    throw safetyError('EXECUTABLE_COMMENT', 'Executable SQL comments (/*! ... */ and /*M! ... */) are not allowed.');
+  }
+  if (tokens.some((token) => token.type === 'comment')) {
+    throw safetyError('SQL_COMMENT', 'SQL comments (--, # and /* */) are not allowed in generated SQL.');
+  }
+  const unknown = tokens.find((token) => token.type === 'unknown');
+  if (unknown) {
+    throw safetyError('INVALID_CHARACTER', `SQL contains an unexpected control character at offset ${unknown.start}.`);
+  }
+  if (tokens.some((token) => token.type === 'string' && token.backslashEscapedQuote)) {
+    throw safetyError(
+      'AMBIGUOUS_STRING_ESCAPE',
+      "Escape quotes inside string literals by doubling them ('') instead of using a backslash."
+    );
+  }
+
+  const analysis = analyzeSqlStructure(tokens);
+  const significant = analysis.tokens;
+
+  // A single trailing ';' is allowed and stripped from the executed SQL.
+  let statementTokens = significant;
+  let executableSql = cleaned;
+  if (isPunctToken(significant.at(-1), ';')) {
+    statementTokens = significant.slice(0, -1);
+    executableSql = cleaned.slice(0, significant.at(-1).start).trimEnd();
+  }
+  if (statementTokens.length === 0) {
+    throw safetyError('EMPTY_SQL', 'Model did not return SQL.');
+  }
+
+  const violation = findTokenPolicyViolation(statementTokens);
+  if (violation) {
+    const [code, message] = violation;
+    throw safetyError(code, message || SAFETY_MESSAGES[code]);
+  }
+
+  // A query expression may open with parentheses: `(SELECT ...) UNION (SELECT
+  // ...)` and `((SELECT ...))` are plain reads, so skip leading '(' tokens.
+  let headIndex = 0;
+  while (isPunctToken(statementTokens[headIndex], '(')) {
+    headIndex += 1;
+  }
+  const firstKeyword = isKeywordToken(statementTokens[headIndex], 'SELECT', 'WITH') ? statementTokens[headIndex].upper : null;
   if (!firstKeyword) {
-    throw new Error('Only SELECT or WITH queries are allowed.');
+    throw safetyError('NOT_SELECT', 'Only SELECT or WITH queries are allowed.');
   }
 
-  const statements = scanText.split(';').map((part) => part.trim()).filter(Boolean);
-  if (statements.length > 1) {
-    throw new Error('Only a single SQL statement is allowed.');
+  if (statementTokens.some((token) => isPunctToken(token, ';'))) {
+    throw safetyError('MULTI_STATEMENT', 'Only a single SQL statement is allowed.');
   }
 
-  const extractedTables = extractTablesFromSql(cleaned, { alreadyCleaned: true });
+  const [issue] = analysis.issues;
+  if (issue) {
+    throw safetyError(issue.code, issue.message);
+  }
 
-  const allowSet = new Set(allowedTables);
-  for (const tableName of extractedTables) {
-    if (!allowSet.has(tableName)) {
-      throw new Error(`SQL references table "${tableName}" which is outside the allowed table set.`);
+  for (const ref of analysis.tableRefs) {
+    if (ref.kind === 'table' && ref.schema) {
+      const code = METADATA_SCHEMAS.has(ref.schema.toLowerCase()) ? 'METADATA_SCHEMA' : 'CROSS_DATABASE';
+      throw safetyError(code, SAFETY_MESSAGES[code]);
     }
   }
 
-  const tablesUsed = [...new Set(extractedTables)];
-  const guardrails = validateSqlGuardrails(cleaned, {
+  const tablesUsed = [
+    ...new Set(analysis.tableRefs.filter((ref) => ref.kind === 'table').map((ref) => ref.name)),
+  ];
+  const allowSet = new Set(allowedTables || []);
+  for (const tableName of tablesUsed) {
+    if (!allowSet.has(tableName)) {
+      throw safetyError('TABLE_SCOPE', `SQL references table "${tableName}" which is outside the allowed table set.`, {
+        table: tableName,
+      });
+    }
+  }
+
+  return {
+    sql: executableSql,
+    tablesUsed,
+    statementCount: 1,
+    firstKeyword,
+    cteNames: [...new Set(analysis.ctes.map((cte) => cte.name))],
+  };
+}
+
+/**
+ * Full validation: layer 1 (validateSqlSafety) then layer 2 (schema-aware
+ * guardrails, only when a prompt context is supplied). Every rejection is a
+ * SqlValidationError carrying `code` and `layer`.
+ */
+export function validateReadOnlySql(sql, allowedTables, { promptContext = null, response = null } = {}) {
+  const safety = validateSqlSafety(sql, allowedTables);
+  const guardrails = validateSqlGuardrails(safety.sql, {
     allowedTables,
     promptContext,
     response,
-    tablesUsed,
+    tablesUsed: safety.tablesUsed,
   });
 
   return {
-    sql: cleaned,
-    tablesUsed,
-    statementCount: statements.length,
-    firstKeyword,
+    sql: safety.sql,
+    tablesUsed: safety.tablesUsed,
+    statementCount: safety.statementCount,
+    firstKeyword: safety.firstKeyword,
     guardrails,
   };
 }

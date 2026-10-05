@@ -358,3 +358,164 @@ test('validateReadOnlySql accepts valid joins through simple derived table colum
     )
   );
 });
+
+test('guardrail rejections carry error.code and error.layer', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
+  const cases = [
+    ['SELECT c.CustomerDisplayName FROM Customer c', 'UNKNOWN_COLUMN'],
+    ['SELECT x.CustomerName FROM Customer c', 'UNKNOWN_TABLE_ALIAS'],
+    ['SELECT CustomerDisplayName FROM Customer', 'UNKNOWN_IDENTIFIER'],
+    [
+      'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
+      'JOIN_PATH',
+    ],
+    [
+      'SELECT c.CustomerName, SUM(v.BillTotalAmount) AS total FROM SalesDocument v JOIN Customer c ON v.CustomerId = c.CustomerId GROUP BY c.CustomerName',
+      'METRIC_COLUMN',
+    ],
+  ];
+
+  for (const [sql, code] of cases) {
+    assert.throws(
+      () => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context }),
+      (error) => error.code === code && error.layer === 'guardrail',
+      code
+    );
+  }
+
+  const sparkling = buildSparklingWaterSalesPrompt();
+  assert.throws(
+    () =>
+      validateReadOnlySql('SELECT SUM(d.NetAmount) AS total FROM SalesDocumentLine d WHERE d.ProductId = 999', allowedTables(sparkling), {
+        promptContext: sparkling.context,
+      }),
+    (error) => error.code === 'MASTER_DATA_ID' && error.layer === 'guardrail'
+  );
+});
+
+test('validateReadOnlySql resolves qualified CTE references through both layers', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validated = validateReadOnlySql(
+    `WITH FirstCustomers AS (SELECT c.CustomerId, c.CustomerName FROM Customer c),
+     Named (Id, Label) AS (SELECT fc.CustomerId, fc.CustomerName FROM FirstCustomers fc)
+     SELECT n.Label, FirstCustomers.CustomerId FROM Named n JOIN FirstCustomers ON FirstCustomers.CustomerId = n.Id`,
+    allowedTables(prompt),
+    { promptContext: prompt.context, response: { tables_used: ['Customer'] } }
+  );
+
+  assert.deepEqual(validated.tablesUsed, ['Customer']);
+  assert.ok(validated.guardrails.columnChecks.qualifiedColumns.some((column) => column.qualifier === 'n' && column.columnName === 'Label'));
+
+  assert.throws(
+    () =>
+      validateReadOnlySql(
+        'WITH fc AS (SELECT c.CustomerId FROM Customer c) SELECT fc.CustomerName FROM fc',
+        allowedTables(prompt),
+        { promptContext: prompt.context }
+      ),
+    (error) => error.code === 'UNKNOWN_COLUMN' && /"CustomerName"/.test(error.message)
+  );
+});
+
+test('qualifiers resolve in their own SELECT scope, the way MariaDB resolves them', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validate = (sql) => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context });
+
+  // The CTE's `d` (SalesDocument) and the outer `d` (Customer) do not collide.
+  const scoped = validate(
+    'WITH t AS (SELECT d.CustomerId, SUM(d.NetAmount) AS net FROM SalesDocument d GROUP BY d.CustomerId) SELECT d.CustomerName, t.net FROM t JOIN Customer d ON d.CustomerId = t.CustomerId'
+  );
+  assert.deepEqual(
+    scoped.guardrails.columnChecks.qualifiedColumns.map(({ tableName, columnName }) => `${tableName}.${columnName}`).slice(0, 3),
+    ['SalesDocument.CustomerId', 'SalesDocument.NetAmount', 'SalesDocument.CustomerId']
+  );
+  assert.ok(scoped.guardrails.columnChecks.qualifiedColumns.some((column) => column.tableName === 'Customer' && column.columnName === 'CustomerName'));
+
+  // Each of these fails on MariaDB 10.6 with "Unknown column": a CTE or derived
+  // body cannot see outer or sibling aliases, UNION branches do not share FROM
+  // clauses, aliases are case-sensitive, an aliased table is no longer
+  // reachable by its name, and a CTE is qualified by its FROM spelling.
+  for (const [sql, qualifier] of [
+    ['WITH x AS (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) SELECT 1 FROM x JOIN Customer c ON c.CustomerId = x.CustomerId', 'c'],
+    ['SELECT 1 FROM Customer c JOIN (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) x ON x.CustomerId = c.CustomerId', 'c'],
+    ['SELECT c.CustomerId FROM Customer c WHERE EXISTS (SELECT 1 FROM (SELECT d.CustomerId FROM SalesDocument d WHERE d.CustomerId = c.CustomerId) x)', 'c'],
+    ['SELECT c.CustomerId FROM Customer c UNION SELECT c.CustomerId FROM SalesDocument d', 'c'],
+    ['SELECT D.CustomerId FROM SalesDocument d', 'D'],
+    ['SELECT SalesDocument.CustomerId FROM SalesDocument d', 'SalesDocument'],
+    ['SELECT Customer.CustomerName FROM SalesDocument d', 'Customer'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT x.CustomerId FROM X', 'x'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT X.CustomerId FROM x', 'X'],
+    ['WITH x AS (SELECT CustomerId FROM Customer) SELECT x.CustomerId FROM x y', 'x'],
+  ]) {
+    assert.throws(
+      () => validate(sql),
+      (error) => error.code === 'UNKNOWN_TABLE_ALIAS' && error.message.includes(`"${qualifier}"`),
+      sql
+    );
+  }
+});
+
+test('CTE bodies see earlier CTEs: stars expand from their columns and lineage carries forward', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validate = (sql) => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context });
+  const CHAIN = 'WITH c1 AS (SELECT c.CustomerId FROM Customer c), c2 AS (SELECT c1.* FROM c1), c3 AS (SELECT * FROM c2)';
+
+  // The join through two star copies is checked against Customer.CustomerId.
+  const joined = validate(`${CHAIN} SELECT c3.CustomerId, d.NetAmount FROM c3 JOIN SalesDocument d ON d.CustomerId = c3.CustomerId`);
+  assert.deepEqual(
+    joined.guardrails.joinChecks.map(({ leftTable, leftColumn, rightTable, rightColumn }) => `${leftTable}.${leftColumn}=${rightTable}.${rightColumn}`),
+    ['SalesDocument.CustomerId=Customer.CustomerId']
+  );
+  assert.throws(
+    () => validate(`${CHAIN} SELECT c3.CustomerId FROM c3 JOIN SalesDocument d ON d.SalesDocumentId = c3.CustomerId`),
+    (error) => error.code === 'JOIN_PATH' && /SalesDocument\.SalesDocumentId to Customer\.CustomerId/.test(error.message)
+  );
+  // Only the projected columns exist on the copies.
+  assert.throws(
+    () => validate(`${CHAIN} SELECT c3.CustomerName FROM c3`),
+    (error) => error.code === 'UNKNOWN_COLUMN' && /"CustomerName" on derived table or CTE "c3"/.test(error.message)
+  );
+
+  // Computed columns survive a star copy and a column list renames them.
+  assert.doesNotThrow(() =>
+    validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b AS (SELECT * FROM a) SELECT b.net, b.CustomerId FROM b')
+  );
+  assert.doesNotThrow(() =>
+    validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b (id, total) AS (SELECT a.* FROM a) SELECT b.total, b.id FROM b')
+  );
+  assert.throws(
+    () => validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b (id, total) AS (SELECT a.* FROM a) SELECT b.net FROM b'),
+    (error) => error.code === 'UNKNOWN_COLUMN'
+  );
+});
+
+test('the ProductId candidate check ignores numbers inside IN (SELECT ...) subqueries', () => {
+  const prompt = buildSparklingWaterSalesPrompt();
+  const validated = validateReadOnlySql(
+    `SELECT SUM(d.NetAmount) AS total_net_amount
+     FROM SalesDocumentLine d
+     WHERE d.ProductId = 101
+       AND d.ProductId IN (SELECT d2.ProductId FROM SalesDocumentLine d2 WHERE d2.SalesDocumentLineId > 10)`,
+    allowedTables(prompt),
+    { promptContext: prompt.context }
+  );
+  assert.deepEqual(validated.guardrails.masterDataChecks.referencedIds, [101]);
+});
+
+test('validateSqlGuardrails rejects header amounts summed across a line join (fan-out)', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'product sales by brand');
+
+  assert.throws(
+    () =>
+      validateReadOnlySql(
+        `SELECT i.ProductName, SUM(v.NetAmount) AS total_net_amount
+         FROM SalesDocument v
+         JOIN SalesDocumentLine d ON d.SalesDocumentId = v.SalesDocumentId
+         JOIN Product i ON d.ProductId = i.ProductId
+         GROUP BY i.ProductName`,
+        allowedTables(prompt),
+        { promptContext: prompt.context }
+      ),
+    (error) => error.code === 'FAN_OUT' && /Use SalesDocumentLine\.NetAmount/.test(error.message)
+  );
+});

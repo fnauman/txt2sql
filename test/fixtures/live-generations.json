@@ -1,0 +1,974 @@
+[
+  {
+    "dataset": "edge",
+    "caseId": "core_public_001",
+    "question": "Show the top customers by total net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN Customer c ON sd.CustomerId = c.CustomerId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_002",
+    "question": "Show the top products by quantity sold in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 2,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"quantity_sold\" (SalesDocumentLine.Quantity).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nJOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE IFNULL(d2.IsCanceled, 0) = 0\n    AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nJOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND l.Quantity > 0\nAND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE IFNULL(d2.IsCanceled, 0) = 0\n    AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_005",
+    "question": "Show the top ledger accounts by debit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  la.AccountCode,\n  la.AccountName,\n  ROUND(SUM(COALESCE(ap.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting ap\nJOIN SalesDocument sd ON ap.SalesDocumentId = sd.SalesDocumentId\nJOIN LedgerAccount la ON ap.LedgerAccountId = la.LedgerAccountId\nWHERE ap.PostingDate >= '2026-03-01' AND ap.PostingDate < '2026-04-01'\nGROUP BY la.LedgerAccountId, la.AccountCode, la.AccountName\nORDER BY total_debit DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nLEFT JOIN AccountingPosting ON SalesDocument.SalesDocumentId = AccountingPosting.SalesDocumentId\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0 AND AccountingPosting.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nLEFT JOIN AccountingPosting ON SalesDocument.SalesDocumentId = AccountingPosting.SalesDocumentId\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0 AND AccountingPosting.SalesDocumentId IS NULL AND SalesDocument.NetAmount IS NOT NULL;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_007",
+    "question": "How many active customers do we have?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_008",
+    "question": "Show the top products by net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_009",
+    "question": "Show the top ledger accounts by credit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting a\nJOIN SalesDocument d ON a.SalesDocumentId = d.SalesDocumentId\nJOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nWHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY SUM(COALESCE(a.CreditAmount, 0)) DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_001_brand_net_sales_march_2026",
+    "question": "Show the top brands by net sales in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN Brand b ON p.BrandId = b.BrandId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY b.BrandId, b.BrandName\nORDER BY total_net_amount DESC, b.BrandName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL joins SalesDocument.CampaignId to Product.CampaignId, which is not an in-scope relationship.",
+    "expected": "reject",
+    "expectedCode": "JOIN_PATH",
+    "reason": "joins SalesDocument.CampaignId to Product.CampaignId (not an in-scope relationship). Seeded demo DB: total_net_amount 3600 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(sd.NetAmount), 0) AS total_net_amount\nFROM SalesDocument sd\nJOIN Product p ON sd.CampaignId = p.CampaignId\nWHERE p.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\n  AND IFNULL(sd.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(sd.NetAmount), 0) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nWHERE p.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\n  AND IFNULL(sd.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_003_sparkling_water_master_data",
+    "question": "Which sparkling water products did we sell in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nAND (p.ProductName LIKE '%sparkling water%' OR p.ProductCode LIKE '%sparkling water%' OR p.ProductTags LIKE '%sparkling water%')\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE DocumentDate >= '2026-03-01' AND DocumentDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE DocumentDate >= '2026-03-01' AND DocumentDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0 AND NetAmount > 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_005_customer_gross_amount_march_2026",
+    "question": "Show the top customers by gross amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_amount\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_gross_amount DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_006_category_line_net_sales_march_2026",
+    "question": "Show net sales by product category in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_net_amount DESC, pc.CategoryName ASC;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_007_category_quantity_current_join",
+    "question": "Which product categories had the highest quantity sold in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sl.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine sl\nJOIN Product p ON sl.ProductId = p.ProductId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nJOIN SalesDocument d ON sl.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_qty DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_008_customer_month_columns_jan_feb_2026",
+    "question": "Compare January and February 2026 net sales by customer in separate columns.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: differs from gold only by including customers with zero January/February sales (a defensible reading the gold label rejects); not a guardrail concern",
+    "sql": "SELECT c.CustomerName, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales \nFROM SalesDocument d \nJOIN Customer c ON d.CustomerId = c.CustomerId \nWHERE IFNULL(d.IsCanceled, 0) = 0 \nGROUP BY c.CustomerId, c.CustomerName \nORDER BY c.CustomerName ASC;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_001",
+    "question": "Show the top customers by total net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN Customer c ON sd.CustomerId = c.CustomerId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_002",
+    "question": "Show the top products by quantity sold in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 2,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"quantity_sold\" (SalesDocumentLine.Quantity).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result (it adds an unrequested Product.IsActive filter that the seed cannot distinguish; no deterministic guardrail rule applies, so the validator must still accept)",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nLEFT JOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nLEFT JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE p.IsActive = 1\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND NOT EXISTS (\n    SELECT 1\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE l2.ProductId = p.ProductId\n    AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nLEFT JOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nLEFT JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE p.IsActive = 1\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND COALESCE(l.Quantity, 0) > 0\nAND NOT EXISTS (\n    SELECT 1\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE l2.ProductId = p.ProductId\n    AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_005",
+    "question": "Show the top ledger accounts by debit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  la.AccountCode,\n  la.AccountName,\n  ROUND(SUM(COALESCE(ap.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting ap\nJOIN SalesDocument sd ON ap.SalesDocumentId = sd.SalesDocumentId\nJOIN LedgerAccount la ON ap.LedgerAccountId = la.LedgerAccountId\nWHERE ap.PostingDate >= '2026-03-01' AND ap.PostingDate < '2026-04-01'\nGROUP BY la.LedgerAccountId, la.AccountCode, la.AccountName\nORDER BY total_debit DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0\nAND SalesDocument.SalesDocumentId NOT IN (SELECT AccountingPosting.SalesDocumentId FROM AccountingPosting)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 2,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0\nAND SalesDocument.SalesDocumentId NOT IN (SELECT AccountingPosting.SalesDocumentId FROM AccountingPosting)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_007",
+    "question": "How many active customers do we have?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_008",
+    "question": "Show the top products by net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_009",
+    "question": "Show the top ledger accounts by credit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting a\nJOIN SalesDocument d ON a.SalesDocumentId = d.SalesDocumentId\nJOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nWHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY SUM(COALESCE(a.CreditAmount, 0)) DESC, l.AccountCode ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_001_brand_net_sales_march_2026",
+    "question": "Show the top brands by net sales in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN Brand b ON p.BrandId = b.BrandId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY b.BrandId, b.BrandName\nORDER BY total_net_amount DESC, b.BrandName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL joins SalesDocument.CampaignId to Product.CampaignId, which is not an in-scope relationship.",
+    "expected": "reject",
+    "expectedCode": "JOIN_PATH",
+    "reason": "joins SalesDocument.CampaignId to Product.CampaignId (not an in-scope relationship). Seeded demo DB: total_net_amount 3600 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(sd.NetAmount), 0) AS total_net_amount\nFROM SalesDocument sd\nJOIN Product p ON sd.CampaignId = p.CampaignId\nWHERE p.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\n  AND IFNULL(sd.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(sd.NetAmount), 0) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nWHERE p.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\n  AND IFNULL(sd.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_003_sparkling_water_master_data",
+    "question": "Which sparkling water products did we sell in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nAND (p.ProductName LIKE '%sparkling water%' OR p.ProductCode LIKE '%sparkling water%' OR p.ProductTags LIKE '%sparkling water%')\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE DocumentDate >= '2026-03-01' AND DocumentDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE DocumentDate >= '2026-03-01' AND DocumentDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0 AND NetAmount > 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_005_customer_gross_amount_march_2026",
+    "question": "Show the top customers by gross amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_amount\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_gross_amount DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_006_category_line_net_sales_march_2026",
+    "question": "Show net sales by product category in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_net_amount DESC"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_007_category_quantity_current_join",
+    "question": "Which product categories had the highest quantity sold in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sl.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine sl\nJOIN Product p ON sl.ProductId = p.ProductId\nJOIN SalesDocument d ON sl.SalesDocumentId = d.SalesDocumentId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_qty DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_008_customer_month_columns_jan_feb_2026",
+    "question": "Compare January and February 2026 net sales by customer in separate columns.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: differs from gold only by including customers with zero January/February sales (a defensible reading the gold label rejects); not a guardrail concern",
+    "sql": "SELECT c.CustomerName, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales \nFROM SalesDocument d \nJOIN Customer c ON d.CustomerId = c.CustomerId \nWHERE IFNULL(d.IsCanceled, 0) = 0 \nGROUP BY c.CustomerId, c.CustomerName \nORDER BY c.CustomerName ASC"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_001",
+    "question": "Show the top customers by total net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN Customer c ON sd.CustomerId = c.CustomerId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\n  AND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_002",
+    "question": "Show the top products by quantity sold in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_003",
+    "question": "Show sales document count by document type in March 2026.",
+    "attempt": 2,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count \nFROM SalesDocument \nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId \nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01' \nAND IFNULL(SalesDocument.IsCanceled, 0) = 0 \nGROUP BY DocumentType.DocumentTypeName;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"quantity_sold\" (SalesDocumentLine.Quantity).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result (it adds an unrequested Product.IsActive filter that the seed cannot distinguish; no deterministic guardrail rule applies, so the validator must still accept)",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nLEFT JOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nLEFT JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE p.IsActive = 1\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_004",
+    "question": "How many products were sold in February 2026 but not in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(DISTINCT p.ProductId) AS product_count\nFROM Product p\nLEFT JOIN SalesDocumentLine l ON p.ProductId = l.ProductId\nLEFT JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE p.IsActive = 1\nAND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\nAND COALESCE(l.Quantity, 0) > 0\nAND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n)"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_005",
+    "question": "Show the top ledger accounts by debit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  la.AccountCode,\n  la.AccountName,\n  ROUND(SUM(COALESCE(ap.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting ap\nJOIN SalesDocument sd ON ap.SalesDocumentId = sd.SalesDocumentId\nJOIN LedgerAccount la ON ap.LedgerAccountId = la.LedgerAccountId\nWHERE ap.PostingDate >= '2026-03-01' AND ap.PostingDate < '2026-04-01'\nGROUP BY la.LedgerAccountId, la.AccountCode, la.AccountName\nORDER BY total_debit DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nLEFT JOIN AccountingPosting ON SalesDocument.SalesDocumentId = AccountingPosting.SalesDocumentId\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0 AND AccountingPosting.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_006",
+    "question": "How many non-canceled sales documents do not have any accounting postings?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nLEFT JOIN AccountingPosting ON SalesDocument.SalesDocumentId = AccountingPosting.SalesDocumentId\nWHERE IFNULL(SalesDocument.IsCanceled, 0) = 0 AND AccountingPosting.SalesDocumentId IS NULL AND SalesDocument.NetAmount IS NOT NULL;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_007",
+    "question": "How many active customers do we have?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_008",
+    "question": "Show the top products by net sales amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "core_public_009",
+    "question": "Show the top ledger accounts by credit amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  la.AccountCode,\n  la.AccountName,\n  ROUND(SUM(COALESCE(ap.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting ap\nJOIN SalesDocument sd ON ap.SalesDocumentId = sd.SalesDocumentId\nJOIN LedgerAccount la ON ap.LedgerAccountId = la.LedgerAccountId\nWHERE sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY la.LedgerAccountId, la.AccountCode, la.AccountName\nORDER BY total_credit DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_001_brand_net_sales_march_2026",
+    "question": "Show the top brands by net sales in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN Brand b ON p.BrandId = b.BrandId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY b.BrandId, b.BrandName\nORDER BY total_net_amount DESC, b.BrandName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL joins SalesDocument.CampaignId to Product.CampaignId, which is not an in-scope relationship.",
+    "expected": "reject",
+    "expectedCode": "JOIN_PATH",
+    "reason": "joins SalesDocument.CampaignId to Product.CampaignId (not an in-scope relationship). Seeded demo DB: total_net_amount 3600 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(SalesDocument.NetAmount), 0) AS total_net_amount\nFROM SalesDocument\nJOIN Product ON SalesDocument.CampaignId = Product.CampaignId\nWHERE Product.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\n  AND IFNULL(SalesDocument.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_002_campaign_net_sales_march_2026",
+    "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800 vs gold 1400",
+    "sql": "SELECT\n  COALESCE(SUM(SalesDocument.NetAmount), 0) AS total_net_amount\nFROM SalesDocument\nJOIN SalesDocumentLine ON SalesDocument.SalesDocumentId = SalesDocumentLine.SalesDocumentId\nJOIN Product ON SalesDocumentLine.ProductId = Product.ProductId\nWHERE Product.CampaignId IN (SELECT CampaignId FROM Campaign WHERE CampaignName LIKE '%Urban Refresh%')\n  AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\n  AND IFNULL(SalesDocument.IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_003_sparkling_water_master_data",
+    "question": "Which sparkling water products did we sell in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nAND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nAND (p.ProductName LIKE '%sparkling water%' OR p.ProductCode LIKE '%sparkling water%' OR p.ProductTags LIKE '%sparkling water%')\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE PostingDate >= '2026-03-01' AND PostingDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_004_posting_date_trap",
+    "question": "How many sales documents were posted in March 2026?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument\nWHERE PostingDate >= '2026-03-01' AND PostingDate < '2026-04-01' AND IFNULL(IsCanceled, 0) = 0 AND NetAmount > 0;"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_005_customer_gross_amount_march_2026",
+    "question": "Show the top customers by gross amount in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_amount\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY total_gross_amount DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_006_category_line_net_sales_march_2026",
+    "question": "Show net sales by product category in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "reject",
+    "expectedCode": "FAN_OUT",
+    "reason": "fan-out: header SalesDocument.NetAmount summed while joined to SalesDocumentLine (1:N). Seeded demo DB: total_net_amount 1800, 1500, 650 vs gold 1400, 900, 650",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sd.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument sd\nJOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId\nJOIN Product p ON sdl.ProductId = p.ProductId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nWHERE IFNULL(sd.IsCanceled, 0) = 0\nAND sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_net_amount DESC"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_007_category_quantity_current_join",
+    "question": "Which product categories had the highest quantity sold in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(sl.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine sl\nJOIN Product p ON sl.ProductId = p.ProductId\nJOIN SalesDocument d ON sl.SalesDocumentId = d.SalesDocumentId\nJOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY pc.ProductCategoryId, pc.CategoryName\nORDER BY total_qty DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "edge",
+    "caseId": "edge_public_008_customer_month_columns_jan_feb_2026",
+    "question": "Compare January and February 2026 net sales by customer in separate columns.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: differs from gold only by including customers with zero January/February sales (a defensible reading the gold label rejects); not a guardrail concern",
+    "sql": "SELECT c.CustomerName, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, \n       ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales \nFROM SalesDocument d \nJOIN Customer c ON d.CustomerId = c.CustomerId \nWHERE IFNULL(d.IsCanceled, 0) = 0 \nGROUP BY c.CustomerId, c.CustomerName \nORDER BY c.CustomerName ASC;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_001",
+    "question": "Who are our biggest buyers in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Customer.CustomerName, COALESCE(SUM(SalesDocument.NetAmount), 0) AS total_net_amount\nFROM Customer\nJOIN SalesDocument ON SalesDocument.CustomerId = Customer.CustomerId\nWHERE SalesDocument.IsCanceled = 0 AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nGROUP BY Customer.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_002",
+    "question": "Which SKUs moved the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Product.ProductName, Product.ProductCode, ROUND(SUM(SalesDocumentLine.Quantity), 3) AS total_qty\nFROM SalesDocumentLine\nJOIN SalesDocument ON SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId\nJOIN Product ON SalesDocumentLine.ProductId = Product.ProductId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY Product.ProductId\nORDER BY total_qty DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_003",
+    "question": "Which document classes were used the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count\nFROM SalesDocument\nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY DocumentType.DocumentTypeName\nORDER BY document_count DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_004",
+    "question": "How many SKUs sold in February 2026 but stopped selling in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: lists the product with its quantity instead of counting products (wrong answer shape); no deterministic guardrail rule applies, so the validator must still accept",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\n  AND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE IFNULL(d2.IsCanceled, 0) = 0\n      AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n  )\nGROUP BY p.ProductId, p.ProductName;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_005",
+    "question": "Which general ledger accounts had the biggest debits in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting a\nLEFT JOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nLEFT JOIN SalesDocument s ON a.SalesDocumentId = s.SalesDocumentId\nWHERE s.DocumentDate >= '2026-03-01' AND s.DocumentDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY total_debit DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL AND sd.NetAmount IS NOT NULL;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_007",
+    "question": "What's our active customer headcount?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_008",
+    "question": "Which products brought in the most revenue in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_009",
+    "question": "Top general-ledger accounts by credit in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  la.AccountCode,\n  la.AccountName,\n  ROUND(SUM(COALESCE(ap.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting ap\nJOIN SalesDocument sd ON ap.SalesDocumentId = sd.SalesDocumentId\nJOIN LedgerAccount la ON ap.LedgerAccountId = la.LedgerAccountId\nWHERE sd.DocumentDate >= '2026-03-01' AND sd.DocumentDate < '2026-04-01'\nGROUP BY la.LedgerAccountId, la.AccountCode, la.AccountName\nORDER BY SUM(COALESCE(ap.CreditAmount, 0)) DESC\nLIMIT 10"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_001",
+    "question": "Who are our biggest buyers in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Customer.CustomerName, COALESCE(SUM(SalesDocument.NetAmount), 0) AS total_net_amount\nFROM Customer\nJOIN SalesDocument ON SalesDocument.CustomerId = Customer.CustomerId\nWHERE SalesDocument.IsCanceled = 0 AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nGROUP BY Customer.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_002",
+    "question": "Which SKUs moved the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Product.ProductName, Product.ProductCode, ROUND(SUM(SalesDocumentLine.Quantity), 3) AS total_qty\nFROM SalesDocumentLine\nJOIN SalesDocument ON SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId\nJOIN Product ON SalesDocumentLine.ProductId = Product.ProductId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY Product.ProductId\nORDER BY total_qty DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_003",
+    "question": "Which document classes were used the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count\nFROM SalesDocument\nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY DocumentType.DocumentTypeName\nORDER BY document_count DESC;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_004",
+    "question": "How many SKUs sold in February 2026 but stopped selling in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: lists the product with its quantity instead of counting products (wrong answer shape); no deterministic guardrail rule applies, so the validator must still accept",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\n  AND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE IFNULL(d2.IsCanceled, 0) = 0\n      AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n  )\nGROUP BY p.ProductId, p.ProductName;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_005",
+    "question": "Which general ledger accounts had the biggest debits in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting a\nLEFT JOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nLEFT JOIN SalesDocument s ON a.SalesDocumentId = s.SalesDocumentId\nWHERE a.PostingDate >= '2026-03-01' AND a.PostingDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY total_debit DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 2,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL AND sd.NetAmount > 0;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_007",
+    "question": "What's our active customer headcount?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_008",
+    "question": "Which products brought in the most revenue in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_009",
+    "question": "Top general-ledger accounts by credit in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting a\nJOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nJOIN SalesDocument d ON a.SalesDocumentId = d.SalesDocumentId\nWHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY SUM(COALESCE(a.CreditAmount, 0)) DESC, l.AccountCode ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_001",
+    "question": "Who are our biggest buyers in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Customer.CustomerName, COALESCE(SUM(SalesDocument.NetAmount), 0) AS total_net_amount\nFROM Customer\nJOIN SalesDocument ON SalesDocument.CustomerId = Customer.CustomerId\nWHERE SalesDocument.IsCanceled = 0 AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nGROUP BY Customer.CustomerName\nORDER BY total_net_amount DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_002",
+    "question": "Which SKUs moved the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT Product.ProductName, Product.ProductCode, ROUND(SUM(SalesDocumentLine.Quantity), 3) AS total_qty\nFROM SalesDocumentLine\nJOIN SalesDocument ON SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId\nJOIN Product ON SalesDocumentLine.ProductId = Product.ProductId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY Product.ProductName, Product.ProductCode\nORDER BY total_qty DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_003",
+    "question": "Which document classes were used the most in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT DocumentType.DocumentTypeName, COUNT(*) AS document_count\nFROM SalesDocument\nJOIN DocumentType ON SalesDocument.DocumentTypeId = DocumentType.DocumentTypeId\nWHERE SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'\nAND IFNULL(SalesDocument.IsCanceled, 0) = 0\nGROUP BY DocumentType.DocumentTypeName\nORDER BY document_count DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_004",
+    "question": "How many SKUs sold in February 2026 but stopped selling in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting. Seeded demo DB: lists the product with its quantity instead of counting products (wrong answer shape); no deterministic guardrail rule applies, so the validator must still accept",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'\n  AND p.ProductId NOT IN (\n    SELECT l2.ProductId\n    FROM SalesDocumentLine l2\n    JOIN SalesDocument d2 ON l2.SalesDocumentId = d2.SalesDocumentId\n    WHERE IFNULL(d2.IsCanceled, 0) = 0\n      AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01'\n  )\nGROUP BY p.ProductId, p.ProductName;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_005",
+    "question": "Which general ledger accounts had the biggest debits in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.DebitAmount, 0)), 2) AS total_debit\nFROM AccountingPosting a\nLEFT JOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nLEFT JOIN SalesDocument s ON a.SalesDocumentId = s.SalesDocumentId\nWHERE a.PostingDate >= '2026-03-01' AND a.PostingDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY total_debit DESC\nLIMIT 10;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 1,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_006",
+    "question": "How many sales documents never made it into accounting postings?",
+    "attempt": 2,
+    "liveRejection": "SQL does not use a preferred column for semantic metric \"net_sales\" (SalesDocument.NetAmount).",
+    "expected": "accept",
+    "reason": "spurious metric-guardrail rejection of a count/list/existence question; verified on the seeded demo DB: result equals the gold result",
+    "sql": "SELECT COUNT(*) AS document_count\nFROM SalesDocument sd\nLEFT JOIN AccountingPosting ap ON sd.SalesDocumentId = ap.SalesDocumentId\nWHERE IFNULL(sd.IsCanceled, 0) = 0 AND ap.SalesDocumentId IS NULL;"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_007",
+    "question": "What's our active customer headcount?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT COUNT(*) AS active_customer_count\nFROM Customer\nWHERE IsActive = 1"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_008",
+    "question": "Which products brought in the most revenue in March 2026?",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocumentLine l\nJOIN Product p ON l.ProductId = p.ProductId\nJOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\nWHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY p.ProductId, p.ProductName\nORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC\nLIMIT 10"
+  },
+  {
+    "dataset": "para",
+    "caseId": "paraphrase_public_009",
+    "question": "Top general-ledger accounts by credit in March 2026.",
+    "attempt": 1,
+    "liveRejection": null,
+    "expected": "accept",
+    "reason": "accepted live; keep accepting",
+    "sql": "SELECT\n  l.AccountCode,\n  l.AccountName,\n  ROUND(SUM(COALESCE(a.CreditAmount, 0)), 2) AS total_credit\nFROM AccountingPosting a\nJOIN LedgerAccount l ON a.LedgerAccountId = l.LedgerAccountId\nJOIN SalesDocument d ON a.SalesDocumentId = d.SalesDocumentId\nWHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'\nGROUP BY l.LedgerAccountId, l.AccountCode, l.AccountName\nORDER BY SUM(COALESCE(a.CreditAmount, 0)) DESC, l.AccountCode ASC\nLIMIT 10"
+  }
+]

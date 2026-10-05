@@ -32,6 +32,11 @@ const REJECTED = [
 for (const [sql, pattern] of REJECTED) {
   test(`validateReadOnlySql rejects: ${sql.slice(0, 48)}`, () => {
     assert.throws(() => validateReadOnlySql(sql, ALLOWED), pattern);
+    // Every rejection carries a stable machine-readable code and its layer.
+    assert.throws(
+      () => validateReadOnlySql(sql, ALLOWED),
+      (error) => typeof error.code === 'string' && error.code.length > 0 && error.layer === 'safety'
+    );
   });
 }
 
