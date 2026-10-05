@@ -90,6 +90,38 @@ const SQL_KEYWORDS = new Set([
   'YEAR',
 ]);
 
+// Built-in MariaDB functions that models often write in mixed case
+// (DateDiff, YearWeek, Coalesce). A call to one of these is not a hallucinated
+// column, so the unqualified-identifier check skips it when it is followed by
+// '('. Restricted functions are rejected earlier, by the safety layer.
+const KNOWN_SQL_FUNCTIONS = new Set([
+  // date and time
+  'ADDDATE', 'ADDTIME', 'CONVERT_TZ', 'CURDATE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'CURTIME',
+  'DATE', 'DATEDIFF', 'DATE_ADD', 'DATE_FORMAT', 'DATE_SUB', 'DAY', 'DAYNAME', 'DAYOFMONTH', 'DAYOFWEEK',
+  'DAYOFYEAR', 'EXTRACT', 'FROM_DAYS', 'FROM_UNIXTIME', 'HOUR', 'LAST_DAY', 'LOCALTIME', 'LOCALTIMESTAMP',
+  'MAKEDATE', 'MAKETIME', 'MICROSECOND', 'MINUTE', 'MONTH', 'MONTHNAME', 'NOW', 'PERIOD_ADD', 'PERIOD_DIFF',
+  'QUARTER', 'SECOND', 'SEC_TO_TIME', 'STR_TO_DATE', 'SUBDATE', 'SUBTIME', 'SYSDATE', 'TIME', 'TIMEDIFF',
+  'TIMESTAMP', 'TIMESTAMPADD', 'TIMESTAMPDIFF', 'TIME_FORMAT', 'TIME_TO_SEC', 'TO_DAYS', 'TO_SECONDS',
+  'UNIX_TIMESTAMP', 'UTC_DATE', 'UTC_TIME', 'UTC_TIMESTAMP', 'WEEK', 'WEEKDAY', 'WEEKOFYEAR', 'YEAR', 'YEARWEEK',
+  // strings
+  'ASCII', 'CHAR', 'CHAR_LENGTH', 'CHARACTER_LENGTH', 'CONCAT', 'CONCAT_WS', 'ELT', 'FIELD', 'FIND_IN_SET',
+  'FORMAT', 'INSTR', 'LCASE', 'LEFT', 'LENGTH', 'LOCATE', 'LOWER', 'LPAD', 'LTRIM', 'MID', 'POSITION',
+  'REGEXP_INSTR', 'REGEXP_REPLACE', 'REGEXP_SUBSTR', 'REPEAT', 'REPLACE', 'REVERSE', 'RIGHT', 'RPAD', 'RTRIM',
+  'SPACE', 'SUBSTR', 'SUBSTRING', 'SUBSTRING_INDEX', 'TRIM', 'UCASE', 'UPPER',
+  // numbers
+  'ABS', 'CEIL', 'CEILING', 'EXP', 'FLOOR', 'GREATEST', 'LEAST', 'LN', 'LOG', 'LOG10', 'LOG2', 'MOD', 'PI',
+  'POW', 'POWER', 'RAND', 'ROUND', 'SIGN', 'SQRT', 'TRUNCATE',
+  // control flow and conversion
+  'CAST', 'COALESCE', 'CONVERT', 'IF', 'IFNULL', 'ISNULL', 'NULLIF',
+  // aggregates and window functions
+  'AVG', 'BIT_AND', 'BIT_OR', 'BIT_XOR', 'COUNT', 'GROUP_CONCAT', 'JSON_ARRAYAGG', 'JSON_OBJECTAGG', 'MAX', 'MIN',
+  'STD', 'STDDEV', 'STDDEV_POP', 'STDDEV_SAMP', 'SUM', 'VARIANCE', 'VAR_POP', 'VAR_SAMP', 'CUME_DIST',
+  'DENSE_RANK', 'FIRST_VALUE', 'LAG', 'LAST_VALUE', 'LEAD', 'MEDIAN', 'NTH_VALUE', 'NTILE', 'PERCENTILE_CONT',
+  'PERCENTILE_DISC', 'PERCENT_RANK', 'RANK', 'ROW_NUMBER',
+  // JSON
+  'JSON_ARRAY', 'JSON_EXTRACT', 'JSON_OBJECT', 'JSON_UNQUOTE', 'JSON_VALUE',
+]);
+
 const TABLE_ALIAS_STOPWORDS = new Set([
   'FULL',
   'INNER',
@@ -469,6 +501,9 @@ function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, der
       continue;
     }
     if (SQL_KEYWORDS.has(upper) || knownIdentifiers.has(identifier)) {
+      continue;
+    }
+    if (KNOWN_SQL_FUNCTIONS.has(upper) && /^\s*\(/.test(cleaned.slice(match.index + match[0].length))) {
       continue;
     }
     if (/[A-Z]/.test(identifier) && !/^[A-Z_]+$/.test(identifier)) {

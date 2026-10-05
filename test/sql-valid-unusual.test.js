@@ -32,6 +32,9 @@ const Q_NET = 'What were net sales by customer in March 2026?';
 const Q_CUST = 'Show the top customers by total net sales amount in March 2026.';
 const Q_QTY = 'Which products sold the most quantity in March 2026?';
 const Q_LIST = 'List all customer names.';
+// Metric-free question whose prompt context has the document, line and product
+// tables, for shapes that are about structure rather than a measure.
+const Q_LINES = 'List sales documents with their product lines.';
 const Q_POSTINGS = 'How many non-canceled sales documents do not have any accounting postings?';
 const JOIN_CUSTOMER = 'FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId';
 
@@ -117,7 +120,7 @@ const VALID = [
   [Q_NET, 'INSERT() string function', `SELECT INSERT(c.CustomerName, 1, 0, '* ') AS customer, SUM(d.NetAmount) AS net ${JOIN_CUSTOMER} GROUP BY customer`],
   [Q_NET, 'CAST ... CHARACTER SET', `SELECT CAST(c.CustomerName AS CHAR CHARACTER SET utf8mb4) AS customer, SUM(d.NetAmount) AS net ${JOIN_CUSTOMER} GROUP BY customer`],
   [Q_NET, 'GROUP_CONCAT ... SEPARATOR', `SELECT GROUP_CONCAT(c.CustomerName ORDER BY c.CustomerName SEPARATOR ', ') AS names, SUM(d.NetAmount) AS net ${JOIN_CUSTOMER}`],
-  [Q_NET, 'FROM DUAL', 'SELECT 1 AS one, SUM(0) AS NetAmount FROM DUAL'],
+  [Q_LIST, 'FROM DUAL', 'SELECT 1 AS one FROM DUAL'],
   [Q_NET, 'UNION ALL', "SELECT 'doc' AS src, SUM(d.NetAmount) AS net FROM SalesDocument d UNION ALL SELECT 'cust' AS src, COUNT(*) AS net FROM Customer c"],
   [Q_NET, 'JOIN ... USING', 'SELECT c.CustomerName, SUM(d.NetAmount) AS net FROM SalesDocument d JOIN Customer c USING (CustomerId) GROUP BY c.CustomerName'],
   [Q_NET, 'uppercase aliases', 'SELECT C.CustomerName, SUM(D.NetAmount) AS net FROM SalesDocument D JOIN Customer C ON C.CustomerId = D.CustomerId GROUP BY C.CustomerName'],
@@ -143,15 +146,33 @@ const VALID = [
     'SELECT p.ProductName, SUM(l.Quantity * l.SalePrice) AS revenue, SUM(l.NetAmount) AS net, SUM(l.Quantity) AS qty FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId GROUP BY p.ProductName',
   ],
   [
-    Q_QTY,
+    Q_LINES,
     'header SUM filtered through EXISTS',
-    "SELECT ROUND(SUM(d.NetAmount), 2) AS total_net_amount, SUM(0) AS Quantity FROM SalesDocument d WHERE EXISTS (SELECT 1 FROM SalesDocumentLine l JOIN Product p ON p.ProductId = l.ProductId WHERE l.SalesDocumentId = d.SalesDocumentId AND p.ProductName LIKE '%Water%')",
+    "SELECT ROUND(SUM(d.NetAmount), 2) AS total_net_amount FROM SalesDocument d WHERE EXISTS (SELECT 1 FROM SalesDocumentLine l JOIN Product p ON p.ProductId = l.ProductId WHERE l.SalesDocumentId = d.SalesDocumentId AND p.ProductName LIKE '%Water%')",
   ],
   [
-    Q_QTY,
+    Q_LINES,
     'header SUM joined to a pre-aggregated child',
-    'SELECT ROUND(SUM(d.NetAmount), 2) AS total_net_amount, SUM(x.qty) AS Quantity FROM SalesDocument d JOIN (SELECT l.SalesDocumentId, SUM(l.Quantity) AS qty FROM SalesDocumentLine l GROUP BY l.SalesDocumentId) x ON x.SalesDocumentId = d.SalesDocumentId',
+    'SELECT ROUND(SUM(d.NetAmount), 2) AS total_net_amount, SUM(x.qty) AS total_qty FROM SalesDocument d JOIN (SELECT l.SalesDocumentId, SUM(l.Quantity) AS qty FROM SalesDocumentLine l GROUP BY l.SalesDocumentId) x ON x.SalesDocumentId = d.SalesDocumentId',
   ],
+  [
+    Q_LINES,
+    'header SUM with a child pre-filtered by DISTINCT',
+    'SELECT ROUND(SUM(d.NetAmount), 2) AS total_net_amount FROM SalesDocument d JOIN (SELECT DISTINCT l.SalesDocumentId FROM SalesDocumentLine l WHERE l.Quantity > 1) x ON x.SalesDocumentId = d.SalesDocumentId',
+  ],
+  [
+    Q_LINES,
+    'line value scaled by a header ratio (line grain)',
+    'SELECT ROUND(SUM(l.NetAmount * d.NetAmount / NULLIF(d.GrossAmount, 0)), 2) AS adjusted FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId',
+  ],
+  [Q_LIST, 'parenthesized UNION branches', '(SELECT CustomerName FROM Customer ORDER BY CustomerName LIMIT 2) UNION ALL (SELECT CustomerName FROM Customer LIMIT 1)'],
+  [
+    Q_NET,
+    'mixed-case built-in functions (DateDiff, YearWeek, Round, Sum)',
+    'SELECT YearWeek(d.DocumentDate) AS wk, AVG(DateDiff(d.DueDate, d.DocumentDate)) AS days, Round(Sum(d.NetAmount), 2) AS net FROM SalesDocument d GROUP BY wk',
+  ],
+  [Q_LIST, 'an alias named minus', 'SELECT minus.CustomerName FROM Customer minus ORDER BY minus.CustomerName'],
+  [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_QTY,
     'COUNT/MAX over header columns with a line join',
