@@ -3,7 +3,6 @@ import {
   isKeywordToken,
   stripSqlTokens,
   tokenizeSql,
-  tokensToText,
 } from './sql-tokenizer.js';
 
 /**
@@ -134,6 +133,21 @@ const TABLE_ALIAS_STOPWORDS = new Set([
 
 const DERIVED_TABLE_PREFIX = '__derived_table__:';
 
+// Modifiers between SELECT and the select list.
+const SELECT_OPTION_WORDS = [
+  'ALL',
+  'DISTINCT',
+  'DISTINCTROW',
+  'HIGH_PRIORITY',
+  'STRAIGHT_JOIN',
+  'SQL_SMALL_RESULT',
+  'SQL_BIG_RESULT',
+  'SQL_BUFFER_RESULT',
+  'SQL_CACHE',
+  'SQL_NO_CACHE',
+  'SQL_CALC_FOUND_ROWS',
+];
+
 // Blank string literals and drop comments using the shared MariaDB tokenizer, so
 // this layer sees exactly the SQL text the safety layer validated. Comments
 // become a space so neighbouring tokens never glue together. Tolerant mode:
@@ -156,182 +170,6 @@ function isDerivedTableName(tableName) {
 
 function derivedAliasFromTableName(tableName) {
   return isDerivedTableName(tableName) ? String(tableName).slice(DERIVED_TABLE_PREFIX.length) : null;
-}
-
-function splitTopLevelCommaList(value) {
-  const parts = [];
-  let depth = 0;
-  let start = 0;
-  const text = String(value || '');
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (char === '(') {
-      depth += 1;
-    } else if (char === ')') {
-      depth = Math.max(0, depth - 1);
-    } else if (char === ',' && depth === 0) {
-      parts.push(text.slice(start, index).trim());
-      start = index + 1;
-    }
-  }
-
-  const tail = text.slice(start).trim();
-  if (tail) {
-    parts.push(tail);
-  }
-
-  return parts;
-}
-
-function isIdentifierChar(char) {
-  return /[A-Za-z0-9_]/.test(char || '');
-}
-
-function findTopLevelKeyword(sql, keyword, startIndex = 0) {
-  let depth = 0;
-  const pattern = new RegExp('^' + escapeRegExp(keyword) + '\\b', 'i');
-
-  for (let index = startIndex; index < sql.length; index += 1) {
-    const char = sql[index];
-    if (char === '(') {
-      depth += 1;
-      continue;
-    }
-    if (char === ')') {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth !== 0 || isIdentifierChar(sql[index - 1])) {
-      continue;
-    }
-    if (pattern.test(sql.slice(index))) {
-      return index;
-    }
-  }
-
-  return -1;
-}
-
-function parseSimpleColumnExpression(expression, localAliases, knownTables) {
-  const text = String(expression || '').trim().replace(/;$/, '');
-  const qualified = text.match(/^`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*`?([A-Za-z][A-Za-z0-9_]*)`?$/);
-  if (qualified) {
-    const tableName = localAliases.get(normalizeIdentifier(qualified[1]));
-    const columnName = normalizeIdentifier(qualified[2]);
-    if (tableName && !isDerivedTableName(tableName) && columnExists(knownTables, tableName, columnName, new Map())) {
-      return { outputName: columnName, origins: [{ tableName, columnName }] };
-    }
-    return { outputName: columnName, origins: [] };
-  }
-
-  const unqualified = text.match(/^`?([A-Za-z][A-Za-z0-9_]*)`?$/);
-  if (!unqualified) {
-    return null;
-  }
-
-  const columnName = normalizeIdentifier(unqualified[1]);
-  const originTables = [...new Set([...localAliases.values()])]
-    .filter((tableName) => !isDerivedTableName(tableName) && columnExists(knownTables, tableName, columnName, new Map()));
-
-  return {
-    outputName: columnName,
-    origins: originTables.length === 1 ? [{ tableName: originTables[0], columnName }] : [],
-  };
-}
-
-function parseSelectItem(selectItem, localAliases, knownTables) {
-  const explicitAlias = selectItem.match(/\s+AS\s+`?([A-Za-z][A-Za-z0-9_]*)`?\s*$/i);
-  if (explicitAlias) {
-    const expression = selectItem.slice(0, explicitAlias.index).trim();
-    const parsed = parseSimpleColumnExpression(expression, localAliases, knownTables);
-    return {
-      outputName: normalizeIdentifier(explicitAlias[1]),
-      origins: parsed?.origins || [],
-    };
-  }
-
-  const trailingAlias = selectItem.match(/^(.+?)\s+`?([A-Za-z][A-Za-z0-9_]*)`?\s*$/);
-  if (trailingAlias && !SQL_KEYWORDS.has(String(trailingAlias[2]).toUpperCase())) {
-    const parsed = parseSimpleColumnExpression(trailingAlias[1], localAliases, knownTables);
-    return {
-      outputName: normalizeIdentifier(trailingAlias[2]),
-      origins: parsed?.origins || [],
-    };
-  }
-
-  return parseSimpleColumnExpression(selectItem, localAliases, knownTables);
-}
-
-function expandStarSelectItem(selectItem, localAliases, knownTables) {
-  const text = String(selectItem || '').trim();
-  const qualifiedStar = text.match(/^`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*\*$/);
-  let tableNames = [];
-  if (text === '*') {
-    tableNames = [...new Set([...localAliases.values()])].filter((tableName) => !isDerivedTableName(tableName));
-  } else if (qualifiedStar) {
-    const tableName = localAliases.get(normalizeIdentifier(qualifiedStar[1]));
-    tableNames = tableName && !isDerivedTableName(tableName) ? [tableName] : [];
-  } else {
-    return null;
-  }
-
-  return tableNames.flatMap((tableName) =>
-    [...(knownTables.get(tableName) || [])].map((columnName) => ({
-      outputName: columnName,
-      origins: [{ tableName, columnName }],
-    }))
-  );
-}
-
-function parseDerivedTableColumns(sql, knownTables) {
-  const empty = { columns: new Set(), origins: new Map(), orderedColumns: [] };
-  const selectIndex = findTopLevelKeyword(sql, 'SELECT');
-  if (selectIndex < 0) {
-    return empty;
-  }
-
-  const selectEnd = selectIndex + 'SELECT'.length;
-  const fromIndex = findTopLevelKeyword(sql, 'FROM', selectEnd);
-  const selectListEnd = fromIndex < 0 ? sql.length : fromIndex;
-
-  const localAliases = fromIndex < 0 ? new Map() : extractRealTableAliases(sql, knownTables);
-  const columns = new Set();
-  const origins = new Map();
-  const orderedColumns = [];
-
-  for (const item of splitTopLevelCommaList(sql.slice(selectEnd, selectListEnd).replace(/^\s*DISTINCT\b/i, ''))) {
-    // SELECT * / alias.* expose every column of the underlying table(s).
-    const starColumns = expandStarSelectItem(item, localAliases, knownTables);
-    const parsedItems = starColumns || [parseSelectItem(item, localAliases, knownTables)];
-    for (const parsed of parsedItems) {
-      if (!parsed?.outputName) {
-        orderedColumns.push(null);
-        continue;
-      }
-      columns.add(parsed.outputName);
-      origins.set(parsed.outputName, parsed.origins || []);
-      orderedColumns.push(parsed);
-    }
-  }
-
-  return { columns, origins, orderedColumns };
-}
-
-// A CTE with an explicit column list (`m (CustomerId, Net) AS (...)`) renames
-// the body's select items positionally.
-function parseCteColumns(cte, bodyText, knownTables) {
-  const parsed = parseDerivedTableColumns(bodyText, knownTables);
-  if (!Array.isArray(cte.columns) || cte.columns.length === 0) {
-    return parsed;
-  }
-
-  const columns = new Set(cte.columns);
-  const origins = new Map();
-  cte.columns.forEach((columnName, index) => {
-    origins.set(columnName, parsed.orderedColumns[index]?.origins || []);
-  });
-  return { columns, origins, orderedColumns: cte.columns.map((outputName) => ({ outputName, origins: origins.get(outputName) })) };
 }
 
 function collectPromptTables(promptContext = {}, allowedTables = []) {
@@ -368,24 +206,6 @@ function isUsableAlias(alias, knownTables) {
   return !TABLE_ALIAS_STOPWORDS.has(upper) && !SQL_KEYWORDS.has(upper) && !knownTables.has(alias);
 }
 
-// Table aliases from the token-level table references, so comma-joined tables
-// (`FROM SalesDocument d, Customer c`) get their aliases too.
-function extractRealTableAliases(sql, knownTables) {
-  const aliases = new Map();
-  for (const tableName of knownTables.keys()) {
-    aliases.set(tableName, tableName);
-  }
-
-  const analysis = analyzeSqlStructure(String(sql || ''), { tolerant: true });
-  for (const ref of analysis.tableRefs) {
-    if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name) && isUsableAlias(ref.alias, knownTables)) {
-      aliases.set(ref.alias, ref.name);
-    }
-  }
-
-  return aliases;
-}
-
 /**
  * Name resolution per SELECT block, the way MariaDB 10.6 scopes it (verified
  * on the server):
@@ -405,14 +225,17 @@ function extractRealTableAliases(sql, knownTables) {
 function buildRelationModel(analysis, knownTables) {
   const { tokens, groups } = analysis;
   const blocksById = new Map(analysis.blocks.map((block) => [block.id, block]));
-  const derivedTables = new Map();
+  const bodies = new Map();
   const bodyGroups = new Set();
 
-  const relationOfBody = (openIndex, label, parse) => {
+  // Derived tables and CTEs, by key; their columns are projected below, once
+  // every block's bindings are known.
+  const relationOfBody = (openIndex, label, columnList = null) => {
     const key = `${label}@${openIndex}`;
-    if (!derivedTables.has(key)) {
-      derivedTables.set(key, { label, ...parse() });
+    if (!bodies.has(key)) {
+      bodies.set(key, { label, openIndex, columnList });
     }
+    bodyGroups.add(tokens[openIndex].groupId);
     return DERIVED_TABLE_PREFIX + key;
   };
 
@@ -434,28 +257,23 @@ function buildRelationModel(analysis, knownTables) {
       if (!cte) {
         return null;
       }
-      bodyGroups.add(tokens[cte.bodyOpen].groupId);
-      const relation = relationOfBody(cte.bodyOpen, cte.name, () =>
-        parseCteColumns(cte, tokensToText(tokens, cte.bodyOpen + 1, cte.bodyClose), knownTables)
-      );
-      return [alias || ref.name, relation];
+      return [alias || ref.name, relationOfBody(cte.bodyOpen, cte.name, cte.columns)];
     }
     if (ref.kind === 'derived') {
-      bodyGroups.add(tokens[ref.open].groupId);
-      const relation = relationOfBody(ref.open, alias || 'derived', () =>
-        parseDerivedTableColumns(tokensToText(tokens, ref.open + 1, ref.close), knownTables)
-      );
+      const relation = relationOfBody(ref.open, alias || 'derived');
       return alias ? [alias, relation] : null;
     }
     return null;
   };
 
   const bindings = new Map();
+  const relationOfRef = new Map();
   for (const ref of analysis.tableRefs) {
     const binding = bindRef(ref);
     if (!binding) {
       continue;
     }
+    relationOfRef.set(ref, binding[1]);
     if (!bindings.has(ref.blockId)) {
       bindings.set(ref.blockId, new Map());
     }
@@ -466,10 +284,7 @@ function buildRelationModel(analysis, knownTables) {
   }
   // CTEs that are declared but never referenced still get their columns parsed.
   for (const cte of analysis.ctes) {
-    bodyGroups.add(tokens[cte.bodyOpen].groupId);
-    relationOfBody(cte.bodyOpen, cte.name, () =>
-      parseCteColumns(cte, tokensToText(tokens, cte.bodyOpen + 1, cte.bodyClose), knownTables)
-    );
+    relationOfBody(cte.bodyOpen, cte.name, cte.columns);
   }
 
   const enclosingBlock = (blockId) => {
@@ -491,8 +306,152 @@ function buildRelationModel(analysis, knownTables) {
     return null;
   };
 
+  const derivedTables = new Map();
+  const walker = createTokenWalker(analysis);
+  const projectRelation = (relationName) => {
+    const key = derivedAliasFromTableName(relationName);
+    if (!derivedTables.has(key)) {
+      // A body that (indirectly) reads itself projects nothing.
+      derivedTables.set(key, { label: bodies.get(key).label, columns: new Set(), origins: new Map(), orderedColumns: [] });
+      derivedTables.set(key, { label: bodies.get(key).label, ...projectBody(bodies.get(key)) });
+    }
+    return derivedTables.get(key);
+  };
+
+  // The columns a relation exposes, each with the table columns it comes from.
+  const relationColumns = (relationName) => {
+    if (isDerivedTableName(relationName)) {
+      return projectRelation(relationName).orderedColumns.filter(Boolean);
+    }
+    return [...(knownTables.get(relationName) || [])].map((columnName) => ({
+      outputName: columnName,
+      origins: [{ tableName: relationName, columnName }],
+    }));
+  };
+  const columnOrigins = (relationName, columnName) => {
+    if (isDerivedTableName(relationName)) {
+      return projectRelation(relationName).origins.get(columnName) || [];
+    }
+    const canonical = findColumnName(knownTables, relationName, columnName);
+    return canonical ? [{ tableName: relationName, columnName: canonical }] : [];
+  };
+  const hasColumn = (relationName, columnName) =>
+    isDerivedTableName(relationName)
+      ? projectRelation(relationName).columns.has(columnName)
+      : Boolean(findColumnName(knownTables, relationName, columnName));
+
+  // One select-list item: { outputName, origins } (outputName null for an
+  // unnamed expression), or the expanded columns of `*` / `q.*`.
+  const projectItem = (block, [from, to]) => {
+    const blockBindings = bindings.get(block.id) || new Map();
+    if (to - from === 1 && isOperatorToken(tokens[from], '*')) {
+      return [...blockBindings.values()].flatMap(relationColumns);
+    }
+    if (to - from === 3 && tokenIdentifierName(tokens[from]) && isPunctToken(tokens[from + 1], '.') && isOperatorToken(tokens[from + 2], '*')) {
+      const relationName = resolve(block.id, tokenIdentifierName(tokens[from]));
+      return relationName ? relationColumns(relationName) : [];
+    }
+
+    let alias = null;
+    let end = to;
+    const last = tokens[to - 1];
+    const previous = tokens[to - 2];
+    if (to - from >= 3 && isKeywordToken(previous, 'AS') && (tokenIdentifierName(last) || last.type === 'string')) {
+      alias = last.type === 'string' ? last.value.slice(1, -1) : tokenIdentifierName(last);
+      end = to - 2;
+    } else if (to - from >= 2 && isTrailingAlias(last, previous)) {
+      alias = tokenIdentifierName(last);
+      end = to - 1;
+    }
+
+    const qualified = end - from === 3 ? walker.qualifiedColumnAt(from) : null;
+    if (qualified) {
+      const relationName = resolve(block.id, qualified.qualifier);
+      return [{ outputName: alias || qualified.column, origins: relationName ? columnOrigins(relationName, qualified.column) : [] }];
+    }
+    const name = end - from === 1 && !tokens[from].afterDot ? tokenIdentifierName(tokens[from]) : null;
+    if (name) {
+      const owners = [...blockBindings.values()].filter((relationName) => hasColumn(relationName, name));
+      return [{ outputName: alias || name, origins: owners.length === 1 ? columnOrigins(owners[0], name) : [] }];
+    }
+    return [{ outputName: alias, origins: [] }];
+  };
+
+  // Columns of a derived table or CTE body: the select list of its first SELECT
+  // block, resolved against that block's FROM (which may name earlier CTEs),
+  // renamed positionally by a CTE column list.
+  const projectBody = ({ openIndex, columnList }) => {
+    const scopeId = tokens[openIndex].groupId;
+    const block = analysis.blocks.find((candidate) => candidate.scopeId === scopeId);
+    const range = block ? findSelectListRange(walker, block) : null;
+    const orderedColumns = [];
+    for (const item of range ? walker.splitList(range[0], range[1]) : []) {
+      for (const column of projectItem(block, item)) {
+        orderedColumns.push(column.outputName ? column : null);
+      }
+    }
+
+    const renamed = Array.isArray(columnList) && columnList.length > 0
+      ? columnList.map((outputName, index) => ({ outputName, origins: orderedColumns[index]?.origins || [] }))
+      : orderedColumns;
+    const columns = new Set();
+    const origins = new Map();
+    for (const column of renamed.filter(Boolean)) {
+      columns.add(column.outputName);
+      origins.set(column.outputName, column.origins);
+    }
+    return { columns, origins, orderedColumns: renamed };
+  };
+
+  for (const key of bodies.keys()) {
+    projectRelation(DERIVED_TABLE_PREFIX + key);
+  }
+
   const qualifiers = new Set([...bindings.values()].flatMap((blockBindings) => [...blockBindings.keys()]));
-  return { resolve, derivedTables, qualifiers };
+  return {
+    resolve,
+    derivedTables,
+    qualifiers,
+    relationOf: (ref) => relationOfRef.get(ref) || null,
+  };
+}
+
+// `expr alias` without AS: the alias is an identifier (not a reserved word)
+// that follows a complete operand, not an operator or operator keyword.
+function isTrailingAlias(last, previous) {
+  const name = tokenIdentifierName(last);
+  if (!name || last.afterDot || (last.type === 'word' && SQL_KEYWORDS.has(last.upper))) {
+    return false;
+  }
+  return (
+    !isPunctToken(previous, '.') &&
+    !isPunctToken(previous, ',') &&
+    previous.type !== 'operator' &&
+    !isKeywordToken(previous, ...OPERAND_SEPARATOR_KEYWORDS, ...MULTIPLICATIVE_KEYWORDS, 'AS', 'BINARY', 'COLLATE', 'DISTINCT', 'ESCAPE', 'INTERVAL', 'SELECT')
+  );
+}
+
+// [start, end) of a SELECT block's select list (after SELECT and its options).
+function findSelectListRange(walker, block) {
+  const { tokens } = walker;
+  const baseGroup = blockBaseGroup(block);
+  const indexes = block.tokenIndexes.filter((index) => tokens[index].parentGroupId === baseGroup);
+  const selectAt = indexes.findIndex((index) => isKeywordToken(tokens[index], 'SELECT'));
+  if (selectAt < 0) {
+    return null;
+  }
+  let start = indexes[selectAt] + 1;
+  while (isKeywordToken(tokens[start], ...SELECT_OPTION_WORDS)) {
+    start += 1;
+  }
+  let end = block.tokenIndexes[block.tokenIndexes.length - 1] + 1;
+  for (const index of indexes.slice(selectAt + 1)) {
+    if (index >= start && (isKeywordToken(tokens[index], 'FROM', ...WHERE_CLAUSE_TERMINATORS) || isPunctToken(tokens[index], ';'))) {
+      end = index;
+      break;
+    }
+  }
+  return [start, end];
 }
 
 function extractTableContext(sql, knownTables) {
@@ -1580,7 +1539,13 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
       } else if (walker.qualifiedColumnAt(index)) {
         const { qualifier, column } = walker.qualifiedColumnAt(index);
         const entry = qualifierEntries.get(qualifier);
-        if (entry && (entry.viaDerived || knownTables.get(entry.tableName)?.has(column))) {
+        if (entry?.viaDerived) {
+          // A derived column that copies one column of its source table is that
+          // column (`h.amt` for `d.NetAmount AS amt` is SalesDocument.NetAmount).
+          const [origin, ...more] = entry.relation?.origins.get(column) || [];
+          const sourceColumn = origin && more.length === 0 && origin.tableName === entry.tableName ? origin.columnName : column;
+          grains.push(columnGrain(entry, entry.tableName, sourceColumn));
+        } else if (entry && knownTables.get(entry.tableName)?.has(column)) {
           grains.push(columnGrain(entry, entry.tableName, column));
         }
         index += 3;
@@ -1629,7 +1594,7 @@ function describeFanOut({ aggregate, tableName, columnName, edge, knownTables })
  * keeps one row per parent, and a derived table or CTE that merely projects a
  * child table counts as that child.
  */
-function validateFanOut(analysis, knownTables, promptContext) {
+function validateFanOut(analysis, knownTables, promptContext, model) {
   const columnMetadata = collectColumnMetadata(promptContext);
   const edges = collectForeignKeyEdges(promptContext, columnMetadata);
   const checks = [];
@@ -1649,7 +1614,8 @@ function validateFanOut(analysis, knownTables, promptContext) {
         const tableName = resolvePassThroughTable(walker, analysis, ref, knownTables);
         const qualifier = ref.alias || (ref.kind === 'cte' ? ref.name : null);
         if (tableName && qualifier) {
-          entries.push({ ref, tableName, qualifier, viaDerived: true });
+          const relation = model.derivedTables.get(derivedAliasFromTableName(model.relationOf(ref)));
+          entries.push({ ref, tableName, qualifier, viaDerived: true, relation });
         }
       }
     }
@@ -1939,7 +1905,7 @@ export function validateSqlGuardrails(
   const qualifiedColumns = validateQualifiedColumns(analysis, knownTables, model);
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, model.qualifiers, model.derivedTables);
   const joinChecks = validateJoinGuardrails(analysis, model, promptContext);
-  const fanOutChecks = validateFanOut(analysis, knownTables, promptContext);
+  const fanOutChecks = validateFanOut(analysis, knownTables, promptContext, model);
   const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);
 

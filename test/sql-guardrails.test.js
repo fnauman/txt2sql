@@ -455,6 +455,40 @@ test('qualifiers resolve in their own SELECT scope, the way MariaDB resolves the
   }
 });
 
+test('CTE bodies see earlier CTEs: stars expand from their columns and lineage carries forward', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validate = (sql) => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context });
+  const CHAIN = 'WITH c1 AS (SELECT c.CustomerId FROM Customer c), c2 AS (SELECT c1.* FROM c1), c3 AS (SELECT * FROM c2)';
+
+  // The join through two star copies is checked against Customer.CustomerId.
+  const joined = validate(`${CHAIN} SELECT c3.CustomerId, d.NetAmount FROM c3 JOIN SalesDocument d ON d.CustomerId = c3.CustomerId`);
+  assert.deepEqual(
+    joined.guardrails.joinChecks.map(({ leftTable, leftColumn, rightTable, rightColumn }) => `${leftTable}.${leftColumn}=${rightTable}.${rightColumn}`),
+    ['SalesDocument.CustomerId=Customer.CustomerId']
+  );
+  assert.throws(
+    () => validate(`${CHAIN} SELECT c3.CustomerId FROM c3 JOIN SalesDocument d ON d.SalesDocumentId = c3.CustomerId`),
+    (error) => error.code === 'JOIN_PATH' && /SalesDocument\.SalesDocumentId to Customer\.CustomerId/.test(error.message)
+  );
+  // Only the projected columns exist on the copies.
+  assert.throws(
+    () => validate(`${CHAIN} SELECT c3.CustomerName FROM c3`),
+    (error) => error.code === 'UNKNOWN_COLUMN' && /"CustomerName" on derived table or CTE "c3"/.test(error.message)
+  );
+
+  // Computed columns survive a star copy and a column list renames them.
+  assert.doesNotThrow(() =>
+    validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b AS (SELECT * FROM a) SELECT b.net, b.CustomerId FROM b')
+  );
+  assert.doesNotThrow(() =>
+    validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b (id, total) AS (SELECT a.* FROM a) SELECT b.total, b.id FROM b')
+  );
+  assert.throws(
+    () => validate('WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b (id, total) AS (SELECT a.* FROM a) SELECT b.net FROM b'),
+    (error) => error.code === 'UNKNOWN_COLUMN'
+  );
+});
+
 test('the ProductId candidate check ignores numbers inside IN (SELECT ...) subqueries', () => {
   const prompt = buildSparklingWaterSalesPrompt();
   const validated = validateReadOnlySql(

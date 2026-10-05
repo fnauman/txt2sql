@@ -269,6 +269,15 @@ test('a derived table or CTE that only projects a child table counts as that chi
   ]) {
     assertFanOut(BRAND_QUESTION, sql);
   }
+  // A renamed header column is still the header amount it copies, through CTE chains too.
+  assertFanOut(
+    BRAND_QUESTION,
+    'WITH h AS (SELECT d.SalesDocumentId AS id, d.NetAmount AS amt FROM SalesDocument d) SELECT SUM(h.amt) AS n FROM h JOIN SalesDocumentLine l ON l.SalesDocumentId = h.id'
+  );
+  assertFanOut(
+    BRAND_QUESTION,
+    'WITH a AS (SELECT d.SalesDocumentId, d.NetAmount AS amt FROM SalesDocument d), b AS (SELECT a.* FROM a) SELECT SUM(b.amt) AS n FROM b JOIN SalesDocumentLine l ON l.SalesDocumentId = b.SalesDocumentId'
+  );
   // ...and a projection of the header joined to its lines is the header.
   assertFanOut(
     BRAND_QUESTION,

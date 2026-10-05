@@ -58,6 +58,18 @@ const VALID = [
     'WITH m (CustomerId, Net) AS (SELECT d.CustomerId, SUM(COALESCE(d.NetAmount, 0)) FROM SalesDocument d GROUP BY d.CustomerId) SELECT c.CustomerName, ROUND(m.Net, 2) AS total_net_amount FROM m JOIN Customer c ON m.CustomerId = c.CustomerId LIMIT 10',
   ],
   [Q_LIST, 'simple CTE', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM x'],
+  // Star columns of a CTE chain come from the earlier CTE's projection.
+  [Q_LIST, 'CTE chain copying an earlier CTE with q.*', 'WITH c1 AS (SELECT c.CustomerId FROM Customer c), c2 AS (SELECT c1.* FROM c1) SELECT c2.CustomerId FROM c2'],
+  [
+    Q_CUST,
+    'CTE chain copying an aggregate CTE with *',
+    'WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId), b AS (SELECT * FROM a) SELECT b.net FROM b',
+  ],
+  [
+    Q_CUST,
+    'derived table over a CTE, star and string alias',
+    "WITH a AS (SELECT d.CustomerId, SUM(d.NetAmount) AS 'net' FROM SalesDocument d GROUP BY d.CustomerId) SELECT c.CustomerName, x.net FROM (SELECT * FROM a) x JOIN Customer c ON c.CustomerId = x.CustomerId",
+  ],
   // MariaDB resolves CTE names case-insensitively; qualifiers follow the FROM spelling.
   [Q_LIST, 'CTE referenced in another case', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM X'],
   [Q_LIST, 'CTE columns qualified by the FROM spelling', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT X.CustomerId FROM X'],
