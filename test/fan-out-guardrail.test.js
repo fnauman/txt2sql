@@ -258,6 +258,13 @@ test('a parent value reduced by an inner MIN/MAX per parent-level group is not r
     `SELECT l.ProductId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY l.ProductId`,
     // Positional keys are not attributed to a table.
     `SELECT l.ProductId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY 1`,
+    // Neither are output aliases, keyword-like ones included, nor subqueries
+    // (5100 and 6500 on the seeded demo DB).
+    `SELECT l.ProductId AS year, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY year`,
+    `SELECT l.ProductId date, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY date`,
+    `SELECT l.ProductId AS month, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY month`,
+    `SELECT l.ProductId AS pid, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY pid`,
+    `SELECT d.SalesDocumentId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.SalesDocumentId, (SELECT l.SalesDocumentLineId)`,
     // A windowed MAX is not a per-group reduction.
     `SELECT SUM(d.NetAmount) OVER () AS total, MAX(d.NetAmount) OVER () AS m ${HEADER_LINES}`,
   ]) {

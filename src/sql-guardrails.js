@@ -478,11 +478,27 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     projectRelation(DERIVED_TABLE_PREFIX + key);
   }
 
+  // Lower-cased output names of a block's select list (aliases included).
+  const outputNames = (blockId) => {
+    const block = blocksById.get(blockId);
+    const selectList = block ? findSelectListRange(walker, block) : null;
+    const names = new Set();
+    for (const item of selectList ? walker.splitList(selectList.start, selectList.end) : []) {
+      for (const column of projectItem(block, item)) {
+        if (column.outputName) {
+          names.add(String(column.outputName).toLowerCase());
+        }
+      }
+    }
+    return names;
+  };
+
   const qualifiers = new Set([...bindings.values()].flatMap((blockBindings) => [...blockBindings.keys()]));
   return {
     resolve,
     derivedTables,
     qualifiers,
+    outputNames,
     relationOf: (ref) => relationOfRef.get(ref) || null,
   };
 }
@@ -1239,10 +1255,11 @@ function findLimitCount(walker, block) {
 /**
  * The entries whose columns the block's GROUP BY keys read ([] when there is
  * no GROUP BY), or null when a key cannot be attributed to a joined table: a
- * positional `GROUP BY 1`, an output alias, an outer-scope column or an
- * unknown identifier.
+ * positional `GROUP BY 1`, an output alias (keyword-like ones such as `year`
+ * too; GROUP BY prefers a FROM column of the same name, as MariaDB does), a
+ * subquery, an outer-scope column or an unknown identifier.
  */
-function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners }) {
+function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners, outputNames }) {
   const range = findGroupByRange(walker, block);
   if (!range) {
     return [];
@@ -1257,7 +1274,7 @@ function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwne
     for (let index = start; index < end; index += 1) {
       const token = tokens[index];
       if (token.blockId !== block.id) {
-        continue;
+        return null;
       }
       const reference = walker.qualifiedColumnAt(index);
       if (reference) {
@@ -1276,7 +1293,7 @@ function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwne
       const found = unqualifiedOwners(name);
       if (found.length === 1) {
         owners.push(found[0].entry);
-      } else if (!(token.type === 'word' && SQL_KEYWORDS.has(token.upper))) {
+      } else if (found.length > 1 || outputNames.has(name.toLowerCase()) || !(token.type === 'word' && SQL_KEYWORDS.has(token.upper))) {
         return null;
       }
     }
@@ -1860,7 +1877,7 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
     let groupByOwners;
     const isGroupedWithin = (entry) => {
       if (groupByOwners === undefined) {
-        groupByOwners = collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners });
+        groupByOwners = collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners, outputNames: model.outputNames(block.id) });
       }
       return Array.isArray(groupByOwners) && groupByOwners.every((owner) => owner === entry);
     };
