@@ -6,8 +6,18 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-3306}:3306"
     environment:
-      MARIADB_ROOT_PASSWORD: "${MARIADB_ROOT_PASSWORD:-${DB_PASSWORD:-secret}}"
+      # Admin (root) password. bootstrap-db and seed-demo connect as
+      # DB_ADMIN_USER / DB_ADMIN_PASSWORD, which default to root /
+      # MARIADB_ROOT_PASSWORD. DB_PASSWORD is the last fallback for older .env
+      # files that still run everything as root.
+      MARIADB_ROOT_PASSWORD: "${MARIADB_ROOT_PASSWORD:-${DB_ADMIN_PASSWORD:-${DB_PASSWORD:-secret}}}"
       MARIADB_DATABASE: "${DB_NAME:-demo_retail}"
+      # Least-privilege query user created on first init by
+      # docker/mariadb/initdb/01-readonly-user.sh (SELECT on demo_retail* only).
+      # The app's query paths connect as DB_USER / DB_PASSWORD, so the password
+      # defaults to DB_PASSWORD; the init script refuses to run without one.
+      DB_READONLY_USER: "${DB_READONLY_USER:-demo_readonly}"
+      DB_READONLY_PASSWORD: "${DB_READONLY_PASSWORD:-${DB_PASSWORD:-}}"
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=\"$${MARIADB_ROOT_PASSWORD}\" mariadb-admin ping -h 127.0.0.1 --silent"]
       interval: 5s
@@ -15,6 +25,8 @@ services:
       retries: 20
     volumes:
       - mariadb_data:/var/lib/mysql
+      # Init scripts run once, when the data volume is first created.
+      - ./docker/mariadb/initdb:/docker-entrypoint-initdb.d:ro
 
 volumes:
   mariadb_data:

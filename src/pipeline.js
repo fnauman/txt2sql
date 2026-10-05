@@ -2304,31 +2304,94 @@ export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } 
   });
 }
 
-function buildMariaDbConnectionOptions({ includeDatabase = true } = {}) {
+// --- MariaDB credentials ----------------------------------------------------
+// Two roles with separate credentials:
+// - 'query' (web, basic, optimized, resolve-master-data, evaluation): DB_USER /
+//   DB_PASSWORD, defaulting to the SELECT-only demo_readonly user that
+//   docker/mariadb/initdb provisions.
+// - 'admin' (bootstrap-db, seed-demo): DB_ADMIN_USER / DB_ADMIN_PASSWORD, which
+//   default to root / MARIADB_ROOT_PASSWORD. When no admin credential is set at
+//   all, admin scripts fall back to DB_USER / DB_PASSWORD with a warning, so
+//   older single-user (root) setups keep working.
+export const DEFAULT_QUERY_DB_USER = 'demo_readonly';
+export const DEFAULT_ADMIN_DB_USER = 'root';
+const DB_ROLES = new Set(['query', 'admin']);
+
+export function resolveQueryDbUser(env = process.env) {
+  return env.DB_USER || DEFAULT_QUERY_DB_USER;
+}
+
+export function resolveMariaDbCredentials({ role = 'query', env = process.env } = {}) {
+  if (!DB_ROLES.has(role)) {
+    throw new TypeError(`Unknown MariaDB connection role "${role}" (expected "query" or "admin").`);
+  }
+
+  if (role === 'query') {
+    return {
+      role,
+      user: resolveQueryDbUser(env),
+      password: env.DB_PASSWORD,
+      fallback: false,
+      credentialVars: 'DB_USER and DB_PASSWORD',
+    };
+  }
+
+  const adminConfigured =
+    env.DB_ADMIN_USER !== undefined || env.DB_ADMIN_PASSWORD !== undefined || env.MARIADB_ROOT_PASSWORD !== undefined;
+  if (adminConfigured) {
+    return {
+      role,
+      user: env.DB_ADMIN_USER || DEFAULT_ADMIN_DB_USER,
+      password: env.DB_ADMIN_PASSWORD ?? env.MARIADB_ROOT_PASSWORD,
+      fallback: false,
+      credentialVars: 'DB_ADMIN_USER and DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD)',
+    };
+  }
+
+  return {
+    role,
+    user: env.DB_USER,
+    password: env.DB_PASSWORD,
+    fallback: true,
+    credentialVars: 'DB_USER and DB_PASSWORD',
+  };
+}
+
+function adminFallbackWarning(user) {
+  return (
+    `[db] No admin credentials configured (DB_ADMIN_USER / DB_ADMIN_PASSWORD or MARIADB_ROOT_PASSWORD); ` +
+    `falling back to DB_USER "${user}" for this admin task. It needs CREATE/INSERT/DELETE privileges, ` +
+    'which the read-only query user must not have. Set DB_ADMIN_* to keep the two roles separate.'
+  );
+}
+
+function buildMariaDbConnectionOptions({ includeDatabase = true, role = 'query', env = process.env } = {}) {
+  const credentials = resolveMariaDbCredentials({ role, env });
   const connectionOptions = {
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    user: credentials.user,
+    password: credentials.password,
     decimalNumbers: true,
   };
 
   if (includeDatabase) {
-    connectionOptions.database = process.env.DB_NAME;
+    connectionOptions.database = env.DB_NAME;
   }
 
-  if (process.env.DB_SOCKET) {
-    connectionOptions.socketPath = process.env.DB_SOCKET;
+  if (env.DB_SOCKET) {
+    connectionOptions.socketPath = env.DB_SOCKET;
   } else {
-    connectionOptions.host = process.env.DB_HOST || '127.0.0.1';
-    connectionOptions.port = Number(process.env.DB_PORT || 3306);
+    connectionOptions.host = env.DB_HOST || '127.0.0.1';
+    connectionOptions.port = Number(env.DB_PORT || 3306);
   }
 
   return connectionOptions;
 }
 
-export function describeMariaDbConnectionTarget({ includeDatabase = true } = {}) {
-  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase });
+export function describeMariaDbConnectionTarget({ includeDatabase = true, role = 'query', env = process.env } = {}) {
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
 
   return {
+    role,
     user: connectionOptions.user || null,
     database: includeDatabase ? connectionOptions.database || null : null,
     socketPath: connectionOptions.socketPath || null,
@@ -2345,34 +2408,73 @@ function formatMariaDbTarget(connectionOptions) {
   return `${connectionOptions.host}:${connectionOptions.port}`;
 }
 
-export async function createMariaDbConnection({ includeDatabase = true } = {}) {
-  const missing = ['DB_USER', includeDatabase ? 'DB_NAME' : null].filter((key) => key && !process.env[key]);
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
-    );
+function assertMariaDbConfigured({ includeDatabase, role, env }) {
+  const credentials = resolveMariaDbCredentials({ role, env });
+  const missing = [];
+  if (role === 'admin' && credentials.fallback && !env.DB_USER) {
+    missing.push('DB_ADMIN_USER/DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD, or DB_USER as a fallback)');
+  }
+  if (includeDatabase && !env.DB_NAME) {
+    missing.push('DB_NAME');
   }
 
-  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase });
+  if (missing.length > 0) {
+    const error = new Error(
+      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
+    );
+    error.code = 'DB_NOT_CONFIGURED';
+    throw error;
+  }
+
+  return credentials;
+}
+
+// Re-throw driver errors with an actionable message, keeping code/errno so
+// callers can still classify them (e.g. connection failures as infra errors).
+function wrapConnectionError(error, message) {
+  const wrapped = new Error(message, { cause: error });
+  wrapped.code = error.code;
+  wrapped.errno = error.errno;
+  return wrapped;
+}
+
+export async function createMariaDbConnection({ includeDatabase = true, role = 'query', env = process.env, warn = console.warn } = {}) {
+  const credentials = assertMariaDbConfigured({ includeDatabase, role, env });
+  if (credentials.fallback) {
+    warn(adminFallbackWarning(credentials.user));
+  }
+
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
 
   try {
     return await mysql.createConnection(connectionOptions);
   } catch (error) {
     if (error.code === 'ECONNREFUSED') {
-      throw new Error(
+      throw wrapConnectionError(
+        error,
         `Unable to connect to MariaDB at ${formatMariaDbTarget(connectionOptions)}. Start MariaDB locally or update DB_HOST, DB_PORT, or DB_SOCKET.`
       );
     }
 
     if (error.code === 'ER_BAD_DB_ERROR' && includeDatabase) {
-      throw new Error(
-        `Database "${process.env.DB_NAME}" does not exist. Start MariaDB and run "npm run bootstrap-db" first.`
+      throw wrapConnectionError(
+        error,
+        `Database "${env.DB_NAME}" does not exist. Start MariaDB and run "npm run bootstrap-db" first.`
       );
     }
 
     if (error.code === 'ER_ACCESS_DENIED_ERROR') {
-      throw new Error(
-        `MariaDB access denied for user "${connectionOptions.user}". Check DB_USER and DB_PASSWORD.`
+      throw wrapConnectionError(
+        error,
+        `MariaDB access denied for user "${connectionOptions.user}". Check ${credentials.credentialVars}.`
+      );
+    }
+
+    if (error.code === 'ER_DBACCESS_DENIED_ERROR' && includeDatabase) {
+      throw wrapConnectionError(
+        error,
+        `MariaDB user "${connectionOptions.user}" may not access database "${env.DB_NAME}". ` +
+          'The provisioned query user only has SELECT on demo_retail* databases (docker/mariadb/initdb).'
       );
     }
 
@@ -2380,20 +2482,99 @@ export async function createMariaDbConnection({ includeDatabase = true } = {}) {
   }
 }
 
-export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5 } = {}) {
-  const missing = ['DB_USER', includeDatabase ? 'DB_NAME' : null].filter((key) => key && !process.env[key]);
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
-    );
-  }
+export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5, role = 'query', env = process.env } = {}) {
+  assertMariaDbConfigured({ includeDatabase, role, env });
 
   return mysql.createPool({
-    ...buildMariaDbConnectionOptions({ includeDatabase }),
+    ...buildMariaDbConnectionOptions({ includeDatabase, role, env }),
     waitForConnections: true,
     connectionLimit,
     queueLimit: 20,
   });
+}
+
+// The DB grants are the real boundary for model-authored SQL; the validator is
+// defense in depth. SHOW GRANTS for the connected (query) user and report
+// anything beyond SELECT/USAGE: write or admin privileges (ALL PRIVILEGES,
+// INSERT, FILE, SUPER, ...), SELECT on every database (*.*, which includes the
+// mysql system schema), and grant options. Returns warnings; never throws for
+// an unexpected grant format.
+const ALLOWED_QUERY_PRIVILEGES = new Set(['SELECT', 'USAGE']);
+
+function splitPrivileges(list) {
+  // Column grants look like "SELECT (a, b)"; drop the column lists first.
+  return list
+    .replace(/\([^)]*\)/g, '')
+    .split(',')
+    .map((privilege) => privilege.trim().replace(/\s+/g, ' ').toUpperCase())
+    .filter(Boolean);
+}
+
+export function analyzeQueryUserGrants(grants) {
+  const warnings = [];
+  const privileges = [];
+
+  for (const grant of grants) {
+    const text = String(grant || '').trim();
+    const onMatch = /^GRANT\s+(.+?)\s+ON\s+(.+?)\s+TO\s+/i.exec(text);
+    if (!onMatch) {
+      const roleMatch = /^GRANT\s+(.+?)\s+TO\s+/i.exec(text);
+      if (roleMatch) {
+        warnings.push(`Role ${roleMatch[1]} is granted to the query user; review that role's privileges.`);
+      }
+      continue;
+    }
+
+    const [, privilegeList, target] = onMatch;
+    const grantPrivileges = splitPrivileges(privilegeList);
+    privileges.push({ on: target, privileges: grantPrivileges });
+
+    const extra = grantPrivileges.filter((privilege) => !ALLOWED_QUERY_PRIVILEGES.has(privilege));
+    if (extra.length > 0) {
+      warnings.push(`${extra.join(', ')} on ${target}: the query user should only have SELECT (and USAGE).`);
+    }
+
+    if (grantPrivileges.includes('SELECT') && /^\*\.\*$/.test(target.trim())) {
+      warnings.push('SELECT on *.*: the query user can read every database, including the mysql system schema.');
+    }
+
+    if (/\bWITH\s+GRANT\s+OPTION\b/i.test(text)) {
+      warnings.push(`GRANT OPTION on ${target}: the query user can grant its privileges to others.`);
+    }
+  }
+
+  return { ok: warnings.length === 0, warnings, privileges };
+}
+
+function redactGrant(grant) {
+  return String(grant || '')
+    .replace(/(IDENTIFIED BY PASSWORD\s+)'[^']*'/gi, "$1'<redacted>'")
+    .replace(/(\bUSING\s+)'[^']*'/gi, "$1'<redacted>'");
+}
+
+export async function checkQueryUserPrivileges(connection) {
+  const [rows] = await connection.query('SHOW GRANTS');
+  const grants = (Array.isArray(rows) ? rows : []).map((row) => String(Object.values(row || {})[0] ?? ''));
+  return {
+    grants: grants.map(redactGrant),
+    ...analyzeQueryUserGrants(grants),
+  };
+}
+
+// CLI helper: print privilege warnings for the query user to stderr (stdout
+// stays clean for results). Best effort: a failed SHOW GRANTS is reported, not
+// fatal.
+export async function reportQueryUserPrivileges(connection, { log = console.error } = {}) {
+  try {
+    const report = await checkQueryUserPrivileges(connection);
+    for (const warning of report.warnings) {
+      log(`[db] warning: ${warning}`);
+    }
+    return report;
+  } catch (error) {
+    log(`[db] note: could not check the query user's privileges (${error.message}).`);
+    return null;
+  }
 }
 
 export async function loadNarrowSchema({

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getOptionValue, getPositionalArgs, hasOptionFlag } from '../src/env.js';
+import { ENV_OPTIONS_WITH_VALUES, getOptionValue, getPositionalArgs, hasOptionFlag } from '../src/env.js';
 import { caseMatchesId, DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
 import {
   extractTablesFromSql,
@@ -31,7 +31,10 @@ async function resolveQuestion(argv) {
   const datasetPath = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
   const datasetName = getOptionValue(argv, '--dataset') || (datasetPath ? null : DEFAULT_DATASET_NAME);
   const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
+  // Env-source flags take a value too; skip them so a path never becomes part
+  // of the question (this script does not load an env file itself).
   const positional = getPositionalArgs(argv, [
+    ...ENV_OPTIONS_WITH_VALUES,
     '--case-id',
     '--tag',
     '--dataset',

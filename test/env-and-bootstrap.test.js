@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   ENV_OPTIONS_WITH_VALUES,
@@ -11,6 +13,8 @@ import {
   resolveEnvPath,
 } from '../src/env.js';
 import { mapColumnTypeToMariaDb } from '../src/mariadb-bootstrap.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function withEnv(overrides, fn) {
   const original = new Map();
@@ -104,6 +108,38 @@ test('loadEnvironment loads the selected file without overriding existing values
     assert.equal(missing.candidate, path.join(dir, 'missing.env'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Regression: Node (20.6+) scans the whole command line for --env-file, even
+// after the script path, and exits "node: <path>: not found" before the script
+// runs. --dotenv must reach the script untouched.
+test('a CLI script receives --dotenv=<missing path> instead of Node intercepting it', () => {
+  const missing = path.join(os.tmpdir(), 'txt2sql-definitely-missing', 'none.env');
+  const result = spawnSync(process.execPath, ['scripts/resolve-master-data.js', `--dotenv=${missing}`], {
+    cwd: repoRoot,
+    env: { PATH: process.env.PATH, HOME: os.tmpdir() },
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stderr, /node: .*not found/);
+  // The script itself ran: no question was given, so it prints its usage.
+  assert.match(result.stderr, /Pass a question to resolve/);
+  assert.match(result.stderr, /--dotenv <path>/);
+});
+
+test('CLI usage strings document --dotenv', () => {
+  for (const script of ['scripts/basic.js', 'scripts/optimized.js']) {
+    const result = spawnSync(process.execPath, [script, '--help'], {
+      cwd: repoRoot,
+      env: { PATH: process.env.PATH, HOME: os.tmpdir() },
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+    assert.equal(result.status, 0, `${script} --help failed: ${result.stderr}`);
+    assert.match(result.stdout, /--dotenv <path>/);
+    assert.match(result.stdout, /QUERY_STATEMENT_TIMEOUT_MS/);
   }
 });
 
