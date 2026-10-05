@@ -4,6 +4,7 @@ import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
+import { calculateCost } from '../src/pricing.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { extractAttempts } from '../src/eval/case-trace.js';
 import { createGoldCache, GOLD_STATEMENT_TIMEOUT_MS } from '../src/eval/oracle.js';
@@ -414,4 +415,44 @@ test('extractAttempts tolerates partial traces', () => {
     error: { name: 'LlmResponseError', code: 'LLM_TRUNCATED', message: 'cut off' },
   });
   assert.equal(attempts[0].validation, null);
+});
+
+test('billed but unusable completions (truncated) count toward the case tokens and cost', async () => {
+  // Moved from trace-and-metadata.test.js when the benchmark moved onto the
+  // product loop: the loop must still bill truncated/refused completions.
+  const usage = { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 };
+  const truncatingClient = {
+    calls: 0,
+    chat: {
+      completions: {
+        async create(request) {
+          truncatingClient.calls += 1;
+          return {
+            id: `resp_${truncatingClient.calls}`,
+            model: request.model,
+            usage,
+            choices: [{ finish_reason: 'length', message: { content: '{"sql": "SELECT' } }],
+          };
+        },
+      },
+    },
+  };
+  const { trace, events } = collector();
+  const result = await evaluateQuestion({
+    client: truncatingClient,
+    connection: fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }] }),
+    schema,
+    model: 'gpt-4o-mini',
+    testCase: activeCase,
+    caseIndex: 1,
+    trace,
+  });
+
+  const perCall = calculateCost('gpt-4o-mini', usage).totalCost;
+  assert.equal(result.status, 'llm_error');
+  assert.equal(truncatingClient.calls, 2, 'the truncated attempt is retried once');
+  assert.equal(result.llm_usage.total_tokens, 300, 'both billed attempts are counted');
+  assert.ok(Math.abs(result.llm_cost.totalCost - 2 * perCall) < 1e-12);
+  const completed = events.find((entry) => entry.event === 'case.completed');
+  assert.ok(Math.abs(completed.llmCost.totalCost - 2 * perCall) < 1e-12);
 });
