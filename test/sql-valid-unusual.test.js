@@ -256,6 +256,10 @@ const VALID = [
     'SELECT (SELECT COUNT(*) FROM Customer) TotalCount INTERSECT SELECT (SELECT COUNT(*) FROM Customer) ORDER BY TotalCount',
   ],
   [Q_LIST, 'implicit alias before WINDOW', "SELECT 'x' Label, (SELECT COUNT(*) FROM Customer) TotalCount WINDOW w AS (ORDER BY 1)"],
+  // A SELECT modifier is not an expression: the alias after the first item
+  // still counts.
+  [Q_LIST, 'DISTINCTROW with an implicit alias used in ORDER BY', 'SELECT DISTINCTROW c.CustomerName Nm FROM Customer c ORDER BY Nm'],
+  [Q_LIST, 'SQL_NO_CACHE before a bare column', 'SELECT SQL_NO_CACHE CustomerName FROM Customer'],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,

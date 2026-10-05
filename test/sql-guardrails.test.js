@@ -389,6 +389,13 @@ test('guardrail rejections carry error.code and error.layer', () => {
     // The name after an operator word is an operand, not an alias.
     ['SELECT c.CustomerId DIV CustomerRank FROM Customer c', 'UNKNOWN_IDENTIFIER'],
     ['SELECT (SELECT MAX(x.CustomerId) FROM Customer x) MOD CustomerRank ORDER BY 1', 'UNKNOWN_IDENTIFIER'],
+    // The name after a SELECT modifier (DISTINCTROW, SQL_NO_CACHE, ...) is the
+    // first select item, not an alias, also before LIMIT / ORDER BY.
+    ['SELECT c.CustomerId FROM Customer c WHERE c.CustomerId = (SELECT DISTINCTROW CustomerKey LIMIT 1)', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT c.CustomerId FROM Customer c WHERE c.CustomerId IN (SELECT DISTINCTROW CustomerRank ORDER BY 1)', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT c.CustomerId, (SELECT SQL_NO_CACHE CustomerRank LIMIT 1) FROM Customer c', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT DISTINCTROW CustomerRank FROM Customer', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT HIGH_PRIORITY STRAIGHT_JOIN CustomerRank FROM Customer', 'UNKNOWN_IDENTIFIER'],
     [
       'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
       'JOIN_PATH',

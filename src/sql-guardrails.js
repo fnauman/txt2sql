@@ -723,6 +723,11 @@ const EXPRESSION_END_KEYWORDS = new Set(['END', 'NULL', 'TRUE', 'FALSE']);
 // one is an operand (`a DIV b`), never an alias.
 const OPERATOR_WORDS = new Set(['DIV', 'MOD', 'XOR', 'REGEXP', 'RLIKE', 'SOUNDS', 'BINARY', 'ESCAPE']);
 
+// SELECT modifiers missing from SQL_KEYWORDS (DISTINCTROW, HIGH_PRIORITY,
+// STRAIGHT_JOIN, SQL_*): the name after one is the first select item
+// (`SELECT DISTINCTROW CustomerKey LIMIT 1`), never an alias.
+const SELECT_OPTION_WORD_SET = new Set(SELECT_OPTION_WORDS);
+
 function endsExpression(token) {
   if (!token) {
     return false;
@@ -734,7 +739,11 @@ function endsExpression(token) {
     return true;
   }
   if (token.type === 'word') {
-    return token.afterDot || EXPRESSION_END_KEYWORDS.has(token.upper) || (!SQL_KEYWORDS.has(token.upper) && !OPERATOR_WORDS.has(token.upper));
+    return (
+      token.afterDot ||
+      EXPRESSION_END_KEYWORDS.has(token.upper) ||
+      (!SQL_KEYWORDS.has(token.upper) && !OPERATOR_WORDS.has(token.upper) && !SELECT_OPTION_WORD_SET.has(token.upper))
+    );
   }
   return false;
 }

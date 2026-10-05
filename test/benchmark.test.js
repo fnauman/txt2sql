@@ -157,6 +157,12 @@ test('findDisallowedColumnsUsed treats implicit aliases and alias references in 
   // name), a bare name in WHERE (aliases do not exist there), the operand of
   // an operator word, or a name that is not an alias.
   assert.deepEqual(findDisallowedColumnsUsed('SELECT d.NetAmount DIV NetPayableAmount FROM SalesDocument d', entry), entry);
+  // ... or the first select item after a SELECT modifier.
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT d.SalesDocumentId, (SELECT DISTINCTROW NetPayableAmount LIMIT 1) FROM SalesDocument d', entry),
+    entry
+  );
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SQL_NO_CACHE NetPayableAmount FROM SalesDocument', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT NetPayableAmount AS NetPayableAmount FROM SalesDocument', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT d.NetPayableAmount AS NetPayableAmount FROM SalesDocument d', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS NetPayableAmount FROM SalesDocument d WHERE NetPayableAmount > 0', entry), entry);
