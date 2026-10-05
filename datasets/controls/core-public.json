@@ -422,7 +422,7 @@
       },
       {
         "id": "rp4",
-        "note": "review: GROUP BY ... HAVING over a Feb-Mar range, then count (P08). The FAN_OUT guardrail rejects SUM(d.DocumentDate < ...) over line-joined headers although the boolean aggregate cannot fan out; kept as a known false rejection.",
+        "note": "review: GROUP BY ... HAVING over a Feb-Mar range, then count (P08). The FAN_OUT guardrail rejects SUM(d.DocumentDate < ...) over line-joined headers. Here the sums are only tested against 0, which a fan-out cannot change, but relaxing FAN_OUT for boolean aggregates in general would also admit SUM(d.IsCanceled = 0)-style document counts over line-joined headers, which do fan out; so it stays a known false rejection rather than a guardrail change.",
         "sql": "SELECT COUNT(*) AS product_count FROM (SELECT l.ProductId FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId WHERE d.IsCanceled = 0 AND l.ProductId IS NOT NULL AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-04-01' GROUP BY l.ProductId HAVING SUM(d.DocumentDate < '2026-03-01') > 0 AND SUM(d.DocumentDate >= '2026-03-01') = 0) x",
         "validator_known_false_rejection": true
       }
