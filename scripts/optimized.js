@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_OPTIMIZED_QUESTIONS } from '../src/constants.js';
-import { getPositionalArgs, hasOptionFlag, loadEnvironment } from '../src/env.js';
+import { ENV_OPTIONS_WITH_VALUES, ENV_USAGE, getPositionalArgs, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import {
   createMariaDbConnection,
   createOpenAiClient,
@@ -10,18 +10,32 @@ import {
   describeSchema,
   loadNarrowSchema,
   printRows,
+  reportQueryUserPrivileges,
+  resolveStatementTimeoutMs,
 } from '../src/pipeline.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
-import { runOptimizedQuestion } from '../src/query-service.js';
+import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = path.resolve(__dirname, '../models');
 const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
+const USAGE = `Usage: npm run optimized -- [question] [--refresh-schema] [--trace] [--trace-file <path>]
+${ENV_USAGE}
+Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).`;
+
 async function main() {
   const argv = process.argv.slice(2);
+  if (hasOptionFlag(argv, '--help')) {
+    console.log(USAGE);
+    return;
+  }
+
   const envInfo = await loadEnvironment(argv);
+  // Validate up front so a bad value fails the run, not every question.
+  const statementTimeoutMs = resolveStatementTimeoutMs();
+  const maxRetries = resolveMaxRetries();
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const traceOptions = resolveTraceOptions(argv);
   const trace = await createTraceLogger({
@@ -34,7 +48,7 @@ async function main() {
   const cli = createCliOutput({
     traceToStdout: traceOptions.logToStdout,
   });
-  const positional = getPositionalArgs(argv, ['--env-file', '--env-dir', '--trace-file']);
+  const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
   const model = process.env.MODEL_NAME || 'gpt-4o-mini';
   const questions = customQuestion ? [customQuestion] : DEFAULT_OPTIMIZED_QUESTIONS;
@@ -50,6 +64,8 @@ async function main() {
     openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
     traceToStdout: traceOptions.logToStdout,
     traceFile: trace.filePath,
+    statementTimeoutMs,
+    maxRetries,
   });
 
   let schema;
@@ -109,6 +125,7 @@ async function main() {
     ...connectionTimer.stop(),
     target: describeMariaDbConnectionTarget(),
   });
+  await reportQueryUserPrivileges(connection);
 
   cli.log(`Model: ${model}`);
   cli.log(`Schema file: ${SCHEMA_PATH}`);
@@ -128,6 +145,8 @@ async function main() {
         question,
         questionIndex: index + 1,
         trace,
+        maxRetries,
+        statementTimeoutMs,
       });
 
       if (result.llmUsage) {
@@ -157,7 +176,7 @@ async function main() {
 
       if (!result.success) {
         failureCount += 1;
-        cli.log(`Error: ${result.error.message}`);
+        cli.log(`Error (${result.errorStage}${result.errorCode ? `, ${result.errorCode}` : ''}): ${result.error.message}`);
         continue;
       }
 

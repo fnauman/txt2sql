@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { getPositionalArgs, loadEnvironment } from '../src/env.js';
+import { ENV_OPTIONS_WITH_VALUES, ENV_USAGE, getPositionalArgs, loadEnvironment } from '../src/env.js';
 import {
   buildSemanticPlan,
   createMariaDbConnection,
   describeMariaDbConnectionTarget,
+  resolveStatementTimeoutMs,
 } from '../src/pipeline.js';
 import { resolveMasterDataCandidates } from '../src/master-data-resolver.js';
 import { createTimer } from '../src/trace.js';
@@ -12,10 +13,13 @@ import { createTimer } from '../src/trace.js';
 async function main() {
   const argv = process.argv.slice(2);
   await loadEnvironment(argv);
-  const question = getPositionalArgs(argv, ['--env-file', '--env-dir']).join(' ').trim();
+  const statementTimeoutMs = resolveStatementTimeoutMs();
+  const question = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES]).join(' ').trim();
 
   if (!question) {
-    throw new Error('Pass a question to resolve, for example: npm run resolve-master-data -- "sparkling water sales"');
+    throw new Error(
+      `Pass a question to resolve, for example: npm run resolve-master-data -- "sparkling water sales"\n${ENV_USAGE}`
+    );
   }
 
   const connection = await createMariaDbConnection();
@@ -25,6 +29,7 @@ async function main() {
     const candidates = await resolveMasterDataCandidates({
       connection,
       semanticPlan,
+      statementTimeoutMs,
     });
     const timing = timer.stop();
 

@@ -12,12 +12,13 @@
 // demo_readonly user. Default-deny. It is also single-process / single-tenant —
 // the key has no per-user component, which is fine only because the demo is not
 // multi-user. (Add an identity component before introducing auth/multi-tenancy.)
+//
+// Settings come from loadWebConfig() (WEB_RESULT_CACHE, WEB_RESULT_CACHE_SIZE,
+// WEB_RESULT_CACHE_TTL_MS) via the constructor; nothing is read from
+// process.env at import time, so values set only in .env are honored.
 
-const MAX_ENTRIES = Number(process.env.WEB_RESULT_CACHE_SIZE) || 200;
-const TTL_MS = Number.isFinite(Number(process.env.WEB_RESULT_CACHE_TTL_MS))
-  ? Number(process.env.WEB_RESULT_CACHE_TTL_MS)
-  : 15 * 60 * 1000;
-const ENABLED = process.env.WEB_RESULT_CACHE !== '0';
+const DEFAULT_MAX_ENTRIES = 200;
+const DEFAULT_TTL_MS = 15 * 60 * 1000;
 
 export function normalizeQuestion(question) {
   return String(question || '')
@@ -37,20 +38,47 @@ export function schemaVersion(dbSchema) {
 }
 
 // Only synthetic demo data may be retained/replayed (defense in depth on top of
-// the DB user/database separation, which remains the real boundary).
-function isDemoSource() {
-  return process.env.DB_NAME === 'demo_retail' && process.env.DB_USER === 'demo_readonly';
+// the DB user/database separation, which remains the real boundary). The
+// default reads the env at call time; the web app injects its loaded config.
+export function isDemoSourceEnv(env = process.env) {
+  return env.DB_NAME === 'demo_retail' && env.DB_USER === 'demo_readonly';
 }
 
 export class ResultCache {
   #map = new Map(); // insertion-ordered -> cheap LRU
+  #enabled;
+  #maxEntries;
+  #ttlMs;
+  #isDemoSource;
+  // Bumped by clear(). A request that started before a clear (e.g. an admin
+  // schema refresh) passes the generation it saw to set(), so its now-stale
+  // result is not written back after the clear.
+  #generation = 0;
+
+  constructor({ enabled = true, maxEntries = DEFAULT_MAX_ENTRIES, ttlMs = DEFAULT_TTL_MS, isDemoSource = () => isDemoSourceEnv() } = {}) {
+    this.#maxEntries = Number.isInteger(maxEntries) && maxEntries >= 0 ? maxEntries : DEFAULT_MAX_ENTRIES;
+    this.#ttlMs = Number.isFinite(ttlMs) && ttlMs >= 0 ? ttlMs : DEFAULT_TTL_MS;
+    // A zero size or a zero TTL keeps nothing, so either disables the cache
+    // (an entry with a 0 ms TTL would still be stored and replayed in the same
+    // millisecond).
+    this.#enabled = Boolean(enabled) && this.#maxEntries > 0 && this.#ttlMs > 0;
+    this.#isDemoSource = isDemoSource;
+  }
 
   #key(question, dbSchema, rowLimit, includeInsights) {
     return `${normalizeQuestion(question)}::${schemaVersion(dbSchema)}::${rowLimit}::${includeInsights ? 1 : 0}`;
   }
 
+  get enabled() {
+    return this.#enabled;
+  }
+
+  get generation() {
+    return this.#generation;
+  }
+
   get(question, dbSchema, rowLimit, includeInsights, now = Date.now()) {
-    if (!ENABLED) {
+    if (!this.#enabled) {
       return null;
     }
     const key = this.#key(question, dbSchema, rowLimit, includeInsights);
@@ -58,7 +86,7 @@ export class ResultCache {
     if (!hit) {
       return null;
     }
-    if (now - hit.at > TTL_MS) {
+    if (now - hit.at > this.#ttlMs) {
       this.#map.delete(key);
       return null;
     }
@@ -68,30 +96,32 @@ export class ResultCache {
     return hit.payload;
   }
 
-  set(question, dbSchema, rowLimit, includeInsights, payload, now = Date.now()) {
-    if (!ENABLED) {
+  set(question, dbSchema, rowLimit, includeInsights, payload, now = Date.now(), { generation = this.#generation } = {}) {
+    if (!this.#enabled) {
       return;
     }
     if (!payload || payload.success !== true) {
       return; // never cache failures
     }
-    if (!isDemoSource()) {
+    if (generation !== this.#generation) {
+      return; // computed before the last clear() — stale
+    }
+    if (!this.#isDemoSource()) {
       return; // demo_retail + demo_readonly only — never cache real/ERP data
     }
     const key = this.#key(question, dbSchema, rowLimit, includeInsights);
     this.#map.set(key, { payload, at: now });
-    while (this.#map.size > MAX_ENTRIES) {
+    while (this.#map.size > this.#maxEntries) {
       this.#map.delete(this.#map.keys().next().value);
     }
   }
 
   clear() {
     this.#map.clear();
+    this.#generation += 1;
   }
 
   get size() {
     return this.#map.size;
   }
 }
-
-export const resultCache = new ResultCache();

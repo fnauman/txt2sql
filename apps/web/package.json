@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "server": "node src/server/index.js",
+    "server": "node src/server/main.js",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

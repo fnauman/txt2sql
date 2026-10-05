@@ -1,12 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import OpenAI from 'openai';
+import OpenAI, { APIUserAbortError } from 'openai';
 import mysql from 'mysql2/promise';
 
 import {
   BUSINESS_RULES,
   DEFAULT_INCLUDED_TABLES,
   FEW_SHOT_EXAMPLES,
+  NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
 import { calculateCost } from './pricing.js';
@@ -1312,6 +1313,7 @@ export function buildBasicPrompt(schema, question) {
 
 Write one read-only SQL query that answers the user's question.
 Return ONLY the SQL query.
+${NO_SQL_COMMENTS_RULE}
 ${EXACT_SCHEMA_GUARD}
 
 Resolved temporal references:
@@ -1523,6 +1525,48 @@ export const BASIC_MODEL_REQUEST_OPTIONS = {
   max_completion_tokens: 1200,
 };
 
+// Typed failure for a completion that must not be parsed: the model hit the
+// token limit (finish_reason 'length', so the SQL/JSON is cut off) or declined
+// to answer (finish_reason 'content_filter', or a structured-output refusal).
+// Parsing partial output would execute a truncated query or a refusal string,
+// so callers get error.code 'LLM_TRUNCATED' / 'LLM_REFUSED' (stage 'llm')
+// instead. usage/cost ride along because those tokens were still billed.
+export class LlmResponseError extends Error {
+  constructor(message, { code, finishReason = null, refusal = null, rawText = '', usage = null, cost = null, responseId = null, responseModel = null } = {}) {
+    super(message);
+    this.name = 'LlmResponseError';
+    this.code = code;
+    this.stage = 'llm';
+    this.finishReason = finishReason;
+    this.refusal = refusal;
+    this.rawText = rawText;
+    this.usage = usage;
+    this.cost = cost;
+    this.responseId = responseId;
+    this.responseModel = responseModel;
+  }
+}
+
+function assertCompleteChoice(choice, details) {
+  const finishReason = choice?.finish_reason || null;
+  if (finishReason === 'length') {
+    throw new LlmResponseError(
+      'The model response was cut off at the completion token limit (finish_reason=length); the partial output was discarded.',
+      { ...details, code: 'LLM_TRUNCATED', finishReason }
+    );
+  }
+
+  const refusal = typeof choice?.message?.refusal === 'string' && choice.message.refusal ? choice.message.refusal : null;
+  if (finishReason === 'content_filter' || refusal) {
+    throw new LlmResponseError(
+      finishReason === 'content_filter'
+        ? 'The model response was blocked by the provider content filter (finish_reason=content_filter).'
+        : `The model declined to answer: ${refusal}`,
+      { ...details, code: 'LLM_REFUSED', finishReason, refusal }
+    );
+  }
+}
+
 export async function generateBasicSql({ client, model, prompt }) {
   const request = {
     model,
@@ -1541,6 +1585,14 @@ export async function generateBasicSql({ client, model, prompt }) {
   const rawText = extractMessageText(response.choices[0]?.message?.content);
   const usage = response.usage || null;
   const responseModel = response.model || model;
+
+  assertCompleteChoice(response.choices[0], {
+    rawText,
+    usage,
+    cost: calculateCost(responseModel, usage),
+    responseId: response.id || null,
+    responseModel,
+  });
 
   return {
     sql: cleanModelOutput(rawText),
@@ -1625,11 +1677,25 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   };
 
   // Pass the abort signal so a disconnected client (SSE closed) stops the
-  // in-flight generation instead of burning the full completion's tokens.
-  const response = await client.chat.completions.create(request, signal ? { signal } : undefined);
+  // in-flight generation instead of burning the full completion's tokens. The
+  // SDK only checks it per HTTP attempt: its retry backoff sleep (retry-after
+  // is honoured up to 60 s) ignores it, so the wait is bounded here as well;
+  // the SDK's own late rejection is then ignored.
+  const response = await untilAborted(client.chat.completions.create(request, signal ? { signal } : undefined), signal, {
+    abortError: () => new APIUserAbortError(),
+  });
   const rawText = extractMessageText(response.choices[0]?.message?.content);
   const usage = response.usage || null;
   const responseModel = response.model || model;
+
+  // A truncated or refused completion is a typed failure, never parsed below.
+  assertCompleteChoice(response.choices[0], {
+    rawText,
+    usage,
+    cost: calculateCost(responseModel, usage),
+    responseId: response.id || null,
+    responseModel,
+  });
 
   const cleaned = cleanModelOutput(rawText);
 
@@ -2017,25 +2083,317 @@ export function validateReadOnlySql(sql, allowedTables, { promptContext = null, 
   };
 }
 
-// Bound the execution tail. The generated SQL is model-authored, so a
-// pathological join could otherwise run unbounded and pin the MariaDB instance,
-// which may also host sensitive non-demo databases. MariaDB's
-// `SET STATEMENT max_statement_time=<seconds> FOR <stmt>` scopes the timeout to
-// this single statement (seconds, fractional allowed). Pass timeoutMs<=0 (or set
-// WEB_QUERY_STATEMENT_TIMEOUT_MS=0) to disable and preserve the old behavior.
-export async function executeReadOnlySql(connection, sql, { timeoutMs } = {}) {
-  // Opt-in tail bounding. When a positive timeout is supplied, MariaDB's
-  // `SET STATEMENT max_statement_time=<seconds> FOR <stmt>` scopes it to this one
-  // statement (seconds, fractional allowed). Callers that pass nothing keep the
-  // original unbounded behavior — the web layer is what opts in, since it is the
-  // path exposed to model-authored SQL against the shared MariaDB instance.
-  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-    const seconds = (timeoutMs / 1000).toFixed(3);
-    const [rows] = await connection.query(`SET STATEMENT max_statement_time=${seconds} FOR ${sql}`);
-    return rows;
+// --- Execution bounds -------------------------------------------------------
+// The generated SQL is model-authored, so a pathological join could otherwise
+// run unbounded and pin the MariaDB instance, which may also host sensitive
+// non-demo databases. Every path (web, CLI, benchmark, master-data lookups) is
+// bounded by default: QUERY_STATEMENT_TIMEOUT_MS (default 8000; 0 disables).
+export const DEFAULT_STATEMENT_TIMEOUT_MS = 8000;
+
+function configError(message) {
+  const error = new Error(message);
+  error.code = 'INVALID_CONFIG';
+  return error;
+}
+
+function readIntegerEnv(env, name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = env[name];
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return fallback;
   }
 
-  const [rows] = await connection.query(sql);
+  // Plain decimal digits only (Number() would also take "0x50" or "8e3").
+  const text = String(raw).trim();
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw configError(`${name} must be an integer between ${min} and ${max}; got "${raw}".`);
+  }
+
+  return value;
+}
+
+export function resolveStatementTimeoutMs(env = process.env) {
+  return readIntegerEnv(env, 'QUERY_STATEMENT_TIMEOUT_MS', DEFAULT_STATEMENT_TIMEOUT_MS, { min: 0 });
+}
+
+// MariaDB's `SET STATEMENT var=value[, ...] FOR <stmt>` scopes session variables
+// to this one statement:
+// - max_statement_time (seconds, fractional allowed) bounds the execution tail.
+// - sql_select_limit caps the rows the server returns WITHOUT rewriting the
+//   query: it applies only to the outermost SELECT (subqueries, derived tables,
+//   CTEs and window frames still see every row) and keeps ORDER BY. Verified on
+//   MariaDB 10.6. An explicit LIMIT in the query takes precedence over it, so
+//   executeReadOnlySql also stops reading after maxRows rows (see readRows).
+export function buildBoundedStatement(sql, { timeoutMs = 0, maxRows = null } = {}) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError(`timeoutMs must be a non-negative number of milliseconds; got ${timeoutMs}.`);
+  }
+
+  if (maxRows != null && (!Number.isInteger(maxRows) || maxRows < 1)) {
+    throw new TypeError(`maxRows must be a positive integer; got ${maxRows}.`);
+  }
+
+  const settings = [];
+  if (timeoutMs > 0) {
+    // Never round a tiny positive timeout down to 0, which would disable it.
+    settings.push(`max_statement_time=${(Math.max(timeoutMs, 1) / 1000).toFixed(3)}`);
+  }
+  if (maxRows != null) {
+    settings.push(`sql_select_limit=${maxRows}`);
+  }
+
+  return settings.length > 0 ? `SET STATEMENT ${settings.join(', ')} FOR ${sql}` : sql;
+}
+
+function createQueryAbortError(signal, cause = null) {
+  const reason = signal?.reason;
+  const error = new Error('The database query was cancelled because the request was aborted.');
+  error.name = 'AbortError';
+  error.code = typeof reason?.code === 'string' ? reason.code : 'QUERY_ABORTED';
+  error.cause = cause || reason || null;
+  return error;
+}
+
+// Settles like `promise`, unless `signal` aborts first: then it rejects at once
+// with `abortError()` (default: the signal's reason). A value that still
+// arrives after the abort is handed to `onLate`, so a resource nobody will use
+// (a pool connection, a runtime lease) is released instead of leaked; a late
+// rejection is ignored. Without a signal it simply awaits `promise`.
+export function untilAborted(promise, signal, { onLate = null, abortError = () => signal.reason } = {}) {
+  if (!signal) {
+    return Promise.resolve(promise);
+  }
+  return new Promise((resolve, reject) => {
+    let abandoned = false;
+    const onAbort = () => {
+      abandoned = true;
+      reject(abortError());
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        if (!abandoned) {
+          resolve(value);
+          return;
+        }
+        try {
+          onLate?.(value);
+        } catch {
+          // Best-effort cleanup of a result nobody is waiting for.
+        }
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        if (!abandoned) {
+          reject(error);
+        }
+      }
+    );
+  });
+}
+
+// How long to wait for an in-flight KILL QUERY before giving up on returning the
+// connection to the pool (it is destroyed instead, see below).
+const KILL_SETTLE_TIMEOUT_MS = 2000;
+
+// Resolves with `promise`'s value, or with 'timeout' if it takes longer.
+function waitForSettle(promise, timeoutMs) {
+  let timer;
+  // Not unref'd: the connection must be released or destroyed before the
+  // process exits.
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Reads one statement's rows. Without maxRows (or on a connection without the
+// mysql2 core API, e.g. a test fake) it is a plain buffered query.
+//
+// With maxRows, rows arrive as a stream through the mysql2 core connection and
+// at most maxRows are kept. sql_select_limit already caps the result, but an
+// explicit LIMIT in model SQL overrides it (`... LIMIT 100000000` would still
+// pull the whole table into Node), so the read itself is bounded too: when row
+// maxRows + 1 arrives the promise resolves with `overflowed: true` and every
+// later row is dropped as it is parsed, never materialized. A pool caller then
+// destroys the connection to stop the transfer (see executeOnPoolConnection);
+// a single connection keeps draining (and discarding) in the background, so its
+// next statement simply queues behind this one.
+function readRows(connection, statement, params, { maxRows = null } = {}) {
+  const core = connection?.connection;
+  if (maxRows == null || typeof core?.query !== 'function') {
+    const pending = params === undefined ? connection.query(statement) : connection.query(statement, params);
+    return Promise.resolve(pending).then(([rows]) => {
+      if (maxRows != null && Array.isArray(rows) && rows.length > maxRows) {
+        return { rows: rows.slice(0, maxRows), overflowed: true, streamed: false };
+      }
+      return { rows, overflowed: false, streamed: false };
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    let settled = false;
+    const query = params === undefined ? core.query(statement) : core.query(statement, params);
+    query.on('result', (row) => {
+      if (settled) {
+        return; // past the cap (or failed): drop it
+      }
+      if (rows.length < maxRows) {
+        rows.push(row);
+        return;
+      }
+      settled = true;
+      resolve({ rows, overflowed: true, streamed: true });
+    });
+    // Always listened to, even after settling: an unhandled 'error' event on
+    // the query would crash the process.
+    query.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    query.on('end', () => {
+      if (!settled) {
+        settled = true;
+        resolve({ rows, overflowed: false, streamed: true });
+      }
+    });
+  });
+}
+
+// KILL QUERY for a cancelled request. Pools from createMariaDbPool provide
+// killQuery(), which uses its own short-lived connection: a pool slot could be
+// queued behind the very queries it should stop when the pool is saturated.
+function killQuery(pool, threadId) {
+  return typeof pool.killQuery === 'function' ? pool.killQuery(threadId) : pool.query(`KILL QUERY ${threadId}`);
+}
+
+// Runs a statement on a dedicated pool connection, which makes it
+// - killable: if the signal aborts mid-query, `KILL QUERY <threadId>` is sent
+//   (MariaDB lets a user kill its own threads without extra privileges). The
+//   killed statement fails with ER_QUERY_INTERRUPTED and its connection stays
+//   usable.
+// - row-capped: when the server sends more than maxRows rows (an explicit
+//   LIMIT in the SQL), the statement is killed and the connection dropped
+//   instead of drained; the pool opens a fresh one when needed. (Dropping alone
+//   is not enough: mysql2's destroy() only half-closes the socket, and MariaDB
+//   keeps producing rows into it until the statement ends.)
+//
+// Every wait is bounded by the signal: on a saturated pool the request gives up
+// waiting for a slot when it aborts (a connection handed out later goes
+// straight back), and the read itself is not awaited past the abort, because a
+// KILL that fails or is slow leaves the statement running (indefinitely when
+// the statement timeout is off). Rows are never returned after an abort.
+async function executeOnPoolConnection(pool, statement, params, { signal, maxRows, killSettleTimeoutMs }) {
+  const abortError = () => createQueryAbortError(signal);
+  const connection = await untilAborted(pool.getConnection(), signal, {
+    onLate: (late) => late.release(),
+    abortError,
+  });
+  let killPromise = null;
+  let overflowed = false;
+
+  const startKill = () => {
+    const threadId = Number(connection.threadId);
+    if (!killPromise && Number.isInteger(threadId) && threadId > 0) {
+      killPromise = Promise.resolve()
+        .then(() => killQuery(pool, threadId))
+        .catch(() => null);
+    }
+  };
+  const onAbort = () => startKill();
+
+  if (signal?.aborted) {
+    connection.release();
+    throw createQueryAbortError(signal);
+  }
+
+  // Registered before the read is raced against the signal, so the KILL is
+  // already on its way when the caller is answered.
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let reading = null;
+  try {
+    reading = readRows(connection, statement, params, { maxRows });
+    const result = await untilAborted(reading, signal, { abortError });
+    overflowed = result.overflowed && result.streamed;
+    if (signal?.aborted) {
+      // Finished in the same turn as the abort: the request is cancelled.
+      throw abortError();
+    }
+    return result.rows;
+  } catch (error) {
+    if (signal?.aborted && error?.name !== 'AbortError') {
+      throw createQueryAbortError(signal, error);
+    }
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    if (overflowed) {
+      // The server is still sending rows nobody will read. Never reuse this
+      // thread, and stop the statement; the caller does not wait for the KILL
+      // (thread ids are not reused, so a late KILL cannot hit another query).
+      connection.destroy();
+      startKill();
+    } else if (!killPromise) {
+      connection.release();
+    } else {
+      // Cancelled. The caller is answered now; the thread goes back to the pool
+      // only once the KILL has landed (or failed) AND the statement has ended
+      // while we still own it, so neither can hit the next query on it.
+      // Otherwise it is dropped. A streamed read that overflows the cap after
+      // the abort has NOT ended (readRows resolves on row maxRows + 1 while the
+      // server keeps sending, e.g. because the KILL failed): it is dropped at
+      // once, like an overflow before the abort.
+      const statement = reading
+        ? reading.then((late) => (late.overflowed && late.streamed ? 'overflow' : 'ended'), () => 'ended')
+        : Promise.resolve('ended');
+      const outcome = statement.then((state) => (state === 'overflow' ? state : killPromise.then(() => state)));
+      void waitForSettle(outcome, killSettleTimeoutMs).then((state) =>
+        state === 'ended' ? connection.release() : connection.destroy()
+      );
+    }
+  }
+}
+
+// Executes model-authored, already-validated SQL with server-side bounds.
+// - timeoutMs: per-statement max_statement_time. Omitted/null uses
+//   QUERY_STATEMENT_TIMEOUT_MS (default 8000); 0 disables.
+// - maxRows: at most this many rows are returned: sql_select_limit caps the
+//   result server-side, and the read stops after maxRows rows when an explicit
+//   LIMIT overrides it. Callers that display N rows pass N + 1 so truncation is
+//   detectable without fetching more.
+// - signal: when it aborts during execution on a pool, the query is killed.
+// - params: optional placeholders (client-side escaped by mysql2), used by the
+//   parameterized master-data lookups.
+// - killSettleTimeoutMs: how long to wait for an issued KILL QUERY (tests).
+export async function executeReadOnlySql(
+  connection,
+  sql,
+  { timeoutMs = null, maxRows = null, signal = null, params = undefined, killSettleTimeoutMs = KILL_SETTLE_TIMEOUT_MS } = {}
+) {
+  const effectiveTimeoutMs = timeoutMs == null ? resolveStatementTimeoutMs() : timeoutMs;
+  const statement = buildBoundedStatement(sql, { timeoutMs: effectiveTimeoutMs, maxRows });
+
+  if (signal?.aborted) {
+    throw createQueryAbortError(signal);
+  }
+
+  // Pools run the statement on a dedicated connection whenever it must be
+  // killable or row-capped; a plain pool.query() could do neither.
+  if (typeof connection.getConnection === 'function' && (signal || maxRows != null)) {
+    return executeOnPoolConnection(connection, statement, params, { signal, maxRows, killSettleTimeoutMs });
+  }
+
+  const { rows } = await untilAborted(readRows(connection, statement, params, { maxRows }), signal, {
+    abortError: () => createQueryAbortError(signal),
+  });
   return rows;
 }
 
@@ -2067,42 +2425,144 @@ export function compareRows(expectedRows, actualRows) {
   return expected.every((value, index) => value === actual[index]);
 }
 
-export function createOpenAiClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required.');
+// Explicit transport bounds for the OpenAI SDK. Its defaults (10-minute timeout,
+// 2 retries) let one question run for over an hour against a hung provider, and
+// the app's own self-correction loop multiplies that. OPENAI_TIMEOUT_MS (default
+// 60000) bounds each HTTP attempt; OPENAI_MAX_RETRIES (default 1) bounds
+// transport retries (connection errors, 408/409/429/5xx) inside one app attempt.
+export const DEFAULT_OPENAI_TIMEOUT_MS = 60_000;
+export const DEFAULT_OPENAI_MAX_RETRIES = 1;
+
+export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env = process.env) {
+  const resolvedTimeoutMs =
+    timeoutMs ?? readIntegerEnv(env, 'OPENAI_TIMEOUT_MS', DEFAULT_OPENAI_TIMEOUT_MS, { min: 1, max: 600_000 });
+  const resolvedMaxRetries =
+    maxRetries ?? readIntegerEnv(env, 'OPENAI_MAX_RETRIES', DEFAULT_OPENAI_MAX_RETRIES, { min: 0, max: 10 });
+
+  if (!Number.isInteger(resolvedTimeoutMs) || resolvedTimeoutMs < 1) {
+    throw configError(`OpenAI timeoutMs must be a positive integer; got ${timeoutMs}.`);
+  }
+  if (!Number.isInteger(resolvedMaxRetries) || resolvedMaxRetries < 0) {
+    throw configError(`OpenAI maxRetries must be a non-negative integer; got ${maxRetries}.`);
   }
 
+  return { timeoutMs: resolvedTimeoutMs, maxRetries: resolvedMaxRetries };
+}
+
+export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } = {}) {
+  if (!env.OPENAI_API_KEY) {
+    const error = new Error('OPENAI_API_KEY is required.');
+    error.code = 'OPENAI_NOT_CONFIGURED';
+    throw error;
+  }
+
+  const options = resolveOpenAiClientOptions({ timeoutMs, maxRetries }, env);
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    ...(process.env.OPENAI_BASE_URL && { baseURL: process.env.OPENAI_BASE_URL }),
+    apiKey: env.OPENAI_API_KEY,
+    ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),
+    timeout: options.timeoutMs,
+    maxRetries: options.maxRetries,
   });
 }
 
-function buildMariaDbConnectionOptions({ includeDatabase = true } = {}) {
+// --- MariaDB credentials ----------------------------------------------------
+// Two roles with separate credentials:
+// - 'query' (web, basic, optimized, resolve-master-data, evaluation): DB_USER /
+//   DB_PASSWORD, defaulting to the SELECT-only demo_readonly user that
+//   docker/mariadb/initdb provisions.
+// - 'admin' (bootstrap-db, seed-demo): DB_ADMIN_USER (default root) with the
+//   first non-blank of DB_ADMIN_PASSWORD, MARIADB_ROOT_PASSWORD, DB_PASSWORD:
+//   the same order docker-compose.yml uses to initialize root's password. When
+//   no admin setting is set at all, admin scripts fall back to DB_USER /
+//   DB_PASSWORD with a warning, so older single-user (root) setups keep working.
+// Blank values count as unset, like compose's `${VAR:-default}`, so template
+// lines such as `DB_ADMIN_PASSWORD=` do not override a real setting.
+export const DEFAULT_QUERY_DB_USER = 'demo_readonly';
+export const DEFAULT_ADMIN_DB_USER = 'root';
+const DB_ROLES = new Set(['query', 'admin']);
+
+function nonBlankEnv(env, name) {
+  const value = env[name];
+  return value === undefined || value === null || String(value).trim() === '' ? undefined : value;
+}
+
+export function resolveQueryDbUser(env = process.env) {
+  return nonBlankEnv(env, 'DB_USER') || DEFAULT_QUERY_DB_USER;
+}
+
+export function resolveMariaDbCredentials({ role = 'query', env = process.env } = {}) {
+  if (!DB_ROLES.has(role)) {
+    throw new TypeError(`Unknown MariaDB connection role "${role}" (expected "query" or "admin").`);
+  }
+
+  if (role === 'query') {
+    return {
+      role,
+      user: resolveQueryDbUser(env),
+      password: env.DB_PASSWORD,
+      fallback: false,
+      credentialVars: 'DB_USER and DB_PASSWORD',
+    };
+  }
+
+  const adminUser = nonBlankEnv(env, 'DB_ADMIN_USER');
+  const adminPassword = nonBlankEnv(env, 'DB_ADMIN_PASSWORD');
+  const rootPassword = nonBlankEnv(env, 'MARIADB_ROOT_PASSWORD');
+  if (adminUser !== undefined || adminPassword !== undefined || rootPassword !== undefined) {
+    return {
+      role,
+      user: adminUser ?? DEFAULT_ADMIN_DB_USER,
+      // Same precedence as root's password in docker-compose.yml.
+      password: adminPassword ?? rootPassword ?? nonBlankEnv(env, 'DB_PASSWORD'),
+      fallback: false,
+      credentialVars: 'DB_ADMIN_USER and DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD)',
+    };
+  }
+
+  return {
+    role,
+    user: nonBlankEnv(env, 'DB_USER'),
+    password: env.DB_PASSWORD,
+    fallback: true,
+    credentialVars: 'DB_USER and DB_PASSWORD',
+  };
+}
+
+function adminFallbackWarning(user) {
+  return (
+    `[db] No admin credentials configured (DB_ADMIN_USER / DB_ADMIN_PASSWORD or MARIADB_ROOT_PASSWORD); ` +
+    `falling back to DB_USER "${user}" for this admin task. It needs CREATE/INSERT/DELETE privileges, ` +
+    'which the read-only query user must not have. Set DB_ADMIN_* to keep the two roles separate.'
+  );
+}
+
+function buildMariaDbConnectionOptions({ includeDatabase = true, role = 'query', env = process.env } = {}) {
+  const credentials = resolveMariaDbCredentials({ role, env });
   const connectionOptions = {
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    user: credentials.user,
+    password: credentials.password,
     decimalNumbers: true,
   };
 
   if (includeDatabase) {
-    connectionOptions.database = process.env.DB_NAME;
+    connectionOptions.database = env.DB_NAME;
   }
 
-  if (process.env.DB_SOCKET) {
-    connectionOptions.socketPath = process.env.DB_SOCKET;
+  if (env.DB_SOCKET) {
+    connectionOptions.socketPath = env.DB_SOCKET;
   } else {
-    connectionOptions.host = process.env.DB_HOST || '127.0.0.1';
-    connectionOptions.port = Number(process.env.DB_PORT || 3306);
+    connectionOptions.host = env.DB_HOST || '127.0.0.1';
+    connectionOptions.port = Number(env.DB_PORT || 3306);
   }
 
   return connectionOptions;
 }
 
-export function describeMariaDbConnectionTarget({ includeDatabase = true } = {}) {
-  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase });
+export function describeMariaDbConnectionTarget({ includeDatabase = true, role = 'query', env = process.env } = {}) {
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
 
   return {
+    role,
     user: connectionOptions.user || null,
     database: includeDatabase ? connectionOptions.database || null : null,
     socketPath: connectionOptions.socketPath || null,
@@ -2119,34 +2579,87 @@ function formatMariaDbTarget(connectionOptions) {
   return `${connectionOptions.host}:${connectionOptions.port}`;
 }
 
-export async function createMariaDbConnection({ includeDatabase = true } = {}) {
-  const missing = ['DB_USER', includeDatabase ? 'DB_NAME' : null].filter((key) => key && !process.env[key]);
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
-    );
+function assertMariaDbConfigured({ includeDatabase, role, env }) {
+  const credentials = resolveMariaDbCredentials({ role, env });
+  const missing = [];
+  if (role === 'admin' && credentials.fallback && !credentials.user) {
+    missing.push('DB_ADMIN_USER/DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD, or DB_USER as a fallback)');
+  }
+  if (includeDatabase && !env.DB_NAME) {
+    missing.push('DB_NAME');
   }
 
-  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase });
+  if (missing.length > 0) {
+    const error = new Error(
+      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
+    );
+    error.code = 'DB_NOT_CONFIGURED';
+    throw error;
+  }
+
+  return credentials;
+}
+
+// Re-throw driver errors with an actionable message, keeping code/errno so
+// callers can still classify them (e.g. connection failures as infra errors).
+function wrapConnectionError(error, message) {
+  const wrapped = new Error(message, { cause: error });
+  wrapped.code = error.code;
+  wrapped.errno = error.errno;
+  return wrapped;
+}
+
+export async function createMariaDbConnection({
+  includeDatabase = true,
+  role = 'query',
+  env = process.env,
+  warn = console.warn,
+  connect = (options) => mysql.createConnection(options),
+} = {}) {
+  const credentials = assertMariaDbConfigured({ includeDatabase, role, env });
+  if (credentials.fallback) {
+    warn(adminFallbackWarning(credentials.user));
+  }
+
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
 
   try {
-    return await mysql.createConnection(connectionOptions);
+    return await connect(connectionOptions);
   } catch (error) {
     if (error.code === 'ECONNREFUSED') {
-      throw new Error(
+      throw wrapConnectionError(
+        error,
         `Unable to connect to MariaDB at ${formatMariaDbTarget(connectionOptions)}. Start MariaDB locally or update DB_HOST, DB_PORT, or DB_SOCKET.`
       );
     }
 
     if (error.code === 'ER_BAD_DB_ERROR' && includeDatabase) {
-      throw new Error(
-        `Database "${process.env.DB_NAME}" does not exist. Start MariaDB and run "npm run bootstrap-db" first.`
+      throw wrapConnectionError(
+        error,
+        `Database "${env.DB_NAME}" does not exist. Start MariaDB and run "npm run bootstrap-db" first.`
       );
     }
 
     if (error.code === 'ER_ACCESS_DENIED_ERROR') {
-      throw new Error(
-        `MariaDB access denied for user "${connectionOptions.user}". Check DB_USER and DB_PASSWORD.`
+      // The provisioned query user only exists if the init script ran, which
+      // happens once, on a fresh data volume (and fails without a password).
+      const provisioningHint =
+        connectionOptions.user === DEFAULT_QUERY_DB_USER
+          ? ` ${DEFAULT_QUERY_DB_USER} is created only when the Docker data volume is first initialized ` +
+            '(docker/mariadb/initdb, password from DB_READONLY_PASSWORD or DB_PASSWORD); if it is missing, ' +
+            "recreate the volume with 'docker compose down -v'."
+          : '';
+      throw wrapConnectionError(
+        error,
+        `MariaDB access denied for user "${connectionOptions.user}". Check ${credentials.credentialVars}.${provisioningHint}`
+      );
+    }
+
+    if (error.code === 'ER_DBACCESS_DENIED_ERROR' && includeDatabase) {
+      throw wrapConnectionError(
+        error,
+        `MariaDB user "${connectionOptions.user}" may not access database "${env.DB_NAME}". ` +
+          'The provisioned query user only has SELECT on demo_retail* databases (docker/mariadb/initdb).'
       );
     }
 
@@ -2154,20 +2667,216 @@ export async function createMariaDbConnection({ includeDatabase = true } = {}) {
   }
 }
 
-export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5 } = {}) {
-  const missing = ['DB_USER', includeDatabase ? 'DB_NAME' : null].filter((key) => key && !process.env[key]);
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required MariaDB env vars: ${missing.join(', ')}. Add them to the loaded .env file or export them in the shell.`
-    );
-  }
+// Connect timeout for the short-lived KILL QUERY connection.
+const KILL_CONNECT_TIMEOUT_MS = 5000;
 
-  return mysql.createPool({
-    ...buildMariaDbConnectionOptions({ includeDatabase }),
+export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5, role = 'query', env = process.env } = {}) {
+  assertMariaDbConfigured({ includeDatabase, role, env });
+
+  const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
+  const pool = mysql.createPool({
+    ...connectionOptions,
     waitForConnections: true,
     connectionLimit,
     queueLimit: 20,
   });
+
+  // Cancelling a request's query must not wait for a free pool slot: when every
+  // slot is busy, a pooled KILL would queue behind the very query it should
+  // stop. It runs on its own short-lived connection (same user, so it may kill
+  // that user's threads).
+  pool.killQuery = async (threadId) => {
+    const killer = await mysql.createConnection({ ...connectionOptions, connectTimeout: KILL_CONNECT_TIMEOUT_MS });
+    try {
+      await killer.query(`KILL QUERY ${Number(threadId)}`);
+    } finally {
+      await killer.end().catch(() => killer.destroy());
+    }
+  };
+
+  return pool;
+}
+
+// The DB grants are the real boundary for model-authored SQL; the validator is
+// defense in depth. SHOW GRANTS for the connected (query) user and report
+// anything beyond SELECT/USAGE (ALL PRIVILEGES, INSERT, FILE, SUPER, ...),
+// grant options, and SELECT that reaches past the expected data: every
+// database (*.*), a system schema (mysql.global_priv holds password hashes),
+// or (when `database` is given) a database other than DB_NAME and the
+// provisioned demo_retail* family. Returns warnings; never throws for an
+// unexpected grant format.
+const ALLOWED_QUERY_PRIVILEGES = new Set(['SELECT', 'USAGE']);
+const SYSTEM_SCHEMAS = ['mysql', 'sys', 'performance_schema', 'information_schema'];
+// docker/mariadb/initdb grants SELECT on `demo\_retail%`.*: demo_retail and
+// its fixture databases (demo_retail_v2, ...) are always in scope.
+const PROVISIONED_DATABASE_PREFIX = 'demo_retail';
+
+function splitPrivileges(list) {
+  // Column grants look like "SELECT (a, b)"; drop the column lists first.
+  return list
+    .replace(/\([^)]*\)/g, '')
+    .split(',')
+    .map((privilege) => privilege.trim().replace(/\s+/g, ' ').toUpperCase())
+    .filter(Boolean);
+}
+
+// The database part of a SHOW GRANTS target (`db`.*, `db`.`table`, *.*,
+// PROCEDURE `db`.`proc`), unquoted. At database level the name is a LIKE
+// pattern (% and _ are wildcards, \ escapes); in a table-level grant it is
+// literal. Null for targets that are not db.object (e.g. PROXY grants).
+function parseGrantTarget(target) {
+  const match = /^(?:(?:PROCEDURE|FUNCTION|PACKAGE BODY|PACKAGE)\s+)?(\*|`(?:[^`]|``)*`|[^.\s`]+)\.(.+)$/i.exec(target.trim());
+  if (!match) {
+    return null;
+  }
+  const [, rawDatabase, object] = match;
+  const database = rawDatabase.startsWith('`') ? rawDatabase.slice(1, -1).replace(/``/g, '`') : rawDatabase;
+  return { database, databaseLevel: object.trim() === '*' };
+}
+
+// Splits a grant database name into LIKE tokens: { literal } or { wildcard }.
+function grantNameTokens(name, { pattern }) {
+  const tokens = [];
+  for (let index = 0; index < name.length; index += 1) {
+    const char = name[index];
+    if (char === '\\' && index + 1 < name.length) {
+      index += 1;
+      tokens.push({ literal: name[index] });
+    } else if (pattern && (char === '%' || char === '_')) {
+      tokens.push({ wildcard: char });
+    } else {
+      tokens.push({ literal: char });
+    }
+  }
+  return tokens;
+}
+
+function grantNameMatches(tokens, databaseName) {
+  const source = tokens
+    .map((token) =>
+      token.wildcard ? (token.wildcard === '%' ? '.*' : '.') : token.literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    )
+    .join('');
+  return new RegExp(`^${source}$`, 'i').test(databaseName);
+}
+
+// The text before the first `%`: every database the grant can match starts
+// with it (give or take single characters). An unescaped `_` is kept as
+// itself here: it stands for exactly one character, so the very common
+// `demo_retail`.* still reads as demo_retail rather than "anything".
+function grantNamePrefix(tokens) {
+  let prefix = '';
+  for (const token of tokens) {
+    if (token.wildcard === '%') {
+      break;
+    }
+    prefix += token.wildcard || token.literal;
+  }
+  return prefix;
+}
+
+function selectScopeWarning(target, { database }) {
+  const parsed = parseGrantTarget(target);
+  if (!parsed || parsed.database === '*') {
+    return null; // *.* is reported separately
+  }
+
+  const tokens = grantNameTokens(parsed.database, { pattern: parsed.databaseLevel });
+  const systemSchema = SYSTEM_SCHEMAS.find((schema) => grantNameMatches(tokens, schema));
+  if (systemSchema) {
+    return `SELECT on ${target} reaches the ${systemSchema} system schema (mysql.global_priv holds password hashes): grant SELECT on the demo database only.`;
+  }
+
+  if (!database) {
+    return null;
+  }
+  // In scope: a grant that names DB_NAME itself (a `%` pattern also reaches
+  // other databases, e.g. `foo%` reaches foobar), or the provisioned
+  // demo_retail* family.
+  const hasPercent = tokens.some((token) => token.wildcard === '%');
+  const namesDatabase = !hasPercent && grantNameMatches(tokens, database);
+  const inScope = namesDatabase || grantNamePrefix(tokens).startsWith(PROVISIONED_DATABASE_PREFIX);
+  if (!inScope) {
+    const reach = hasPercent ? 'matches databases beyond' : 'is a database other than';
+    return `SELECT on ${target} ${reach} DB_NAME (${database}): the query user should only read the configured database.`;
+  }
+  return null;
+}
+
+export function analyzeQueryUserGrants(grants, { database = null } = {}) {
+  const warnings = [];
+  const privileges = [];
+
+  for (const grant of grants) {
+    const text = String(grant || '').trim();
+    const onMatch = /^GRANT\s+(.+?)\s+ON\s+(.+?)\s+TO\s+/i.exec(text);
+    if (!onMatch) {
+      const roleMatch = /^GRANT\s+(.+?)\s+TO\s+/i.exec(text);
+      if (roleMatch) {
+        warnings.push(`Role ${roleMatch[1]} is granted to the query user; review that role's privileges.`);
+      }
+      continue;
+    }
+
+    const [, privilegeList, target] = onMatch;
+    const grantPrivileges = splitPrivileges(privilegeList);
+    privileges.push({ on: target, privileges: grantPrivileges });
+
+    const extra = grantPrivileges.filter((privilege) => !ALLOWED_QUERY_PRIVILEGES.has(privilege));
+    if (extra.length > 0) {
+      warnings.push(`${extra.join(', ')} on ${target}: the query user should only have SELECT (and USAGE).`);
+    }
+
+    if (grantPrivileges.includes('SELECT')) {
+      if (/^\*\.\*$/.test(target.trim())) {
+        warnings.push('SELECT on *.*: the query user can read every database, including the mysql system schema.');
+      } else {
+        const scopeWarning = selectScopeWarning(target, { database });
+        if (scopeWarning) {
+          warnings.push(scopeWarning);
+        }
+      }
+    }
+
+    if (/\bWITH\s+GRANT\s+OPTION\b/i.test(text)) {
+      warnings.push(`GRANT OPTION on ${target}: the query user can grant its privileges to others.`);
+    }
+  }
+
+  return { ok: warnings.length === 0, warnings, privileges };
+}
+
+function redactGrant(grant) {
+  return String(grant || '')
+    .replace(/(IDENTIFIED BY PASSWORD\s+)'[^']*'/gi, "$1'<redacted>'")
+    .replace(/(\bUSING\s+)'[^']*'/gi, "$1'<redacted>'");
+}
+
+// `database` is the configured DB_NAME; SELECT grants on other databases are
+// reported (pass null to skip that part of the check).
+export async function checkQueryUserPrivileges(connection, { database = process.env.DB_NAME || null } = {}) {
+  const [rows] = await connection.query('SHOW GRANTS');
+  const grants = (Array.isArray(rows) ? rows : []).map((row) => String(Object.values(row || {})[0] ?? ''));
+  return {
+    grants: grants.map(redactGrant),
+    ...analyzeQueryUserGrants(grants, { database }),
+  };
+}
+
+// CLI helper: print privilege warnings for the query user to stderr (stdout
+// stays clean for results). Best effort: a failed SHOW GRANTS is reported, not
+// fatal.
+export async function reportQueryUserPrivileges(connection, { log = console.error, database = process.env.DB_NAME || null } = {}) {
+  try {
+    const report = await checkQueryUserPrivileges(connection, { database });
+    for (const warning of report.warnings) {
+      log(`[db] warning: ${warning}`);
+    }
+    return report;
+  } catch (error) {
+    log(`[db] note: could not check the query user's privileges (${error.message}).`);
+    return null;
+  }
 }
 
 export async function loadNarrowSchema({

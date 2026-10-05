@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_BASIC_QUESTIONS } from '../src/constants.js';
-import { getPositionalArgs, hasOptionFlag, loadEnvironment } from '../src/env.js';
+import { ENV_OPTIONS_WITH_VALUES, ENV_USAGE, getPositionalArgs, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import {
   buildBasicPrompt,
   createMariaDbConnection,
@@ -13,6 +13,8 @@ import {
   generateBasicSql,
   loadNarrowSchema,
   printRows,
+  reportQueryUserPrivileges,
+  resolveStatementTimeoutMs,
   validateReadOnlySql,
 } from '../src/pipeline.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
@@ -22,9 +24,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = path.resolve(__dirname, '../models');
 const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
+const USAGE = `Usage: npm run basic -- [question] [--refresh-schema] [--trace] [--trace-file <path>]
+${ENV_USAGE}
+Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).`;
+
 async function main() {
   const argv = process.argv.slice(2);
+  if (hasOptionFlag(argv, '--help')) {
+    console.log(USAGE);
+    return;
+  }
+
   const envInfo = await loadEnvironment(argv);
+  // Validate up front so a bad value fails the run, not every question.
+  const statementTimeoutMs = resolveStatementTimeoutMs();
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const traceOptions = resolveTraceOptions(argv);
   const trace = await createTraceLogger({
@@ -37,7 +50,7 @@ async function main() {
   const cli = createCliOutput({
     traceToStdout: traceOptions.logToStdout,
   });
-  const positional = getPositionalArgs(argv, ['--env-file', '--env-dir', '--trace-file']);
+  const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
   const model = process.env.MODEL_NAME || 'gpt-4o-mini';
   const questions = customQuestion ? [customQuestion] : DEFAULT_BASIC_QUESTIONS;
@@ -53,6 +66,7 @@ async function main() {
     openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
     traceToStdout: traceOptions.logToStdout,
     traceFile: trace.filePath,
+    statementTimeoutMs,
   });
 
   let schema;
@@ -113,6 +127,7 @@ async function main() {
     ...connectionTimer.stop(),
     target: describeMariaDbConnectionTarget(),
   });
+  await reportQueryUserPrivileges(connection);
 
   const allowedTables = schema.tables.map((table) => table.tableName);
 
@@ -157,6 +172,14 @@ async function main() {
         try {
           generated = await generateBasicSql({ client, model, prompt });
         } catch (error) {
+          // A truncated/refused completion (LlmResponseError) was still billed;
+          // keep the run totals honest.
+          if (error?.usage) {
+            runUsages.push(error.usage);
+          }
+          if (error?.cost) {
+            runCosts.push(error.cost);
+          }
           await trace.emit('llm.failed', {
             ...questionContext,
             ...llmTimer.stop(),
@@ -215,7 +238,7 @@ async function main() {
 
         const executionTimer = createTimer();
         try {
-          rows = await executeReadOnlySql(connection, validated.sql);
+          rows = await executeReadOnlySql(connection, validated.sql, { timeoutMs: statementTimeoutMs });
         } catch (error) {
           await trace.emit('sql.execution_failed', {
             ...questionContext,

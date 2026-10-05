@@ -7,6 +7,8 @@
 // user. Default to 'server-only'. This is defense in depth — the DB user/database
 // separation remains the real boundary; client-side filtering is presentation,
 // never access control. Asserted at emission time, not trusted from the client.
+// The web app passes its loaded config ({ DB_NAME, DB_USER: effective query
+// user }); the default reads the env at call time.
 export function resolveDataResidency(env = process.env) {
   const isDemoSource = env.DB_NAME === 'demo_retail' && env.DB_USER === 'demo_readonly';
   return {

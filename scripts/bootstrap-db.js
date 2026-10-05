@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { buildBootstrapPlan } from '../src/mariadb-bootstrap.js';
-import { createMariaDbConnection, loadNarrowSchema } from '../src/pipeline.js';
+import { createMariaDbConnection, describeMariaDbConnectionTarget, loadNarrowSchema } from '../src/pipeline.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = path.resolve(__dirname, '../models');
@@ -30,6 +30,10 @@ async function main() {
 
   console.log(`Environment: ${envInfo.path || 'not found'}`);
   console.log(`Target database: ${process.env.DB_NAME}`);
+  if (!printSql) {
+    const target = describeMariaDbConnectionTarget({ includeDatabase: false, role: 'admin' });
+    console.log(`Admin user: ${target.user || '(unset)'}`);
+  }
   console.log(`Tables: ${schema.tables.map((table) => table.tableName).join(', ')}`);
   if (bootstrapPlan.adjustments.length > 0) {
     console.log(`Wide-table adjustments: ${bootstrapPlan.adjustments.length} table(s) had oversized VARCHAR columns downgraded to TEXT for MariaDB compatibility.`);
@@ -40,7 +44,9 @@ async function main() {
     return;
   }
 
-  const connection = await createMariaDbConnection({ includeDatabase: false });
+  // DDL needs the admin role (DB_ADMIN_USER / DB_ADMIN_PASSWORD, default root /
+  // MARIADB_ROOT_PASSWORD); the query user is SELECT-only by design.
+  const connection = await createMariaDbConnection({ includeDatabase: false, role: 'admin' });
   try {
     for (const statement of bootstrapPlan.statements) {
       await connection.query(statement);

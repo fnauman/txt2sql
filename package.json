@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "description": "Minimal MariaDB text-to-SQL starter driven by Sequelize model metadata",
   "keywords": [
@@ -36,16 +36,16 @@
     "evaluate": "node scripts/evaluate.js",
     "verify-dataset": "node scripts/verify-dataset.js",
     "build-edge-dataset": "node scripts/build-edge-dataset.mjs",
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.js\" \"apps/web/test/**/*.test.js\" \"apps/web/test/**/*.test.ts\"",
     "debug-retrieval": "node scripts/debug-retrieval.js",
     "evaluate-retrieval": "node scripts/evaluate-retrieval.js",
     "resolve-master-data": "node scripts/resolve-master-data.js",
     "measure-prompt-cache": "node scripts/measure-prompt-cache.js",
-    "web:dev": "npm --workspace @text-to-sql/web run dev",
+    "web:dev": "npm --workspace @text-to-sql/web run dev --",
     "web:build": "npm --workspace @text-to-sql/web run build",
     "web:typecheck": "npm --workspace @text-to-sql/web run typecheck",
     "web:test": "npm --workspace @text-to-sql/web run test",
-    "web:start": "npm --workspace @text-to-sql/web run server",
+    "web:start": "npm --workspace @text-to-sql/web run server --",
     "seed-demo": "node scripts/seed-public-db.js"
   },
   "dependencies": {

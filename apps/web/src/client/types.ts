@@ -59,6 +59,22 @@ export interface DebugEvent {
   [key: string]: unknown;
 }
 
+// Where a failed question stopped (server contract; see src/query-service.js).
+export type ErrorStage = 'llm' | 'validation' | 'execution' | 'aborted' | 'infra';
+
+// Which SQL validator layer rejected a query (src/sql-guardrails.js
+// SqlValidationError.layer): 'safety' is the read-only/table-scope check,
+// 'guardrail' the schema-aware check against the prompt context.
+export type ValidationLayer = 'safety' | 'guardrail';
+
+export interface QueryError {
+  name?: string;
+  message: string;
+  code?: string | null;
+  stage?: ErrorStage | null;
+  layer?: ValidationLayer | null;
+}
+
 export interface QueryResponse {
   success: boolean;
   question: string;
@@ -66,7 +82,9 @@ export interface QueryResponse {
   rows: Record<string, unknown>[];
   columns: ResultColumn[];
   rowCount: number;
-  totalRowCount: number;
+  // null when the result was truncated at the server-side row cap: there are
+  // more than rowCount rows, but the exact total is unknown.
+  totalRowCount: number | null;
   truncated: boolean;
   explanation: string;
   assumptions: string[];
@@ -85,7 +103,9 @@ export interface QueryResponse {
     completionTokens?: number;
   } | null;
   attemptCount: number;
-  error: { name?: string; message: string; code?: string | null } | null;
+  errorStage?: ErrorStage | null;
+  errorCode?: string | null;
+  error: QueryError | null;
   debug: {
     events: DebugEvent[];
     llmCalls: unknown[];
@@ -111,6 +131,12 @@ export interface HealthResponse {
   openAiConfigured: boolean;
   dbConfigured: boolean;
   model: string;
-  dbReachable?: boolean;
-  error?: { message: string };
+  authRequired?: boolean;
+  // Whether the server honors the Debug toggle (WEB_ALLOW_DEBUG).
+  debugAllowed?: boolean;
+  cacheEnabled?: boolean;
+  dataResidency?: DataResidency['engine'];
+  // null when the deep check failed before reaching the database.
+  dbReachable?: boolean | null;
+  error?: { message: string; code?: string | null };
 }

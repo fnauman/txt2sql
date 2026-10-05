@@ -156,7 +156,10 @@ async function seedDemoDatabase(connection) {
 async function main() {
   const argv = process.argv.slice(2);
   const envInfo = await loadEnvironment(argv);
-  const connection = await createMariaDbConnection();
+  // Seeding writes rows, so it uses the admin role (DB_ADMIN_USER /
+  // DB_ADMIN_PASSWORD, default root / MARIADB_ROOT_PASSWORD), never the
+  // SELECT-only query user.
+  const connection = await createMariaDbConnection({ role: 'admin' });
   try {
     await seedDemoDatabase(connection);
   } finally {

@@ -10,11 +10,12 @@ import {
   buildOptimizedPrompt,
   generateBasicSql,
   generateOptimizedResponse,
+  LlmResponseError,
   OPTIMIZED_MODEL_REQUEST_OPTIONS,
   validateReadOnlySql,
 } from '../src/pipeline.js';
 import { applyEvaluationFailureExitCode, evaluateQuestion } from '../scripts/evaluate.js';
-import { createCliOutput, createTraceLogger, resolveTraceOptions } from '../src/trace.js';
+import { createCliOutput, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
 function createWideTable(tableName, columnCount = 30) {
   return {
@@ -494,4 +495,73 @@ test('resolveTraceOptions enables tracing for stdout or file output', () => {
   });
 
   assert.equal(resolveTraceOptions(['--trace-file', './generated/basic.jsonl']).enabled, true);
+});
+
+test('serializeError keeps the validation code, layer and any failure stage for traces', () => {
+  let safetyError;
+  try {
+    validateReadOnlySql('SELECT 1 -- note', []);
+  } catch (error) {
+    safetyError = error;
+  }
+  const serialized = serializeError(safetyError);
+  assert.equal(serialized.name, 'SqlValidationError');
+  assert.equal(serialized.code, 'SQL_COMMENT');
+  assert.equal(serialized.layer, 'safety');
+
+  const staged = Object.assign(new Error('provider timed out'), { code: 'LLM_TIMEOUT', errorStage: 'llm' });
+  assert.deepEqual(
+    { code: serializeError(staged).code, errorStage: serializeError(staged).errorStage },
+    { code: 'LLM_TIMEOUT', errorStage: 'llm' }
+  );
+
+  // LlmResponseError carries its stage as `stage`.
+  const truncated = new LlmResponseError('cut off', { code: 'LLM_TRUNCATED' });
+  assert.equal(serializeError(truncated).errorStage, 'llm');
+  assert.equal(serializeError(truncated).code, 'LLM_TRUNCATED');
+
+  // An unrelated `stage` (e.g. from a third-party library) is not a pipeline stage.
+  const foreign = Object.assign(new Error('upload failed'), { stage: 'multipart-upload' });
+  assert.equal('errorStage' in serializeError(foreign), false);
+
+  // Plain errors keep the old shape: no empty layer/errorStage keys.
+  const plain = serializeError(new Error('boom'));
+  assert.equal('layer' in plain, false);
+  assert.equal('errorStage' in plain, false);
+  assert.equal(plain.code, null);
+});
+
+test('evaluateQuestion counts the tokens and cost of failed (truncated or refused) completions', async () => {
+  const { trace, events } = createTraceCollector();
+  const billed = (code) =>
+    new LlmResponseError('the completion was billed but unusable', {
+      code,
+      usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+      cost: { currency: 'USD', inputCost: 0.001, outputCost: 0.002, totalCost: 0.003 },
+    });
+  const failures = [billed('LLM_TRUNCATED'), billed('LLM_REFUSED')];
+
+  const result = await evaluateQuestion({
+    client: null,
+    connection: null,
+    schema: { tables: [{ tableName: 'Customer' }] },
+    model: 'gpt-4o-mini',
+    testCase: { id: 'billed_failures', question: 'List customers', expected_sql: 'SELECT 1' },
+    caseIndex: 1,
+    trace,
+    dependencies: {
+      buildPrompt: () => ({ system: 's', user: 'u', context: {}, tables: [{ tableName: 'Customer' }] }),
+      resolveMasterData: async () => [],
+      executeSql: async () => [{ one: 1 }],
+      generateResponse: async () => {
+        throw failures.shift();
+      },
+    },
+  });
+
+  assert.equal(result.status, 'llm_error');
+  assert.equal(result.llm_usage.total_tokens, 300, 'both billed attempts are counted');
+  assert.equal(result.llm_cost.totalCost, 0.006);
+  const completed = events.find((entry) => entry.event === 'case.completed');
+  assert.equal(completed.llmCost.totalCost, 0.006);
 });

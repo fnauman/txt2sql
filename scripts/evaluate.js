@@ -184,6 +184,14 @@ export async function evaluateQuestion({
     } catch (error) {
       executionError = error;
       finalFailureStatus = 'llm_error';
+      // A truncated or refused completion (LlmResponseError) was still billed;
+      // count it like runOptimizedQuestion and the basic CLI do.
+      if (error?.usage) {
+        llmUsages.push(error.usage);
+      }
+      if (error?.cost) {
+        llmCosts.push(error.cost);
+      }
 
       await trace.emit('llm.failed', {
         ...attemptContext,
