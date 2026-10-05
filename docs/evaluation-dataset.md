@@ -488,11 +488,14 @@ npm run eval -- --help                              # every flag
    `MARIADB_ROOT_PASSWORD`. Without admin credentials the run stops and says
    which fixture needs what. `--no-seed` never writes and stops instead.
 3. **Verification.** Every gold query and every control of the suite's
-   datasets, in process, with the `verify-dataset` gates: no case problem, and
-   each dataset's design kill rate at least `--min-kill-rate` (0.95; held-out
-   floor `--min-heldout-kill-rate`, default 0). A failure stops the run with
-   exit 2 before any LLM call; `--skip-verify` runs anyway, `--skip-controls`
-   verifies the gold only.
+   datasets, in process, with the `verify-dataset` gates: no case problem
+   (an invalid or unscored negative control is one: a control that does not
+   execute is never a kill), and each dataset's design kill rate at least
+   `--min-kill-rate` (0.95; held-out floor `--min-heldout-kill-rate`, default
+   0; undecided controls count as not killed). A missing or empty controls
+   directory, or one whose controls apply to none of the datasets, stops the
+   run too. A failure stops the run with exit 2 before any LLM call;
+   `--skip-verify` runs anyway, `--skip-controls` verifies the gold only.
 4. **The run** (needs `OPENAI_API_KEY`; `OPENAI_BASE_URL` for an
    OpenAI-compatible endpoint; `MODEL_NAME` or `--model`). Every selected case
    goes through the product loop (`evaluateQuestion` -> `runOptimizedQuestion`)
@@ -596,7 +599,9 @@ there too.
   tokens, and the budget. Questions that used tokens without a known price
   (the total is then a lower bound) and questions that completed no LLM call
   (a timeout or outage) are counted separately.
-- **Verification**: fixture status and the kill rates per dataset.
+- **Verification**: fixture status, the kill rates per dataset, and the
+  undecided, invalid and unscored negative controls (counts per dataset, ids
+  below the table).
 - **Provenance**: git sha (and whether the tree was dirty), prompt version
   (sha256 of the optimized system prompt, `BUSINESS_RULES`,
   `FEW_SHOT_EXAMPLES` and the request options), semantic-layer version (sha256

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { adminCredentialsHint, composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { verifySuite } from '../src/eval/verify.js';
-import { baselineRefusal, computeExitCode, createRunStopper, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval } from '../scripts/eval.js';
+import { baselineRefusal, computeExitCode, createRunStopper, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval, verificationRefusal } from '../scripts/eval.js';
 
 test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline', () => {
   const options = parseEvalArgs([], { env: {} });
@@ -298,6 +298,42 @@ test('verifySuite checks a case shared by two datasets once and applies the kill
     ['edge', 2, 1, 3, 4],
   ]);
   assert.deepEqual(result.gateFailures, ['edge: design kill rate 75.0% < 95.0%']);
+});
+
+test('the in-process verify gate: invalid and unscored controls are problems (exit 2), undecided ones only lower the kill rate', async () => {
+  const testCase = normalizeBenchmarkCase({ id: 'c1', question: 'Q?', expected_sql: 'SELECT 1' });
+  const killed = (id) => ({ id, type: 'join_path', heldout: false, status: 'killed', killed: true, killedOn: ['v2'] });
+  const negativeWith = (extra) => async () => ({
+    id: 'c1',
+    // verifyCase reports invalid/unscored controls as problems; a verifier
+    // that only sets the status must still fail the gate.
+    problems: [],
+    notes: [],
+    goldRowCounts: {},
+    controls: { source: 'x', matchedBy: 'id', positive: [], negative: [...Array.from({ length: 30 }, (_, index) => killed(`m${index}`)), extra] },
+  });
+  const run = (extra) =>
+    verifySuite({ datasets: [{ name: 'core', cases: [testCase] }], connections: [{ name: 'seed' }, { name: 'v2' }], verify: negativeWith(extra), minKillRate: 0.95 });
+
+  const invalid = await run({ id: 'mx', type: 'cancel', heldout: false, status: 'invalid', killed: false, killedOn: [], errors: [{ fixture: 'v2', code: 'ER_BAD_FIELD_ERROR', infra: false }] });
+  assert.deepEqual(invalid.controlStatus, { undecided: [], invalid: ['c1/mx'], unscored: [] });
+  assert.deepEqual(invalid.gateFailures, [], '30/31 is above the floor; the invalid control alone must fail the gate');
+  assert.match(verificationRefusal(invalid), /1 invalid and 0 unscored negative control\(s\) \(c1\/mx\)/);
+
+  const unscored = await run({ id: 'hx', type: 'cancel', heldout: true, status: 'unscored', killed: false, killedOn: [], errors: [{ fixture: 'seed', code: 'ECONNRESET', infra: true }] });
+  assert.deepEqual(unscored.controlStatus, { undecided: [], invalid: [], unscored: ['c1/hx'] });
+  assert.match(verificationRefusal(unscored), /0 invalid and 1 unscored negative control\(s\) \(c1\/hx\).*the database failed while scoring/);
+
+  const undecided = await run({ id: 'my', type: 'cancel', heldout: false, status: 'undecided', killed: false, killedOn: [] });
+  assert.deepEqual(undecided.controlStatus, { undecided: ['c1/my'], invalid: [], unscored: [] });
+  assert.equal(verificationRefusal(undecided), null, 'undecided counts as not killed, like a survivor');
+  assert.equal(undecided.datasets[0].controls.design.killed, 30);
+  assert.equal(undecided.datasets[0].controls.design.total, 31);
+
+  // Gold problems and gate failures still fail it.
+  assert.match(verificationRefusal({ problems: [{ id: 'c1' }], gateFailures: ['core: design kill rate 50.0% < 95.0%'], controlStatus: { undecided: [], invalid: [], unscored: [] } }), /1 case\(s\) with problems, 1 gate failure\(s\)/);
+  // A pre-status verification result (no controlStatus) is read as none.
+  assert.equal(verificationRefusal({ problems: [], gateFailures: [] }), null);
 });
 
 test('unknown flags name the closest known one', () => {

@@ -113,6 +113,12 @@ export const NEGATIVE_STATUS = Object.freeze({
 
 const EXHAUSTED = 'assignment_search_exhausted';
 
+// A recorded negative control's status (results from before the statuses
+// carry only `killed`).
+function negativeStatusOf(control) {
+  return control.status ?? (control.killed ? NEGATIVE_STATUS.killed : NEGATIVE_STATUS.survived);
+}
+
 // Some part of the oracle's verdict came from a search that gave up.
 function restsOnExhaustedSearch(score) {
   return score.reason === EXHAUSTED || score.variants.some((variant) => variant.reason === EXHAUSTED || variant.perFixture.some((entry) => entry.reason === EXHAUSTED));
@@ -281,7 +287,7 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
     }
   }
 
-  const statusOf = (control) => control.status ?? (control.killed ? NEGATIVE_STATUS.killed : NEGATIVE_STATUS.survived);
+  const statusOf = negativeStatusOf;
   const describe = (control) => `${control.caseId}/${control.id} (${control.type}${control.note ? `: ${control.note}` : ''})`;
   const describeErrors = (control) =>
     `${control.caseId}/${control.id} (${(control.errors || []).map((error) => `${error.fixture}: ${error.code}`).join(', ') || control.executionError?.code || 'error'})`;
@@ -436,8 +442,11 @@ export function pinWriteRefusal(checks) {
  * the same gates apply: no case problem, and each dataset's design (and
  * held-out) kill rate at or above the floors. `datasets` are
  * [{ name, cases }] of normalized cases. Returns { cases, problems: [{ id,
- * datasets, problems }], notes, gateFailures, datasets: [{ name, cases,
- * failures, controls }] }.
+ * datasets, problems }], notes, gateFailures, controlStatus: { undecided,
+ * invalid, unscored }, datasets: [{ name, cases, failures, controls }] }.
+ * controlStatus lists (as caseId/controlId, each verified case once) the
+ * negative controls that are not a verdict: invalid and unscored controls are
+ * problems (the run must not start), undecided ones count as not killed.
  */
 export async function verifySuite({
   datasets,
@@ -463,7 +472,7 @@ export async function verifySuite({
       let entry = verified.get(key);
       if (!entry) {
         const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
-        entry = { result, datasets: [] };
+        entry = { id: testCase.id, result, datasets: [] };
         verified.set(key, entry);
         if (result.problems.length > 0) {
           problems.push({ id: testCase.id, datasets: entry.datasets, problems: result.problems });
@@ -485,5 +494,11 @@ export async function verifySuite({
       controls: hasControls ? summary : null,
     });
   }
-  return { cases: verified.size, problems, notes, gateFailures, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
+  const controlStatus = { undecided: [], invalid: [], unscored: [] };
+  for (const entry of verified.values()) {
+    for (const control of entry.result.controls?.negative || []) {
+      controlStatus[negativeStatusOf(control)]?.push(`${entry.id}/${control.id}`);
+    }
+  }
+  return { cases: verified.size, problems, notes, gateFailures, controlStatus, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
 }

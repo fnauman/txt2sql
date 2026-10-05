@@ -466,6 +466,14 @@ function verificationSection(report) {
     `Gold and controls: ${verification.cases} case(s) verified on every fixture, ${verification.problems.length} with problems; ` +
       `gates ${verification.gateFailures.length === 0 ? 'passed' : `FAILED (${verification.gateFailures.join('; ')})`}.`
   );
+  // Negative controls that are not a verdict, design + held-out. Undecided
+  // ones (mapping search cut off) count as not killed; invalid (an SQL error)
+  // and unscored (an infrastructure error) ones are problems. A summary
+  // written before these statuses existed shows n/a.
+  const statusCount = (controls, key) =>
+    Array.isArray(controls.design?.[key]) || Array.isArray(controls.heldout?.[key])
+      ? String((controls.design?.[key]?.length || 0) + (controls.heldout?.[key]?.length || 0))
+      : 'n/a';
   const rows = verification.datasets
     .filter((dataset) => dataset.controls)
     .map((dataset) => [
@@ -473,11 +481,25 @@ function verificationSection(report) {
       `${dataset.controls.design.killed}/${dataset.controls.design.total} (${formatPercent(dataset.controls.design.rate)})`,
       `${dataset.controls.heldout.killed}/${dataset.controls.heldout.total} (${formatPercent(dataset.controls.heldout.rate)})`,
       `${dataset.controls.design.seedOnlyKilled}/${dataset.controls.design.total}`,
+      statusCount(dataset.controls, 'undecided'),
+      statusCount(dataset.controls, 'invalid'),
+      statusCount(dataset.controls, 'unscored'),
       `${dataset.controls.positive.matched}/${dataset.controls.positive.total} match, ${dataset.controls.positive.validatorAccepted} accepted`,
     ]);
   if (rows.length) {
     lines.push('');
-    lines.push(table(['Dataset', 'Design kill rate', 'Held-out kill rate', 'Killed on seed alone', 'Positive controls'], rows));
+    lines.push(table(['Dataset', 'Design kill rate', 'Held-out kill rate', 'Killed on seed alone', 'Undecided', 'Invalid', 'Unscored', 'Positive controls'], rows));
+  }
+  const status = verification.controlStatus || {};
+  for (const [key, label] of [
+    ['invalid', 'Invalid controls (fail to execute; a problem, not a kill)'],
+    ['unscored', 'Unscored controls (infrastructure error; a problem, not a kill)'],
+    ['undecided', 'Undecided controls (mapping search cut off; counted as not killed)'],
+  ]) {
+    if (status[key]?.length) {
+      lines.push('');
+      lines.push(`${label}: ${truncate(status[key].join(', '), 600)}.`);
+    }
   }
   return lines.join('\n');
 }

@@ -46,7 +46,7 @@ import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite } from '../src/eval/runner.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { describeFilters, filterSuiteEntries, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
-import { createValidatorProbe, verifySuite } from '../src/eval/verify.js';
+import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { calculateCost } from '../src/pricing.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
@@ -447,18 +447,50 @@ function formatProgress({ testCase, repetition, result, completed, total, repeat
 
 function printVerification(cli, verification) {
   for (const dataset of verification.datasets) {
+    const { design, heldout, positive } = dataset.controls || {};
+    const count = (key) => (design?.[key]?.length || 0) + (heldout?.[key]?.length || 0);
     const controls = dataset.controls
-      ? `; design kill rate ${dataset.controls.design.killed}/${dataset.controls.design.total}, held-out ${dataset.controls.heldout.killed}/${dataset.controls.heldout.total}, ` +
-        `positive ${dataset.controls.positive.matched}/${dataset.controls.positive.total}`
+      ? `; design kill rate ${design.killed}/${design.total}, held-out ${heldout.killed}/${heldout.total}, ` +
+        `positive ${positive.matched}/${positive.total}; undecided ${count('undecided')}, invalid ${count('invalid')}, unscored ${count('unscored')}`
       : '';
     cli.log(`  ${dataset.name}: ${dataset.cases} case(s), ${dataset.failures} with problems${controls}`);
   }
   for (const problem of verification.problems) {
     cli.log(`  ✗ ${problem.id} (${problem.datasets.join(', ')}): ${problem.problems.join('; ')}`);
   }
+  for (const id of verification.controlStatus?.undecided || []) {
+    cli.log(`  undecided (mapping search cut off, counted as not killed): ${id}`);
+  }
   for (const failure of verification.gateFailures) {
     cli.log(`  FAIL: ${failure}`);
   }
+}
+
+/**
+ * Why the in-process verify gate stops the run before any LLM call (null when
+ * it passes): a case problem (a failing gold, a positive control that does not
+ * match, ...), a kill-rate gate failure, or a negative control that is not a
+ * verdict. An invalid control (an SQL error on some fixture) or an unscored
+ * one (an infrastructure error) is a problem, never a kill, as in
+ * verify-dataset; an undecided control (mapping search cut off) only counts
+ * as not killed, so it can fail the kill-rate gate but is not a problem itself.
+ */
+export function verificationRefusal(verification) {
+  const invalid = verification.controlStatus?.invalid || [];
+  const unscored = verification.controlStatus?.unscored || [];
+  const problems = verification.problems?.length || 0;
+  const gateFailures = verification.gateFailures?.length || 0;
+  if (problems === 0 && gateFailures === 0 && invalid.length === 0 && unscored.length === 0) {
+    return null;
+  }
+  const parts = [`${problems} case(s) with problems, ${gateFailures} gate failure(s)`];
+  if (invalid.length + unscored.length > 0) {
+    parts.push(
+      `${invalid.length} invalid and ${unscored.length} unscored negative control(s) (${[...invalid, ...unscored].join(', ')}): ` +
+        `a control that does not execute is a problem, not a kill${unscored.length > 0 ? '; the database failed while scoring some, rerun once it is healthy' : ''}`
+    );
+  }
+  return `Verification failed (${parts.join('; ')}); no LLM call was made. Fix the dataset, controls or fixtures, or pass --skip-verify to run anyway.`;
 }
 
 async function writeReport(report, { reportPath, cli }) {
@@ -983,9 +1015,23 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
         controlsIndex = await loadControlsIndex({ controlsDir: options.controlsDir });
       } catch (error) {
         if (options.verify) {
-          throw new HarnessError(`Cannot load the oracle controls: ${error.message}`, { code: 'CONTROLS_INVALID', cause: error });
+          // CONTROLS_NOT_FOUND (a missing or empty directory) or
+          // CONTROLS_INVALID: never an empty index that skips the gate.
+          throw new HarnessError(`Cannot load the oracle controls: ${error.message}`, { code: error.code === 'CONTROLS_NOT_FOUND' ? error.code : 'CONTROLS_INVALID', cause: error });
         }
         cli.log(`  warning: oracle controls not loaded (${error.message}).`);
+      }
+      // Controls that load but apply to none of these datasets would skip
+      // every kill-rate gate, as in verify-dataset.
+      const coverageFailure = options.verify
+        ? controlsCoverageFailure(
+            selection.datasets.map((dataset) => ({ datasetName: dataset.name, cases: dataset.cases })),
+            controlsIndex,
+            { controlsDir: repoRelative(options.controlsDir) }
+          )
+        : null;
+      if (coverageFailure) {
+        throw new HarnessError(coverageFailure, { code: 'CONTROLS_NOT_FOUND' });
       }
     }
     let verification = { skipped: true };
@@ -1012,12 +1058,9 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       verification = { skipped: false, ...result };
       cli.log(`Verify: ${result.cases} unique case(s) on ${connections.length} fixture(s), ${result.problems.length} with problems.`);
       printVerification(cli, result);
-      if (result.problems.length > 0 || result.gateFailures.length > 0) {
-        throw new HarnessError(
-          `Verification failed (${result.problems.length} case(s) with gold problems, ${result.gateFailures.length} gate failure(s)); ` +
-            'no LLM call was made. Fix the dataset or fixtures, or pass --skip-verify to run anyway.',
-          { code: 'VERIFY_FAILED' }
-        );
+      const refusal = verificationRefusal(result);
+      if (refusal) {
+        throw new HarnessError(refusal, { code: 'VERIFY_FAILED' });
       }
     } else {
       cli.log('Verify: skipped.');

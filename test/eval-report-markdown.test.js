@@ -159,3 +159,36 @@ test('the outcome table splits an outcome whose repetitions moved buckets, and n
   assert.match(markdown, /2 repetition\(s\) with a guardrail rejection that could not be re-checked/);
   assert.match(markdown, /unknown 3 \(rejected SQL fails the safety layer now, not run 1, re-check failed 2\)/);
 });
+
+test('the Verification section counts undecided, invalid and unscored controls per dataset', async () => {
+  const report = await sampleReport();
+  const group = (killed, total, extra = {}) => ({ total, killed, rate: total ? killed / total : null, seedOnlyKilled: killed, seedOnlyRate: null, survivors: [], undecided: [], invalid: [], unscored: [], executionErrors: 0, ...extra });
+  report.verification = {
+    skipped: false,
+    cases: 2,
+    problems: [{ id: 'c1', datasets: ['core'], problems: ['negative control m2 is invalid: it fails to execute'] }],
+    gateFailures: [],
+    controlStatus: { undecided: ['c1/m3'], invalid: ['c1/m2'], unscored: ['c2/h1'] },
+    datasets: [
+      {
+        name: 'core',
+        cases: 2,
+        failures: 1,
+        controls: {
+          design: group(1, 3, { undecided: ['c1/m3 (cancel)'], invalid: ['c1/m2 (v2: ER_BAD_FIELD_ERROR)'] }),
+          heldout: group(0, 1, { unscored: ['c2/h1 (seed: ECONNRESET)'] }),
+          positive: { total: 1, matched: 1, validatorAccepted: 1 },
+        },
+      },
+      // A summary from before the statuses existed shows n/a, not 0.
+      { name: 'legacy', cases: 1, failures: 0, controls: { design: { total: 1, killed: 1, rate: 1, seedOnlyKilled: 1 }, heldout: { total: 0, killed: 0, rate: null }, positive: { total: 0, matched: 0, validatorAccepted: 0 } } },
+    ],
+  };
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /\| Dataset \| Design kill rate \| Held-out kill rate \| Killed on seed alone \| Undecided \| Invalid \| Unscored \| Positive controls \|/);
+  assert.match(markdown, /\| core \| 1\/3 \(33\.3%\) \| 0\/1 \(0\.0%\) \| 1\/3 \| 1 \| 1 \| 1 \| 1\/1 match, 1 accepted \|/);
+  assert.match(markdown, /\| legacy \| 1\/1 \(100\.0%\) \| 0\/0 \(n\/a\) \| 1\/1 \| n\/a \| n\/a \| n\/a \|/);
+  assert.match(markdown, /Invalid controls \(fail to execute; a problem, not a kill\): c1\/m2\./);
+  assert.match(markdown, /Unscored controls \(infrastructure error; a problem, not a kill\): c2\/h1\./);
+  assert.match(markdown, /Undecided controls \(mapping search cut off; counted as not killed\): c1\/m3\./);
+});

@@ -328,3 +328,18 @@ test('Ctrl-C (SIGINT) aborts in-flight cases and still writes a partial report (
   assert.deepEqual(report.attribution.repetitions.byOutcome, { cancelled: 9 });
   assert.ok(report.results.filter((record) => record.repetitions[0].cancelled_in_flight).length === 2, 'the two in-flight cases were aborted');
 });
+
+test('npm run eval: a missing controls directory, or controls for other cases, stop the run before any LLM call (exit 2)', { skip }, async () => {
+  requireAdmin();
+  const missing = await runEval(['--offline', '--controls-dir', path.join(outputRoot, 'no-such-controls')], 'controls-missing');
+  assert.equal(missing.code, 2, missing.stdout + missing.stderr);
+  assert.match(missing.stdout + missing.stderr, /Cannot load the oracle controls: Controls directory .*no-such-controls does not exist/);
+
+  const otherDir = path.join(outputRoot, 'other-controls');
+  await fs.mkdir(otherDir, { recursive: true });
+  await fs.writeFile(path.join(otherDir, 'other.json'), JSON.stringify({ not_a_case_here: { negative: [{ id: 'm1', type: 'join_path', sql: 'SELECT 1' }] } }));
+  const uncovered = await runEval(['--offline', '--dataset', 'core-public', '--controls-dir', otherDir], 'controls-uncovered');
+  assert.equal(uncovered.code, 2, uncovered.stdout + uncovered.stderr);
+  assert.match(uncovered.stdout + uncovered.stderr, /No oracle controls in .*other-controls apply to core-public/);
+  assert.doesNotMatch(uncovered.stdout, /^Verify:/m, 'stopped before verification');
+});
