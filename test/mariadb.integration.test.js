@@ -31,6 +31,22 @@ const env = {
 
 const numbers = (count) => `WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < ${count}) `;
 
+// The KILL for a cancelled or overflowing read is not awaited by the caller,
+// so poll briefly until no bounded statement is running any more.
+async function boundedStatementsStillRunning(pool) {
+  let running = 1;
+  for (let attempt = 0; attempt < 40 && running > 0; attempt += 1) {
+    const [[row]] = await pool.query(
+      "SELECT COUNT(*) AS running FROM information_schema.PROCESSLIST WHERE COMMAND = 'Query' AND INFO LIKE 'SET STATEMENT%'"
+    );
+    running = Number(row.running);
+    if (running > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  return running;
+}
+
 test('sql_select_limit caps only the outermost result and keeps ORDER BY', { skip }, async () => {
   const connection = await createMariaDbConnection({ env });
   try {
@@ -67,19 +83,8 @@ test('a pool stops a huge explicit-LIMIT result after maxRows rows and stays usa
     });
     assert.equal(rows.length, 11);
     assert.ok(Date.now() - started < 5000, `stopped early (${Date.now() - started} ms)`);
-    // ...and the server stopped producing rows too (the statement was killed;
-    // the KILL is not awaited by the read, so poll briefly).
-    let running = 1;
-    for (let attempt = 0; attempt < 40 && running > 0; attempt += 1) {
-      const [[row]] = await pool.query(
-        "SELECT COUNT(*) AS running FROM information_schema.PROCESSLIST WHERE COMMAND = 'Query' AND INFO LIKE 'SET STATEMENT%'"
-      );
-      running = Number(row.running);
-      if (running > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-    assert.equal(running, 0);
+    // ...and the server stopped producing rows too (the statement was killed).
+    assert.equal(await boundedStatementsStillRunning(pool), 0);
     // The overflowing connection was dropped; the single slot is reusable.
     assert.deepEqual(await executeReadOnlySql(pool, 'SELECT 1 AS ok', { maxRows: 5 }), [{ ok: 1 }]);
   } finally {
@@ -97,9 +102,10 @@ test('KILL-on-abort still works when every pool slot is busy', { skip }, async (
       executeReadOnlySql(pool, 'SELECT SLEEP(3) AS s', { timeoutMs: 60_000, signal: controller.signal }),
       (error) => error.code === 'REQUEST_TIMEOUT'
     );
-    // A pooled KILL would wait for the only slot, i.e. the full SLEEP(3).
-    assert.ok(Date.now() - started < 2000, `killed promptly (${Date.now() - started} ms)`);
+    // The caller is answered at once; the only slot comes back once the KILL
+    // has landed. A pooled KILL would wait for that slot, i.e. the full SLEEP(3).
     assert.deepEqual(await executeReadOnlySql(pool, 'SELECT 1 AS ok'), [{ ok: 1 }], 'the pool stays usable');
+    assert.ok(Date.now() - started < 2000, `killed promptly (${Date.now() - started} ms)`);
   } finally {
     await pool.end();
   }
@@ -117,10 +123,15 @@ test('the statement timeout and KILL-on-abort stop a long query', { skip }, asyn
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(Object.assign(new Error('deadline'), { code: 'REQUEST_TIMEOUT' })), 200);
+    const abortStarted = Date.now();
     await assert.rejects(
       executeReadOnlySql(pool, endless, { timeoutMs: 60_000, signal: controller.signal }),
-      (error) => error.code === 'REQUEST_TIMEOUT' && error.cause?.code === 'ER_QUERY_INTERRUPTED'
+      (error) => error.name === 'AbortError' && error.code === 'REQUEST_TIMEOUT'
     );
+    // Answered at the abort, without waiting for the KILL round trip...
+    assert.ok(Date.now() - abortStarted < 1000, `answered at the abort (${Date.now() - abortStarted} ms)`);
+    // ...which still stops the statement on the server.
+    assert.equal(await boundedStatementsStillRunning(pool), 0);
     assert.deepEqual(await executeReadOnlySql(pool, 'SELECT 1 AS ok'), [{ ok: 1 }], 'the pool stays usable');
   } finally {
     await pool.end();
