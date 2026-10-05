@@ -6,8 +6,14 @@ name: CI
 #            an offline evaluation (rescore of the committed baseline, no LLM
 #            calls) and the retrieval evaluation. Costs nothing.
 # eval-paid: the full evaluation with real LLM calls under a budget; only on a
-#            manual dispatch or a pull request labelled `run-eval`, and only
-#            when the OPENAI_API_KEY secret is available.
+#            manual dispatch or a pull request labelled `run-eval` (every push
+#            to such a pull request runs it again; remove the label to stop),
+#            and only when the OPENAI_API_KEY secret is available. The key is
+#            given to the two steps that need it, never to npm ci.
+#
+# Adding a label other than run-eval to a pull request starts a run whose jobs
+# are all skipped, in a concurrency group of its own, so it never cancels the
+# run in progress (or a paid evaluation).
 
 on:
   push:
@@ -25,12 +31,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # One group per event and ref, so a push to main never cancels a manual
+  # paid evaluation; a label other than run-eval gets a throwaway group.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ (github.event.action == 'labeled' && github.event.label.name != 'run-eval') && format('-label-{0}', github.run_id) || '' }}
+  # Only superseded pull-request runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     name: test (node ${{ matrix.node }})
+    if: github.event.action != 'labeled' || github.event.label.name == 'run-eval'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -51,6 +61,7 @@ jobs:
 
   db:
     name: db (MariaDB, fixtures, verify, offline eval)
+    if: github.event.action != 'labeled' || github.event.label.name == 'run-eval'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -88,7 +99,14 @@ jobs:
           TEST_MARIADB_ADMIN_PASSWORD: ci-admin-password
         run: node --test --test-concurrency=1 test/mariadb.integration.test.js test/eval-fixtures.integration.test.js test/eval-runner.integration.test.js
       - name: Offline evaluation (rescore the committed baseline; no LLM calls)
-        run: npm run eval -- --offline
+        # With a committed baseline, a guardrail, oracle or fixture change that
+        # makes its recorded SQL score significantly worse fails the job.
+        run: |
+          if [ -f "eval/baselines/${MODEL_NAME:-gpt-4o-mini}.json" ]; then
+            npm run eval -- --offline --gate
+          else
+            npm run eval -- --offline
+          fi
       - name: Retrieval evaluation
         run: npm run evaluate-retrieval
       - name: Add the offline report to the job summary
@@ -100,11 +118,13 @@ jobs:
   eval-paid:
     name: eval (paid, budget-capped)
     needs: [test, db]
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-eval'))
+    if: >-
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-eval'))) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'run-eval')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       BUDGET_USD: ${{ inputs.budget || '1' }}
       DB_HOST: 127.0.0.1
       DB_PORT: '3306'
@@ -116,6 +136,8 @@ jobs:
     steps:
       - name: Check for the OpenAI key
         id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "$OPENAI_API_KEY" ]; then
             echo "::notice title=eval-paid::OPENAI_API_KEY is not available to this run; skipping the paid evaluation."
@@ -134,12 +156,14 @@ jobs:
         if: steps.key.outputs.present == 'true'
       - name: Evaluate (starts MariaDB, seeds, verifies, runs, reports)
         if: steps.key.outputs.present == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run eval -- --budget-usd "$BUDGET_USD"
       - name: Upload the run
         if: always() && steps.key.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: eval-runs-${{ github.run_id }}
+          name: eval-runs-${{ github.run_id }}-${{ github.run_attempt }}
           path: generated/runs
           if-no-files-found: warn
       - name: Add report.md to the job summary

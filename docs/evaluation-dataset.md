@@ -726,13 +726,25 @@ otherwise the console says why and the existing file is left alone.
 - **db**: MariaDB from `docker compose` with dummy credentials, then
   `bootstrap-db`, `seed-fixtures`, `verify-dataset` (kill-rate gate), the
   opt-in real-database tests (including `npm run eval` against the OpenAI
-  stand-in), `npm run eval -- --offline` (rescores the committed baseline, or
-  notes that there is none) and `evaluate-retrieval`. No LLM call.
+  stand-in), `npm run eval -- --offline` (with `--gate` once
+  `eval/baselines/<model>.json` is committed, so a guardrail, oracle or
+  fixture change that makes the baseline's recorded SQL score significantly
+  worse fails the job; without a baseline it notes that there is none) and
+  `evaluate-retrieval`. No LLM call.
 - **eval-paid**: only on a manual dispatch (input `budget`, default 1 USD) or
   a pull request labelled `run-eval`, and skipped with a notice when the
   `OPENAI_API_KEY` secret is not available (e.g. pull requests from forks).
   Runs `npm run eval -- --budget-usd <budget>`, uploads `generated/runs` as an
-  artifact and appends `report.md` to the job summary.
+  artifact (named with the run id and attempt) and appends `report.md` to the
+  job summary. Once a pull request carries `run-eval`, every push to it runs
+  the paid evaluation again (each capped by the budget); remove the label to
+  stop. Only the two steps that need `OPENAI_API_KEY` get it (not `npm ci`).
+  A one-off provider error left after the SDK's retries fails this job (exit
+  2); re-run it.
+
+Adding any other label to a pull request starts no job and cancels nothing;
+superseded pull-request runs are cancelled, pushes to `main` and manual runs
+are not.
 
 ### Cost
 
