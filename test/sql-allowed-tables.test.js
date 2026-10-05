@@ -65,3 +65,56 @@ test('validateReadOnlySql still accepts a comma-join when every table is allowed
   const result = validateReadOnlySql('SELECT 1 FROM Sales, Customer LIMIT 5', ALLOWED);
   assert.deepEqual(result.tablesUsed.slice().sort(), ['Customer', 'Sales']);
 });
+
+// CTE names are query-local: they are not checked against the allow-list (and
+// not reported as tables), but the tables inside CTE bodies are. Before the
+// tokenizer rewrite every query that selected FROM a CTE was rejected here.
+test('extractTablesFromSql excludes CTE names but includes tables inside CTE bodies', () => {
+  assert.deepEqual(
+    extractTablesFromSql(
+      'WITH feb AS (SELECT l.ProductId FROM Sales l), mar (ProductId) AS (SELECT ProductId FROM Customer) SELECT COUNT(*) FROM feb LEFT JOIN mar ON mar.ProductId = feb.ProductId'
+    ),
+    ['Sales', 'Customer']
+  );
+});
+
+test('validateReadOnlySql accepts queries that select FROM CTEs (qualified and unqualified)', () => {
+  const unqualified = validateReadOnlySql('WITH x AS (SELECT id FROM Customer) SELECT COUNT(*) FROM x', ALLOWED);
+  assert.deepEqual(unqualified.tablesUsed, ['Customer']);
+  assert.equal(unqualified.firstKeyword, 'WITH');
+
+  const qualified = validateReadOnlySql(
+    'WITH feb AS (SELECT s.id FROM Sales s), mar AS (SELECT c.id FROM Customer c) SELECT COUNT(*) FROM feb LEFT JOIN mar ON mar.id = feb.id WHERE mar.id IS NULL',
+    ALLOWED
+  );
+  assert.deepEqual(qualified.tablesUsed, ['Sales', 'Customer']);
+});
+
+test('validateReadOnlySql still checks the tables inside CTE bodies', () => {
+  assert.throws(
+    () => validateReadOnlySql('WITH x AS (SELECT * FROM secret_audit) SELECT * FROM x', ALLOWED),
+    (error) => error.code === 'TABLE_SCOPE' && /"secret_audit"/.test(error.message)
+  );
+});
+
+test('FROM inside EXTRACT/TRIM/SUBSTRING is not a table, FROM DUAL is allowed', () => {
+  const result = validateReadOnlySql(
+    "SELECT EXTRACT(MONTH FROM s.DocumentDate) AS m, TRIM(LEADING '0' FROM s.DocumentNo) AS doc, SUBSTRING(s.DocumentNo FROM 1 FOR 3) AS p FROM Sales s",
+    ALLOWED
+  );
+  assert.deepEqual(result.tablesUsed, ['Sales']);
+  assert.deepEqual(validateReadOnlySql('SELECT 1 AS one FROM DUAL', ALLOWED).tablesUsed, []);
+});
+
+test('table-like words inside literals do not become tables', () => {
+  const result = validateReadOnlySql(
+    "SELECT * FROM Customer c WHERE c.name <> 'Fresh from Farm' AND c.name NOT LIKE '%join Club%'",
+    ALLOWED
+  );
+  assert.deepEqual(result.tablesUsed, ['Customer']);
+});
+
+test('parenthesized table references and db-qualified tables fail closed', () => {
+  assert.throws(() => validateReadOnlySql('SELECT * FROM (Customer)', ALLOWED), (error) => error.code === 'PARENTHESIZED_TABLE');
+  assert.throws(() => validateReadOnlySql('SELECT * FROM other.Customer', ALLOWED), (error) => error.code === 'CROSS_DATABASE');
+});

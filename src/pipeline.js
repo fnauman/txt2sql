@@ -12,7 +12,14 @@ import {
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { loadSemanticLayerSync } from './semantic-layer.js';
-import { validateSqlGuardrails } from './sql-guardrails.js';
+import { SqlValidationError, validateSqlGuardrails } from './sql-guardrails.js';
+import {
+  SqlTokenizeError,
+  analyzeSqlStructure,
+  isKeywordToken,
+  stripSqlTokens,
+  tokenizeSql,
+} from './sql-tokenizer.js';
 import { escapeRegExp, uniqueStrings } from './utils.js';
 
 function splitWords(value) {
@@ -956,93 +963,22 @@ export function retrieveRelevantTables(
   };
 }
 
-// Keywords that end a FROM table-list. A JOIN/STRAIGHT_JOIN starts a fresh table
-// reference (captured by the keyword regex below); the rest close the FROM clause.
-const FROM_LIST_TERMINATOR =
-  /^(?:WHERE|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|EXCEPT|INTERSECT|WINDOW|FOR|INTO|ON|USING|JOIN|INNER|LEFT|RIGHT|FULL|CROSS|NATURAL|STRAIGHT_JOIN)$/i;
-
-// Tables in a comma-separated FROM list (`FROM a, b, c`). The keyword regex only
-// sees the table immediately after FROM/JOIN, so without this a comma-joined
-// table would slip the allowed-table check entirely (a real, if grant-contained,
-// guardrail bypass). Walk each FROM clause depth-aware — so subquery and
-// SELECT-list commas are ignored — and take the leading identifier of every
-// top-level comma segment. Erring toward over-extraction is safe: an extra
-// candidate that is not in the allow-set just triggers a fail-closed rejection.
-function extractFromListTables(sql) {
-  const tables = [];
-  const isWord = (char) => char !== undefined && /[A-Za-z0-9_]/.test(char);
-  const pushLeading = (start, end) => {
-    const match = sql.slice(start, end).match(/^\s*`?([A-Za-z][A-Za-z0-9_]*)`?/);
-    if (match) {
-      tables.push(match[1]);
-    }
-  };
-
-  const fromRegex = /\bFROM\b/gi;
-  let from;
-  while ((from = fromRegex.exec(sql)) !== null) {
-    let depth = 0;
-    let segmentStart = fromRegex.lastIndex;
-    let i = segmentStart;
-
-    while (i < sql.length) {
-      const char = sql[i];
-      if (char === '(') {
-        depth += 1;
-        i += 1;
-        continue;
-      }
-      if (char === ')') {
-        if (depth === 0) {
-          break; // closing paren of an enclosing subquery — FROM list ends here
-        }
-        depth -= 1;
-        i += 1;
-        continue;
-      }
-      if (depth === 0 && char === ',') {
-        pushLeading(segmentStart, i);
-        segmentStart = i + 1;
-        i += 1;
-        continue;
-      }
-      if (depth === 0 && /[A-Za-z_]/.test(char) && !isWord(sql[i - 1])) {
-        let end = i + 1;
-        while (end < sql.length && isWord(sql[end])) {
-          end += 1;
-        }
-        if (FROM_LIST_TERMINATOR.test(sql.slice(i, end))) {
-          break;
-        }
-        i = end; // skip the rest of this identifier (a table name or alias)
-        continue;
-      }
-      i += 1;
-    }
-
-    pushLeading(segmentStart, i);
-  }
-
-  return tables;
-}
-
+// Tables referenced by a SQL statement, read from the shared MariaDB tokenizer:
+// FROM / JOIN / STRAIGHT_JOIN targets and every table of a comma-separated FROM
+// list, in order of appearance. CTE names (query-local), derived tables and DUAL
+// are not tables; FROM inside EXTRACT/TRIM/SUBSTRING(...) is not a table keyword.
+// A db-qualified reference is returned as "db.table".
+//
+// This is a best-effort helper for trusted SQL (few-shot examples, gold SQL in
+// benchmarks): it never throws. The read-only safety layer (validateSqlSafety)
+// runs the same analysis in strict mode and fails closed on anything it cannot
+// classify.
 export function extractTablesFromSql(sql, { alreadyCleaned = false } = {}) {
   const normalizedSql = alreadyCleaned ? String(sql || '') : cleanModelOutput(sql);
-  const tables = [];
-
-  // FROM / JOIN / STRAIGHT_JOIN each introduce a table. STRAIGHT_JOIN must be
-  // matched explicitly: `\bJOIN` does not match inside STRAIGHT_JOIN because the
-  // preceding underscore is a word character, so there is no word boundary.
-  const keywordRegex = /\b(?:FROM|STRAIGHT_JOIN|JOIN)\s+`?([A-Za-z][A-Za-z0-9_]*)`?/gi;
-  let match;
-  while ((match = keywordRegex.exec(normalizedSql)) !== null) {
-    tables.push(match[1]);
-  }
-
-  // Add the 2nd+ tables of any comma-separated FROM list.
-  for (const table of extractFromListTables(normalizedSql)) {
-    tables.push(table);
-  }
+  const analysis = analyzeSqlStructure(normalizedSql, { tolerant: true });
+  const tables = analysis.tableRefs
+    .filter((ref) => ref.kind === 'table')
+    .map((ref) => (ref.schema ? `${ref.schema}.${ref.name}` : ref.name));
 
   return [...new Set(tables)];
 }
@@ -1553,101 +1489,334 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   }
 }
 
-// Strip string literals, quoted identifiers, and comments so the safety scan
-// matches only executable SQL tokens. This avoids false positives on harmless
-// literals (e.g. WHERE note = 'DELETE later') and prevents comment-obfuscated
-// payloads from sneaking past the keyword/function denylist.
+// Strip string literals, quoted identifiers, and comments using the shared
+// MariaDB tokenizer. Kept for diagnostics and callers that want a literal-free
+// view of the SQL; the safety layer itself works on tokens.
 export function stripSqlForSafetyScan(sql) {
-  return String(sql || '')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/`(?:[^`]|``)*`/g, '``')
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/#[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ');
+  return stripSqlTokens(tokenizeSql(String(sql || ''), { tolerant: true }), { blankQuotedIdentifiers: true });
 }
 
-// Patterns that must never appear in a read-only analytics query. The validator
-// is intentionally conservative: the first keyword must already be SELECT/WITH
-// and only a single statement is permitted, so this list targets the residual
-// ways a SELECT can still write, exfiltrate, lock, or denial-of-service.
-const READ_ONLY_DENYLIST = [
-  {
-    pattern:
-      /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|CALL|DO|HANDLER|RENAME|PREPARE|EXECUTE|DEALLOCATE|SHUTDOWN|KILL|FLUSH|INSTALL|UNINSTALL|LOAD)\b/i,
-    message: 'Only read-only SQL is allowed.',
-  },
-  { pattern: /\bINTO\s+(OUTFILE|DUMPFILE)\b/i, message: 'Writing query output to files is not allowed.' },
-  { pattern: /\bFOR\s+UPDATE\b/i, message: 'Locking reads (FOR UPDATE) are not allowed.' },
-  { pattern: /\bLOCK\s+IN\s+SHARE\s+MODE\b/i, message: 'Locking reads (LOCK IN SHARE MODE) are not allowed.' },
-  { pattern: /@/, message: 'User-defined and server (@/@@) variables are not allowed.' },
-  {
-    pattern: /\b(INFORMATION_SCHEMA|PERFORMANCE_SCHEMA|MYSQL|SYS)\s*\./i,
-    message: 'Querying server metadata schemas is not allowed.',
-  },
-  {
-    pattern:
-      /\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|IS_FREE_LOCK|IS_USED_LOCK|LOAD_FILE|MASTER_POS_WAIT|NAME_CONST|EXTRACTVALUE|UPDATEXML|WAIT_FOR_EXECUTED_GTID_SET)\s*\(/i,
-    message: 'Use of restricted SQL functions (locking, file, timing, or XML) is not allowed.',
-  },
-  {
-    pattern: /\b(USER|CURRENT_USER|SESSION_USER|SYSTEM_USER|VERSION|DATABASE|SCHEMA|CONNECTION_ID|CURRENT_ROLE)\s*\(/i,
-    message: 'Server/session information functions are not allowed.',
-  },
-];
+function safetyError(code, message, details = null) {
+  return new SqlValidationError(message, { code, layer: 'safety', details });
+}
 
-export function validateReadOnlySql(sql, allowedTables, { promptContext = null, response = null } = {}) {
-  const cleaned = cleanModelOutput(sql).replace(/;+\s*$/, '');
-  if (!cleaned) {
-    throw new Error('Model did not return SQL.');
+// Layer-1 policy over significant tokens. Keywords are matched on bare word
+// tokens only (never inside strings or quoted identifiers, and never on an
+// identifier that directly follows `ident.`); function names are matched on bare
+// and backtick-quoted identifiers followed by '('.
+// The validator is intentionally conservative: the first keyword must already be
+// SELECT/WITH and only a single statement is permitted, so these lists target
+// the residual ways a SELECT can still write, exfiltrate, lock, or stall.
+const WRITE_KEYWORDS = new Set([
+  'INSERT',
+  'UPDATE',
+  'DELETE',
+  'DROP',
+  'ALTER',
+  'CREATE',
+  'TRUNCATE',
+  'REPLACE',
+  'MERGE',
+  'GRANT',
+  'REVOKE',
+  'CALL',
+  'DO',
+  'HANDLER',
+  'RENAME',
+  'PREPARE',
+  'EXECUTE',
+  'DEALLOCATE',
+  'SHUTDOWN',
+  'KILL',
+  'FLUSH',
+  'INSTALL',
+  'UNINSTALL',
+  'LOAD',
+]);
+
+// String functions that share a name with a write statement: REPLACE(str, a, b)
+// and INSERT(str, pos, len, new) are read-only when called as functions.
+const WRITE_KEYWORD_STRING_FUNCTIONS = new Set(['REPLACE', 'INSERT']);
+
+const RESTRICTED_FUNCTIONS = new Set([
+  // timing / denial of service
+  'SLEEP',
+  'BENCHMARK',
+  // locking
+  'GET_LOCK',
+  'RELEASE_LOCK',
+  'RELEASE_ALL_LOCKS',
+  'IS_FREE_LOCK',
+  'IS_USED_LOCK',
+  // file access
+  'LOAD_FILE',
+  // replication waits (block until a position/GTID or the timeout)
+  'MASTER_POS_WAIT',
+  'MASTER_GTID_WAIT',
+  'WAIT_FOR_EXECUTED_GTID_SET',
+  // error-based / XML exfiltration
+  'NAME_CONST',
+  'EXTRACTVALUE',
+  'UPDATEXML',
+  // sequence state changes (MariaDB 10.3+) and session state
+  'NEXTVAL',
+  'SETVAL',
+  'LASTVAL',
+  'LAST_INSERT_ID',
+]);
+
+const SESSION_INFO_FUNCTIONS = new Set([
+  'USER',
+  'CURRENT_USER',
+  'SESSION_USER',
+  'SYSTEM_USER',
+  'VERSION',
+  'DATABASE',
+  'SCHEMA',
+  'CONNECTION_ID',
+  'CURRENT_ROLE',
+]);
+
+// MariaDB also accepts these without parentheses (SELECT CURRENT_USER).
+const BARE_SESSION_INFO_KEYWORDS = new Set(['CURRENT_USER', 'CURRENT_ROLE']);
+
+const METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys']);
+// Unambiguous schema names are rejected anywhere; mysql/sys only when used as a
+// qualifier (`mysql.user`) so a column alias named "sys" stays legal.
+const ALWAYS_METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema']);
+
+const SAFETY_MESSAGES = {
+  NOT_READ_ONLY: 'Only read-only SQL is allowed.',
+  FILE_OUTPUT: 'Writing query output to files is not allowed.',
+  SELECT_INTO: 'SELECT ... INTO (variables or files) is not allowed.',
+  SERVER_VARIABLE: 'User-defined and server (@/@@) variables are not allowed.',
+  METADATA_SCHEMA: 'Querying server metadata schemas is not allowed.',
+  DENYLISTED_FUNCTION:
+    'Use of restricted SQL functions (locking, file, timing, replication, sequence, or XML) is not allowed.',
+  SESSION_INFO_FUNCTION: 'Server/session information functions are not allowed.',
+  PROCEDURE_CLAUSE: 'PROCEDURE clauses are not allowed.',
+  RECURSIVE_CTE: 'Recursive CTEs (WITH RECURSIVE) are not allowed.',
+  CROSS_DATABASE: 'Cross-database references (db.table or db.function()) are not allowed.',
+};
+
+function isPunctToken(token, value) {
+  return Boolean(token) && token.type === 'punct' && token.value === value;
+}
+
+function isCallToken(tokens, index) {
+  return isPunctToken(tokens[index + 1], '(');
+}
+
+function lowerIdentifier(token) {
+  if (token?.type === 'quoted_identifier') {
+    return token.name.toLowerCase();
   }
+  return token?.type === 'word' ? token.value.toLowerCase() : null;
+}
 
-  // Reject MySQL/MariaDB executable comments (/*! ... */) before they are
-  // stripped; their payload runs on the server but hides from naive scanners.
-  if (/\/\*!/.test(cleaned)) {
-    throw new Error('Executable SQL comments (/*! ... */) are not allowed.');
-  }
+// Returns the first layer-1 violation among the significant tokens, scanning in
+// order so the reported error is the leftmost offending construct.
+function findTokenPolicyViolation(tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const next = tokens[index + 1];
 
-  const scanText = stripSqlForSafetyScan(cleaned);
+    if (token.type === 'variable') {
+      return ['SERVER_VARIABLE'];
+    }
 
-  for (const { pattern, message } of READ_ONLY_DENYLIST) {
-    if (pattern.test(scanText)) {
-      throw new Error(message);
+    const lower = lowerIdentifier(token);
+    if (lower && METADATA_SCHEMAS.has(lower) && (ALWAYS_METADATA_SCHEMAS.has(lower) || isPunctToken(next, '.'))) {
+      return ['METADATA_SCHEMA'];
+    }
+
+    const isIdentifier = (token.type === 'word' && !token.afterDot) || token.type === 'quoted_identifier';
+    if (!isIdentifier) {
+      continue;
+    }
+    if (isPunctToken(next, '.') && tokens[index + 2] && isCallToken(tokens, index + 2)) {
+      // db.function(...) calls a stored function in another schema.
+      return ['CROSS_DATABASE'];
+    }
+    if (isCallToken(tokens, index)) {
+      // MariaDB resolves a backtick-quoted built-in name too: `SLEEP`(5) and
+      // `LOAD_FILE`('/etc/passwd') run the real functions (verified on 10.6).
+      const functionName = token.type === 'quoted_identifier' ? token.name.toUpperCase() : token.upper;
+      if (RESTRICTED_FUNCTIONS.has(functionName)) {
+        return ['DENYLISTED_FUNCTION'];
+      }
+      if (SESSION_INFO_FUNCTIONS.has(functionName)) {
+        return ['SESSION_INFO_FUNCTION'];
+      }
+    }
+
+    if (token.type !== 'word') {
+      continue;
+    }
+
+    const word = token.upper;
+    if (word === 'FOR' && isKeywordToken(next, 'UPDATE', 'SHARE')) {
+      return ['LOCKING_READ', `Locking reads (FOR ${next.upper}) are not allowed.`];
+    }
+    if (word === 'LOCK') {
+      return ['LOCKING_READ', 'Locking reads (LOCK IN SHARE MODE) are not allowed.'];
+    }
+    if (word === 'INTO') {
+      return isKeywordToken(next, 'OUTFILE', 'DUMPFILE') ? ['FILE_OUTPUT'] : ['SELECT_INTO'];
+    }
+    if (word === 'SET' && !isKeywordToken(tokens[index - 1], 'CHARACTER')) {
+      // Only CHARACTER SET is legal inside a read query; SET STATEMENT etc. is not.
+      return ['NOT_READ_ONLY'];
+    }
+    if (WRITE_KEYWORDS.has(word) && !(WRITE_KEYWORD_STRING_FUNCTIONS.has(word) && isCallToken(tokens, index))) {
+      return ['NOT_READ_ONLY'];
+    }
+    if (word === 'PROCEDURE') {
+      return ['PROCEDURE_CLAUSE'];
+    }
+    if (word === 'WITH' && isKeywordToken(next, 'RECURSIVE')) {
+      return ['RECURSIVE_CTE'];
+    }
+    if ((word === 'NEXT' || word === 'PREVIOUS') && isKeywordToken(next, 'VALUE') && isKeywordToken(tokens[index + 2], 'FOR')) {
+      return ['DENYLISTED_FUNCTION'];
+    }
+    if (BARE_SESSION_INFO_KEYWORDS.has(word)) {
+      return ['SESSION_INFO_FUNCTION'];
     }
   }
 
-  const firstKeyword = scanText.match(/^\s*(WITH|SELECT)\b/i)?.[1]?.toUpperCase();
+  return null;
+}
+
+/**
+ * Layer 1: read-only safety and table scope, computed from MariaDB-faithful
+ * tokens. Rejects (with error.code and error.layer = 'safety'):
+ * - any comment and any executable comment (generated analytics SQL never needs
+ *   comments, and comment-lexing differences are how payloads hide),
+ * - unterminated strings/identifiers/comments, control characters, and
+ *   backslash-escaped quotes (ambiguous under NO_BACKSLASH_ESCAPES),
+ * - write/DDL keywords, SELECT ... INTO, locking reads, PROCEDURE, SET,
+ *   @/@@ variables, restricted and session-information functions, sequences,
+ *   WITH RECURSIVE, metadata schemas and cross-database references,
+ * - anything but a single SELECT/WITH statement (one trailing ';' is allowed),
+ * - table references outside `allowedTables`, including parenthesized table
+ *   references and table functions after FROM/JOIN (fail closed). CTE names are
+ *   query-local and are not checked, but the tables inside CTE bodies are.
+ */
+export function validateSqlSafety(sql, allowedTables = []) {
+  const cleaned = cleanModelOutput(sql);
+  if (cleaned.includes('\u0000')) {
+    throw safetyError('INVALID_CHARACTER', 'SQL contains a NUL character.');
+  }
+
+  let tokens;
+  try {
+    tokens = tokenizeSql(cleaned);
+  } catch (error) {
+    if (error instanceof SqlTokenizeError) {
+      throw safetyError(error.code, error.message, { position: error.position, tokenType: error.tokenType });
+    }
+    throw error;
+  }
+
+  if (tokens.some((token) => token.type === 'executable_comment')) {
+    throw safetyError('EXECUTABLE_COMMENT', 'Executable SQL comments (/*! ... */ and /*M! ... */) are not allowed.');
+  }
+  if (tokens.some((token) => token.type === 'comment')) {
+    throw safetyError('SQL_COMMENT', 'SQL comments (--, # and /* */) are not allowed in generated SQL.');
+  }
+  const unknown = tokens.find((token) => token.type === 'unknown');
+  if (unknown) {
+    throw safetyError('INVALID_CHARACTER', `SQL contains an unexpected control character at offset ${unknown.start}.`);
+  }
+  if (tokens.some((token) => token.type === 'string' && token.backslashEscapedQuote)) {
+    throw safetyError(
+      'AMBIGUOUS_STRING_ESCAPE',
+      "Escape quotes inside string literals by doubling them ('') instead of using a backslash."
+    );
+  }
+
+  const analysis = analyzeSqlStructure(tokens);
+  const significant = analysis.tokens;
+
+  // A single trailing ';' is allowed and stripped from the executed SQL.
+  let statementTokens = significant;
+  let executableSql = cleaned;
+  if (isPunctToken(significant.at(-1), ';')) {
+    statementTokens = significant.slice(0, -1);
+    executableSql = cleaned.slice(0, significant.at(-1).start).trimEnd();
+  }
+  if (statementTokens.length === 0) {
+    throw safetyError('EMPTY_SQL', 'Model did not return SQL.');
+  }
+
+  const violation = findTokenPolicyViolation(statementTokens);
+  if (violation) {
+    const [code, message] = violation;
+    throw safetyError(code, message || SAFETY_MESSAGES[code]);
+  }
+
+  const firstKeyword = isKeywordToken(statementTokens[0], 'SELECT', 'WITH') ? statementTokens[0].upper : null;
   if (!firstKeyword) {
-    throw new Error('Only SELECT or WITH queries are allowed.');
+    throw safetyError('NOT_SELECT', 'Only SELECT or WITH queries are allowed.');
   }
 
-  const statements = scanText.split(';').map((part) => part.trim()).filter(Boolean);
-  if (statements.length > 1) {
-    throw new Error('Only a single SQL statement is allowed.');
+  if (statementTokens.some((token) => isPunctToken(token, ';'))) {
+    throw safetyError('MULTI_STATEMENT', 'Only a single SQL statement is allowed.');
   }
 
-  const extractedTables = extractTablesFromSql(cleaned, { alreadyCleaned: true });
+  const [issue] = analysis.issues;
+  if (issue) {
+    throw safetyError(issue.code, issue.message);
+  }
 
-  const allowSet = new Set(allowedTables);
-  for (const tableName of extractedTables) {
-    if (!allowSet.has(tableName)) {
-      throw new Error(`SQL references table "${tableName}" which is outside the allowed table set.`);
+  for (const ref of analysis.tableRefs) {
+    if (ref.kind === 'table' && ref.schema) {
+      const code = METADATA_SCHEMAS.has(ref.schema.toLowerCase()) ? 'METADATA_SCHEMA' : 'CROSS_DATABASE';
+      throw safetyError(code, SAFETY_MESSAGES[code]);
     }
   }
 
-  const tablesUsed = [...new Set(extractedTables)];
-  const guardrails = validateSqlGuardrails(cleaned, {
+  const tablesUsed = [
+    ...new Set(analysis.tableRefs.filter((ref) => ref.kind === 'table').map((ref) => ref.name)),
+  ];
+  const allowSet = new Set(allowedTables || []);
+  for (const tableName of tablesUsed) {
+    if (!allowSet.has(tableName)) {
+      throw safetyError('TABLE_SCOPE', `SQL references table "${tableName}" which is outside the allowed table set.`, {
+        table: tableName,
+      });
+    }
+  }
+
+  return {
+    sql: executableSql,
+    tablesUsed,
+    statementCount: 1,
+    firstKeyword,
+    cteNames: [...new Set(analysis.ctes.map((cte) => cte.name))],
+  };
+}
+
+/**
+ * Full validation: layer 1 (validateSqlSafety) then layer 2 (schema-aware
+ * guardrails, only when a prompt context is supplied). Every rejection is a
+ * SqlValidationError carrying `code` and `layer`.
+ */
+export function validateReadOnlySql(sql, allowedTables, { promptContext = null, response = null } = {}) {
+  const safety = validateSqlSafety(sql, allowedTables);
+  const guardrails = validateSqlGuardrails(safety.sql, {
     allowedTables,
     promptContext,
     response,
-    tablesUsed,
+    tablesUsed: safety.tablesUsed,
   });
 
   return {
-    sql: cleaned,
-    tablesUsed,
-    statementCount: statements.length,
-    firstKeyword,
+    sql: safety.sql,
+    tablesUsed: safety.tablesUsed,
+    statementCount: safety.statementCount,
+    firstKeyword: safety.firstKeyword,
     guardrails,
   };
 }

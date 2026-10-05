@@ -1,3 +1,32 @@
+import {
+  analyzeSqlStructure,
+  stripSqlTokens,
+  tokenizeSql,
+  tokensToText,
+} from './sql-tokenizer.js';
+
+/**
+ * Error thrown by every deterministic SQL check. `code` is a stable string
+ * (e.g. SQL_COMMENT, TABLE_SCOPE, FAN_OUT) and `layer` says which layer rejected
+ * the SQL: 'safety' (read-only / table scope, pipeline.js) or 'guardrail'
+ * (schema-aware checks in this module).
+ */
+export class SqlValidationError extends Error {
+  constructor(message, { code, layer, details = null } = {}) {
+    super(message);
+    this.name = 'SqlValidationError';
+    this.code = code;
+    this.layer = layer;
+    if (details) {
+      this.details = details;
+    }
+  }
+}
+
+function guardrailError(code, message, details = null) {
+  return new SqlValidationError(message, { code, layer: 'guardrail', details });
+}
+
 const SQL_KEYWORDS = new Set([
   'ALL',
   'ABS',
@@ -72,12 +101,12 @@ const TABLE_ALIAS_STOPWORDS = new Set([
 
 const DERIVED_TABLE_PREFIX = '__derived_table__:';
 
+// Blank string literals and drop comments using the shared MariaDB tokenizer, so
+// this layer sees exactly the SQL text the safety layer validated. Comments
+// become a space so neighbouring tokens never glue together. Tolerant mode:
+// layer 1 has already rejected unterminated tokens before this runs.
 function stripSqlLiterals(sql) {
-  return String(sql || '')
-    .replace(/'([^'\\]|\\.)*'/g, "''")
-    .replace(/"([^"\\]|\\.)*"/g, '""')
-    .replace(/--.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
+  return stripSqlTokens(tokenizeSql(String(sql || ''), { tolerant: true }));
 }
 
 function normalizeIdentifier(value) {
@@ -94,24 +123,6 @@ function isDerivedTableName(tableName) {
 
 function derivedAliasFromTableName(tableName) {
   return isDerivedTableName(tableName) ? String(tableName).slice(DERIVED_TABLE_PREFIX.length) : null;
-}
-
-function findClosingParen(sql, openIndex) {
-  let depth = 0;
-
-  for (let index = openIndex; index < sql.length; index += 1) {
-    const char = sql[index];
-    if (char === '(') {
-      depth += 1;
-    } else if (char === ')') {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
-  }
-
-  return -1;
 }
 
 function splitTopLevelCommaList(value) {
@@ -219,60 +230,75 @@ function parseSelectItem(selectItem, localAliases, knownTables) {
   return parseSimpleColumnExpression(selectItem, localAliases, knownTables);
 }
 
+function expandStarSelectItem(selectItem, localAliases, knownTables) {
+  const text = String(selectItem || '').trim();
+  const qualifiedStar = text.match(/^`?([A-Za-z][A-Za-z0-9_]*)`?\s*\.\s*\*$/);
+  let tableNames = [];
+  if (text === '*') {
+    tableNames = [...new Set([...localAliases.values()])].filter((tableName) => !isDerivedTableName(tableName));
+  } else if (qualifiedStar) {
+    const tableName = localAliases.get(normalizeIdentifier(qualifiedStar[1]));
+    tableNames = tableName && !isDerivedTableName(tableName) ? [tableName] : [];
+  } else {
+    return null;
+  }
+
+  return tableNames.flatMap((tableName) =>
+    [...(knownTables.get(tableName) || [])].map((columnName) => ({
+      outputName: columnName,
+      origins: [{ tableName, columnName }],
+    }))
+  );
+}
+
 function parseDerivedTableColumns(sql, knownTables) {
+  const empty = { columns: new Set(), origins: new Map(), orderedColumns: [] };
   const selectIndex = findTopLevelKeyword(sql, 'SELECT');
   if (selectIndex < 0) {
-    return { columns: new Set(), origins: new Map() };
+    return empty;
   }
 
   const selectEnd = selectIndex + 'SELECT'.length;
   const fromIndex = findTopLevelKeyword(sql, 'FROM', selectEnd);
-  if (fromIndex < 0) {
-    return { columns: new Set(), origins: new Map() };
-  }
+  const selectListEnd = fromIndex < 0 ? sql.length : fromIndex;
 
-  const localAliases = extractRealTableAliases(sql, knownTables);
+  const localAliases = fromIndex < 0 ? new Map() : extractRealTableAliases(sql, knownTables);
   const columns = new Set();
   const origins = new Map();
+  const orderedColumns = [];
 
-  for (const item of splitTopLevelCommaList(sql.slice(selectEnd, fromIndex))) {
-    const parsed = parseSelectItem(item, localAliases, knownTables);
-    if (!parsed?.outputName) {
-      continue;
+  for (const item of splitTopLevelCommaList(sql.slice(selectEnd, selectListEnd).replace(/^\s*DISTINCT\b/i, ''))) {
+    // SELECT * / alias.* expose every column of the underlying table(s).
+    const starColumns = expandStarSelectItem(item, localAliases, knownTables);
+    const parsedItems = starColumns || [parseSelectItem(item, localAliases, knownTables)];
+    for (const parsed of parsedItems) {
+      if (!parsed?.outputName) {
+        orderedColumns.push(null);
+        continue;
+      }
+      columns.add(parsed.outputName);
+      origins.set(parsed.outputName, parsed.origins || []);
+      orderedColumns.push(parsed);
     }
-    columns.add(parsed.outputName);
-    origins.set(parsed.outputName, parsed.origins || []);
   }
 
-  return { columns, origins };
+  return { columns, origins, orderedColumns };
 }
 
-function extractDerivedTables(sql, knownTables) {
-  const derivedTables = new Map();
-  const derivedRegex = /\b(?:FROM|JOIN)\s*\(/gi;
-  let match;
-
-  while ((match = derivedRegex.exec(sql)) !== null) {
-    const openIndex = sql.indexOf('(', match.index);
-    const closeIndex = findClosingParen(sql, openIndex);
-    if (closeIndex < 0) {
-      continue;
-    }
-
-    const aliasMatch = sql.slice(closeIndex + 1).match(/^\s+(?:AS\s+)?`?([A-Za-z][A-Za-z0-9_]*)`?/i);
-    if (!aliasMatch) {
-      continue;
-    }
-
-    const alias = normalizeIdentifier(aliasMatch[1]);
-    const upper = alias.toUpperCase();
-    if (alias && !TABLE_ALIAS_STOPWORDS.has(upper) && !SQL_KEYWORDS.has(upper) && !knownTables.has(alias)) {
-      derivedTables.set(alias, parseDerivedTableColumns(sql.slice(openIndex + 1, closeIndex), knownTables));
-    }
-    derivedRegex.lastIndex = closeIndex + 1 + aliasMatch[0].length;
+// A CTE with an explicit column list (`m (CustomerId, Net) AS (...)`) renames
+// the body's select items positionally.
+function parseCteColumns(cte, bodyText, knownTables) {
+  const parsed = parseDerivedTableColumns(bodyText, knownTables);
+  if (!Array.isArray(cte.columns) || cte.columns.length === 0) {
+    return parsed;
   }
 
-  return derivedTables;
+  const columns = new Set(cte.columns);
+  const origins = new Map();
+  cte.columns.forEach((columnName, index) => {
+    origins.set(columnName, parsed.orderedColumns[index]?.origins || []);
+  });
+  return { columns, origins, orderedColumns: cte.columns.map((outputName) => ({ outputName, origins: origins.get(outputName) })) };
 }
 
 function collectPromptTables(promptContext = {}, allowedTables = []) {
@@ -301,40 +327,67 @@ function collectPromptTables(promptContext = {}, allowedTables = []) {
   return tables;
 }
 
+function isUsableAlias(alias, knownTables) {
+  if (!alias) {
+    return false;
+  }
+  const upper = alias.toUpperCase();
+  return !TABLE_ALIAS_STOPWORDS.has(upper) && !SQL_KEYWORDS.has(upper) && !knownTables.has(alias);
+}
+
+// Table aliases from the token-level table references, so comma-joined tables
+// (`FROM SalesDocument d, Customer c`) get their aliases too.
 function extractRealTableAliases(sql, knownTables) {
   const aliases = new Map();
-  const cleaned = stripSqlLiterals(sql);
-  const tableRegex = /\b(?:FROM|JOIN)\s+`?([A-Za-z][A-Za-z0-9_]*)`?(?:\s+(?:AS\s+)?`?([A-Za-z][A-Za-z0-9_]*)`?)?/gi;
-  let match;
-
   for (const tableName of knownTables.keys()) {
     aliases.set(tableName, tableName);
   }
 
-  while ((match = tableRegex.exec(cleaned)) !== null) {
-    const tableName = normalizeIdentifier(match[1]);
-    const alias = normalizeIdentifier(match[2]);
-    if (!knownTables.has(tableName)) {
-      continue;
-    }
-    if (alias && !TABLE_ALIAS_STOPWORDS.has(alias.toUpperCase()) && !knownTables.has(alias)) {
-      aliases.set(alias, tableName);
+  const analysis = analyzeSqlStructure(String(sql || ''), { tolerant: true });
+  for (const ref of analysis.tableRefs) {
+    if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name) && isUsableAlias(ref.alias, knownTables)) {
+      aliases.set(ref.alias, ref.name);
     }
   }
 
   return aliases;
 }
 
+// Aliases, derived tables and CTEs for the whole statement. CTEs are registered
+// like derived tables (name -> projected columns), so qualified CTE references
+// such as `mar.ProductId` resolve instead of failing as unknown aliases.
 function extractTableContext(sql, knownTables) {
-  const cleaned = stripSqlLiterals(sql);
-  const aliases = extractRealTableAliases(cleaned, knownTables);
-  const derivedTables = extractDerivedTables(cleaned, knownTables);
+  const analysis = analyzeSqlStructure(String(sql || ''), { tolerant: true });
+  const aliases = new Map();
+  const derivedTables = new Map();
 
-  for (const alias of derivedTables.keys()) {
-    aliases.set(alias, DERIVED_TABLE_PREFIX + alias);
+  for (const tableName of knownTables.keys()) {
+    aliases.set(tableName, tableName);
   }
 
-  return { aliases, derivedTables };
+  for (const cte of analysis.ctes) {
+    const bodyText = tokensToText(analysis.tokens, cte.bodyOpen + 1, cte.bodyClose);
+    derivedTables.set(cte.name, parseCteColumns(cte, bodyText, knownTables));
+    aliases.set(cte.name, DERIVED_TABLE_PREFIX + cte.name);
+  }
+
+  for (const ref of analysis.tableRefs) {
+    if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
+      if (isUsableAlias(ref.alias, knownTables)) {
+        aliases.set(ref.alias, ref.name);
+      }
+    } else if (ref.kind === 'cte') {
+      if (isUsableAlias(ref.alias, knownTables) && ref.alias !== ref.cteName) {
+        aliases.set(ref.alias, DERIVED_TABLE_PREFIX + ref.cteName);
+      }
+    } else if (ref.kind === 'derived' && isUsableAlias(ref.alias, knownTables)) {
+      const bodyText = tokensToText(analysis.tokens, ref.open + 1, ref.close);
+      derivedTables.set(ref.alias, parseDerivedTableColumns(bodyText, knownTables));
+      aliases.set(ref.alias, DERIVED_TABLE_PREFIX + ref.alias);
+    }
+  }
+
+  return { aliases, derivedTables, analysis };
 }
 
 function extractOutputAliases(sql) {
@@ -350,20 +403,8 @@ function extractOutputAliases(sql) {
   return aliases;
 }
 
-function extractCteNames(sql) {
-  const ctes = new Set();
-  const cleaned = stripSqlLiterals(sql);
-  if (!/^\s*WITH\b/i.test(cleaned)) {
-    return ctes;
-  }
-
-  const cteRegex = /(?:^\s*WITH\s+(?:RECURSIVE\s+)?|,)\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s+AS\s*\(/gi;
-  let match;
-  while ((match = cteRegex.exec(cleaned)) !== null) {
-    ctes.add(normalizeIdentifier(match[1]));
-  }
-
-  return ctes;
+export function extractCteNames(sql) {
+  return new Set(analyzeSqlStructure(String(sql || ''), { tolerant: true }).ctes.map((cte) => cte.name));
 }
 
 function columnExists(knownTables, tableName, columnName, derivedTables = new Map()) {
@@ -388,10 +429,13 @@ function validateQualifiedColumns(sql, knownTables, aliases, derivedTables) {
     const tableName = aliases.get(qualifier);
 
     if (!tableName) {
-      throw new Error(`SQL references unknown table or alias "${qualifier}" in qualified column "${qualifier}.${columnName}".`);
+      throw guardrailError(
+        'UNKNOWN_TABLE_ALIAS',
+        `SQL references unknown table or alias "${qualifier}" in qualified column "${qualifier}.${columnName}".`
+      );
     }
     if (!columnExists(knownTables, tableName, columnName, derivedTables)) {
-      throw new Error(`SQL references unknown column "${columnName}" on table "${tableName}".`);
+      throw guardrailError('UNKNOWN_COLUMN', `SQL references unknown column "${columnName}" on table "${tableName}".`);
     }
 
     usedColumns.push({ tableName, columnName, qualifier });
@@ -427,7 +471,7 @@ function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, der
       continue;
     }
     if (/[A-Z]/.test(identifier) && !/^[A-Z_]+$/.test(identifier)) {
-      throw new Error(`SQL references unknown identifier "${identifier}".`);
+      throw guardrailError('UNKNOWN_IDENTIFIER', `SQL references unknown identifier "${identifier}".`);
     }
   }
 }
@@ -527,7 +571,8 @@ function validateJoinGuardrails(sql, knownTables, aliases, derivedTables, prompt
           rightQualifier,
         });
         if (!relationshipKeys.has(key)) {
-          throw new Error(
+          throw guardrailError(
+            'JOIN_PATH',
             'SQL joins ' +
               leftReference.tableName +
               '.' +
@@ -582,7 +627,8 @@ function validateMetricGuardrails(sql, promptContext = {}) {
 
     checkedMetrics.push({ name: metric.name, preferredColumns });
     if (!preferredColumns.some((column) => columnMentioned(sqlText, column))) {
-      throw new Error(
+      throw guardrailError(
+        'METRIC_COLUMN',
         `SQL does not use a preferred column for semantic metric "${metric.name}" (${preferredColumns.join(', ')}).`
       );
     }
@@ -657,6 +703,11 @@ function collectReferencedProductIds(sql, productIdColumnNames) {
   }
 
   while ((match = inRegex.exec(sql)) !== null) {
+    // `ProductId IN (SELECT ... WHERE Quantity > 10)` is a subquery, not an ID
+    // list; its numeric literals are not ProductIds.
+    if (/\bSELECT\b/i.test(match[1])) {
+      continue;
+    }
     for (const idMatch of match[1].matchAll(/\b\d+\b/g)) {
       referencedIds.add(Number(idMatch[0]));
     }
@@ -677,7 +728,10 @@ function validateMasterDataCandidateIds(sql, promptContext = {}) {
 
   for (const productId of referencedIds) {
     if (!candidateIds.has(productId)) {
-      throw new Error(`SQL references ProductId ${productId}, which was not in the resolved master-data candidates.`);
+      throw guardrailError(
+        'MASTER_DATA_ID',
+        `SQL references ProductId ${productId}, which was not in the resolved master-data candidates.`
+      );
     }
   }
 
@@ -688,24 +742,29 @@ function validateMasterDataCandidateIds(sql, promptContext = {}) {
   };
 }
 
-function validateResponseTableContract(response, tablesUsed, allowedTables) {
+function validateResponseTableContract(response, tablesUsed, allowedTables, cteNames = new Set()) {
   if (!response || !Array.isArray(response.tables_used)) {
     return null;
   }
 
   const allowed = new Set(allowedTables || []);
-  const declared = [...new Set(response.tables_used)];
+  // CTE names are query-local, so a model that lists them in tables_used is not
+  // claiming access to another table.
+  const declared = [...new Set(response.tables_used)].filter((tableName) => !cteNames.has(tableName));
   const actual = [...new Set(tablesUsed || [])];
 
   for (const tableName of declared) {
     if (!allowed.has(tableName)) {
-      throw new Error(`Response tables_used includes table "${tableName}" outside the allowed table set.`);
+      throw guardrailError(
+        'RESPONSE_TABLES',
+        `Response tables_used includes table "${tableName}" outside the allowed table set.`
+      );
     }
   }
 
   const missing = actual.filter((tableName) => !declared.includes(tableName));
   if (missing.length > 0) {
-    throw new Error(`Response tables_used omitted SQL table(s): ${missing.join(', ')}.`);
+    throw guardrailError('RESPONSE_TABLES', `Response tables_used omitted SQL table(s): ${missing.join(', ')}.`);
   }
 
   return { declaredTables: declared, actualTables: actual };
@@ -720,7 +779,8 @@ export function validateSqlGuardrails(
   }
 
   const knownTables = collectPromptTables(promptContext, allowedTables);
-  const { aliases, derivedTables } = extractTableContext(sql, knownTables);
+  const { aliases, derivedTables, analysis } = extractTableContext(sql, knownTables);
+  const cteNames = new Set(analysis.ctes.map((cte) => cte.name));
   const qualifiedColumns = validateQualifiedColumns(sql, knownTables, aliases, derivedTables);
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, derivedTables);
   const joinChecks = validateJoinGuardrails(sql, knownTables, aliases, derivedTables, promptContext);
@@ -734,6 +794,6 @@ export function validateSqlGuardrails(
     joinChecks,
     metricChecks,
     masterDataChecks,
-    responseTableChecks: validateResponseTableContract(response, tablesUsed, allowedTables),
+    responseTableChecks: validateResponseTableContract(response, tablesUsed, allowedTables, cteNames),
   };
 }

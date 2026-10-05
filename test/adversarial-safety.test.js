@@ -34,6 +34,10 @@ const REJECTED = [
   ['SeLeCt\n  SlEeP(3)', /restricted SQL functions/],
   // Versioned executable comment (payload runs server-side, hidden from scanners).
   ['SELECT 1 /*!40001 SQL_NO_CACHE */', /Executable SQL comments/],
+  // Any comment is rejected: generated analytics SQL never needs one, and
+  // comment-lexing differences are how payloads hide from the denylist.
+  ['/* monthly report */ SELECT CustomerName FROM Customer LIMIT 5', /SQL comments/],
+  ['SELECT CustomerName FROM Customer -- TODO: drop this column later\n LIMIT 5', /SQL comments/],
 ];
 
 for (const [sql, pattern] of REJECTED) {
@@ -45,10 +49,6 @@ for (const [sql, pattern] of REJECTED) {
 // Legitimate reads that LOOK risky but are safe must still be accepted, so the
 // guardrail does not become unusable by over-blocking.
 const ACCEPTED = [
-  // Leading block comment before the real SELECT.
-  '/* monthly report */ SELECT CustomerName FROM Customer LIMIT 5',
-  // A line comment that merely mentions a dangerous word.
-  'SELECT CustomerName FROM Customer -- TODO: drop this column later\n LIMIT 5',
   // Dangerous tokens confined to a string literal.
   "SELECT CustomerName FROM Customer WHERE CustomerName = 'DROP TABLE x; -- or 1=1'",
   // UNION across allowed tables is a normal read.

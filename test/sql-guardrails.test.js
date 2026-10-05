@@ -358,3 +358,74 @@ test('validateReadOnlySql accepts valid joins through simple derived table colum
     )
   );
 });
+
+test('guardrail rejections carry error.code and error.layer', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
+  const cases = [
+    ['SELECT c.CustomerDisplayName FROM Customer c', 'UNKNOWN_COLUMN'],
+    ['SELECT x.CustomerName FROM Customer c', 'UNKNOWN_TABLE_ALIAS'],
+    ['SELECT CustomerDisplayName FROM Customer', 'UNKNOWN_IDENTIFIER'],
+    [
+      'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
+      'JOIN_PATH',
+    ],
+    [
+      'SELECT c.CustomerName, SUM(v.BillTotalAmount) AS total FROM SalesDocument v JOIN Customer c ON v.CustomerId = c.CustomerId GROUP BY c.CustomerName',
+      'METRIC_COLUMN',
+    ],
+  ];
+
+  for (const [sql, code] of cases) {
+    assert.throws(
+      () => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context }),
+      (error) => error.code === code && error.layer === 'guardrail',
+      code
+    );
+  }
+
+  const sparkling = buildSparklingWaterSalesPrompt();
+  assert.throws(
+    () =>
+      validateReadOnlySql('SELECT SUM(d.NetAmount) AS total FROM SalesDocumentLine d WHERE d.ProductId = 999', allowedTables(sparkling), {
+        promptContext: sparkling.context,
+      }),
+    (error) => error.code === 'MASTER_DATA_ID' && error.layer === 'guardrail'
+  );
+});
+
+test('validateReadOnlySql resolves qualified CTE references through both layers', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'List customers');
+  const validated = validateReadOnlySql(
+    `WITH FirstCustomers AS (SELECT c.CustomerId, c.CustomerName FROM Customer c),
+     Named (Id, Label) AS (SELECT fc.CustomerId, fc.CustomerName FROM FirstCustomers fc)
+     SELECT n.Label, FirstCustomers.CustomerId FROM Named n JOIN FirstCustomers ON FirstCustomers.CustomerId = n.Id`,
+    allowedTables(prompt),
+    { promptContext: prompt.context, response: { tables_used: ['Customer'] } }
+  );
+
+  assert.deepEqual(validated.tablesUsed, ['Customer']);
+  assert.ok(validated.guardrails.columnChecks.qualifiedColumns.some((column) => column.qualifier === 'n' && column.columnName === 'Label'));
+
+  assert.throws(
+    () =>
+      validateReadOnlySql(
+        'WITH fc AS (SELECT c.CustomerId FROM Customer c) SELECT fc.CustomerName FROM fc',
+        allowedTables(prompt),
+        { promptContext: prompt.context }
+      ),
+    (error) => error.code === 'UNKNOWN_COLUMN' && /"CustomerName"/.test(error.message)
+  );
+});
+
+test('the ProductId candidate check ignores numbers inside IN (SELECT ...) subqueries', () => {
+  const prompt = buildSparklingWaterSalesPrompt();
+  const validated = validateReadOnlySql(
+    `SELECT SUM(d.NetAmount) AS total_net_amount
+     FROM SalesDocumentLine d
+     WHERE d.ProductId = 101
+       AND d.ProductId IN (SELECT d2.ProductId FROM SalesDocumentLine d2 WHERE d2.SalesDocumentLineId > 10)`,
+    allowedTables(prompt),
+    { promptContext: prompt.context }
+  );
+  assert.deepEqual(validated.guardrails.masterDataChecks.referencedIds, [101]);
+});
