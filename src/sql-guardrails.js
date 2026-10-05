@@ -484,8 +484,22 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
       }
     }
 
-    const uniqueness = bodyBlocks.length === 1 && selectList ? describeUniqueness(block, selectList, projected, renamed) : null;
+    let uniqueness = null;
+    if (selectList && bodyBlocks.length === 1) {
+      uniqueness = describeUniqueness(block, selectList, projected, renamed);
+    } else if (selectList && bodyBlocks.slice(1).every(isDistinctSetOperation)) {
+      // UNION [DISTINCT] (and INTERSECT / EXCEPT without ALL) removes
+      // duplicate rows: the result is unique on all its output columns.
+      uniqueness = { singleRow: false, keys: [renamed.map((column) => (column ? [column.outputName] : []))] };
+    }
     return { columns, origins, orderedColumns: renamed, sourceTables, uniqueness };
+  };
+
+  // Whether a block after the first of a body is joined by a duplicate-removing
+  // set operator (not UNION ALL, EXCEPT ALL or INTERSECT ALL).
+  const isDistinctSetOperation = (setBlock) => {
+    const operatorIndex = setBlock.tokenIndexes[0];
+    return isKeywordToken(tokens[operatorIndex], 'UNION', 'INTERSECT', 'EXCEPT') && !isKeywordToken(tokens[operatorIndex + 1], 'ALL');
   };
 
   /**

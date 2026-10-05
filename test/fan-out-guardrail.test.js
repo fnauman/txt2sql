@@ -400,6 +400,25 @@ test('a relation that filters, renames or re-projects a unique CTE or derived ta
   }
 });
 
+test('a UNION (DISTINCT) child is unique on its output columns; UNION ALL is not', () => {
+  const HEADER = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d';
+  const ON = 'x ON x.SalesDocumentId = d.SalesDocumentId';
+  // 5500 on the seeded demo DB.
+  for (const sql of [
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine UNION SELECT SalesDocumentId FROM SalesDocumentLine) ${ON}`,
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine UNION DISTINCT SELECT SalesDocumentId FROM SalesDocumentLine WHERE Quantity > 1) ${ON}`,
+  ]) {
+    assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
+  }
+  // 6500 (two output columns) and 12000 (a trailing UNION ALL).
+  for (const sql of [
+    `${HEADER} JOIN (SELECT SalesDocumentId, ProductId FROM SalesDocumentLine UNION SELECT SalesDocumentId, ProductId FROM SalesDocumentLine) ${ON}`,
+    `${HEADER} JOIN (SELECT SalesDocumentId FROM SalesDocumentLine UNION DISTINCT SELECT SalesDocumentId FROM SalesDocumentLine UNION ALL SELECT SalesDocumentId FROM SalesDocumentLine) ${ON}`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+});
+
 test('one-to-one keys are skipped only when the FK is the sole primary-key column', () => {
   const column = (name, extra = {}) => ({ name, type: 'INTEGER', primaryKey: false, allowNull: true, ...extra });
   const promptContext = {
