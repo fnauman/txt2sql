@@ -39,7 +39,7 @@ const BASE_MODEL_PRICING = Object.freeze({
 // Parse MODEL_PRICING_OVERRIDES lazily and memoize on the raw string. Parsing
 // at resolution time (not module-import time) is required because entrypoints
 // call loadEnvironment() AFTER their static imports already evaluated this
-// module, so an override supplied via .env / --env-file would otherwise be
+// module, so an override supplied via .env / --dotenv would otherwise be
 // missed. Memoizing on the raw value means it is parsed once in practice while
 // still picking up a changed env (e.g. between tests).
 let cachedOverridesRaw;
