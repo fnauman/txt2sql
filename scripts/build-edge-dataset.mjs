@@ -14,6 +14,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_001_brand_net_sales_march_2026",
     "intentId": "brand_net_sales_march_2026",
+    "split": "dev",
     "question": "Show the top brands by net sales in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -67,6 +68,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_002_campaign_net_sales_march_2026",
     "intentId": "campaign_net_sales_march_2026",
+    "split": "dev",
     "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
     "difficulty": "hard",
     "tags": [
@@ -112,6 +114,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_003_sparkling_water_master_data",
     "intentId": "sparkling_water_master_data",
+    "split": "dev",
     "question": "Which sparkling water products did we sell in March 2026?",
     "difficulty": "medium",
     "tags": [
@@ -152,6 +155,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_004_posting_date_trap",
     "intentId": "posting_date_document_count",
+    "split": "dev",
     "question": "How many sales documents were posted in March 2026?",
     "difficulty": "medium",
     "tags": [
@@ -187,6 +191,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_005_customer_gross_amount_march_2026",
     "intentId": "customer_gross_amount_march_2026",
+    "split": "dev",
     "question": "Show the top customers by gross amount in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -240,6 +245,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_006_category_line_net_sales_march_2026",
     "intentId": "category_line_net_sales_march_2026",
+    "split": "dev",
     "question": "Show net sales by product category in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -295,6 +301,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_007_category_quantity_current_join",
     "intentId": "category_quantity_current_join",
+    "split": "dev",
     "question": "Which product categories had the highest quantity sold in March 2026?",
     "difficulty": "hard",
     "tags": [
@@ -346,6 +353,7 @@ const PUBLIC_EDGE_CASES = [
   {
     "id": "edge_public_008_customer_month_columns_jan_feb_2026",
     "intentId": "customer_month_columns_jan_feb_2026",
+    "split": "dev",
     "question": "Compare January and February 2026 net sales by customer in separate columns.",
     "difficulty": "hard",
     "tags": [

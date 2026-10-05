@@ -2,6 +2,7 @@
   {
     "id": "core_public_001",
     "intentId": "customer_net_sales_march_2026",
+    "split": "dev",
     "question": "Show the top customers by total net sales amount in March 2026.",
     "canonicalQuestion": "Show the top customers by total net sales amount in March 2026.",
     "difficulty": "medium",
@@ -53,6 +54,7 @@
   {
     "id": "core_public_002",
     "intentId": "product_qty_sold_march_2026",
+    "split": "dev",
     "question": "Show the top products by quantity sold in March 2026.",
     "canonicalQuestion": "Show the top products by quantity sold in March 2026.",
     "difficulty": "medium",
@@ -102,6 +104,7 @@
   {
     "id": "core_public_003",
     "intentId": "document_count_by_type_march_2026",
+    "split": "dev",
     "question": "Show sales document count by document type in March 2026.",
     "canonicalQuestion": "Show sales document count by document type in March 2026.",
     "difficulty": "medium",
@@ -151,6 +154,7 @@
   {
     "id": "core_public_004",
     "intentId": "products_sold_feb_not_march_2026",
+    "split": "dev",
     "question": "How many products were sold in February 2026 but not in March 2026?",
     "canonicalQuestion": "How many products were sold in February 2026 but not in March 2026?",
     "difficulty": "hard",
@@ -187,6 +191,7 @@
   {
     "id": "core_public_005",
     "intentId": "account_debit_march_2026",
+    "split": "dev",
     "question": "Show the top ledger accounts by debit amount in March 2026.",
     "canonicalQuestion": "Show the top ledger accounts by debit amount in March 2026.",
     "difficulty": "medium",
@@ -239,6 +244,7 @@
   {
     "id": "core_public_006",
     "intentId": "documents_without_postings",
+    "split": "dev",
     "question": "How many non-canceled sales documents do not have any accounting postings?",
     "canonicalQuestion": "How many non-canceled sales documents do not have any accounting postings?",
     "difficulty": "medium",
@@ -276,6 +282,7 @@
   {
     "id": "core_public_007",
     "intentId": "active_customer_count",
+    "split": "dev",
     "question": "How many active customers do we have?",
     "canonicalQuestion": "How many active customers do we have?",
     "difficulty": "easy",
@@ -308,6 +315,7 @@
   {
     "id": "core_public_008",
     "intentId": "product_net_sales_march_2026",
+    "split": "dev",
     "question": "Show the top products by net sales amount in March 2026.",
     "canonicalQuestion": "Show the top products by net sales amount in March 2026.",
     "difficulty": "medium",
@@ -355,6 +363,7 @@
   {
     "id": "core_public_009",
     "intentId": "account_credit_march_2026",
+    "split": "dev",
     "question": "Show the top ledger accounts by credit amount in March 2026.",
     "canonicalQuestion": "Show the top ledger accounts by credit amount in March 2026.",
     "difficulty": "medium",
@@ -407,6 +416,7 @@
   {
     "id": "edge_public_001_brand_net_sales_march_2026",
     "intentId": "brand_net_sales_march_2026",
+    "split": "dev",
     "question": "Show the top brands by net sales in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -460,6 +470,7 @@
   {
     "id": "edge_public_002_campaign_net_sales_march_2026",
     "intentId": "campaign_net_sales_march_2026",
+    "split": "dev",
     "question": "What were the total sales for the Urban Refresh campaign in March 2026?",
     "difficulty": "hard",
     "tags": [
@@ -505,6 +516,7 @@
   {
     "id": "edge_public_003_sparkling_water_master_data",
     "intentId": "sparkling_water_master_data",
+    "split": "dev",
     "question": "Which sparkling water products did we sell in March 2026?",
     "difficulty": "medium",
     "tags": [
@@ -545,6 +557,7 @@
   {
     "id": "edge_public_004_posting_date_trap",
     "intentId": "posting_date_document_count",
+    "split": "dev",
     "question": "How many sales documents were posted in March 2026?",
     "difficulty": "medium",
     "tags": [
@@ -580,6 +593,7 @@
   {
     "id": "edge_public_005_customer_gross_amount_march_2026",
     "intentId": "customer_gross_amount_march_2026",
+    "split": "dev",
     "question": "Show the top customers by gross amount in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -633,6 +647,7 @@
   {
     "id": "edge_public_006_category_line_net_sales_march_2026",
     "intentId": "category_line_net_sales_march_2026",
+    "split": "dev",
     "question": "Show net sales by product category in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -688,6 +703,7 @@
   {
     "id": "edge_public_007_category_quantity_current_join",
     "intentId": "category_quantity_current_join",
+    "split": "dev",
     "question": "Which product categories had the highest quantity sold in March 2026?",
     "difficulty": "hard",
     "tags": [
@@ -739,6 +755,7 @@
   {
     "id": "edge_public_008_customer_month_columns_jan_feb_2026",
     "intentId": "customer_month_columns_jan_feb_2026",
+    "split": "dev",
     "question": "Compare January and February 2026 net sales by customer in separate columns.",
     "difficulty": "hard",
     "tags": [
