@@ -60,7 +60,8 @@ test('every outcome class gets its bucket and counted flag', () => {
     [repetition('aborted', [], { timed_out: true }), 'timeout', 'infra', true],
     [repetition('aborted', [], { error_code: 'ABORTED' }), 'aborted', 'infra', true],
     [repetition('skipped_budget'), 'skipped_budget', 'skipped', false],
-    [repetition('expected_sql_error'), 'expected_sql_error', 'harness', false],
+    [repetition('expected_sql_error', [], { error_code: 'ER_NO_SUCH_TABLE' }), 'expected_sql_error', 'harness', false],
+    [repetition('expected_sql_error', [], { error_code: 'ECONNREFUSED' }), 'infra_error', 'infra', false],
     [repetition('evaluation_error'), 'harness_error', 'harness', false],
   ];
   for (const [input, outcome, bucket, counted] of cases) {

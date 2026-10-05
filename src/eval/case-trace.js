@@ -32,7 +32,7 @@ function pickError(error) {
 /**
  * Per-attempt record of one product-loop run, from its trace events:
  * [{ attempt, retry, generatedSql, llm, validation, execution }] where
- * - llm: { ok, durationMs, usage, cost, model, finishReason } or
+ * - llm: { ok, durationMs, usage, cost, model, finishReason, tablesUsed } or
  *   { ok: false, durationMs, code, error }
  * - validation: { ok: true, durationMs, tablesUsed } or
  *   { ok: false, durationMs, code, layer, message }
@@ -78,6 +78,9 @@ export function extractAttempts(events) {
           cost: entry.response?.cost ?? null,
           model: entry.response?.model ?? null,
           finishReason: entry.response?.finishReason ?? null,
+          // The response's tables_used, which the guardrails check against
+          // the SQL (rescore re-validates with it).
+          tablesUsed: Array.isArray(entry.response?.tablesUsed) ? entry.response.tablesUsed : null,
         };
         break;
       case 'llm.failed':

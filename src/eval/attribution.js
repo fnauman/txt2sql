@@ -19,7 +19,9 @@
 //                                        expected table was not retrieved:
 //                                        the retrieved set is the allow-list)
 //   timeout / aborted           infra   (case deadline; counted as a failure)
-//   infra_error                 infra   (excluded from accuracy)
+//   infra_error                 infra   (excluded from accuracy; also a gold
+//                                        query that failed because the
+//                                        database went away)
 //   llm_outage                  infra   (llm_error from a provider outage:
 //                                        timeout, unreachable, 401/403/429/5xx;
 //                                        excluded)
@@ -34,7 +36,7 @@
 
 import { findMissingExpectedTables } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
-import { isLlmUnavailableCode } from '../query-service.js';
+import { isInfraError, isLlmUnavailableCode } from '../query-service.js';
 import { scoreAgainstGold } from './oracle.js';
 
 export const OUTCOME_BUCKETS = Object.freeze({
@@ -104,7 +106,9 @@ export function classifyRepetition(repetition, testCase = {}) {
       outcome = 'skipped_budget';
       break;
     case 'expected_sql_error':
-      outcome = 'expected_sql_error';
+      // A gold query that failed because the database went away is an
+      // infrastructure failure, not a broken gold.
+      outcome = isInfraError({ code: repetition.error_code }) ? 'infra_error' : 'expected_sql_error';
       break;
     case 'evaluation_error':
       outcome = 'harness_error';

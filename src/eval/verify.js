@@ -35,7 +35,10 @@ import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlErro
  * Validates SQL the way the product does for `question`: master-data
  * candidates from the primary fixture, the optimized prompt's table set and
  * context, and a response whose tables_used lists the SQL's own tables (what a
- * consistent model returns). Returns null when accepted, else the error.
+ * consistent model returns) unless `options.tablesUsed` gives the response's
+ * own list (rescore passes the recorded one). Returns null when accepted, else
+ * the error. `validate.promptFor(question)` exposes the cached prompt context
+ * ({ context, allowedTables, masterDataCandidates }).
  */
 export function createValidatorProbe({ schema, connection = null }) {
   const prompts = new Map();
@@ -54,21 +57,23 @@ export function createValidatorProbe({ schema, connection = null }) {
             }
           }
           const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
-          return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName) };
+          return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName), masterDataCandidates };
         })()
       );
     }
     return prompts.get(question);
   };
 
-  return async function validate(question, sql) {
+  const validate = async function validate(question, sql, { tablesUsed: declaredTables = null } = {}) {
     const { context, allowedTables } = await promptFor(question);
     try {
-      let tablesUsed = [];
-      try {
-        tablesUsed = validateSqlSafety(sql, allowedTables).tablesUsed;
-      } catch {
-        tablesUsed = [];
+      let tablesUsed = Array.isArray(declaredTables) ? declaredTables : [];
+      if (!Array.isArray(declaredTables)) {
+        try {
+          tablesUsed = validateSqlSafety(sql, allowedTables).tablesUsed;
+        } catch {
+          tablesUsed = [];
+        }
       }
       validateReadOnlySql(sql, allowedTables, { promptContext: context, response: { sql, tables_used: tablesUsed } });
       return null;
@@ -76,6 +81,8 @@ export function createValidatorProbe({ schema, connection = null }) {
       return { code: error.code || null, layer: error.layer || null, message: error.message };
     }
   };
+  validate.promptFor = promptFor;
+  return validate;
 }
 
 /**
