@@ -280,21 +280,29 @@ test('a query expression may open with parentheses', () => {
   assert.equal(validateSqlSafety('(SELECT 1) UNION (SELECT 2)').firstKeyword, 'SELECT');
 });
 
-// Known gap, deferred to SAFE-11 (resource bounds enforced at the connection:
-// max_statement_time, sql_select_limit). These SAFE-10 payloads exhaust time or
-// memory, not the read-only/table-scope policy, so layer 1 knowingly accepts
-// them on the basic path. Verified on MariaDB 10.6: a REPEAT() result larger
-// than max_allowed_packet (16 MiB) is returned as NULL with warning 1301, so the
-// "memory bomb" is capped by the server; a cartesian self-join only costs time,
-// which only a statement timeout can bound. When SAFE-11 lands, move these into
-// PAYLOADS (or delete them) instead of keeping this list.
-const KNOWN_ACCEPTED_RESOURCE_PAYLOADS = [
+// Known gaps: SAFE-10 payloads that layer 1 knowingly accepts. Keep this list
+// visible instead of silently dropping them from the battery.
+// - Resource exhaustion, deferred to SAFE-11 (bounds enforced at the
+//   connection: max_statement_time, sql_select_limit). It is not a
+//   read-only/table-scope concern. Verified on MariaDB 10.6: a REPEAT() result
+//   larger than max_allowed_packet (16 MiB) comes back as NULL with warning
+//   1301, so the "memory bomb" is capped by the server; a cartesian self-join
+//   only costs time, which only a statement timeout can bound.
+// - Harmless under the denylist design (the audit's verifier: "adding the
+//   specific names to the denylist is enough for now"; a full function
+//   allowlist is a separate change): UUID_SHORT() only returns a number, and
+//   a Cyrillic look-alike SLEEP is an unknown function (ERROR 1305) because
+//   non-ASCII characters are identifier characters.
+// When a later change rejects one of these, move it into PAYLOADS.
+const KNOWN_ACCEPTED_SAFE10_PAYLOADS = [
   "SELECT LENGTH(REPEAT('x', 1073741824)) AS n",
   'SELECT COUNT(*) AS n FROM SalesDocumentLine a, SalesDocumentLine b, SalesDocumentLine c, SalesDocumentLine d, SalesDocumentLine e',
+  'SELECT UUID_SHORT() AS u',
+  'SELECT \u0405LEEP(5) AS s',
 ];
 
-test('known gap (SAFE-11): resource-exhaustion payloads still pass layer 1', () => {
-  for (const sql of KNOWN_ACCEPTED_RESOURCE_PAYLOADS) {
+test('known gaps (SAFE-10/SAFE-11): resource and harmless function payloads still pass layer 1', () => {
+  for (const sql of KNOWN_ACCEPTED_SAFE10_PAYLOADS) {
     assert.doesNotThrow(() => validateSqlSafety(sql, ALL_TABLES), sql);
   }
 });
