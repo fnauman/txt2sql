@@ -10,9 +10,12 @@ import {
   classifyBenchmarkStatus,
   createBenchmarkRunPaths,
   findDisallowedColumnsUsed,
+  listGoldVariants,
   loadBenchmarkDataset,
   normalizeBenchmarkCase,
+  resolveExpectedRowCount,
   runSignalChecks,
+  runSignalChecksThroughAssignment,
 } from '../src/benchmark.js';
 
 const execFileAsync = promisify(execFile);
@@ -116,7 +119,7 @@ test('runSignalChecks reports a single empty-result failure when only column che
   ]);
 });
 
-test('findDisallowedColumnsUsed escapes regex characters in column names', () => {
+test('findDisallowedColumnsUsed still matches an identifier spelled exactly like the entry', () => {
   const used = findDisallowedColumnsUsed(
     'SELECT `SalesDocumentNet.Amount`, SafeColumn FROM ExampleTable',
     ['SalesDocumentNet.Amount', 'Other[Column]']
@@ -125,7 +128,57 @@ test('findDisallowedColumnsUsed escapes regex characters in column names', () =>
   assert.deepEqual(used, ['SalesDocumentNet.Amount']);
 });
 
-test('classifyBenchmarkStatus distinguishes retrieval misses and low-signal successes', () => {
+// Behavior change (ORACLE-8): the lint used to be a regex over the raw text,
+// so comments, string literals and `AS` aliases triggered it while a table
+// alias (`d.CampaignId`) hid a qualified entry. It now reads tokens.
+test('findDisallowedColumnsUsed ignores comments, strings and alias definitions', () => {
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT 1 AS x /* not NetPayableAmount */ FROM SalesDocument', ['NetPayableAmount']), []);
+  assert.deepEqual(findDisallowedColumnsUsed("SELECT 'NetPayableAmount' AS label FROM SalesDocument", ['NetPayableAmount']), []);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS NetPayableAmount FROM SalesDocument d', ['NetPayableAmount']), []);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.netpayableamount) FROM SalesDocument d', ['NetPayableAmount']), ['NetPayableAmount']);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(`NetPayableAmount`) FROM SalesDocument', ['NetPayableAmount']), ['NetPayableAmount']);
+});
+
+test('findDisallowedColumnsUsed resolves table aliases for qualified entries', () => {
+  const entry = ['SalesDocument.CampaignId'];
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT 1 FROM SalesDocument d JOIN Campaign c ON d.CampaignId = c.CampaignId', entry),
+    entry
+  );
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT 1 FROM SalesDocument JOIN Campaign ON SalesDocument.CampaignId = Campaign.CampaignId', entry),
+    entry
+  );
+  // Product.CampaignId is the right path and must not be flagged.
+  assert.deepEqual(
+    findDisallowedColumnsUsed(
+      'SELECT 1 FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId',
+      entry
+    ),
+    []
+  );
+  // A bare column resolves to the only referenced table...
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT CampaignId FROM SalesDocument', entry), entry);
+  // ...or, with a schema, to the only referenced table that has it.
+  const schema = {
+    tables: [
+      { tableName: 'SalesDocument', columns: [{ name: 'CampaignId' }, { name: 'SalesDocumentId' }] },
+      { tableName: 'SalesDocumentLine', columns: [{ name: 'SalesDocumentId' }] },
+    ],
+  };
+  const joined = 'SELECT CampaignId FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId';
+  assert.deepEqual(findDisallowedColumnsUsed(joined, entry), []);
+  assert.deepEqual(findDisallowedColumnsUsed(joined, entry, { schema }), entry);
+});
+
+test('findDisallowedColumnsUsed treats a table-name entry as a table reference', () => {
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT b.BrandName FROM ProductBrand pb JOIN Brand b ON pb.BrandId = b.BrandId', ['ProductBrand', 'BrandNameSnapshot']),
+    ['ProductBrand']
+  );
+});
+
+test('classifyBenchmarkStatus distinguishes retrieval misses; low signal is no longer a failure', () => {
   assert.equal(
     classifyBenchmarkStatus({
       rowsMatch: false,
@@ -143,8 +196,61 @@ test('classifyBenchmarkStatus distinguishes retrieval misses and low-signal succ
       retrievedTables: ['Customer'],
       signalCheckResult: { passed: false },
     }),
-    'low_signal_success'
+    'pass'
   );
+});
+
+test('runSignalChecksThroughAssignment resolves gold names through the comparator assignment', () => {
+  const checks = {
+    min_row_count: 2,
+    require_nonzero_columns: ['total_net_amount'],
+    require_nonnull_columns: ['CustomerName'],
+    min_distinct_counts: { CustomerName: 2 },
+  };
+  const rows = [
+    { customer: 'Acme', revenue: 10 },
+    { customer: 'Beta', revenue: 5 },
+  ];
+  // Keyed by gold name, the renamed aliases look like empty columns.
+  assert.equal(runSignalChecks(rows, checks).passed, false);
+  const resolved = runSignalChecksThroughAssignment(rows, checks, { CustomerName: 'customer', total_net_amount: 'revenue' });
+  assert.equal(resolved.passed, true);
+  assert.deepEqual(resolved.unresolvedColumns, []);
+
+  // Real problems still show up through the assignment.
+  const zero = runSignalChecksThroughAssignment(
+    rows.map((row) => ({ ...row, revenue: 0 })),
+    checks,
+    { CustomerName: 'customer', total_net_amount: 'revenue' }
+  );
+  assert.deepEqual(zero.failures.map((failure) => failure.code), ['require_nonzero_columns']);
+
+  // Without an assignment, a column the prediction does not carry is skipped.
+  const unresolved = runSignalChecksThroughAssignment(rows, checks, null);
+  assert.deepEqual(unresolved.unresolvedColumns.sort(), ['CustomerName', 'total_net_amount']);
+  assert.equal(unresolved.passed, true);
+});
+
+test('normalizeBenchmarkCase keeps per-fixture pins and alternative gold SQL', () => {
+  const normalized = normalizeBenchmarkCase({
+    id: 'x',
+    question: 'q',
+    expected_sql: 'SELECT 1 FROM Customer',
+    alternative_expected_sql: ['SELECT 2 FROM Customer', 'SELECT 1 FROM Customer', ''],
+    expected_row_counts: { seed: 1, v2: 2, v3: -1, bogus: 'x' },
+    comparison: { mode: 'rowset', column_order: ['a', 'b'] },
+  });
+  assert.deepEqual(normalized.alternative_expected_sql, ['SELECT 2 FROM Customer']);
+  assert.deepEqual(normalized.expected_row_counts, { seed: 1, v2: 2 });
+  assert.deepEqual(normalized.comparison.column_order, ['a', 'b']);
+  assert.equal(resolveExpectedRowCount(normalized, 'v2'), 2);
+  assert.equal(resolveExpectedRowCount(normalized, 'v3'), null);
+  assert.deepEqual(listGoldVariants(normalized).map((variant) => variant.label), ['expected_sql', 'alternative_expected_sql[0]']);
+
+  // An external dataset with the older single pin: it applies to the seed only.
+  const legacy = normalizeBenchmarkCase({ id: 'y', question: 'q', expected_sql: 'SELECT 1 FROM Customer', expected_row_count: 4 });
+  assert.equal(resolveExpectedRowCount(legacy, 'seed'), 4);
+  assert.equal(resolveExpectedRowCount(legacy, 'v2'), null);
 });
 
 test('createBenchmarkRunPaths nests report and trace outputs under dataset and model segments', () => {

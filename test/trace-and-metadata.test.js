@@ -450,9 +450,9 @@ test('evaluateQuestion emits retrieval and signal-check events for suspicious su
   });
 
   // The generated SQL matches the (degenerate) gold value but selects a
-  // disallowed column, so the disallowed-column guard takes precedence over the
-  // low-signal classification — it must not be reported as a (suspicious) pass.
-  assert.equal(result.status, 'disallowed_column_used');
+  // disallowed column. Only values decide the status now; the lint finding and
+  // the failed signal checks are reported, not turned into a failure.
+  assert.equal(result.status, 'pass');
   assert.deepEqual(result.disallowed_columns_used, ['CustomerName']);
   assert.deepEqual(
     events.map((entry) => entry.event),

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { compareRows, extractTablesFromSql } from './pipeline.js';
+import { analyzeSqlStructure, isKeywordToken, tokenizeSql } from './sql-tokenizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,8 +94,45 @@ export function normalizeBenchmarkCase(testCase) {
     disallowed_columns: uniqueStrings(testCase.disallowed_columns),
     signal_checks: normalizeSignalChecks(testCase.signal_checks),
     comparison: normalizeComparison(testCase.comparison),
+    alternative_expected_sql: uniqueStrings(testCase.alternative_expected_sql).filter((sql) => sql !== expectedSql),
+    expected_row_counts: normalizeExpectedRowCounts(testCase.expected_row_counts),
     failure_class: testCase.failure_class || null,
   };
+}
+
+function normalizeExpectedRowCounts(counts) {
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) {
+    return null;
+  }
+  const entries = Object.entries(counts)
+    .map(([fixture, count]) => [String(fixture).trim(), count])
+    .filter(([fixture, count]) => fixture && Number.isInteger(count) && count >= 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+/**
+ * The pinned gold row count for one fixture, or null when none is pinned.
+ * Datasets pin `expected_row_counts: { seed, v2, v3 }`; an external dataset
+ * may still carry the older single `expected_row_count`, which was measured on
+ * the demo seed and therefore applies to the primary fixture only.
+ */
+export function resolveExpectedRowCount(testCase, fixtureName, { primaryFixture = 'seed' } = {}) {
+  const pinned = testCase?.expected_row_counts?.[fixtureName];
+  if (Number.isInteger(pinned)) {
+    return pinned;
+  }
+  if (!testCase?.expected_row_counts && fixtureName === primaryFixture && Number.isInteger(testCase?.expected_row_count)) {
+    return testCase.expected_row_count;
+  }
+  return null;
+}
+
+/** Gold SQL variants a prediction may match: the gold first, then alternatives. */
+export function listGoldVariants(testCase) {
+  return [
+    { label: 'expected_sql', sql: testCase.expected_sql },
+    ...(testCase.alternative_expected_sql || []).map((sql, index) => ({ label: `alternative_expected_sql[${index}]`, sql })),
+  ];
 }
 
 export function caseMatchesId(testCase, caseId) {
@@ -200,10 +238,6 @@ function numericValue(value) {
   }
 
   return null;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function runSignalChecks(rows, signalChecks) {
@@ -330,33 +364,231 @@ export function findMissingExpectedTables(expectedTables, retrievedTables) {
   return uniqueStrings(expectedTables).filter((tableName) => !retrieved.has(tableName));
 }
 
-export function findDisallowedColumnsUsed(sql, disallowedColumns) {
-  const sqlText = String(sql || '');
-
-  return uniqueStrings(disallowedColumns).filter((column) =>
-    new RegExp(`\\b${escapeRegExp(column)}\\b`, 'i').test(sqlText)
-  );
+// Signal checks name gold columns, but a correct prediction may alias them
+// differently. Resolve each gold column through the comparator's assignment
+// (gold column -> prediction column) so a renamed alias is checked by value.
+export function remapRowsThroughAssignment(rows, assignment) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const entries = Object.entries(assignment || {});
+  if (entries.length === 0) {
+    return normalizedRows;
+  }
+  return normalizedRows.map((row) => {
+    const remapped = { ...row };
+    for (const [goldColumn, actualColumn] of entries) {
+      remapped[goldColumn] = row?.[actualColumn];
+    }
+    return remapped;
+  });
 }
 
-export function classifyBenchmarkStatus({
-  rowsMatch,
-  signalCheckResult,
-  expectedTables,
-  retrievedTables,
-  disallowedColumnsUsed = [],
-} = {}) {
-  if (rowsMatch) {
-    // Value comparison ignores extra projected columns, so a query can return
-    // the right answer while also selecting a trap column the case forbids
-    // (e.g. the correct gross total plus SalesDocument.NetPayableAmount). That must not be a
-    // pass — the disallowed-column guard would otherwise be silently bypassed.
-    if (Array.isArray(disallowedColumnsUsed) && disallowedColumnsUsed.length > 0) {
-      return 'disallowed_column_used';
+/**
+ * runSignalChecks on a prediction, with gold column names resolved through the
+ * comparator's assignment. Column checks whose gold column the prediction does
+ * not carry (not assigned and not present under the same name) are skipped and
+ * listed in `unresolvedColumns`, instead of failing on a missing alias.
+ * Informational only: a value match is never turned into a failure by it.
+ */
+export function runSignalChecksThroughAssignment(rows, signalChecks, assignment = null) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const checks = normalizeSignalChecks(signalChecks);
+  const remapped = remapRowsThroughAssignment(normalizedRows, assignment);
+  if (!checks || remapped.length === 0) {
+    return { ...runSignalChecks(remapped, checks), unresolvedColumns: [] };
+  }
+
+  const available = new Set([...Object.keys(normalizedRows[0] ?? {}), ...Object.keys(assignment || {})]);
+  const unresolved = new Set();
+  const keep = (column) => {
+    if (available.has(column)) {
+      return true;
     }
-    return signalCheckResult?.passed === false ? 'low_signal_success' : 'pass';
+    unresolved.add(column);
+    return false;
+  };
+  const resolved = {
+    ...(checks.min_row_count != null ? { min_row_count: checks.min_row_count } : {}),
+    require_nonzero_columns: (checks.require_nonzero_columns || []).filter(keep),
+    require_nonnull_columns: (checks.require_nonnull_columns || []).filter(keep),
+    min_distinct_counts: Object.fromEntries(Object.entries(checks.min_distinct_counts || {}).filter(([column]) => keep(column))),
+  };
+  return { ...runSignalChecks(remapped, resolved), unresolvedColumns: [...unresolved] };
+}
+
+const NON_SIGNIFICANT_TOKEN_TYPES = new Set(['whitespace', 'comment', 'executable_comment']);
+
+function isIdentifierLikeToken(token) {
+  return token?.type === 'word' || token?.type === 'quoted_identifier';
+}
+
+function tokenIdentifierName(token) {
+  return token.type === 'quoted_identifier' ? token.name : token.value;
+}
+
+function isPunctTokenValue(token, value) {
+  return token?.type === 'punct' && token.value === value;
+}
+
+function collectColumnReferences(significant, skippedIndexes) {
+  const references = [];
+  for (let index = 0; index < significant.length; index += 1) {
+    const token = significant[index];
+    if (!isIdentifierLikeToken(token) || skippedIndexes.has(index)) {
+      continue;
+    }
+    // `q.col` (or `db.q.col`): record the last two parts.
+    if (isPunctTokenValue(significant[index + 1], '.') && isIdentifierLikeToken(significant[index + 2])) {
+      let end = index + 2;
+      while (isPunctTokenValue(significant[end + 1], '.') && isIdentifierLikeToken(significant[end + 2])) {
+        end += 2;
+      }
+      references.push({
+        qualifier: tokenIdentifierName(significant[end - 2]).toLowerCase(),
+        column: tokenIdentifierName(significant[end]).toLowerCase(),
+        whole: significant.slice(index, end + 1).map(tokenIdentifierName).join('.').toLowerCase(),
+      });
+      index = end;
+      continue;
+    }
+    const previous = significant[index - 1];
+    // Not a column: an alias definition (`AS name`) or a function call (`name(`).
+    if (isKeywordToken(previous, 'AS') || isPunctTokenValue(significant[index + 1], '(')) {
+      continue;
+    }
+    const name = tokenIdentifierName(token);
+    references.push({ qualifier: null, column: name.toLowerCase(), whole: name.toLowerCase() });
+  }
+  return references;
+}
+
+/**
+ * Token-based lint: which `disallowed_columns` entries the SQL actually uses.
+ * Reads SQL through the shared MariaDB tokenizer, so string literals, comments
+ * and `AS alias` definitions never count. Entries are
+ * - `Column`: any reference to that column, bare or qualified;
+ * - `Table.Column`: a reference qualified by that table or one of its aliases,
+ *   or a bare reference when the column resolves to that table (the only
+ *   referenced table, or the only referenced table carrying the column per the
+ *   optional compiled `schema`);
+ * - a table name: the table is referenced at all.
+ * Matching is case-insensitive, like MariaDB identifiers. Reported as a
+ * warning: the comparator, not this lint, decides whether a case passes.
+ */
+export function findDisallowedColumnsUsed(sql, disallowedColumns, { schema = null } = {}) {
+  const entries = uniqueStrings(disallowedColumns);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  let tokens;
+  try {
+    tokens = tokenizeSql(String(sql || ''), { tolerant: true });
+  } catch {
+    return [];
+  }
+  const significant = tokens.filter((token) => !NON_SIGNIFICANT_TOKEN_TYPES.has(token.type));
+  let tableRefs = [];
+  try {
+    tableRefs = analyzeSqlStructure(tokens, { tolerant: true }).tableRefs.filter((ref) => ref.kind === 'table' && ref.name);
+  } catch {
+    tableRefs = [];
+  }
+
+  // Table-reference name/alias tokens are not column references.
+  const skippedIndexes = new Set();
+  const qualifierTables = new Map();
+  const addQualifier = (qualifier, tableName) => {
+    const key = String(qualifier).toLowerCase();
+    if (!qualifierTables.has(key)) {
+      qualifierTables.set(key, new Set());
+    }
+    qualifierTables.get(key).add(tableName.toLowerCase());
+  };
+  for (const ref of tableRefs) {
+    skippedIndexes.add(ref.index);
+    addQualifier(ref.name, ref.name);
+    if (ref.alias) {
+      addQualifier(ref.alias, ref.name);
+      for (const offset of [1, 2]) {
+        const aliasToken = significant[ref.index + offset];
+        if (isIdentifierLikeToken(aliasToken) && tokenIdentifierName(aliasToken) === ref.alias) {
+          skippedIndexes.add(ref.index + offset);
+          break;
+        }
+      }
+    }
+  }
+  const referencedTables = new Set(tableRefs.map((ref) => ref.name.toLowerCase()));
+  const references = collectColumnReferences(significant, skippedIndexes);
+
+  const schemaColumns = new Map(
+    (schema?.tables || []).map((table) => [
+      String(table.tableName || table.name).toLowerCase(),
+      new Set((table.columns || []).map((column) => String(column.name).toLowerCase())),
+    ])
+  );
+  const tablesHavingColumn = (column) =>
+    [...referencedTables].filter((tableName) => schemaColumns.get(tableName)?.has(column));
+
+  return entries.filter((entry) => {
+    const lower = entry.toLowerCase();
+    if (references.some((reference) => reference.whole === lower)) {
+      return true; // e.g. a quoted identifier spelled exactly like the entry
+    }
+    const dot = lower.lastIndexOf('.');
+    if (dot === -1) {
+      return referencedTables.has(lower) || references.some((reference) => reference.column === lower);
+    }
+
+    const tableName = lower.slice(0, dot);
+    const column = lower.slice(dot + 1);
+    if (!referencedTables.has(tableName)) {
+      return false;
+    }
+    return references.some((reference) => {
+      if (reference.column !== column) {
+        return false;
+      }
+      if (reference.qualifier !== null) {
+        return qualifierTables.get(reference.qualifier)?.has(tableName) ?? false;
+      }
+      if (referencedTables.size === 1) {
+        return true;
+      }
+      const owners = tablesHavingColumn(column);
+      return owners.length === 1 && owners[0] === tableName;
+    });
+  });
+}
+
+/**
+ * Benchmark status from the oracle verdict. Only values decide: a value match
+ * is 'pass' even when signal checks or the disallowed-column lint complain
+ * (those are reported as warnings, see collectBenchmarkWarnings). Otherwise a
+ * missing expected table in the retrieved set is a 'retrieval_miss', and
+ * anything else a 'result_mismatch'. `signalCheckResult` and
+ * `disallowedColumnsUsed` are accepted for compatibility and ignored.
+ */
+export function classifyBenchmarkStatus({ rowsMatch, expectedTables, retrievedTables } = {}) {
+  if (rowsMatch) {
+    return 'pass';
   }
 
   return findMissingExpectedTables(expectedTables, retrievedTables).length > 0 ? 'retrieval_miss' : 'result_mismatch';
+}
+
+// Warning flags that used to be failure statuses: 'low_signal_success' (values
+// matched but a signal check, resolved through the column assignment, still
+// complained) and 'disallowed_column_used' (the lint saw a trap column).
+export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disallowedColumnsUsed = [] } = {}) {
+  const warnings = [];
+  if (rowsMatch && Array.isArray(signalWarnings) && signalWarnings.length > 0) {
+    warnings.push('low_signal_success');
+  }
+  if (Array.isArray(disallowedColumnsUsed) && disallowedColumnsUsed.length > 0) {
+    warnings.push('disallowed_column_used');
+  }
+  return warnings;
 }
 
 // --- Value-aware result comparison -------------------------------------------
@@ -382,17 +614,45 @@ export function classifyBenchmarkStatus({
 //     order: 'desc' | 'asc'                    // ranked: default 'desc'
 //     decimals: number                         // rounding precision, default 2
 //     tolerance: number                        // absolute numeric tolerance
+//     column_order: [..gold column names]      // these must keep their relative
+//                                              // SELECT-list order in the prediction
 //   }
 //
-// Numbers are compared either by equality after rounding to `decimals` (default
-// 2, matching the gold queries' ROUND(..., 2)) or, when `tolerance` is set, by a
-// true absolute difference (|gold - actual| <= tolerance) rather than bucketing.
+// Cells are compared by kind:
+// - Dates: a JS Date (mysql2 returns DATE/DATETIME as local-time Dates) and a
+//   date/datetime string normalize to one canonical wall-clock string,
+//   `YYYY-MM-DD` (or `YYYY-MM-DD hh:mm:ss[.fff]` when the time is not midnight),
+//   so a DATE column matches a model's DATE_FORMAT/CAST output.
+// - Numbers (numbers, bigints, numeric strings) compare either by equality
+//   after rounding to `decimals` (default 2, matching the gold queries'
+//   ROUND(..., 2)) or, when `tolerance` is set, by a true absolute difference
+//   (|gold - actual| <= tolerance) rather than bucketing.
+// - Everything else compares as trimmed text; two NULLs are equal; a NULL, a
+//   number, a date and a text cell never equal each other.
 //
 // - scalar/rowset: a bijection of compared row tuples must exist (order-blind).
 // - ranked: that bijection must exist AND the model's primary value column must
-//   be monotonic in `order` (catches "didn't sort / sorted wrong" while tolerating
-//   tie reordering by label, which the gold's tiebreak fixes but the model's
-//   may not).
+//   be monotonic in `order` (catches "didn't sort / sorted wrong" while
+//   tolerating tie reordering by label, which the gold's tiebreak fixes but the
+//   model's may not). The default ranking column is the first truly numeric
+//   gold column (JS numbers, not numeric-looking code strings like '4000').
+// - column_order: an assignment that maps these gold columns to prediction
+//   columns in a different relative order is rejected. Values alone cannot
+//   tell `jan_net_amount` from `feb_net_amount`; their position can.
+// - scalar rule: when the gold is a single value (one row, one compared
+//   column) and the prediction has several columns, the column carrying the
+//   gold value must be the prediction's only column, its only column of the
+//   gold value's kind (only numeric column for a number), or be named like the
+//   gold column (same name ignoring case and punctuation, or a longer name that
+//   contains it, e.g. `posted_document_count` for `document_count`). A
+//   correct-looking incidental extra column can then not carry a wrong
+//   headline number (`{product_count: 4, feb_products: 1}` vs gold 1 fails).
+
+const DEFAULT_DECIMALS = 2;
+// Upper bound on enumerated column assignments (and on the permutations tried
+// to find them), guarding pathological duplicate-column results.
+const MAX_ASSIGNMENTS = 64;
+const MAX_ASSIGNMENT_STEPS = 20000;
 
 function toComparableNumber(value) {
   if (typeof value === 'number') {
@@ -407,15 +667,65 @@ function toComparableNumber(value) {
   return null;
 }
 
-const DEFAULT_DECIMALS = 2;
+function padNumber(value, width = 2) {
+  return String(value).padStart(width, '0');
+}
 
-// Numeric view of a cell: real numbers, bigints, numeric strings (DECIMAL from
-// the driver), and Dates (epoch ms). Everything else is null (treated as text).
-function numericValueOf(value) {
-  if (value instanceof Date) {
-    return value.getTime();
+function formatWallClock(year, month, day, hours, minutes, seconds, fraction) {
+  const date = `${padNumber(year, 4)}-${padNumber(month)}-${padNumber(day)}`;
+  const trimmedFraction = String(fraction || '').replace(/0+$/, '');
+  if (!hours && !minutes && !seconds && !trimmedFraction) {
+    return date;
   }
-  return toComparableNumber(value);
+  const time = `${padNumber(hours)}:${padNumber(minutes)}:${padNumber(seconds)}`;
+  return `${date} ${time}${trimmedFraction ? `.${trimmedFraction}` : ''}`;
+}
+
+const TEMPORAL_TEXT = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+
+/**
+ * Canonical wall-clock text for a Date or a date/datetime string, or null when
+ * the value is not temporal. Dates use local time, which is how mysql2 builds
+ * them from DATE/DATETIME columns (timezone 'local'); a string with an explicit
+ * zone (`...Z`, `+02:00`) is an instant and is converted the same way.
+ */
+export function canonicalTemporalValue(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
+    return formatWallClock(
+      value.getFullYear(),
+      value.getMonth() + 1,
+      value.getDate(),
+      value.getHours(),
+      value.getMinutes(),
+      value.getSeconds(),
+      padNumber(value.getMilliseconds(), 3)
+    );
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const text = value.trim();
+  const match = TEMPORAL_TEXT.exec(text);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day, hours = '00', minutes = '00', seconds = '00', fraction = '', zone] = match;
+  if (zone) {
+    const instant = new Date(text);
+    return Number.isNaN(instant.getTime()) ? null : canonicalTemporalValue(instant);
+  }
+
+  const parts = [Number(month), Number(day), Number(hours), Number(minutes), Number(seconds)];
+  if (parts[0] < 1 || parts[0] > 12 || parts[1] < 1 || parts[1] > 31 || parts[2] > 23 || parts[3] > 59 || parts[4] > 59) {
+    return null;
+  }
+  return formatWallClock(Number(year), ...parts, fraction);
 }
 
 function roundTo(value, decimals) {
@@ -423,61 +733,91 @@ function roundTo(value, decimals) {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
-// Stable key for sorting / column-signature prefiltering. Numbers are rounded to
-// `decimals` (default 2) so a model returning more precision than the gold's
-// ROUND(..., 2) is not bucketed apart from it.
-function cellKey(value, decimals) {
-  const numeric = numericValueOf(value);
-  if (numeric !== null) {
-    return `n:${roundTo(numeric, decimals)}`;
-  }
+// Comparison view of one cell: its kind plus an exact key (numbers rounded to
+// `decimals`). Two cells are equal only when their kinds agree; numbers then
+// compare by key, or by absolute difference when a tolerance is set.
+function describeCell(value, decimals) {
   if (value === null || value === undefined) {
-    return 'null';
+    return { kind: 'null', key: 'null', num: null };
   }
-  return `s:${String(value).trim()}`;
+  const temporal = canonicalTemporalValue(value);
+  if (temporal !== null) {
+    return { kind: 'time', key: `t:${temporal}`, num: null };
+  }
+  const numeric = toComparableNumber(value);
+  if (numeric !== null) {
+    return { kind: 'num', key: `n:${roundTo(numeric, decimals)}`, num: numeric };
+  }
+  return { kind: 'text', key: `s:${String(value).trim()}`, num: null };
 }
 
-// Cell equality. Numbers compare with a true absolute tolerance when one is set
-// (|gold - actual| <= tolerance), otherwise by equality after rounding to
-// `decimals`. A numeric cell never equals a text/NULL cell; two NULLs are equal.
-function cellsEqual(goldValue, actualValue, decimals, tolerance) {
-  const goldNum = numericValueOf(goldValue);
-  const actualNum = numericValueOf(actualValue);
-  if (goldNum !== null && actualNum !== null) {
-    return tolerance > 0
-      ? Math.abs(goldNum - actualNum) <= tolerance + 1e-9
-      : roundTo(goldNum, decimals) === roundTo(actualNum, decimals);
-  }
-  if (goldNum !== null || actualNum !== null) {
+function cellsEqual(gold, actual, tolerance) {
+  if (gold.kind !== actual.kind) {
     return false;
   }
-  const goldNull = goldValue === null || goldValue === undefined;
-  const actualNull = actualValue === null || actualValue === undefined;
-  if (goldNull || actualNull) {
-    return goldNull && actualNull;
+  if (gold.kind === 'num' && tolerance > 0) {
+    return Math.abs(gold.num - actual.num) <= tolerance + 1e-9;
   }
-  return String(goldValue).trim() === String(actualValue).trim();
+  return gold.key === actual.key;
 }
 
-function projectRows(rows, columns) {
-  return rows.map((row) => columns.map((column) => row?.[column]));
+function describeColumn(rows, column, decimals) {
+  return rows.map((row) => describeCell(row?.[column], decimals));
 }
 
-function rowTuplesEqual(goldTuple, actualTuple, decimals, tolerance) {
-  return goldTuple.every((cell, index) => cellsEqual(cell, actualTuple[index], decimals, tolerance));
+function sortedKeys(cells, kind) {
+  return cells
+    .filter((cell) => cell.kind === kind)
+    .map((cell) => cell.key)
+    .sort();
+}
+
+function sameList(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+// Necessary condition for a row bijection that pairs these two columns: equal
+// NULL/date/text multisets and numeric multisets that agree after rounding or,
+// with a tolerance, pairwise within it once sorted (if any pairing of two
+// 1-D multisets is within the tolerance, the sorted pairing is too).
+function columnsCompatible(goldCells, actualCells, tolerance) {
+  for (const kind of ['null', 'time', 'text']) {
+    if (!sameList(sortedKeys(goldCells, kind), sortedKeys(actualCells, kind))) {
+      return false;
+    }
+  }
+  if (tolerance <= 0) {
+    return sameList(sortedKeys(goldCells, 'num'), sortedKeys(actualCells, 'num'));
+  }
+  const goldNumbers = goldCells.filter((cell) => cell.kind === 'num').map((cell) => cell.num).sort((a, b) => a - b);
+  const actualNumbers = actualCells.filter((cell) => cell.kind === 'num').map((cell) => cell.num).sort((a, b) => a - b);
+  return (
+    goldNumbers.length === actualNumbers.length &&
+    goldNumbers.every((value, index) => Math.abs(value - actualNumbers[index]) <= tolerance + 1e-9)
+  );
+}
+
+function tupleKey(tuple) {
+  return tuple.map((cell) => cell.key).join('\u0001');
 }
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
-// matched pair is cell-equal? A pairwise matcher (rather than comparing canonical
-// string multisets) is what lets numeric tolerance be a true absolute difference.
-// Backtracking is fine for the small result sets these datasets produce; a step
-// cap guards against pathological duplicate rows.
-function matchRowsUnordered(goldTuples, actualTuples, decimals, tolerance) {
+// matched pair is cell-equal? Without a tolerance cell equality is an
+// equivalence, so comparing sorted tuple keys is exact. With a tolerance a
+// pairwise matcher is needed so the tolerance is a true absolute difference;
+// backtracking is fine for the small result sets these datasets produce, and a
+// step cap guards against pathological duplicate rows.
+function matchRowsUnordered(goldTuples, actualTuples, tolerance) {
   if (goldTuples.length !== actualTuples.length) {
     return false;
   }
+  if (tolerance <= 0) {
+    return sameList(goldTuples.map(tupleKey).sort(), actualTuples.map(tupleKey).sort());
+  }
+
   const used = new Array(actualTuples.length).fill(false);
   let steps = 0;
+  const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
 
   function backtrack(index) {
     if (index === goldTuples.length) {
@@ -487,7 +827,7 @@ function matchRowsUnordered(goldTuples, actualTuples, decimals, tolerance) {
       return false;
     }
     for (let j = 0; j < actualTuples.length; j += 1) {
-      if (used[j] || !rowTuplesEqual(goldTuples[index], actualTuples[j], decimals, tolerance)) {
+      if (used[j] || !tuplesEqual(goldTuples[index], actualTuples[j])) {
         continue;
       }
       used[j] = true;
@@ -502,67 +842,65 @@ function matchRowsUnordered(goldTuples, actualTuples, decimals, tolerance) {
   return backtrack(0);
 }
 
-function columnSignature(rows, column, decimals) {
-  return rows
-    .map((row) => cellKey(row?.[column], decimals))
-    .sort()
-    .join('');
-}
-
-// Injective gold-column -> actual-column assignments to try. With no tolerance,
-// candidates are pre-filtered to actual columns with an identical value multiset
-// (fast, exact). With a tolerance that prefilter is unsafe (near-but-unequal
-// values bucket differently), so every actual column is a candidate and the row
-// matcher does the real work.
-function findColumnAssignments(goldColumns, actualColumns, goldRows, actualRows, decimals, tolerance) {
-  const candidates = goldColumns.map((goldColumn) => {
-    if (tolerance > 0) {
-      return actualColumns;
-    }
-    const signature = columnSignature(goldRows, goldColumn, decimals);
-    return actualColumns.filter((actualColumn) => columnSignature(actualRows, actualColumn, decimals) === signature);
-  });
-
-  const assignments = [];
-  const used = new Set();
-  const current = [];
-
-  (function backtrack(index) {
-    if (assignments.length >= 64) {
-      return; // safety cap on pathological duplicate-column cases
-    }
-    if (index === goldColumns.length) {
-      assignments.push(current.slice());
-      return;
-    }
-    for (const actualColumn of candidates[index]) {
-      if (used.has(actualColumn)) {
-        continue;
-      }
-      used.add(actualColumn);
-      current.push(actualColumn);
-      backtrack(index + 1);
-      current.pop();
-      used.delete(actualColumn);
-    }
-  })(0);
-
-  return assignments;
-}
-
-function isNumericColumn(rows, column) {
+// Truly numeric column: every non-NULL value is a JS number or bigint. Numeric
+// strings (VARCHAR codes such as AccountCode '4000') do not count, so they are
+// never picked as the default ranking column.
+function isTrulyNumericColumn(rows, column) {
   let sawNumber = false;
   for (const row of rows) {
     const value = row?.[column];
     if (value === null || value === undefined) {
       continue;
     }
-    if (toComparableNumber(value) === null) {
+    if (!(typeof value === 'bigint' || (typeof value === 'number' && Number.isFinite(value)))) {
       return false;
     }
     sawNumber = true;
   }
   return sawNumber;
+}
+
+function valueKind(value) {
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+  if (typeof value === 'bigint' || (typeof value === 'number' && Number.isFinite(value))) {
+    return 'number';
+  }
+  return canonicalTemporalValue(value) !== null ? 'temporal' : 'text';
+}
+
+function normalizedColumnName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+export function isColumnNamedLike(goldColumn, actualColumn) {
+  const gold = normalizedColumnName(goldColumn);
+  const actual = normalizedColumnName(actualColumn);
+  return Boolean(gold) && (actual === gold || actual.includes(gold));
+}
+
+function scalarRuleHolds(goldColumn, actualColumn, actualRow, actualColumns) {
+  if (actualColumns.length === 1) {
+    return true;
+  }
+  const kind = valueKind(actualRow?.[actualColumn]);
+  const sameKind = actualColumns.filter((column) => valueKind(actualRow?.[column]) === kind);
+  if (sameKind.length === 1) {
+    return true;
+  }
+  return isColumnNamedLike(goldColumn, actualColumn);
+}
+
+function rankValueOf(value) {
+  const numeric = toComparableNumber(value);
+  if (numeric !== null) {
+    return numeric;
+  }
+  const temporal = canonicalTemporalValue(value);
+  return temporal === null ? null : Date.parse(temporal.replace(' ', 'T'));
 }
 
 function rankingHolds(actualRows, primaryActualColumn, order, tolerance) {
@@ -572,7 +910,7 @@ function rankingHolds(actualRows, primaryActualColumn, order, tolerance) {
   const slack = tolerance > 0 ? tolerance : 1e-6;
   let previous = null;
   for (const row of actualRows) {
-    const value = numericValueOf(row?.[primaryActualColumn]);
+    const value = rankValueOf(row?.[primaryActualColumn]);
     if (value === null) {
       // Skip NULL metric rows WITHOUT resetting the running bound: a correct
       // ORDER BY puts NULLs at the end, and a NULL must never license a jump
@@ -592,60 +930,195 @@ function rankingHolds(actualRows, primaryActualColumn, order, tolerance) {
   return true;
 }
 
-export function compareResults(expectedRows, actualRows, comparison = null) {
+function columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns) {
+  let previousPosition = -1;
+  for (const goldColumn of columnOrder) {
+    const goldIndex = goldColumns.indexOf(goldColumn);
+    if (goldIndex === -1) {
+      continue;
+    }
+    const position = actualColumns.indexOf(assignment[goldIndex]);
+    if (position <= previousPosition) {
+      return false;
+    }
+    previousPosition = position;
+  }
+  return true;
+}
+
+function legacyOutcome(expected, actual) {
+  const match = compareRows(expected, actual);
+  const goldColumns = Object.keys(expected[0] ?? {});
+  if (!match) {
+    return {
+      match,
+      goldColumns,
+      assignments: [],
+      reason: expected.length !== actual.length ? 'row_count' : 'values',
+      truncated: false,
+      empty: false,
+    };
+  }
+  const actualByLowerName = new Map(Object.keys(actual[0] ?? {}).map((column) => [column.toLowerCase(), column]));
+  return {
+    match,
+    goldColumns,
+    assignments: expected.length > 0 ? [goldColumns.map((column) => actualByLowerName.get(column.toLowerCase()) ?? column)] : [],
+    reason: 'match',
+    truncated: false,
+    empty: expected.length === 0,
+  };
+}
+
+/**
+ * Every valid gold-column -> prediction-column assignment (up to `limit`) under
+ * a case's comparison spec. Returns
+ * `{ match, goldColumns, assignments, reason, truncated, empty }` where each
+ * assignment is an array of prediction column names aligned with
+ * `goldColumns`, and `reason` is 'match' or the first failed requirement:
+ * 'row_count', 'missing_columns', 'values', 'column_order', 'scalar_column' or
+ * 'ranking' ('values' also covers the legacy exact-row comparison). `empty`
+ * marks two empty results, which match under any assignment. The multi-fixture
+ * oracle intersects these sets so one column mapping must hold on every
+ * fixture.
+ */
+export function matchResultSets(expectedRows, actualRows, comparison = null, { limit = MAX_ASSIGNMENTS } = {}) {
   const expected = Array.isArray(expectedRows) ? expectedRows : [];
   const actual = Array.isArray(actualRows) ? actualRows : [];
 
   if (!comparison || typeof comparison !== 'object') {
-    return compareRows(expected, actual);
+    return legacyOutcome(expected, actual);
   }
 
-  if (expected.length !== actual.length) {
-    return false;
-  }
-  if (expected.length === 0) {
-    return true;
-  }
-
-  const tolerance = toComparableNumber(comparison.tolerance) ?? 0;
-  const decimals = Number.isInteger(comparison.decimals) ? comparison.decimals : DEFAULT_DECIMALS;
   const goldColumns =
     Array.isArray(comparison.compare_columns) && comparison.compare_columns.length > 0
       ? comparison.compare_columns
       : Object.keys(expected[0] ?? {});
-  if (goldColumns.length === 0) {
-    return true;
+  const fail = (reason) => ({ match: false, goldColumns, assignments: [], reason, truncated: false, empty: false });
+
+  if (expected.length !== actual.length) {
+    return fail('row_count');
+  }
+  if (expected.length === 0 || goldColumns.length === 0) {
+    return { match: true, goldColumns, assignments: [], reason: 'match', truncated: false, empty: true };
   }
 
   const actualColumns = Object.keys(actual[0] ?? {});
   if (actualColumns.length < goldColumns.length) {
-    return false;
+    return fail('missing_columns');
   }
 
+  const tolerance = toComparableNumber(comparison.tolerance) ?? 0;
+  const decimals = Number.isInteger(comparison.decimals) ? comparison.decimals : DEFAULT_DECIMALS;
   const mode = comparison.mode || 'rowset';
-  const order = (comparison.order || 'desc').toLowerCase();
-  const goldTuples = projectRows(expected, goldColumns);
+  const order = String(comparison.order || 'desc').toLowerCase();
+  const columnOrder = Array.isArray(comparison.column_order) ? comparison.column_order : [];
+  const scalarSingleValue = mode === 'scalar' && expected.length === 1 && goldColumns.length === 1;
+
+  const goldCells = goldColumns.map((column) => describeColumn(expected, column, decimals));
+  const actualCells = new Map(actualColumns.map((column) => [column, describeColumn(actual, column, decimals)]));
+  const goldTuples = expected.map((_row, rowIndex) => goldCells.map((cells) => cells[rowIndex]));
 
   const valueColumns =
     Array.isArray(comparison.value_columns) && comparison.value_columns.length > 0
       ? comparison.value_columns
-      : goldColumns.filter((column) => isNumericColumn(expected, column));
-  const primaryValueColumn = valueColumns[0] || null;
+      : goldColumns.filter((column) => isTrulyNumericColumn(expected, column));
+  const primaryValueIndex = valueColumns.length > 0 ? goldColumns.indexOf(valueColumns[0]) : -1;
 
-  for (const assignment of findColumnAssignments(goldColumns, actualColumns, expected, actual, decimals, tolerance)) {
-    if (!matchRowsUnordered(goldTuples, projectRows(actual, assignment), decimals, tolerance)) {
-      continue;
-    }
-    if (mode !== 'ranked') {
-      return true;
-    }
-    const primaryActualColumn = primaryValueColumn ? assignment[goldColumns.indexOf(primaryValueColumn)] : null;
-    if (rankingHolds(actual, primaryActualColumn, order, tolerance)) {
-      return true;
-    }
-  }
+  const candidates = goldCells.map((cells) =>
+    actualColumns.filter((column) => columnsCompatible(cells, actualCells.get(column), tolerance))
+  );
 
-  return false;
+  const assignments = [];
+  const failures = { values: true, column_order: true, scalar_column: true, ranking: true };
+  let steps = 0;
+  let truncated = false;
+  const used = new Set();
+  const current = [];
+
+  const accept = (assignment) => {
+    const actualTuples = actual.map((_row, rowIndex) => assignment.map((column) => actualCells.get(column)[rowIndex]));
+    if (!matchRowsUnordered(goldTuples, actualTuples, tolerance)) {
+      return;
+    }
+    failures.values = false;
+    if (columnOrder.length > 0 && !columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns)) {
+      return;
+    }
+    failures.column_order = false;
+    if (scalarSingleValue && !scalarRuleHolds(goldColumns[0], assignment[0], actual[0], actualColumns)) {
+      return;
+    }
+    failures.scalar_column = false;
+    if (mode === 'ranked' && primaryValueIndex !== -1 && !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance)) {
+      return;
+    }
+    failures.ranking = false;
+    assignments.push(assignment.slice());
+  };
+
+  (function backtrack(index) {
+    if (assignments.length >= limit || truncated) {
+      return;
+    }
+    if ((steps += 1) > MAX_ASSIGNMENT_STEPS) {
+      truncated = true;
+      return;
+    }
+    if (index === goldColumns.length) {
+      accept(current);
+      return;
+    }
+    for (const column of candidates[index]) {
+      if (used.has(column)) {
+        continue;
+      }
+      used.add(column);
+      current.push(column);
+      backtrack(index + 1);
+      current.pop();
+      used.delete(column);
+      if (assignments.length >= limit) {
+        truncated = true;
+        return;
+      }
+    }
+  })(0);
+
+  const match = assignments.length > 0;
+  const reason = match
+    ? 'match'
+    : failures.values
+      ? 'values'
+      : failures.column_order
+        ? 'column_order'
+        : failures.scalar_column
+          ? 'scalar_column'
+          : 'ranking';
+  return { match, goldColumns, assignments, reason, truncated, empty: false };
+}
+
+/**
+ * Value-aware comparison with an explanation: `{ match, assignment, reason }`.
+ * `assignment` maps each compared gold column to the prediction column that
+ * carries it (null when nothing matched; `{}` for two empty results).
+ */
+export function compareResultsDetailed(expectedRows, actualRows, comparison = null) {
+  const outcome = matchResultSets(expectedRows, actualRows, comparison, { limit: 1 });
+  const [first] = outcome.assignments;
+  return {
+    match: outcome.match,
+    assignment: first
+      ? Object.fromEntries(outcome.goldColumns.map((column, index) => [column, first[index]]))
+      : outcome.match
+        ? {}
+        : null,
+    reason: outcome.reason,
+  };
+}
+
+export function compareResults(expectedRows, actualRows, comparison = null) {
+  return compareResultsDetailed(expectedRows, actualRows, comparison).match;
 }
 
 function normalizeComparison(comparison) {
@@ -663,11 +1136,15 @@ function normalizeComparison(comparison) {
   }
   const compareColumns = uniqueStrings(comparison.compare_columns);
   const valueColumns = uniqueStrings(comparison.value_columns);
+  const columnOrder = uniqueStrings(comparison.column_order);
   if (compareColumns.length > 0) {
     normalized.compare_columns = compareColumns;
   }
   if (valueColumns.length > 0) {
     normalized.value_columns = valueColumns;
+  }
+  if (columnOrder.length > 0) {
+    normalized.column_order = columnOrder;
   }
   return normalized;
 }
