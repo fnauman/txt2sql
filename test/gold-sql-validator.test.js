@@ -50,9 +50,9 @@ function loadGoldPairs() {
 
 const GOLD = loadGoldPairs();
 
-test('the gold corpus has the expected size (211 unique question/SQL pairs, 14 known validator rejections)', () => {
-  assert.equal(GOLD.length, 211);
-  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 14);
+test('the gold corpus has the expected size (241 unique question/SQL pairs, 27 known validator rejections)', () => {
+  assert.equal(GOLD.length, 241);
+  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 27);
 });
 
 for (const testCase of GOLD.filter((entry) => entry.known_validator_rejection)) {
