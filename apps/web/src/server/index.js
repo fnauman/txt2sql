@@ -610,7 +610,9 @@ export function createApp({
       const [rows] = await lease.runtime.connection.query('SELECT 1 AS ok');
       const dbSchema = await getDatabaseSchema(lease, { refresh: true });
       const privileges = authenticated
-        ? await checkQueryUserPrivileges(lease.runtime.connection).catch((error) => ({ error: error.message }))
+        ? await checkQueryUserPrivileges(lease.runtime.connection, { database: config.database.name }).catch((error) => ({
+            error: error.message,
+          }))
         : null;
       res.json({
         ...payload,

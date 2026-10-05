@@ -7,6 +7,7 @@ import test from 'node:test';
 import { APIUserAbortError } from 'openai';
 
 import {
+  READONLY_GRANTS,
   createFakeRuntime,
   createRuntimeFactory,
   deferred,
@@ -435,6 +436,14 @@ test('deep health surfaces over-privileged query users to authorized callers', a
     assert.equal(deep.json.privileges.ok, false);
     assert.match(deep.json.privileges.warnings[0], /ALL PRIVILEGES/);
     assert.doesNotMatch(JSON.stringify(deep.json.privileges.grants), /'\*x'/);
+  });
+
+  // SELECT-only, but on another database than the configured DB_NAME.
+  const elsewhere = createRuntimeFactory({ grants: [...READONLY_GRANTS, 'GRANT SELECT ON `hr`.* TO `demo_readonly`@`%`'] });
+  await withApp({ config: testConfig({ WEB_API_TOKEN: TOKEN }), runtimeFactory: elsewhere.factory }, async (app) => {
+    const deep = await app.request({ path: '/api/health?deep=1', headers: auth });
+    assert.equal(deep.json.privileges.ok, false);
+    assert.match(deep.json.privileges.warnings[0], /`hr`\.\* is a database other than DB_NAME \(demo_retail\)/);
   });
 });
 

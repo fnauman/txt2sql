@@ -7,17 +7,24 @@ services:
       - "127.0.0.1:${DB_PORT:-3306}:3306"
     environment:
       # Admin (root) password. bootstrap-db and seed-demo connect as
-      # DB_ADMIN_USER / DB_ADMIN_PASSWORD, which default to root /
-      # MARIADB_ROOT_PASSWORD. DB_PASSWORD is the last fallback for older .env
+      # DB_ADMIN_USER (default root) with the first non-empty of
+      # DB_ADMIN_PASSWORD, MARIADB_ROOT_PASSWORD, DB_PASSWORD; root is
+      # initialized with the same order so the two always agree (compose only
+      # provisions root as an admin). DB_PASSWORD is the fallback for older .env
       # files that still run everything as root.
-      MARIADB_ROOT_PASSWORD: "${MARIADB_ROOT_PASSWORD:-${DB_ADMIN_PASSWORD:-${DB_PASSWORD:-secret}}}"
+      MARIADB_ROOT_PASSWORD: "${DB_ADMIN_PASSWORD:-${MARIADB_ROOT_PASSWORD:-${DB_PASSWORD:-secret}}}"
       MARIADB_DATABASE: "${DB_NAME:-demo_retail}"
       # Least-privilege query user created on first init by
       # docker/mariadb/initdb/01-readonly-user.sh (SELECT on demo_retail* only).
       # The app's query paths connect as DB_USER / DB_PASSWORD, so the password
-      # defaults to DB_PASSWORD; the init script refuses to run without one.
+      # defaults to DB_PASSWORD. Without either, compose refuses to start
+      # ("required variable DB_PASSWORD is missing a value"): set DB_PASSWORD or
+      # DB_READONLY_PASSWORD (if a data volume already exists, also run
+      # docker compose down -v). Otherwise the init script would fail and leave
+      # a half-initialized volume that comes back up "healthy" with no query
+      # user on the next start.
       DB_READONLY_USER: "${DB_READONLY_USER:-demo_readonly}"
-      DB_READONLY_PASSWORD: "${DB_READONLY_PASSWORD:-${DB_PASSWORD:-}}"
+      DB_READONLY_PASSWORD: "${DB_READONLY_PASSWORD:-${DB_PASSWORD:?}}"
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=\"$${MARIADB_ROOT_PASSWORD}\" mariadb-admin ping -h 127.0.0.1 --silent"]
       interval: 5s

@@ -130,7 +130,7 @@ test('the statement timeout and KILL-on-abort stop a long query', { skip }, asyn
 test('the query user is least-privilege', { skip }, async () => {
   const connection = await createMariaDbConnection({ env });
   try {
-    const report = await checkQueryUserPrivileges(connection);
+    const report = await checkQueryUserPrivileges(connection, { database: env.DB_NAME });
     assert.deepEqual(report.warnings, [], report.grants.join('\n'));
     const [rows] = await connection.query("SELECT LOAD_FILE('/etc/passwd') AS f");
     assert.equal(rows[0].f, null, 'no FILE privilege');

@@ -41,8 +41,42 @@ test('admin tasks use DB_ADMIN_* (default root / MARIADB_ROOT_PASSWORD)', () => 
   assert.throws(() => resolveMariaDbCredentials({ role: 'superuser', env: {} }), TypeError);
 });
 
+// docker-compose.yml initializes root with the first non-empty of these, and
+// `${VAR:-...}` treats an empty value as unset; the app must agree with it.
+test('admin password precedence matches docker-compose and blank values count as unset', () => {
+  const admin = (env) => pick(resolveMariaDbCredentials({ role: 'admin', env }));
+  assert.deepEqual(admin({ DB_ADMIN_PASSWORD: '', MARIADB_ROOT_PASSWORD: 'rootpw' }), {
+    role: 'admin',
+    user: 'root',
+    password: 'rootpw',
+    fallback: false,
+  });
+  assert.equal(admin({ DB_ADMIN_PASSWORD: 'adminpw', MARIADB_ROOT_PASSWORD: 'rootpw' }).password, 'adminpw');
+  // Compose falls back to DB_PASSWORD for root's password; so does the app.
+  assert.deepEqual(admin({ DB_ADMIN_USER: 'root', DB_USER: 'demo_readonly', DB_PASSWORD: 'secret' }), {
+    role: 'admin',
+    user: 'root',
+    password: 'secret',
+    fallback: false,
+  });
+  assert.equal(admin({ DB_ADMIN_USER: '  ', MARIADB_ROOT_PASSWORD: 'rootpw' }).user, 'root');
+
+  const compose = fs.readFileSync(path.join(repoRoot, 'docker-compose.yml'), 'utf8');
+  assert.match(compose, /MARIADB_ROOT_PASSWORD: "\$\{DB_ADMIN_PASSWORD:-\$\{MARIADB_ROOT_PASSWORD:-\$\{DB_PASSWORD:-secret\}\}\}"/);
+});
+
+test('an old single-user .env with blank DB_ADMIN_* placeholders still falls back to DB_USER', () => {
+  const env = { DB_USER: 'root', DB_PASSWORD: 'secret', DB_ADMIN_USER: '', DB_ADMIN_PASSWORD: '', MARIADB_ROOT_PASSWORD: ' ' };
+  assert.deepEqual(pick(resolveMariaDbCredentials({ role: 'admin', env })), {
+    role: 'admin',
+    user: 'root',
+    password: 'secret',
+    fallback: true,
+  });
+});
+
 test('without admin credentials, admin tasks fall back to DB_USER with a warning', async () => {
-  const env = { DB_USER: 'root', DB_PASSWORD: 'secret', DB_NAME: 'demo_retail', DB_HOST: '127.0.0.1', DB_PORT: '1' };
+  const env = { DB_USER: 'root', DB_PASSWORD: 'secret', DB_NAME: 'demo_retail', DB_HOST: '127.0.0.1', DB_PORT: '3306' };
   assert.deepEqual(pick(resolveMariaDbCredentials({ role: 'admin', env })), {
     role: 'admin',
     user: 'root',
@@ -51,12 +85,37 @@ test('without admin credentials, admin tasks fall back to DB_USER with a warning
   });
 
   const warnings = [];
-  // Port 1 refuses the connection; the warning is printed before connecting.
-  await assert.rejects(createMariaDbConnection({ role: 'admin', env, warn: (message) => warnings.push(message) }), {
-    code: 'ECONNREFUSED',
+  const connected = [];
+  // The connector is injected: no socket is opened.
+  const connection = await createMariaDbConnection({
+    role: 'admin',
+    env,
+    warn: (message) => warnings.push(message),
+    connect: async (options) => {
+      connected.push(options);
+      return { fake: true };
+    },
   });
+  assert.deepEqual(connection, { fake: true });
+  assert.equal(connected[0].user, 'root');
+  assert.equal(connected[0].password, 'secret');
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /No admin credentials configured.*falling back to DB_USER "root"/);
+});
+
+test('access denied for demo_readonly explains that the user is provisioned on first volume init', async () => {
+  const denied = Object.assign(new Error("Access denied for user 'demo_readonly'@'172.17.0.1'"), { code: 'ER_ACCESS_DENIED_ERROR', errno: 1045 });
+  const env = { DB_NAME: 'demo_retail', DB_PASSWORD: 'x' };
+  await assert.rejects(createMariaDbConnection({ env, connect: async () => Promise.reject(denied) }), (error) => {
+    assert.equal(error.code, 'ER_ACCESS_DENIED_ERROR');
+    assert.match(error.message, /access denied for user "demo_readonly"\. Check DB_USER and DB_PASSWORD\./);
+    assert.match(error.message, /first initialized.*docker compose down -v/);
+    return true;
+  });
+  await assert.rejects(createMariaDbConnection({ env: { ...env, DB_USER: 'reader' }, connect: async () => Promise.reject(denied) }), (error) => {
+    assert.doesNotMatch(error.message, /docker compose down -v/);
+    return true;
+  });
 });
 
 test('missing settings fail with a typed DB_NOT_CONFIGURED error', async () => {
@@ -123,6 +182,45 @@ test('analyzeQueryUserGrants warns about anything beyond SELECT/USAGE', () => {
   assert.match(role.warnings[0], /Role `analyst` is granted/);
 });
 
+// Real SHOW GRANTS lines from MariaDB 10.6 for users that could read
+// mysql.global_priv (password hashes) while holding "only SELECT".
+test('analyzeQueryUserGrants flags SELECT that reaches system schemas through wildcards or schema/table grants', () => {
+  const shapes = {
+    everyDatabase: 'GRANT SELECT ON `%`.* TO `g_pct`@`%`',
+    mysqlSchema: 'GRANT SELECT ON `mysql`.* TO `g_mysql`@`%`',
+    mysqlTable: 'GRANT SELECT ON `mysql`.`global_priv` TO `g_tbl`@`%`',
+    mysqlColumns: 'GRANT SELECT (`User`) ON `mysql`.`user` TO `g_tbl`@`%`',
+    prefixWildcard: 'GRANT SELECT ON `my%`.* TO `x`@`%`',
+  };
+  for (const [name, grant] of Object.entries(shapes)) {
+    for (const options of [{}, { database: 'demo_retail' }]) {
+      const report = analyzeQueryUserGrants([READONLY_GRANTS[0], READONLY_GRANTS[1], grant], options);
+      assert.equal(report.ok, false, name);
+      assert.equal(report.warnings.length, 1, name);
+      assert.match(report.warnings[0], /reaches the mysql system schema/, name);
+    }
+  }
+});
+
+test('with DB_NAME given, SELECT on other databases is flagged; the demo_retail family is not', () => {
+  const check = (grant, database = 'demo_retail') => analyzeQueryUserGrants([READONLY_GRANTS[0], grant], { database }).warnings;
+  assert.match(check('GRANT SELECT ON `other_db`.* TO `x`@`%`')[0], /`other_db`\.\* is a database other than DB_NAME \(demo_retail\)/);
+  assert.match(check('GRANT SELECT ON `demo%`.* TO `x`@`%`')[0], /matches databases beyond DB_NAME/);
+  assert.match(check('GRANT SELECT ON `hr`.`salaries` TO `x`@`%`')[0], /database other than DB_NAME/);
+  for (const grant of [
+    'GRANT SELECT ON `demo\\_retail%`.* TO `x`@`%`',
+    'GRANT SELECT ON `demo_retail`.* TO `x`@`%`',
+    'GRANT SELECT ON `demo_retail_v2`.* TO `x`@`%`',
+    'GRANT SELECT ON `demo_retail`.`Customer` TO `x`@`%`',
+  ]) {
+    assert.deepEqual(check(grant), [], grant);
+  }
+  // A non-demo deployment reading its own database is fine.
+  assert.deepEqual(check('GRANT SELECT ON `erp`.* TO `x`@`%`', 'erp'), []);
+  // Without DB_NAME only the system-schema and *.* checks apply.
+  assert.deepEqual(analyzeQueryUserGrants([READONLY_GRANTS[0], 'GRANT SELECT ON `other_db`.* TO `x`@`%`']).warnings, []);
+});
+
 test('checkQueryUserPrivileges runs SHOW GRANTS and redacts password hashes', async () => {
   const calls = [];
   const connection = {
@@ -131,7 +229,7 @@ test('checkQueryUserPrivileges runs SHOW GRANTS and redacts password hashes', as
       return [READONLY_GRANTS.map((grant) => ({ 'Grants for demo_readonly@%': grant }))];
     },
   };
-  const report = await checkQueryUserPrivileges(connection);
+  const report = await checkQueryUserPrivileges(connection, { database: 'demo_retail' });
   assert.deepEqual(calls, ['SHOW GRANTS']);
   assert.equal(report.ok, true);
   assert.match(report.grants[0], /IDENTIFIED BY PASSWORD '<redacted>'/);
@@ -166,7 +264,10 @@ test('docker init script grants only SELECT on demo_retail* and compose mounts i
   const compose = fs.readFileSync(path.join(repoRoot, 'docker-compose.yml'), 'utf8');
   assert.match(compose, /\.\/docker\/mariadb\/initdb:\/docker-entrypoint-initdb\.d:ro/);
   assert.match(compose, /DB_READONLY_USER: "\$\{DB_READONLY_USER:-demo_readonly\}"/);
-  assert.match(compose, /DB_READONLY_PASSWORD: "\$\{DB_READONLY_PASSWORD:-\$\{DB_PASSWORD:-\}\}"/);
+  // Compose refuses to start without a query-user password (a failed init
+  // would leave a half-initialized volume that later starts without the user).
+  // Pure interpolation only: no literal text in a password-named value.
+  assert.match(compose, /DB_READONLY_PASSWORD: "\$\{DB_READONLY_PASSWORD:-\$\{DB_PASSWORD:\?\}\}"/);
 });
 
 function pick(credentials) {

@@ -71,7 +71,7 @@ async function main() {
   installSignalHandlers({ shutdown: lifecycle.shutdown, logger: console });
 
   // Least-privilege check for the query user; logs only, never blocks startup.
-  void logQueryUserPrivileges({ logger: console });
+  void logQueryUserPrivileges({ logger: console, database: config.database.name });
 }
 
 main().catch((error) => {

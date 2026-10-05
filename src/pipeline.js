@@ -2391,16 +2391,24 @@ export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } 
 // - 'query' (web, basic, optimized, resolve-master-data, evaluation): DB_USER /
 //   DB_PASSWORD, defaulting to the SELECT-only demo_readonly user that
 //   docker/mariadb/initdb provisions.
-// - 'admin' (bootstrap-db, seed-demo): DB_ADMIN_USER / DB_ADMIN_PASSWORD, which
-//   default to root / MARIADB_ROOT_PASSWORD. When no admin credential is set at
-//   all, admin scripts fall back to DB_USER / DB_PASSWORD with a warning, so
-//   older single-user (root) setups keep working.
+// - 'admin' (bootstrap-db, seed-demo): DB_ADMIN_USER (default root) with the
+//   first non-blank of DB_ADMIN_PASSWORD, MARIADB_ROOT_PASSWORD, DB_PASSWORD:
+//   the same order docker-compose.yml uses to initialize root's password. When
+//   no admin setting is set at all, admin scripts fall back to DB_USER /
+//   DB_PASSWORD with a warning, so older single-user (root) setups keep working.
+// Blank values count as unset, like compose's `${VAR:-default}`, so template
+// lines such as `DB_ADMIN_PASSWORD=` do not override a real setting.
 export const DEFAULT_QUERY_DB_USER = 'demo_readonly';
 export const DEFAULT_ADMIN_DB_USER = 'root';
 const DB_ROLES = new Set(['query', 'admin']);
 
+function nonBlankEnv(env, name) {
+  const value = env[name];
+  return value === undefined || value === null || String(value).trim() === '' ? undefined : value;
+}
+
 export function resolveQueryDbUser(env = process.env) {
-  return env.DB_USER || DEFAULT_QUERY_DB_USER;
+  return nonBlankEnv(env, 'DB_USER') || DEFAULT_QUERY_DB_USER;
 }
 
 export function resolveMariaDbCredentials({ role = 'query', env = process.env } = {}) {
@@ -2418,13 +2426,15 @@ export function resolveMariaDbCredentials({ role = 'query', env = process.env } 
     };
   }
 
-  const adminConfigured =
-    env.DB_ADMIN_USER !== undefined || env.DB_ADMIN_PASSWORD !== undefined || env.MARIADB_ROOT_PASSWORD !== undefined;
-  if (adminConfigured) {
+  const adminUser = nonBlankEnv(env, 'DB_ADMIN_USER');
+  const adminPassword = nonBlankEnv(env, 'DB_ADMIN_PASSWORD');
+  const rootPassword = nonBlankEnv(env, 'MARIADB_ROOT_PASSWORD');
+  if (adminUser !== undefined || adminPassword !== undefined || rootPassword !== undefined) {
     return {
       role,
-      user: env.DB_ADMIN_USER || DEFAULT_ADMIN_DB_USER,
-      password: env.DB_ADMIN_PASSWORD ?? env.MARIADB_ROOT_PASSWORD,
+      user: adminUser ?? DEFAULT_ADMIN_DB_USER,
+      // Same precedence as root's password in docker-compose.yml.
+      password: adminPassword ?? rootPassword ?? nonBlankEnv(env, 'DB_PASSWORD'),
       fallback: false,
       credentialVars: 'DB_ADMIN_USER and DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD)',
     };
@@ -2432,7 +2442,7 @@ export function resolveMariaDbCredentials({ role = 'query', env = process.env } 
 
   return {
     role,
-    user: env.DB_USER,
+    user: nonBlankEnv(env, 'DB_USER'),
     password: env.DB_PASSWORD,
     fallback: true,
     credentialVars: 'DB_USER and DB_PASSWORD',
@@ -2493,7 +2503,7 @@ function formatMariaDbTarget(connectionOptions) {
 function assertMariaDbConfigured({ includeDatabase, role, env }) {
   const credentials = resolveMariaDbCredentials({ role, env });
   const missing = [];
-  if (role === 'admin' && credentials.fallback && !env.DB_USER) {
+  if (role === 'admin' && credentials.fallback && !credentials.user) {
     missing.push('DB_ADMIN_USER/DB_ADMIN_PASSWORD (or MARIADB_ROOT_PASSWORD, or DB_USER as a fallback)');
   }
   if (includeDatabase && !env.DB_NAME) {
@@ -2520,7 +2530,13 @@ function wrapConnectionError(error, message) {
   return wrapped;
 }
 
-export async function createMariaDbConnection({ includeDatabase = true, role = 'query', env = process.env, warn = console.warn } = {}) {
+export async function createMariaDbConnection({
+  includeDatabase = true,
+  role = 'query',
+  env = process.env,
+  warn = console.warn,
+  connect = (options) => mysql.createConnection(options),
+} = {}) {
   const credentials = assertMariaDbConfigured({ includeDatabase, role, env });
   if (credentials.fallback) {
     warn(adminFallbackWarning(credentials.user));
@@ -2529,7 +2545,7 @@ export async function createMariaDbConnection({ includeDatabase = true, role = '
   const connectionOptions = buildMariaDbConnectionOptions({ includeDatabase, role, env });
 
   try {
-    return await mysql.createConnection(connectionOptions);
+    return await connect(connectionOptions);
   } catch (error) {
     if (error.code === 'ECONNREFUSED') {
       throw wrapConnectionError(
@@ -2546,9 +2562,17 @@ export async function createMariaDbConnection({ includeDatabase = true, role = '
     }
 
     if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+      // The provisioned query user only exists if the init script ran, which
+      // happens once, on a fresh data volume (and fails without a password).
+      const provisioningHint =
+        connectionOptions.user === DEFAULT_QUERY_DB_USER
+          ? ` ${DEFAULT_QUERY_DB_USER} is created only when the Docker data volume is first initialized ` +
+            '(docker/mariadb/initdb, password from DB_READONLY_PASSWORD or DB_PASSWORD); if it is missing, ' +
+            "recreate the volume with 'docker compose down -v'."
+          : '';
       throw wrapConnectionError(
         error,
-        `MariaDB access denied for user "${connectionOptions.user}". Check ${credentials.credentialVars}.`
+        `MariaDB access denied for user "${connectionOptions.user}". Check ${credentials.credentialVars}.${provisioningHint}`
       );
     }
 
@@ -2596,11 +2620,17 @@ export function createMariaDbPool({ includeDatabase = true, connectionLimit = 5,
 
 // The DB grants are the real boundary for model-authored SQL; the validator is
 // defense in depth. SHOW GRANTS for the connected (query) user and report
-// anything beyond SELECT/USAGE: write or admin privileges (ALL PRIVILEGES,
-// INSERT, FILE, SUPER, ...), SELECT on every database (*.*, which includes the
-// mysql system schema), and grant options. Returns warnings; never throws for
-// an unexpected grant format.
+// anything beyond SELECT/USAGE (ALL PRIVILEGES, INSERT, FILE, SUPER, ...),
+// grant options, and SELECT that reaches past the expected data: every
+// database (*.*), a system schema (mysql.global_priv holds password hashes),
+// or (when `database` is given) a database other than DB_NAME and the
+// provisioned demo_retail* family. Returns warnings; never throws for an
+// unexpected grant format.
 const ALLOWED_QUERY_PRIVILEGES = new Set(['SELECT', 'USAGE']);
+const SYSTEM_SCHEMAS = ['mysql', 'sys', 'performance_schema', 'information_schema'];
+// docker/mariadb/initdb grants SELECT on `demo\_retail%`.*: demo_retail and
+// its fixture databases (demo_retail_v2, ...) are always in scope.
+const PROVISIONED_DATABASE_PREFIX = 'demo_retail';
 
 function splitPrivileges(list) {
   // Column grants look like "SELECT (a, b)"; drop the column lists first.
@@ -2611,7 +2641,86 @@ function splitPrivileges(list) {
     .filter(Boolean);
 }
 
-export function analyzeQueryUserGrants(grants) {
+// The database part of a SHOW GRANTS target (`db`.*, `db`.`table`, *.*,
+// PROCEDURE `db`.`proc`), unquoted. At database level the name is a LIKE
+// pattern (% and _ are wildcards, \ escapes); in a table-level grant it is
+// literal. Null for targets that are not db.object (e.g. PROXY grants).
+function parseGrantTarget(target) {
+  const match = /^(?:(?:PROCEDURE|FUNCTION|PACKAGE BODY|PACKAGE)\s+)?(\*|`(?:[^`]|``)*`|[^.\s`]+)\.(.+)$/i.exec(target.trim());
+  if (!match) {
+    return null;
+  }
+  const [, rawDatabase, object] = match;
+  const database = rawDatabase.startsWith('`') ? rawDatabase.slice(1, -1).replace(/``/g, '`') : rawDatabase;
+  return { database, databaseLevel: object.trim() === '*' };
+}
+
+// Splits a grant database name into LIKE tokens: { literal } or { wildcard }.
+function grantNameTokens(name, { pattern }) {
+  const tokens = [];
+  for (let index = 0; index < name.length; index += 1) {
+    const char = name[index];
+    if (char === '\\' && index + 1 < name.length) {
+      index += 1;
+      tokens.push({ literal: name[index] });
+    } else if (pattern && (char === '%' || char === '_')) {
+      tokens.push({ wildcard: char });
+    } else {
+      tokens.push({ literal: char });
+    }
+  }
+  return tokens;
+}
+
+function grantNameMatches(tokens, databaseName) {
+  const source = tokens
+    .map((token) =>
+      token.wildcard ? (token.wildcard === '%' ? '.*' : '.') : token.literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    )
+    .join('');
+  return new RegExp(`^${source}$`, 'i').test(databaseName);
+}
+
+// The text before the first `%`: every database the grant can match starts
+// with it (give or take single characters). An unescaped `_` is kept as
+// itself here: it stands for exactly one character, so the very common
+// `demo_retail`.* still reads as demo_retail rather than "anything".
+function grantNamePrefix(tokens) {
+  let prefix = '';
+  for (const token of tokens) {
+    if (token.wildcard === '%') {
+      break;
+    }
+    prefix += token.wildcard || token.literal;
+  }
+  return prefix;
+}
+
+function selectScopeWarning(target, { database }) {
+  const parsed = parseGrantTarget(target);
+  if (!parsed || parsed.database === '*') {
+    return null; // *.* is reported separately
+  }
+
+  const tokens = grantNameTokens(parsed.database, { pattern: parsed.databaseLevel });
+  const systemSchema = SYSTEM_SCHEMAS.find((schema) => grantNameMatches(tokens, schema));
+  if (systemSchema) {
+    return `SELECT on ${target} reaches the ${systemSchema} system schema (mysql.global_priv holds password hashes): grant SELECT on the demo database only.`;
+  }
+
+  if (!database) {
+    return null;
+  }
+  const prefix = grantNamePrefix(tokens);
+  const inScope = [database, PROVISIONED_DATABASE_PREFIX].some((allowed) => prefix.startsWith(allowed));
+  if (!inScope) {
+    const reach = tokens.some((token) => token.wildcard === '%') ? 'matches databases beyond' : 'is a database other than';
+    return `SELECT on ${target} ${reach} DB_NAME (${database}): the query user should only read the configured database.`;
+  }
+  return null;
+}
+
+export function analyzeQueryUserGrants(grants, { database = null } = {}) {
   const warnings = [];
   const privileges = [];
 
@@ -2635,8 +2744,15 @@ export function analyzeQueryUserGrants(grants) {
       warnings.push(`${extra.join(', ')} on ${target}: the query user should only have SELECT (and USAGE).`);
     }
 
-    if (grantPrivileges.includes('SELECT') && /^\*\.\*$/.test(target.trim())) {
-      warnings.push('SELECT on *.*: the query user can read every database, including the mysql system schema.');
+    if (grantPrivileges.includes('SELECT')) {
+      if (/^\*\.\*$/.test(target.trim())) {
+        warnings.push('SELECT on *.*: the query user can read every database, including the mysql system schema.');
+      } else {
+        const scopeWarning = selectScopeWarning(target, { database });
+        if (scopeWarning) {
+          warnings.push(scopeWarning);
+        }
+      }
     }
 
     if (/\bWITH\s+GRANT\s+OPTION\b/i.test(text)) {
@@ -2653,21 +2769,23 @@ function redactGrant(grant) {
     .replace(/(\bUSING\s+)'[^']*'/gi, "$1'<redacted>'");
 }
 
-export async function checkQueryUserPrivileges(connection) {
+// `database` is the configured DB_NAME; SELECT grants on other databases are
+// reported (pass null to skip that part of the check).
+export async function checkQueryUserPrivileges(connection, { database = process.env.DB_NAME || null } = {}) {
   const [rows] = await connection.query('SHOW GRANTS');
   const grants = (Array.isArray(rows) ? rows : []).map((row) => String(Object.values(row || {})[0] ?? ''));
   return {
     grants: grants.map(redactGrant),
-    ...analyzeQueryUserGrants(grants),
+    ...analyzeQueryUserGrants(grants, { database }),
   };
 }
 
 // CLI helper: print privilege warnings for the query user to stderr (stdout
 // stays clean for results). Best effort: a failed SHOW GRANTS is reported, not
 // fatal.
-export async function reportQueryUserPrivileges(connection, { log = console.error } = {}) {
+export async function reportQueryUserPrivileges(connection, { log = console.error, database = process.env.DB_NAME || null } = {}) {
   try {
-    const report = await checkQueryUserPrivileges(connection);
+    const report = await checkQueryUserPrivileges(connection, { database });
     for (const warning of report.warnings) {
       log(`[db] warning: ${warning}`);
     }

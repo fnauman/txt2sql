@@ -160,7 +160,8 @@ export function installSignalHandlers({
 // Startup check that the query user is least-privilege (the real boundary for
 // model-authored SQL). Best effort and OpenAI-independent: if the database is
 // not configured or reachable yet, it logs why and moves on.
-export async function logQueryUserPrivileges({ logger = console, connect = () => createMariaDbConnection() } = {}) {
+// `database` is the configured DB_NAME (SELECT grants elsewhere are reported).
+export async function logQueryUserPrivileges({ logger = console, connect = () => createMariaDbConnection(), database = null } = {}) {
   let connection;
   try {
     connection = await connect();
@@ -170,7 +171,7 @@ export async function logQueryUserPrivileges({ logger = console, connect = () =>
   }
 
   try {
-    const report = await checkQueryUserPrivileges(connection);
+    const report = await checkQueryUserPrivileges(connection, { database });
     if (report.ok) {
       logger.log?.('[db] query user privileges: SELECT-only (ok).');
     } else {
