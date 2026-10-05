@@ -455,9 +455,13 @@ test('semantic retrieval resolves business paraphrases that lexical retrieval mi
       expectedMetrics: ['quantity_sold'],
     },
     {
+      // "product sales" is a line_net_sales phrase that consumes the word
+      // "sales", so the header-level net_sales metric no longer co-fires
+      // (longest-span arbitration); the line metric is the right measure.
       question: 'Show sparkling water, protein bar or cold brew product sales by branch monthwise',
       expectedTables: ['StoreLocation', 'Product', 'SalesDocumentLine', 'SalesDocument'],
-      expectedMetrics: ['net_sales', 'line_net_sales'],
+      expectedMetrics: ['line_net_sales'],
+      unexpectedMetrics: ['net_sales'],
     },
   ];
 
@@ -472,6 +476,12 @@ test('semantic retrieval resolves business paraphrases that lexical retrieval mi
       assert.ok(
         retrieval.semanticPlan.metrics.some((metric) => metric.name === metricName),
         `${testCase.question} should match metric ${metricName}`
+      );
+    }
+    for (const metricName of testCase.unexpectedMetrics || []) {
+      assert.ok(
+        !retrieval.semanticPlan.metrics.some((metric) => metric.name === metricName),
+        `${testCase.question} should not match metric ${metricName}`
       );
     }
   }

@@ -606,11 +606,31 @@ function columnMentioned(sqlText, qualifiedColumn) {
   return new RegExp(`\\b${lowerColumn}\\b`).test(sqlText) || sqlText.includes(lowerQualified);
 }
 
+function metricEnforcement(metric) {
+  // Plans built before metric arbitration existed (or by hand in tests) carry no
+  // enforcement flag; they keep the original, enforced behavior.
+  return metric.enforcement === 'advisory' ? 'advisory' : 'enforced';
+}
+
+/**
+ * Metric guardrail with arbitration.
+ *
+ * - Metrics whose preferred expression is a COUNT are hints only.
+ * - `net_sales` is skipped when the line-level `line_net_sales` also matched.
+ * - ADVISORY metrics (matched only through generic words such as "sales" or
+ *   "sold", or through a count/existence question) never reject; a missing
+ *   preferred column is recorded as a warning instead.
+ * - ENFORCED metrics (explicit phrases such as "net sales", "quantity sold")
+ *   reject the SQL when none of them is used. When several enforced metrics
+ *   matched, using one satisfies the check and the others become warnings, so
+ *   a stray second match cannot veto otherwise-correct SQL.
+ */
 function validateMetricGuardrails(sql, promptContext = {}) {
   const metrics = promptContext.semanticPlan?.metrics || [];
   const hasLineMetric = metrics.some((metric) => metric.name === 'line_net_sales');
   const sqlText = normalizeSqlForColumnSearch(sql);
   const checkedMetrics = [];
+  const warnings = [];
 
   for (const metric of metrics) {
     if (metric.name === 'net_sales' && hasLineMetric) {
@@ -625,16 +645,40 @@ function validateMetricGuardrails(sql, promptContext = {}) {
       continue;
     }
 
-    checkedMetrics.push({ name: metric.name, preferredColumns });
-    if (!preferredColumns.some((column) => columnMentioned(sqlText, column))) {
-      throw guardrailError(
-        'METRIC_COLUMN',
-        `SQL does not use a preferred column for semantic metric "${metric.name}" (${preferredColumns.join(', ')}).`
-      );
-    }
+    checkedMetrics.push({
+      name: metric.name,
+      preferredColumns,
+      enforcement: metricEnforcement(metric),
+      enforcementReason: metric.enforcementReason || null,
+      satisfied: preferredColumns.some((column) => columnMentioned(sqlText, column)),
+    });
   }
 
-  return checkedMetrics;
+  const enforced = checkedMetrics.filter((metric) => metric.enforcement === 'enforced');
+  if (enforced.length > 0 && !enforced.some((metric) => metric.satisfied)) {
+    const [metric] = enforced;
+    throw guardrailError(
+      'METRIC_COLUMN',
+      `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
+      { metric: metric.name, preferredColumns: metric.preferredColumns }
+    );
+  }
+
+  for (const metric of checkedMetrics) {
+    if (metric.satisfied) {
+      continue;
+    }
+    warnings.push({
+      code: 'METRIC_COLUMN_NOT_USED',
+      layer: 'guardrail',
+      metric: metric.name,
+      enforcement: metric.enforcement,
+      reason: metric.enforcement === 'advisory' ? metric.enforcementReason || 'advisory_match' : 'another_enforced_metric_used',
+      message: `SQL does not use a preferred column for ${metric.enforcement} semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
+    });
+  }
+
+  return { checkedMetrics, warnings };
 }
 
 /**
@@ -784,7 +828,7 @@ export function validateSqlGuardrails(
   const qualifiedColumns = validateQualifiedColumns(sql, knownTables, aliases, derivedTables);
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, derivedTables);
   const joinChecks = validateJoinGuardrails(sql, knownTables, aliases, derivedTables, promptContext);
-  const metricChecks = validateMetricGuardrails(sql, promptContext);
+  const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);
 
   return {
@@ -795,5 +839,6 @@ export function validateSqlGuardrails(
     metricChecks,
     masterDataChecks,
     responseTableChecks: validateResponseTableContract(response, tablesUsed, allowedTables, cteNames),
+    warnings: [...metricWarnings],
   };
 }

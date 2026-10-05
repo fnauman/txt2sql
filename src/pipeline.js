@@ -20,7 +20,7 @@ import {
   stripSqlTokens,
   tokenizeSql,
 } from './sql-tokenizer.js';
-import { escapeRegExp, uniqueStrings } from './utils.js';
+import { uniqueStrings } from './utils.js';
 
 function splitWords(value) {
   return String(value || '')
@@ -162,16 +162,6 @@ export function tokenVariants(token) {
   return variants;
 }
 
-function buildVariantSet(tokens) {
-  const variantSet = new Set();
-  for (const token of tokens) {
-    for (const variant of tokenVariants(token)) {
-      variantSet.add(variant);
-    }
-  }
-  return variantSet;
-}
-
 export function normalizeTokens(text) {
   const tokens = [];
 
@@ -308,44 +298,163 @@ export function buildQuestionContext(question) {
   };
 }
 
-function findMatchedSynonyms(entry, questionContext) {
-  const normalizedQuestionText = splitWords(questionContext.normalizedQuestion).join(' ');
-  const questionTokenSet = new Set(questionContext.questionTokens);
-  const questionVariantSet = buildVariantSet(questionContext.questionTokens);
-  const synonyms = uniqueStrings([entry.name, ...(entry.synonyms || [])]);
-  const matched = [];
+function normalizedPhrase(value) {
+  return splitWords(value).join(' ');
+}
+
+function buildQuestionWordIndex(questionContext) {
+  return splitWords(questionContext.normalizedQuestion).map((word) => ({
+    word,
+    singular: singularTokenVariant(word),
+    variants: tokenVariants(word),
+    isStopword: STOPWORDS.has(word),
+  }));
+}
+
+function buildSynonymWord(word) {
+  return {
+    word,
+    singular: singularTokenVariant(word),
+    variants: tokenVariants(word),
+    exactOnly: word.length <= 1 || STOPWORDS.has(word),
+  };
+}
+
+// One synonym word against one question word: exact, singular/plural, or a
+// shared morphological variant ("moved" ~ "move", "selling" ~ "sell").
+// Stopwords and one-letter words must match exactly, so the "without" in
+// "without postings" is significant.
+function synonymWordMatches(questionWord, synonymWord) {
+  if (questionWord.word === synonymWord.word) {
+    return true;
+  }
+  if (synonymWord.exactOnly || questionWord.isStopword) {
+    return false;
+  }
+  if (questionWord.singular === synonymWord.singular) {
+    return true;
+  }
+  for (const variant of questionWord.variants) {
+    if (synonymWord.variants.has(variant)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every place a synonym occurs in the question, as word spans [start, end).
+// Multi-word synonyms must match as a contiguous phrase (with per-word
+// inflection tolerance). Earlier versions matched multi-word synonyms as an
+// unordered bag of non-stopword tokens, so "without postings" fired on any
+// question that mentioned postings.
+function findSynonymSpans(synonyms, questionWords) {
+  const spans = [];
 
   for (const synonym of synonyms) {
-    const synonymTokens = normalizeTokens(synonym);
-    if (synonymTokens.length === 0) {
+    if (normalizeTokens(synonym).length === 0) {
       continue;
     }
 
-    const normalizedSynonymText = splitWords(synonym).join(' ');
-    const phraseMatched =
-      normalizedSynonymText.length > 0 &&
-      new RegExp(`(^|\\s)${escapeRegExp(normalizedSynonymText)}(\\s|$)`, 'i').test(normalizedQuestionText);
-    const tokenMatched = synonymTokens.every((token) => questionTokenSet.has(token));
-    // Morphological fallback: every synonym token must share a stem/inflection
-    // variant with some question token. This only ever adds matches the exact
-    // and singularized passes missed (e.g. "biggest buyers" -> "buyer").
-    const stemMatched =
-      !tokenMatched &&
-      synonymTokens.every((token) => {
-        for (const variant of tokenVariants(token)) {
-          if (questionVariantSet.has(variant)) {
-            return true;
-          }
-        }
-        return false;
-      });
-
-    if (phraseMatched || tokenMatched || stemMatched) {
-      matched.push(synonym);
+    const synonymWords = splitWords(synonym).map(buildSynonymWord);
+    for (let start = 0; start + synonymWords.length <= questionWords.length; start += 1) {
+      if (synonymWords.every((synonymWord, offset) => synonymWordMatches(questionWords[start + offset], synonymWord))) {
+        spans.push({ synonym, start, end: start + synonymWords.length });
+      }
     }
   }
 
-  return matched;
+  return spans;
+}
+
+function findMatchedSynonyms(entry, questionContext) {
+  const synonyms = uniqueStrings([entry.name, ...(entry.synonyms || [])]);
+  const matched = new Set(findSynonymSpans(synonyms, buildQuestionWordIndex(questionContext)).map((span) => span.synonym));
+  return synonyms.filter((synonym) => matched.has(synonym));
+}
+
+/**
+ * Longest-span arbitration across semantic-layer entries.
+ *
+ * When a multi-word synonym of one entry covers a span of the question, shorter
+ * synonyms of OTHER entries that fall entirely inside that span do not match:
+ * "sales documents" (entity) consumes "sales", so metric net_sales does not
+ * fire, and "credit memo" (document type) consumes "credit". Spans are resolved
+ * longest first and only surviving spans can suppress others.
+ *
+ * Exception: metric phrases are compositional ("brand sales", "biggest buyers",
+ * "product sales" name a dimension plus a measure), so a metric span does not
+ * suppress the entity it mentions.
+ */
+function arbitrateSemanticSpans(candidates) {
+  const spanLength = (span) => span.end - span.start;
+  const ordered = [...candidates].sort(
+    (left, right) => spanLength(right) - spanLength(left) || left.start - right.start
+  );
+  const active = [];
+  const suppressed = [];
+
+  for (const candidate of ordered) {
+    const suppressor = active.find(
+      (other) =>
+        other.key !== candidate.key &&
+        spanLength(other) >= 2 &&
+        spanLength(other) > spanLength(candidate) &&
+        other.start <= candidate.start &&
+        candidate.end <= other.end &&
+        !(other.kind === 'metric' && candidate.kind === 'entity')
+    );
+
+    if (suppressor) {
+      suppressed.push({ ...candidate, suppressedBy: { key: suppressor.key, synonym: suppressor.synonym } });
+      continue;
+    }
+    active.push(candidate);
+  }
+
+  return { active, suppressed };
+}
+
+// Count / list / existence phrasings. In such a question a matched amount or
+// quantity metric describes which rows to count, not the measure to aggregate,
+// so it is only enforced when an explicit multi-word metric phrase is present.
+const COUNT_OR_EXISTENCE_INTENT_PATTERNS = [
+  /\bhow many\b/,
+  /\bnumber of\b/,
+  /\bcount\b/,
+  /\b(?:do|does|did) not have\b/,
+  /\b(?:don|doesn|didn) t have\b/,
+  /\b(?:have|has|had) no\b/,
+  /\bwithout\b/,
+  /\bnever\b/,
+  /\bwhich\b.*\bdid we\b/,
+  /\b(?:is|are|was|were) there\b/,
+];
+
+export function detectCountOrExistenceIntent(question) {
+  const text = normalizedPhrase(question);
+  return COUNT_OR_EXISTENCE_INTENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
+ * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning).
+ * - Synonyms listed in the metric's `advisory_synonyms` (generic words such as
+ *   "sales", "sold", "moved") never enforce on their own.
+ * - In a count/list/existence question only an explicit multi-word metric
+ *   phrase ("units sold", "net sales") enforces.
+ */
+function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
+  const advisory = new Set(uniqueStrings(entry.advisory_synonyms).map(normalizedPhrase));
+  const advisoryMatches = matchedSynonyms.filter((synonym) => advisory.has(normalizedPhrase(synonym)));
+  const explicitMatches = matchedSynonyms.filter((synonym) => !advisory.has(normalizedPhrase(synonym)));
+
+  if (explicitMatches.length === 0) {
+    return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
+  }
+  if (countIntent && !explicitMatches.some((synonym) => splitWords(synonym).length > 1)) {
+    return { enforcement: 'advisory', enforcementReason: 'count_or_existence_intent', explicitMatches, advisoryMatches };
+  }
+  return { enforcement: 'enforced', enforcementReason: 'explicit_metric_phrase', explicitMatches, advisoryMatches };
 }
 
 function semanticMatchScore(matchedSynonyms) {
@@ -434,10 +543,16 @@ function addDerivedMetrics(metrics, semanticLayer) {
 
   if (hasGeneralSalesMetric && !metricNames.has('line_net_sales')) {
     const lineMetric = (semanticLayer.metrics || []).find((metric) => metric.name === 'line_net_sales');
+    const salesMetric = derivedMetrics.find((metric) => metric.name === 'net_sales');
     if (lineMetric) {
-      derivedMetrics.push(
-        summarizeSemanticEntry(lineMetric, ['sales with product filter context'])
-      );
+      // The derived line-level metric is exactly as strong as the sales match
+      // that triggered it.
+      derivedMetrics.push({
+        ...summarizeSemanticEntry(lineMetric, ['sales with product filter context']),
+        enforcement: salesMetric.enforcement,
+        enforcementReason: salesMetric.enforcementReason,
+        derivedFrom: 'net_sales',
+      });
     }
   }
 
@@ -470,21 +585,67 @@ function findMatchedClarificationRules(clarificationRules, questionContext) {
     .filter((rule) => rule.matchedTriggers.length > 0);
 }
 
+function matchSemanticLayer(semanticLayer, questionContext) {
+  const questionWords = buildQuestionWordIndex(questionContext);
+  const sources = [
+    ...(semanticLayer.entities || []).map((entry) => ({ kind: 'entity', entry, matchEntry: entry })),
+    ...(semanticLayer.metrics || []).map((entry) => ({ kind: 'metric', entry, matchEntry: entry })),
+    ...(semanticLayer.filter_hints || []).map((entry) => ({
+      kind: 'filter',
+      entry,
+      matchEntry: buildFilterHintMatchEntry(entry, semanticLayer),
+    })),
+  ].map((source, index) => ({
+    ...source,
+    key: `${source.kind}:${source.entry.name}:${index}`,
+    synonyms: uniqueStrings([source.matchEntry.name, ...(source.matchEntry.synonyms || [])]),
+  }));
+
+  const candidates = sources.flatMap((source) =>
+    findSynonymSpans(source.synonyms, questionWords).map((span) => ({
+      ...span,
+      key: source.key,
+      kind: source.kind,
+      entryName: source.entry.name,
+    }))
+  );
+  const { active, suppressed } = arbitrateSemanticSpans(candidates);
+
+  const matches = sources
+    .map((source) => {
+      const activeSynonyms = new Set(active.filter((span) => span.key === source.key).map((span) => span.synonym));
+      return { ...source, matchedSynonyms: source.synonyms.filter((synonym) => activeSynonyms.has(synonym)) };
+    })
+    .filter((source) => source.matchedSynonyms.length > 0);
+
+  return {
+    matches,
+    suppressedMatches: suppressed.map((span) => ({
+      kind: span.kind,
+      name: span.entryName,
+      synonym: span.synonym,
+      suppressedBy: sources.find((source) => source.key === span.suppressedBy.key)?.entry.name || null,
+      suppressedBySynonym: span.suppressedBy.synonym,
+    })),
+  };
+}
+
 export function buildSemanticPlan(question, { questionContext = null, semanticLayer = loadSemanticLayerSync() } = {}) {
   const context = questionContext || buildQuestionContext(question);
-  const entities = (semanticLayer.entities || [])
-    .map((entry) => [entry, findMatchedSynonyms(entry, context)])
-    .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
-    .map(([entry, matchedSynonyms]) => summarizeSemanticEntry(entry, matchedSynonyms));
-  let metrics = (semanticLayer.metrics || [])
-    .map((entry) => [entry, findMatchedSynonyms(entry, context)])
-    .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
-    .map(([entry, matchedSynonyms]) => summarizeSemanticEntry(entry, matchedSynonyms));
-  const filterHints = (semanticLayer.filter_hints || [])
-    .map((entry) => {
-      const matchEntry = buildFilterHintMatchEntry(entry, semanticLayer);
-      return [entry, removeSubsumedAliasMatches(findMatchedSynonyms(matchEntry, context), matchEntry.aliasOnlyValues)];
-    })
+  const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
+  const { matches, suppressedMatches } = matchSemanticLayer(semanticLayer, context);
+  const entities = matches
+    .filter((match) => match.kind === 'entity')
+    .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
+  let metrics = matches
+    .filter((match) => match.kind === 'metric')
+    .map((match) => ({
+      ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
+      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
+    }));
+  const filterHints = matches
+    .filter((match) => match.kind === 'filter')
+    .map((match) => [match.entry, removeSubsumedAliasMatches(match.matchedSynonyms, match.matchEntry.aliasOnlyValues)])
     .filter(([, matchedSynonyms]) => matchedSynonyms.length > 0)
     .map(([entry, matchedSynonyms]) => summarizeFilterHint(entry, matchedSynonyms));
   const hasProductContext =
@@ -518,6 +679,8 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     defaultFilters,
     clarificationRules: findMatchedClarificationRules(semanticLayer.clarification_rules || [], context),
     joinHints: findSemanticJoinHints(semanticLayer.join_paths || [], requiredTables),
+    countIntent,
+    suppressedMatches,
   };
 }
 
@@ -1058,8 +1221,15 @@ function formatSemanticHints(semanticPlan) {
   }
 
   for (const metric of semanticPlan.metrics || []) {
+    // An advisory metric matched only generic wording ("sales", "sold") or a
+    // count/existence question, so say so instead of steering a COUNT query
+    // toward an amount column.
+    const advisoryNote =
+      metric.enforcement === 'advisory'
+        ? ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)'
+        : '';
     lines.push(
-      `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
+      `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}${advisoryNote}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
         metric.preferredTables.length > 0 ? ` using tables ${metric.preferredTables.join(', ')}` : ''
       }.`
     );

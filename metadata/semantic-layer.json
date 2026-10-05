@@ -220,6 +220,11 @@
         "biggest buyers",
         "top buyers"
       ],
+      "advisory_synonyms": [
+        "sales",
+        "sale",
+        "buyers"
+      ],
       "preferred_expression": "COALESCE(SalesDocument.NetAmount, 0)",
       "preferred_columns": [
         "SalesDocument.NetAmount"
@@ -264,6 +269,13 @@
         "quantity sold",
         "qty sold",
         "units sold",
+        "sold",
+        "sell",
+        "moved",
+        "movement",
+        "stopped selling"
+      ],
+      "advisory_synonyms": [
         "sold",
         "sell",
         "moved",
