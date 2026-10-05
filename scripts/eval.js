@@ -41,10 +41,10 @@ import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, op
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
-import { rescoreReportCases } from '../src/eval/rescore.js';
+import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite } from '../src/eval/runner.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
-import { describeFilters, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
+import { describeFilters, filterSuiteEntries, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { calculateCost } from '../src/pricing.js';
@@ -117,6 +117,108 @@ function usageError(message) {
   return new HarnessError(`${message}\nRun with --help for usage.`, { code: 'USAGE' });
 }
 
+// Every flag the runner (and its env loader) understands. Anything else is a
+// usage error: a misspelled flag must not silently change what runs (e.g.
+// `--rescore` without its file would start a paid live run).
+const VALUE_FLAGS = new Set([
+  '--profile',
+  '--dataset',
+  '--dataset-file',
+  '--dev-set',
+  '--datasets-dir',
+  '--split',
+  '--case-id',
+  '--tag',
+  '--intent',
+  '--model',
+  '--repeat',
+  '--concurrency',
+  '--case-timeout-ms',
+  '--budget-usd',
+  '--fixtures',
+  '--controls-dir',
+  '--min-kill-rate',
+  '--min-heldout-kill-rate',
+  '--compare',
+  '--min-accuracy',
+  '--rescore',
+  '--output-dir',
+  '--results-file',
+  '--trace-file',
+  '--trace-dir',
+  '--dotenv',
+  '--env-dir',
+]);
+const BOOLEAN_FLAGS = new Set([
+  '--help',
+  '--trace',
+  '--no-docker',
+  '--no-seed',
+  '--skip-verify',
+  '--skip-controls',
+  '--refresh-schema',
+  '--no-baseline',
+  '--gate',
+  '--write-baseline',
+  '--offline',
+  '--use-home-env',
+]);
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const above = previous[j];
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function suggestFlag(name) {
+  let best = null;
+  for (const flag of [...VALUE_FLAGS, ...BOOLEAN_FLAGS]) {
+    const distance = flag.startsWith(name) ? 1 : editDistance(name, flag);
+    if (distance <= 3 && (!best || distance < best.distance)) {
+      best = { flag, distance };
+    }
+  }
+  return best ? ` Did you mean ${best.flag}?` : '';
+}
+
+/**
+ * Rejects unknown flags, stray arguments, value flags without a value (or
+ * whose value is empty or another flag) and boolean flags given a value.
+ */
+export function validateEvalArgv(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith('--')) {
+      throw usageError(`Unexpected argument "${arg}" (every option is a --flag).`);
+    }
+    const equals = arg.indexOf('=');
+    const name = equals === -1 ? arg : arg.slice(0, equals);
+    if (VALUE_FLAGS.has(name)) {
+      const value = equals === -1 ? argv[index + 1] : arg.slice(equals + 1);
+      if (value === undefined || String(value).trim() === '' || (equals === -1 && value.startsWith('--'))) {
+        throw usageError(`${name} needs a value.`);
+      }
+      if (equals === -1) {
+        index += 1;
+      }
+    } else if (BOOLEAN_FLAGS.has(name)) {
+      if (equals !== -1) {
+        throw usageError(`${name} takes no value; got "${arg}".`);
+      }
+    } else {
+      throw usageError(`Unknown option "${name}".${suggestFlag(name)}`);
+    }
+  }
+}
+
 function parseInteger(argv, name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = getOptionValue(argv, name);
   if (raw === null) {
@@ -151,6 +253,7 @@ export function defaultBaselinePath(model, baselinesDir = DEFAULT_BASELINES_DIR)
 
 /** Parses the command line into run options (throws HarnessError on bad usage). */
 export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = process.env } = {}) {
+  validateEvalArgv(argv);
   const profile = getOptionValue(argv, '--profile') || defaultProfile;
   if (!PROFILES.includes(profile)) {
     throw usageError(`--profile must be one of ${PROFILES.join(', ')}; got "${profile}".`);
@@ -209,11 +312,25 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     traceFile: getOptionValue(argv, '--trace-file') ? path.resolve(getOptionValue(argv, '--trace-file')) : null,
     traceToStdout: hasOptionFlag(argv, '--trace'),
     failOnAnyFailure: benchmark,
+    argv: [...argv],
   };
   if (options.writeBaseline && (options.rescore || options.offline)) {
     throw usageError('--write-baseline only applies to a live run.');
   }
   return options;
+}
+
+/**
+ * Every parsed option, as recorded in the report's runner block (none is a
+ * secret; absolute paths are made repo-relative).
+ */
+export function describeRunnerFlags(options) {
+  const relative = (value) => (typeof value === 'string' && path.isAbsolute(value) ? repoRelative(value) : value);
+  return Object.fromEntries(
+    Object.entries(options)
+      .filter(([key]) => key !== 'argv')
+      .map(([key, value]) => [key, Array.isArray(value) ? value.map(relative) : relative(value)])
+  );
 }
 
 function markdownPathFor(reportPath) {
@@ -368,10 +485,12 @@ async function loadBaseline(options, model, cli) {
   return { path: baselinePath, report };
 }
 
-function finish(report, options, cli) {
-  const { code, reasons } = computeExitCode(report, options);
+function finish(result, options, cli) {
+  const { code, reasons } = result;
+  // 1 is a failed --gate, or (benchmark profile) a failed case.
+  const label = code === 2 ? 'HARNESS' : options.gate ? 'GATE' : 'FAIL';
   for (const reason of reasons) {
-    cli.log(`${code === 2 ? 'HARNESS' : 'GATE'}: ${reason}`);
+    cli.log(`${label}: ${reason}`);
   }
   if (code !== 0) {
     cli.log(`Exit code ${code}.`);
@@ -379,8 +498,48 @@ function finish(report, options, cli) {
   return code;
 }
 
-async function runLive({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification }) {
-  const model = options.model;
+/**
+ * Why a run must not become the committed baseline (null when it may): only
+ * a clean, complete run (exit 0, no case skipped) replaces it.
+ */
+export function baselineRefusal(report, exit) {
+  if (exit.code !== 0) {
+    return `the run exited ${exit.code} (${exit.reasons.join('; ')})`;
+  }
+  const skipped = report.budget?.skippedCases?.length || 0;
+  if (skipped > 0) {
+    return `${skipped} case(s) were skipped by the budget`;
+  }
+  return null;
+}
+
+/**
+ * Fails fast (before any setup or spend) when --gate has nothing to compare
+ * with: no --compare and no default baseline. With --min-accuracy the gate
+ * still has a meaning, so it only warns.
+ */
+async function checkGateBaseline(options, cli) {
+  if (!options.gate || options.compare || options.rescore) {
+    return;
+  }
+  const candidate = defaultBaselinePath(options.model);
+  if (!options.noBaseline && (await fileExists(candidate))) {
+    return;
+  }
+  const where = options.noBaseline ? 'and --no-baseline turns off the default baseline' : `and there is none at ${repoRelative(candidate)}`;
+  if (options.minAccuracy != null) {
+    cli.log(`warning: --gate has no baseline to compare with (${where.replace(/^and /, '')}); only --min-accuracy ${options.minAccuracy} is checked.`);
+    return;
+  }
+  throw new HarnessError(
+    `--gate needs a baseline to compare with, ${where}. Pass --compare <report.json>, commit a baseline ` +
+      '(npm run eval -- --write-baseline), or add --min-accuracy X to gate on accuracy alone.',
+    { code: 'NO_BASELINE' }
+  );
+}
+
+/** The OpenAI client for a live run, checked before anything is set up or spent. */
+function createLiveClient(options) {
   let client;
   try {
     client = createOpenAiClient();
@@ -392,12 +551,17 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       { code: error.code || 'OPENAI_NOT_CONFIGURED', cause: error }
     );
   }
-  if (options.budgetUsd != null && calculateCost(model, { prompt_tokens: 1, completion_tokens: 1 }) === null) {
+  if (options.budgetUsd != null && calculateCost(options.model, { prompt_tokens: 1, completion_tokens: 1 }) === null) {
     throw new HarnessError(
-      `--budget-usd needs a price for model "${model}" (src/pricing.js or MODEL_PRICING_OVERRIDES); without it the cost cannot be tracked.`,
+      `--budget-usd needs a price for model "${options.model}" (src/pricing.js or MODEL_PRICING_OVERRIDES); without it the cost cannot be tracked.`,
       { code: 'NO_PRICING' }
     );
   }
+  return client;
+}
+
+async function runLive({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client }) {
+  const model = options.model;
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const runPaths = createBenchmarkRunPaths({ datasetName: selection.name, model, outputDir: options.outputDir, traceDir: options.traceDir });
@@ -414,6 +578,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
     fixtures: connections.map((entry) => entry.name),
     verify: options.verify,
+    flags: describeRunnerFlags(options),
   };
   const provenance = await collectProvenance({
     schema,
@@ -436,6 +601,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
   });
   await trace.emit('run.started', {
     model,
+    argv: options.argv || [],
     suite,
     runner,
     provenance,
@@ -520,18 +686,24 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     reportPath,
   });
   await writeReport(report, { reportPath, cli });
+  const exit = computeExitCode(report, options);
   if (options.writeBaseline) {
     const target = defaultBaselinePath(model);
-    await writeJsonFile(target, report);
-    cli.log(`Baseline written: ${target}`);
-    if (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length) {
-      cli.log('  note: this run used a subset of the default suite; a committed baseline should cover the whole suite.');
-    }
-    if (report.provenance?.git?.dirty) {
-      cli.log('  note: the working tree is dirty; commit first so the baseline records a reproducible git sha.');
+    const refusal = baselineRefusal(report, exit);
+    if (refusal) {
+      cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
+    } else {
+      await writeJsonFile(target, report);
+      cli.log(`Baseline written: ${target}`);
+      if (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length) {
+        cli.log('  note: this run used a subset of the default suite; a committed baseline should cover the whole suite.');
+      }
+      if (report.provenance?.git?.dirty) {
+        cli.log('  note: the working tree is dirty; commit first so the baseline records a reproducible git sha.');
+      }
     }
   }
-  return finish(report, options, cli);
+  return finish(exit, options, cli);
 }
 
 async function runRescore({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification }) {
@@ -539,19 +711,39 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   if (!sourcePath) {
     const candidate = defaultBaselinePath(options.model);
     if (!(await fileExists(candidate))) {
+      if (options.gate) {
+        throw new HarnessError(`--offline --gate needs a baseline to rescore, and there is none at ${repoRelative(candidate)}.`, { code: 'NO_BASELINE' });
+      }
       const message = `No baseline to rescore at ${repoRelative(candidate)}; preflight, fixtures and verification passed, nothing else to do offline.`;
       cli.log(isGithubActions() ? `::notice title=eval --offline::${message}` : `\n${message}`);
       return 0;
     }
     sourcePath = candidate;
   }
-  const source = await readJson(sourcePath, 'report to rescore');
-  if (!Array.isArray(source.results)) {
+  const recorded = await readJson(sourcePath, 'report to rescore');
+  if (!Array.isArray(recorded.results)) {
     throw new HarnessError(`${sourcePath} has no results[]; is it an evaluation report.json?`, { code: 'REPORT_INVALID' });
   }
-  const model = source.model || options.model;
+  const model = recorded.model || options.model;
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const currentCases = new Map(selection.entries.map((entry) => [entry.testCase.id, entry.testCase]));
+  // The selection filters pick which recorded cases are rescored (judged on
+  // today's case definition when there is one).
+  const filters = { split: options.split, caseIds: options.caseIds, tags: options.tags, intents: options.intents };
+  let source = recorded;
+  if (describeFilters(filters)) {
+    const kept = new Set(
+      filterSuiteEntries(
+        recorded.results.map((record) => ({ testCase: currentCases.get(record.id) || testCaseFromRecord(record) })),
+        filters
+      ).map((entry) => entry.testCase.id)
+    );
+    if (kept.size === 0) {
+      throw new HarnessError(`No recorded case of ${repoRelative(sourcePath)} matched the selection (${describeFilters(filters)}).`, { code: 'EMPTY_SELECTION' });
+    }
+    source = { ...recorded, results: recorded.results.filter((record) => kept.has(record.id)) };
+    cli.log(`Rescoring ${source.results.length} of ${recorded.results.length} recorded case(s) (${describeFilters(filters)}).`);
+  }
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
   const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs });
   const goldCache = createGoldCache();
@@ -584,7 +776,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     duplicates: [],
     filters: { split: 'all', caseIds: [], tags: [], intents: [] },
   };
-  const suite = { ...sourceSuite, selectedCaseCount: caseRecords.length };
+  const suite = { ...sourceSuite, selectedCaseCount: caseRecords.length, ...(describeFilters(filters) ? { filters } : {}) };
   const runner = {
     ...(source.runner || { repeat: source.reliability?.repeat ?? 1 }),
     rescore: true,
@@ -593,6 +785,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
     fixtures: connections.map((entry) => entry.name),
     verify: options.verify,
+    flags: describeRunnerFlags(options),
   };
   const provenance = await collectProvenance({
     schema,
@@ -640,7 +833,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     traceFile: null,
   });
   await writeReport(report, { reportPath, cli });
-  return finish(report, options, cli);
+  return finish(computeExitCode(report, options), options, cli);
 }
 
 /** Runs the evaluation for parsed options; returns the exit code. */
@@ -654,6 +847,9 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): model ${options.model}; ` +
       `fixtures ${fixtures.map((fixture) => fixture.name).join(', ')}`
   );
+  // Configuration problems fail before anything is started, seeded or spent.
+  await checkGateBaseline(options, cli);
+  const client = rescoreMode ? null : createLiveClient(options);
 
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH, refreshSchema: options.refreshSchema });
 
@@ -741,7 +937,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       cli.log('Verify: skipped.');
     }
 
-    const context = { options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification };
+    const context = { options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client };
     return rescoreMode ? await runRescore(context) : await runLive(context);
   } finally {
     await closeFixtureConnections(connections);
@@ -760,7 +956,9 @@ export async function main(argv = process.argv.slice(2), { profile = 'eval' } = 
     cli = createCliOutput({ traceToStdout: options.traceToStdout });
     return await runEval(options, { cli });
   } catch (error) {
-    if (error instanceof HarnessError || error?.exitCode === 2) {
+    // Known failures (a HarnessError, or any error with a code, e.g. an env
+    // file that does not exist) print their message; only a bug gets a stack.
+    if (error instanceof HarnessError || error?.exitCode === 2 || (typeof error?.code === 'string' && error.code !== '')) {
       cli.error(`eval: ${error.message}`);
       return 2;
     }

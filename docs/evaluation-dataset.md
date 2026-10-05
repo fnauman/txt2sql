@@ -508,6 +508,12 @@ different question or gold in two datasets is a dataset conflict (exit 2).
 Filters: `--dataset a,b` or `--dataset-file`, `--split dev|holdout|all` (a case
 without a `split` field is dev; default all), `--case-id`, `--tag` (any of),
 `--intent`. `--fixtures` scores on a subset (it must include `seed`).
+Flags are checked strictly: an unknown flag (with a "did you mean"), a flag
+that needs a value but has none (or an empty one, or another flag), or a
+stray argument stops with exit 2 before anything starts, so a typo cannot
+silently drop `--budget-usd` or turn a `--rescore` into a paid run. A live run
+also checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price)
+before the database is started or seeded.
 
 `npm run benchmark` and `npm run evaluate` (and `node scripts/evaluate.js`) run
 the same runner with `--profile benchmark`: one dataset (default `core-public`),
@@ -574,8 +580,10 @@ there too.
   (sha256 of the optimized system prompt, `BUSINESS_RULES`,
   `FEW_SHOT_EXAMPLES` and the request options), semantic-layer version (sha256
   of `metadata/semantic-layer.json`), schema, fixture, dataset and controls
-  hashes, model, the LLM endpoint host (never keys), Node and the runner flags.
-  The same short versions are stamped on every trace line.
+  hashes, model, the LLM endpoint host (never keys), Node and the runner
+  flags (every parsed option, in `runner.flags`; the raw argv is in the
+  trace's `run.started`). The same short versions are stamped on every trace
+  line.
 
 ### Statistics
 
@@ -618,8 +626,13 @@ Rescoring the same report twice gives identical results (durations are not
 re-measured; every statistic is seeded). The new report links back with
 `rescoredFrom` and compares with the source report by default.
 
+The selection filters (`--split`, `--case-id`, `--tag`, `--intent`) pick
+which recorded cases are rescored; `--dataset` picks today's case
+definitions and what is verified.
+
 `--offline` runs the preflight, fixtures and verification, then rescores
-`eval/baselines/<model>.json` when it exists, or says there is none and exits 0.
+`eval/baselines/<model>.json` when it exists, or says there is none and exits 0
+(exit 2 with `--gate`, which then has nothing to check).
 Outcomes a rescore could not re-check (a recorded provider outage, a run that
 was cut short) are kept, flagged `rescore.inherited`, and do not count as a
 harness failure today.
@@ -641,7 +654,10 @@ read too.
 
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`,
-when strict accuracy is below X. With 26 cases a significant change needs at
+when strict accuracy is below X. `--gate` with no baseline to compare with
+(no `--compare` and no `eval/baselines/<model>.json`, or `--no-baseline`)
+stops with exit 2 before anything starts, instead of passing silently; with
+`--min-accuracy` it only warns and gates on accuracy. With 26 cases a significant change needs at
 least 6 unanimous flips in one direction (p = 0.031); 5 give p = 0.0625.
 
 Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
@@ -657,6 +673,8 @@ worse".
 The committed baseline for a model lives at `eval/baselines/<model>.json`: a
 plain report of the whole default suite (see `eval/baselines/README.md`).
 `npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree.
+It is only written when the run exits 0 with no case skipped by the budget;
+otherwise the console says why and the existing file is left alone.
 
 ### CI
 

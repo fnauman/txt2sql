@@ -4,7 +4,7 @@ import test from 'node:test';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { verifySuite } from '../src/eval/verify.js';
-import { computeExitCode, defaultBaselinePath, parseEvalArgs } from '../scripts/eval.js';
+import { baselineRefusal, computeExitCode, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval } from '../scripts/eval.js';
 
 test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline', () => {
   const options = parseEvalArgs([], { env: {} });
@@ -50,6 +50,20 @@ test('bad usage is a harness error (exit 2)', () => {
     ['--gate', '--min-accuracy', '2'],
     ['--profile', 'nope'],
     ['--offline', '--write-baseline'],
+    // misspelled, valueless or empty flags never fall back to a default
+    ['--budget', '0.0001'],
+    ['--concurency', '9'],
+    ['--repeats', '3'],
+    ['--budget-usd'],
+    ['--budget-usd', ''],
+    ['--budget-usd='],
+    ['--repeat'],
+    ['--compare'],
+    ['--rescore'],
+    ['--rescore', '--offline'],
+    ['--output-dir', '--gate'],
+    ['--gate=true'],
+    ['report.json'],
   ]) {
     assert.throws(() => parseEvalArgs(argv, { env: {} }), (error) => error instanceof HarnessError && error.exitCode === 2, argv.join(' '));
   }
@@ -284,4 +298,63 @@ test('verifySuite checks a case shared by two datasets once and applies the kill
     ['edge', 2, 1, 3, 4],
   ]);
   assert.deepEqual(result.gateFailures, ['edge: design kill rate 75.0% < 95.0%']);
+});
+
+test('unknown flags name the closest known one', () => {
+  const messageOf = (argv) => {
+    try {
+      parseEvalArgs(argv, { env: {} });
+    } catch (error) {
+      return error.message;
+    }
+    return null;
+  };
+  assert.match(messageOf(['--concurency', '9']), /Unknown option "--concurency"\. Did you mean --concurrency\?/);
+  assert.match(messageOf(['--budget', '1']), /Did you mean --budget-usd\?/);
+  assert.match(messageOf(['--rescore']), /--rescore needs a value\./);
+  assert.match(messageOf(['--xyzzy-flag']), /^Unknown option "--xyzzy-flag"\.\n/);
+  // Inline values and every env-source flag are accepted.
+  const options = parseEvalArgs(['--repeat=2', '--dotenv', 'x.env', '--use-home-env', '--trace'], { env: {} });
+  assert.equal(options.repeat, 2);
+  assert.deepEqual(options.argv, ['--repeat=2', '--dotenv', 'x.env', '--use-home-env', '--trace']);
+});
+
+test('the runner block records every parsed flag, paths repo-relative', () => {
+  const options = parseEvalArgs(['--gate', '--min-accuracy', '0.5', '--skip-controls', '--min-kill-rate', '0.9', '--no-seed', '--compare', 'eval/baselines/x.json'], { env: {} });
+  const flags = describeRunnerFlags(options);
+  assert.equal('argv' in flags, false);
+  assert.deepEqual([flags.gate, flags.minAccuracy, flags.checkControls, flags.minKillRate, flags.seed], [true, 0.5, false, 0.9, false]);
+  assert.equal(flags.compare, 'eval/baselines/x.json');
+  assert.equal(flags.outputDir, 'generated/runs');
+});
+
+test('--write-baseline only replaces the baseline with a clean, complete run', () => {
+  const report = { budget: { skippedCases: [] } };
+  assert.equal(baselineRefusal(report, { code: 0, reasons: [] }), null);
+  assert.match(baselineRefusal(report, { code: 2, reasons: ['9 repetition(s): LLM provider outage errors (llm_outage)'] }), /exited 2 \(9 repetition/);
+  assert.match(baselineRefusal(report, { code: 1, reasons: ['significantly worse'] }), /exited 1/);
+  assert.match(baselineRefusal({ budget: { skippedCases: ['a', 'b'] } }, { code: 0, reasons: [] }), /2 case\(s\) were skipped by the budget/);
+});
+
+test('configuration problems fail before any setup: --gate without a baseline, a live run without a key', async () => {
+  const lines = [];
+  const cli = { log: (line) => lines.push(line), error: (line) => lines.push(line) };
+  const base = parseEvalArgs(['--model', 'no-such-model-baseline', '--gate'], { env: {} });
+  await assert.rejects(runEval(base, { cli, env: {} }), (error) => error.code === 'NO_BASELINE' && /--gate needs a baseline to compare with, and there is none at eval\/baselines\/no-such-model-baseline\.json/.test(error.message));
+  await assert.rejects(runEval({ ...base, noBaseline: true }, { cli, env: {} }), (error) => error.code === 'NO_BASELINE' && /--no-baseline/.test(error.message));
+
+  const saved = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    // With --min-accuracy the gate still means something: a warning, then the key check fails first.
+    await assert.rejects(
+      runEval({ ...base, minAccuracy: 0.5 }, { cli, env: {} }),
+      (error) => error.code === 'OPENAI_NOT_CONFIGURED' && /OPENAI_API_KEY is required for a live run/.test(error.message)
+    );
+    assert.ok(lines.some((line) => /warning: --gate has no baseline to compare with .*only --min-accuracy 0\.5 is checked/.test(line)), lines.join('\n'));
+  } finally {
+    if (saved !== undefined) {
+      process.env.OPENAI_API_KEY = saved;
+    }
+  }
 });
