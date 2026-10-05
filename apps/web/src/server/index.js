@@ -132,6 +132,7 @@ function totalRowCountOf(result) {
 function publicResult(result, trace, includeDebug, dataResidency) {
   const response = result.response || {};
   const errorStage = result.success ? null : result.errorStage || null;
+  const errorCode = result.success ? null : result.errorCode ?? null;
   const payload = {
     success: result.success,
     question: result.question,
@@ -151,10 +152,16 @@ function publicResult(result, trace, includeDebug, dataResidency) {
     llmCost: result.llmCost || null,
     attemptCount: result.attemptCount || 0,
     errorStage,
-    errorCode: result.success ? null : result.errorCode ?? null,
+    errorCode,
+    // error.code is the classified code too: the raw error often has none (an
+    // OpenAI SDK timeout is LLM_TIMEOUT by class, a MariaDB statement timeout
+    // is ER_STATEMENT_TIMEOUT by errno), and the SSE error frame is this object.
     error: result.success
       ? null
-      : toClientError(result.serializedError || serializeError(result.error), { stage: errorStage }),
+      : toClientError(
+          { ...(result.serializedError || serializeError(result.error)), ...(errorCode ? { code: errorCode } : {}) },
+          { stage: errorStage }
+        ),
     debug: includeDebug
       ? {
           events: trace.events,

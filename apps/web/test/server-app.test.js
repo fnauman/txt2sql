@@ -4,9 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { APIUserAbortError } from 'openai';
+import { APIConnectionTimeoutError, APIUserAbortError } from 'openai';
 
 import { validateReadOnlySql } from '../../../src/pipeline.js';
+import { errorCodeOf } from '../../../src/query-service.js';
 import { serializeError } from '../../../src/trace.js';
 
 import {
@@ -523,6 +524,49 @@ test('failed questions expose errorStage/errorCode in JSON and SSE error payload
       assert.deepEqual(errorFrame.data, { name: 'Error', message: expected.message, code: expected.code, stage: expected.stage });
       assert.equal(frames.at(-1).event, 'done');
     }
+  });
+});
+
+test('error.code carries the classified code in JSON and SSE when the raw error has none', async () => {
+  // Real pipeline: the OpenAI SDK's timeout error has no `code`; it is
+  // classified as LLM_TIMEOUT by class.
+  const runtime = createFakeRuntime();
+  runtime.client = {
+    chat: {
+      completions: {
+        async create() {
+          throw new APIConnectionTimeoutError();
+        },
+      },
+    },
+  };
+  await withApp({ config: testConfig(), runtimeFactory: async () => runtime }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'How many active customers do we have?' } });
+    assert.equal(json.status, 504);
+    assert.equal(json.json.errorCode, 'LLM_TIMEOUT');
+    assert.equal(json.json.error.code, 'LLM_TIMEOUT');
+    assert.equal(json.json.error.stage, 'llm');
+
+    const frames = parseSse((await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'How many active customers?' } })).text);
+    const errorFrame = frames.find((frame) => frame.event === 'error');
+    assert.equal(errorFrame.data.code, 'LLM_TIMEOUT');
+    assert.equal(errorFrame.data.stage, 'llm');
+  });
+
+  // MariaDB's statement timeout arrives from mysql2 with errno 1969 and no code.
+  const timeout = Object.assign(new Error('Query execution was interrupted (max_statement_time exceeded)'), { errno: 1969 });
+  const { factory } = createRuntimeFactory();
+  const { runQuestion } = recordingRunner((args) => ({
+    ...failureResult(args.question, { stage: 'execution', code: errorCodeOf(timeout), message: timeout.message }),
+    serializedError: serializeError(timeout),
+  }));
+  await withApp({ config: testConfig(), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'slow join' } });
+    assert.equal(json.json.errorCode, 'ER_STATEMENT_TIMEOUT');
+    assert.equal(json.json.error.code, 'ER_STATEMENT_TIMEOUT');
+
+    const frames = parseSse((await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'slow join' } })).text);
+    assert.equal(frames.find((frame) => frame.event === 'error').data.code, 'ER_STATEMENT_TIMEOUT');
   });
 });
 
