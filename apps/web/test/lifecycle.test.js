@@ -71,6 +71,7 @@ test('shutdown force-closes connections that outlive the timeout', async () => {
   const { factory } = createRuntimeFactory();
   const config = testConfig({ WEB_SHUTDOWN_TIMEOUT_MS: '50' });
   const never = deferred();
+  const reached = deferred();
   let aborted = false;
   const { app, close } = createApp({
     config,
@@ -80,6 +81,7 @@ test('shutdown force-closes connections that outlive the timeout', async () => {
       args.signal.addEventListener('abort', () => {
         aborted = true;
       });
+      reached.resolve();
       await never.promise;
       return successResult(args.question);
     },
@@ -90,7 +92,9 @@ test('shutdown force-closes connections that outlive the timeout', async () => {
   const inFlight = request(lifecycle.address.port, { method: 'POST', path: '/api/query', body: { question: 'stuck' } }).catch(
     (error) => error
   );
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Wait for the request to be inside the handler (a fixed sleep raced the
+  // POST under load, so shutdown sometimes found nothing in flight).
+  await reached.promise;
   const result = await lifecycle.shutdown();
   assert.deepEqual(result, { forced: true });
   assert.ok((await inFlight) instanceof Error, 'the client connection was closed');
@@ -123,14 +127,22 @@ test('the first signal drains gracefully, a second one exits immediately', async
   const target = new EventEmitter();
   const exits = [];
   const gate = deferred();
+  let clock = 0;
   const uninstall = installSignalHandlers({
     shutdown: () => gate.promise,
     logger: silentLogger,
     exit: (code) => exits.push(code),
     target,
+    now: () => clock,
   });
   target.emit('SIGTERM', 'SIGTERM');
   assert.deepEqual(exits, []);
+  // Ctrl+C under web:dev: the group SIGINT and dev.mjs's forwarded SIGTERM
+  // arrive together and must not abort the drain.
+  clock = 50;
+  target.emit('SIGINT', 'SIGINT');
+  assert.deepEqual(exits, [], 'a duplicate within the window is ignored');
+  clock = 5000;
   target.emit('SIGINT', 'SIGINT');
   assert.deepEqual(exits, [1]);
   gate.resolve({ forced: false });

@@ -130,6 +130,20 @@ test('loadWebConfig reports every invalid value in one startup error', () => {
   );
 });
 
+test('integer settings accept plain decimal digits only', () => {
+  // Number() would read these as 80, 8000, 1 and 5.
+  for (const [name, raw] of [
+    ['WEB_API_PORT', '0x50'],
+    ['WEB_REQUEST_TIMEOUT_MS', '8e3'],
+    ['WEB_RATE_LIMIT_MAX', '0b1'],
+    ['WEB_QUERY_ROW_LIMIT', '5.0'],
+    ['WEB_MAX_QUESTION_LENGTH', '+5'],
+  ]) {
+    assert.throws(() => loadWebConfig({ [name]: raw }), (error) => error.code === 'INVALID_CONFIG' && error.message.includes(name), `${name}=${raw}`);
+  }
+  assert.equal(loadWebConfig({ WEB_API_PORT: ' 8080 ' }).port, 8080);
+});
+
 test('origins are normalized the way browsers send them', () => {
   const config = loadWebConfig({ WEB_ALLOWED_ORIGINS: 'HTTP://Example.TEST:80/ https://example.test:443' });
   assert.deepEqual(config.allowedOrigins, ['http://example.test', 'https://example.test']);

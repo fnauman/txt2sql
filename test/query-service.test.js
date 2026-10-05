@@ -562,7 +562,7 @@ test('an abort during execution kills the query and reports errorStage "aborted"
 test('WEB_QUERY_MAX_RETRIES is validated instead of silently disabling every question', () => {
   assert.equal(resolveMaxRetries({}), 1);
   assert.equal(resolveMaxRetries({ WEB_QUERY_MAX_RETRIES: '0' }), 0);
-  for (const bad of ['abc', '-1', '9']) {
+  for (const bad of ['abc', '-1', '9', '0x1', '1e0']) {
     assert.throws(() => resolveMaxRetries({ WEB_QUERY_MAX_RETRIES: bad }), { code: 'INVALID_CONFIG' });
   }
 });

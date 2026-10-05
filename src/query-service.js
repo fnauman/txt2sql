@@ -39,7 +39,8 @@ export function resolveMaxRetries(env = process.env) {
     return DEFAULT_MAX_RETRIES;
   }
 
-  const value = Number(String(raw).trim());
+  const text = String(raw).trim();
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
   if (!Number.isInteger(value) || value < 0 || value > MAX_RETRIES_LIMIT) {
     const error = new Error(`WEB_QUERY_MAX_RETRIES must be an integer between 0 and ${MAX_RETRIES_LIMIT}; got "${raw}".`);
     error.code = 'INVALID_CONFIG';
@@ -55,7 +56,8 @@ export function resolveDbConnectionLimit(env = process.env) {
     return 5;
   }
 
-  const value = Number(String(raw).trim());
+  const text = String(raw).trim();
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
   if (!Number.isInteger(value) || value < 1 || value > 100) {
     const error = new Error(`WEB_DB_CONNECTION_LIMIT must be an integer between 1 and 100; got "${raw}".`);
     error.code = 'INVALID_CONFIG';

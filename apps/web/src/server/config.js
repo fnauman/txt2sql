@@ -39,7 +39,10 @@ function createReader(env, problems) {
       if (isBlank(raw)) {
         return fallback;
       }
-      const value = Number(String(raw).trim());
+      // Plain decimal digits only: Number() would also accept "0x50", "8e3",
+      // "0b1" and "  " forms that nobody means as a port or a limit.
+      const text = String(raw).trim();
+      const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
       if (!Number.isInteger(value) || value < min || value > max) {
         problems.push(`${name} must be an integer between ${min} and ${max}; got "${raw}".`);
         return fallback;

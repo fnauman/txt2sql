@@ -96,7 +96,7 @@ test('QUERY_STATEMENT_TIMEOUT_MS sets the default; 0 disables; invalid values fa
     assert.equal(connection.calls[0], 'SELECT 7');
   });
 
-  for (const bad of ['abc', '-1', '1.5']) {
+  for (const bad of ['abc', '-1', '1.5', '0x50', '8e3']) {
     assert.throws(
       () => resolveStatementTimeoutMs({ QUERY_STATEMENT_TIMEOUT_MS: bad }),
       (error) => error.code === 'INVALID_CONFIG' && /QUERY_STATEMENT_TIMEOUT_MS/.test(error.message)

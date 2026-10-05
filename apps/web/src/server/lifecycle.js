@@ -117,16 +117,31 @@ export function startServer({ app, config, onClose = async () => {}, logger = co
   });
 }
 
-// SIGTERM/SIGINT drain gracefully; a second signal exits immediately.
-export function installSignalHandlers({ shutdown, logger = console, exit = (code) => process.exit(code), signals = ['SIGTERM', 'SIGINT'], target = process }) {
-  let received = false;
+// SIGTERM/SIGINT drain gracefully; a second signal exits immediately. A second
+// signal within `duplicateWindowMs` of the first is treated as the same request:
+// Ctrl+C under `npm run web:dev` delivers SIGINT to the whole process group and
+// dev.mjs then forwards SIGTERM, which must not cut the drain short.
+export function installSignalHandlers({
+  shutdown,
+  logger = console,
+  exit = (code) => process.exit(code),
+  signals = ['SIGTERM', 'SIGINT'],
+  target = process,
+  duplicateWindowMs = 1000,
+  now = Date.now,
+}) {
+  let receivedAt = null;
   const handler = (signal) => {
-    if (received) {
+    if (receivedAt !== null) {
+      if (now() - receivedAt < duplicateWindowMs) {
+        logger.log?.(`[server] received ${signal} while already draining; send it again to exit immediately.`);
+        return;
+      }
       logger.warn?.(`[server] received ${signal} again; exiting immediately.`);
       exit(1);
       return;
     }
-    received = true;
+    receivedAt = now();
     shutdown({ reason: `received ${signal}` })
       .then(({ forced }) => exit(forced ? 1 : 0))
       .catch(() => exit(1));

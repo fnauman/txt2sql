@@ -154,3 +154,50 @@ test('close() closes current and retiring runtimes and refuses new leases', asyn
   await assert.rejects(manager.acquire(), { code: 'SHUTTING_DOWN' });
   await assert.rejects(manager.refresh(), { code: 'SHUTTING_DOWN' });
 });
+
+// The lease must be counted BEFORE acquire() awaits the load: otherwise a
+// refresh that finishes while runtime #1 is still loading retires #1 with an
+// in-flight count of 0 and closes it under the request waiting on it.
+test('a refresh that completes while the first runtime is loading never closes it under a waiting request', async () => {
+  const loads = [];
+  const manager = createRuntimeManager({
+    logger: silent,
+    factory: (options) => {
+      let resolve;
+      const promise = new Promise((res) => {
+        resolve = res;
+      });
+      const runtime = {
+        id: loads.length + 1,
+        options,
+        closed: 0,
+        async close() {
+          runtime.closed += 1;
+        },
+      };
+      loads.push({ runtime, resolve: () => resolve(runtime) });
+      return promise;
+    },
+  });
+
+  const waiting = manager.acquire(); // runtime #1 starts loading
+  await tick();
+  const refreshed = manager.refresh(); // runtime #2 starts loading
+  await tick();
+  assert.equal(loads.length, 2);
+
+  loads[1].resolve(); // #2 is ready first and replaces #1
+  assert.equal(await refreshed, loads[1].runtime);
+  loads[0].resolve(); // #1 finishes loading afterwards
+
+  const lease = await waiting;
+  assert.equal(lease.runtime, loads[0].runtime, 'the waiting request keeps the runtime it started on');
+  await tick();
+  assert.equal(lease.runtime.closed, 0, 'not closed while the lease is held');
+  assert.deepEqual(manager.status().retiring, [{ id: 1, inFlight: 1 }]);
+
+  lease.release();
+  await tick();
+  assert.equal(loads[0].runtime.closed, 1, 'closed once the waiting request is done');
+  assert.equal(loads[1].runtime.closed, 0);
+});
