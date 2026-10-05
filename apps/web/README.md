@@ -59,7 +59,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 | `WEB_QUERY_MAX_RETRIES` | `1` | Extra model attempts after a failed generation, validation or execution (0 to 5). Provider outages and infra failures are not retried. |
 | `WEB_REQUEST_TIMEOUT_MS` | `120000` | Per-request deadline; when it passes, the OpenAI call is aborted and the running query killed. `0` disables. |
 | `WEB_DB_CONNECTION_LIMIT` | `5` | MariaDB pool size. |
-| `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. Enabled unless set to `0`; it only caches results from `demo_retail` read as `demo_readonly`. |
+| `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. On by default; set to `0` (or `false`/`no`/`off`) to disable. It only caches results from `demo_retail` read as `demo_readonly`. |
 | `WEB_RESULT_CACHE_TTL_MS` | `900000` | Cache entry TTL (15 min). Bounds staleness from column-level schema drift. |
 | `WEB_RESULT_CACHE_SIZE` | `200` | Max cached results (LRU). `0` disables the cache. |
 | `WEB_SHUTDOWN_TIMEOUT_MS` | `10000` | On SIGTERM/SIGINT the server stops accepting connections and drains in-flight requests for up to this long. A second signal within 1 s counts as a duplicate; one after that exits immediately. |
@@ -74,9 +74,11 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and
 `Cross-Origin-Resource-Policy: same-origin`. Malformed JSON, oversized bodies and
 invalid input get a 4xx with an error `code`. A failed question reports
-`errorStage` (`llm`, `validation`, `execution`, `aborted`, `infra`) and
-`errorCode` in the JSON result and the SSE `error` frame; validation failures
-also carry `error.layer` (`safety` or `guardrail`). LLM provider outages map to
+its stage (`llm`, `validation`, `execution`, `aborted`, `infra`) and an error
+code: the JSON result has top-level `errorStage`/`errorCode` plus `error.code`
+and `error.stage`, and the SSE `error` frame's data is that same `error` object
+(`name`, `message`, `code`, `stage`). Validation failures also carry
+`error.layer` (`safety` or `guardrail`) in both. LLM provider outages map to
 502/503/504, and an unanswerable question to 422. At startup the server logs the
 effective settings and warns when the query user has more than `SELECT`.
 

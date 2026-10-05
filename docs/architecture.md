@@ -14,7 +14,7 @@ extra LLM calls.
 question
    │
    ▼  temporal normalization      "March 2026" → [2026-03-01, 2026-04-01)
-   ▼  semantic retrieval          pick only the in-scope tables a question needs
+   ▼  semantic retrieval          narrow the prompt to the highest-scoring in-scope tables (+ FK paths)
    ▼  master-data resolution      resolve "sparkling water" → bounded candidate rows
    ▼  LLM (structured JSON out)    { sql, explanation, tables_used, assumptions }
    ▼  deterministic validation     read-only safety layer + schema guardrails vs the exact schema it saw
@@ -35,8 +35,8 @@ lives in `src/pipeline.js`, `src/sql-tokenizer.js` and `src/sql-guardrails.js`.
 
 ### Why rule-based semantic retrieval instead of embeddings
 
-Retrieval narrows a potentially huge ERP schema down to the few tables a
-question actually needs, so the prompt stays small and the model can't invent
+Retrieval narrows a potentially huge ERP schema to a small set of relevant
+tables, so the prompt stays small and the model can't invent
 joins across tables it never saw. It is deliberately **rule-based and lexical**,
 not an embedding model or a vector database:
 
@@ -87,9 +87,9 @@ identifiers and comments, so validation fails closed.
    unqualified names are caught only when mixed-case); joins must match in-scope
    foreign keys or declared join hints; explicitly named metrics must use their
    canonical columns; `SUM`/`AVG` over a parent table's column while a 1:N child
-   is joined in the same `SELECT` scope is rejected as `FAN_OUT`; product IDs
-   must come from the resolved candidate list; and `tables_used` must stay
-   inside the allowed set and cover every table the SQL references.
+   is joined in the same `SELECT` scope is rejected as `FAN_OUT`; product ID
+   literals must come from the resolved candidate list; and `tables_used` must
+   stay inside the allowed set and cover every table the SQL references.
 
 Every rejection is a `SqlValidationError` with a stable `code` and a `layer`
 (`safety` or `guardrail`), which the trace, the API (`errorCode`, `error.layer`)
@@ -336,8 +336,11 @@ one error listing every problem.
   allowlist, product-only and literal-only master-data ID checks, partial
   unqualified-column checks); see the guardrails section above. The database
   grants and execution bounds are what cover them.
-- Some valid SQL is still rejected on the optimized path: backtick-quoted
-  aliases containing spaces, and implicit aliases without `AS`.
+- Some valid SQL is still rejected on the optimized path: an implicit alias
+  (no `AS`) or a backtick-quoted alias with spaces is rejected as
+  `UNKNOWN_IDENTIFIER` when it brings in a mixed-case word the schema does not
+  know, e.g. `COUNT(*) ActiveCount` or `` AS `Customer Name` ``, because the
+  unqualified-identifier check reads it as a column.
 - The benchmark has its own orchestration loop rather than calling
   `runOptimizedQuestion`, so its retry behavior can drift from the web/CLI path.
 

@@ -134,7 +134,7 @@ The model's SQL is re-validated locally **before** it ever runs, read through
 - Qualified columns must exist in the **retrieved** schema context
 - Joins must match **in-scope foreign keys** or declared join hints
 - `SUM`/`AVG` across a 1:N join is rejected as a **fan-out**
-- Product IDs must come from the **resolved candidate list**
+- Product ID literals must come from the **resolved candidate list**
 
 Every rejection has a code and a layer. No extra LLM calls — it's plain,
 testable JavaScript. It is defense in depth, not the boundary.
@@ -167,7 +167,8 @@ server files, or read other databases on the instance.
 Generation is non-deterministic — one passing run is a **sample**, not proof.
 
 - A **value-aware comparator** scores answers on *values*, not column names
-  (a correct answer with a different alias is no longer a false failure)
+  (an alias change no longer breaks the value match, but signal checks that
+  name columns can still score it `low_signal_success`)
 - `--repeat N` reports **min / mean / max** accuracy across runs
 - The honest headline is the **Wilson 95% lower bound**, not "100%"
 
