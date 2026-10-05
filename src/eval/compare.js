@@ -1,7 +1,10 @@
 // Paired baseline-vs-candidate comparison of two evaluation reports.
 //
 // Cases are aligned by id. A case is paired only when both reports counted it
-// (see attribution.js) and its gold is unchanged: a case whose gold
+// (see attribution.js), neither report's majority outcome for it is a
+// deadline or infrastructure outcome (timeout, aborted: they are counted in
+// accuracy, but a slow provider is not a model or system change, so they never
+// feed the McNemar flips), and its gold is unchanged: a case whose gold
 // fingerprint (or, when both reports record it, its scoring fingerprint: gold
 // + alternatives + comparison spec) changed is listed and excluded, because
 // its two verdicts answer different questions. Per paired case the verdict is
@@ -14,10 +17,15 @@
 // from the single recorded status.
 
 import { isLlmUnavailableCode } from '../query-service.js';
+import { OUTCOME_BUCKETS } from './attribution.js';
 import { goldFingerprint } from './controls.js';
 import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, mcnemarExact, mean, pairedBootstrapDeltaInterval, round } from './stats.js';
 
 const LEGACY_EXCLUDED = new Set(['infra_error', 'expected_sql_error', 'evaluation_error', 'skipped_budget']);
+
+function isInfraOutcome(outcome) {
+  return OUTCOME_BUCKETS[outcome] === 'infra';
+}
 
 function legacyCounted(result) {
   if (LEGACY_EXCLUDED.has(result.status)) {
@@ -115,8 +123,9 @@ export function compareReports(baselineReport, candidateReport, {
       });
       continue;
     }
-    if (!base.counted || !cand.counted) {
-      notCounted.push({ id, baseline: base.counted ? 'counted' : base.outcome, candidate: cand.counted ? 'counted' : cand.outcome });
+    if (!base.counted || !cand.counted || isInfraOutcome(base.outcome) || isInfraOutcome(cand.outcome)) {
+      const label = (side) => (side.counted && !isInfraOutcome(side.outcome) ? 'counted' : side.outcome);
+      notCounted.push({ id, baseline: label(base), candidate: label(cand) });
       continue;
     }
     paired.push({

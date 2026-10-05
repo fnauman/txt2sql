@@ -259,11 +259,12 @@ test('--budget-usd stops starting cases once the spend reaches the budget', { sk
   assert.equal(report.stats.cases.counted, 2);
 });
 
-test('--case-timeout-ms aborts a slow case and records a timeout', { skip }, async () => {
+test('--case-timeout-ms aborts a slow case and records a timeout (a harness failure for the exit code)', { skip }, async () => {
   mode = 'slow';
   const started = Date.now();
   const run = await runEval(['--case-id', 'core_public_003', '--case-timeout-ms', '1500', '--skip-verify'], 'deadline');
-  assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
+  assert.equal(run.code, 2, `${run.stdout}\n${run.stderr}`);
+  assert.match(run.stdout, /HARNESS: 1 repetition\(s\): hit the case deadline/);
   const { report } = await findReport(run.outputDir);
   const [rep] = report.results[0].repetitions;
   assert.deepEqual([rep.status, rep.outcome, rep.counted, rep.error_code], ['aborted', 'timeout', true, 'CASE_TIMEOUT']);

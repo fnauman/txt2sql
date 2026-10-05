@@ -114,3 +114,19 @@ test('reports written before the runner rewrite are read from status and reliabi
   assert.deepEqual(comparison.flips.improvements.map((entry) => entry.id), ['b']);
   assert.equal(comparison.baseline.gitSha, 'abc');
 });
+
+test('a timeout majority in either report is left out of the McNemar flips (a slow provider is not a regression)', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const baseline = report(ids.map((id) => caseResult(id, { passes: 3 })));
+  // Every candidate repetition hit the deadline: counted as failures, but not paired.
+  const candidate = report(ids.map((id) => caseResult(id, { passes: 0, outcome: 'timeout' })));
+  const comparison = compareReports(baseline, candidate, { resamples: 200 });
+  assert.equal(comparison.paired, 0);
+  assert.equal(comparison.verdict, 'no_paired_cases');
+  assert.deepEqual(comparison.excluded.notCounted[0], { id: 'a', baseline: 'counted', candidate: 'timeout' });
+  assert.equal(comparison.mcnemar.regressions, 0);
+
+  // A case whose majority passed despite one timed-out repetition is still paired.
+  const mixed = report([caseResult('a', { passes: 2, outcome: 'pass' }), ...ids.slice(1).map((id) => caseResult(id, { passes: 3 }))]);
+  assert.equal(compareReports(baseline, mixed, { resamples: 200 }).paired, ids.length);
+});

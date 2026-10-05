@@ -550,8 +550,11 @@ there too.
   database did is never resolved against the model (see `infra_error`); one
   that fails for another reason is `harness_error`. The Bucket column splits
   an outcome whose repetitions moved, e.g. `model 3 / system 1` when one was
-  tagged `retrieval_miss`. A timeout counts as a failure on purpose, so slow cases cannot
-  inflate accuracy.
+  tagged `retrieval_miss`. A timeout counts as a failure on purpose, so slow
+  cases cannot inflate accuracy; but any timeout also makes the run exit 2,
+  and a case whose majority outcome is a timeout is left out of the paired
+  comparison, because a slow or hung provider is not a model or system
+  change.
 - **Guardrail confusion matrix**, over every attempt including retries:
   rejected and incorrect (caught), rejected and correct (false rejection),
   accepted and incorrect (missed; an accepted attempt that failed at execution
@@ -626,7 +629,9 @@ harness failure today.
 `--compare <report.json>` (default: `eval/baselines/<model>.json` when present;
 `--no-baseline` turns that off) aligns cases by id. A case whose gold
 fingerprint changed (or, between two new reports, its alternatives or
-comparison spec) is excluded and listed, as are cases one report did not count;
+comparison spec) is excluded and listed, as are cases one report did not count
+or whose majority outcome in one report is a timeout (or another
+infrastructure outcome);
 new and removed cases are listed too. Per paired case the verdict is the
 majority over repetitions: regressions (baseline pass, candidate fail) and
 improvements feed an **exact two-sided McNemar test**, and a paired case
@@ -642,8 +647,10 @@ least 6 unanimous flips in one direction (p = 0.031); 5 give p = 0.0625.
 Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
 case); 2 harness, dataset or infrastructure failure: unreachable database,
 fixtures that cannot be seeded, failed verification, bad flags, and any
-repetition that ended as `expected_sql_error`, `harness_error`, `infra_error`
-or `llm_outage`, or a run with no counted case.
+repetition that ended as `expected_sql_error`, `harness_error`, `infra_error`,
+`llm_outage`, `timeout` or `aborted`, or a run with no counted case. Exit 2
+wins over 1: a run that hit the deadline is never reported as "significantly
+worse".
 
 ### Baselines
 

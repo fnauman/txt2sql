@@ -17,8 +17,8 @@
 //     generated/runs/<timestamp>/<suite>/<model>/{report.json,report.md,trace.jsonl}.
 //
 // Exit codes: 0 success; 2 harness/dataset/infrastructure failure (database,
-// fixtures, verification gates, gold errors, infra errors or provider outages
-// during the run); with --gate also 1 when the candidate is significantly
+// fixtures, verification gates, gold errors, infra errors, provider outages or
+// case deadlines during the run); with --gate also 1 when the candidate is significantly
 // worse than the baseline (exact McNemar p < 0.05 with more regressions than
 // improvements) or strict accuracy is below --min-accuracy.
 //
@@ -243,6 +243,11 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     ['harness_error', 'the runner failed'],
     ['infra_error', 'database infrastructure errors'],
     ['llm_outage', 'LLM provider outage errors'],
+    // Counted as failures in accuracy (slow cases cannot inflate it), but a
+    // deadline usually means a slow or hung provider, so the run cannot be
+    // trusted, or gated, as a measurement of the model.
+    ['timeout', 'hit the case deadline; raise --case-timeout-ms or check the provider'],
+    ['aborted', 'were aborted before they finished'],
   ]) {
     if (byOutcome[outcome]) {
       harness.push(`${byOutcome[outcome]} repetition(s): ${label} (${outcome})`);

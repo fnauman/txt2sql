@@ -123,7 +123,7 @@ test('a comparison section lists flips and the McNemar verdict; a rescore says w
   assert.match(markdown, /### Regressions \(baseline majority pass → candidate fail\)\n\n\| Case \| Question \| Baseline \| Candidate \|/);
   assert.match(markdown, /\| case_guard \| Products sold in Feb but not March\? \| 100% \(pass\) \| 0% \(guardrail_false_rejection\) \|/);
   assert.match(markdown, /1 regression\(s\), 0 improvement\(s\); exact McNemar p = 1\.000 → no significant difference from the baseline/);
-  assert.match(markdown, /Excluded, not counted in one report: case_skip/);
+  assert.match(markdown, /Excluded from the paired test \(not counted, or a timeout\/infrastructure majority, in one report\): case_skip/);
 
   const headline = renderHeadline(report);
   assert.equal(headline.split('\n').length, 5);

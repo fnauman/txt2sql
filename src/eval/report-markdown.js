@@ -356,7 +356,7 @@ function comparisonSection(comparison) {
   }
   if (comparison.excluded.notCounted.length) {
     notes.push(
-      `Excluded, not counted in one report: ${comparison.excluded.notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`).join(', ')}.`
+      `Excluded from the paired test (not counted, or a timeout/infrastructure majority, in one report): ${comparison.excluded.notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`).join(', ')}.`
     );
   }
   if (comparison.newCases.length) {

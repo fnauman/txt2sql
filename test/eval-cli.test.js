@@ -67,8 +67,16 @@ test('exit codes: 2 for harness/infra, 1 for a failed gate, else 0', () => {
     assert.match(result.reasons[0], new RegExp(outcome));
   }
   assert.equal(computeExitCode(fakeReport({ byOutcome: { skipped_budget: 2 }, strict: null })).code, 2);
-  // Timeouts and model failures are measurements, not harness failures.
-  assert.equal(computeExitCode(fakeReport({ byOutcome: { pass: 1, timeout: 1, wrong_result: 1 } })).code, 0);
+  // Model failures are measurements, not harness failures.
+  assert.equal(computeExitCode(fakeReport({ byOutcome: { pass: 1, wrong_result: 1, guardrail_false_rejection: 1 } })).code, 0);
+  // A deadline is counted as a failure, but the run is not a trustworthy
+  // measurement: exit 2 with or without --gate, never a "significantly worse" 1.
+  const worseByTimeouts = { verdict: 'worse', mcnemar: { regressions: 7, improvements: 0, p: 0.0156 } };
+  for (const gate of [false, true]) {
+    const timedOut = computeExitCode(fakeReport({ byOutcome: { timeout: 6 }, strict: 0, comparison: worseByTimeouts }), { gate });
+    assert.equal(timedOut.code, 2);
+    assert.match(timedOut.reasons[0], /6 repetition\(s\): hit the case deadline; raise --case-timeout-ms or check the provider \(timeout\)/);
+  }
 
   const worse = { verdict: 'worse', mcnemar: { regressions: 6, improvements: 0, p: 0.03125 } };
   assert.equal(computeExitCode(fakeReport({ comparison: worse })).code, 0, 'no gate, no failure');
