@@ -92,9 +92,6 @@ export const OUTCOME_BUCKETS = Object.freeze({
   declined: 'pass',
 });
 
-// Outcomes only a behavior case (abstain / clarify) can have.
-export const BEHAVIOR_OUTCOMES = Object.freeze(['declined', 'answered_instead_of_abstain', 'answered_instead_of_clarify']);
-
 // Outcomes left out of the strict-accuracy denominator (reported separately).
 export const EXCLUDED_OUTCOMES = Object.freeze(new Set(['infra_error', 'llm_outage', 'skipped_budget', 'cancelled', 'expected_sql_error', 'harness_error']));
 

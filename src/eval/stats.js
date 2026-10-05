@@ -191,7 +191,7 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
   const records = caseRecords || [];
   // Abstain / clarify cases never count in accuracy (their repetitions are
   // never `counted`); cost, latency, retries and tokens below cover them too.
-  const behaviorRecords = records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const behaviorRecords = new Set(records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer'));
   const counted = records.filter((record) => record.summary?.counted > 0);
   const passRates = counted.map((record) => record.summary.passRate);
   const majorityPasses = counted.filter((record) => record.summary.majorityPass).length;
@@ -234,7 +234,7 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
   }
 
   const excluded = {};
-  for (const repetition of records.filter((record) => !behaviorRecords.includes(record)).flatMap((record) => record.repetitions || []).filter((entry) => !entry.counted)) {
+  for (const repetition of records.filter((record) => !behaviorRecords.has(record)).flatMap((record) => record.repetitions || []).filter((entry) => !entry.counted)) {
     excluded[repetition.outcome] = (excluded[repetition.outcome] || 0) + 1;
   }
 
@@ -244,8 +244,8 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
     cases: {
       selected: records.length,
       counted: counted.length,
-      excluded: records.length - behaviorRecords.length - counted.length,
-      behavior: behaviorRecords.length,
+      excluded: records.length - behaviorRecords.size - counted.length,
+      behavior: behaviorRecords.size,
       intents: intents.size,
     },
     repetitions: {
