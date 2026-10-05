@@ -114,7 +114,7 @@ test('rescore replays recorded attempts through today\'s validator and oracle', 
   assert.equal(oldRule.attempt_count, 1, 'the replay stops at the first accepted attempt');
   assert.equal(oldRule.attempts[0].validation.ok, true);
   assert.equal(oldRule.attempts[0].validation.durationMs, null, 'durations are not re-measured');
-  assert.deepEqual(oldRule.rescore, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayTruncated: false });
+  assert.deepEqual(oldRule.rescore, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayTruncated: false, inherited: false });
   // Recorded cost and usage are kept: nothing was re-generated.
   assert.equal(oldRule.llm_cost.totalCost, 0.000574);
 
@@ -181,6 +181,19 @@ test('runs cut short keep their status unless a recorded attempt now completes; 
       { ...source.results[0], id: 'legacy_pass', repetitions: undefined, summary: undefined, ...base },
       { ...source.results[0], id: 'timed_out', repetitions: [{ ...base, status: 'aborted', timed_out: true, error_code: 'CASE_TIMEOUT', attempts: [rejectedAttempt] }] },
       { ...source.results[0], id: 'db_was_down', repetitions: [{ ...base, status: 'infra_error', error_code: 'ECONNRESET' }] },
+      {
+        ...source.results[0],
+        id: 'outage',
+        repetitions: [
+          {
+            ...base,
+            status: 'llm_error',
+            error: 'rate limited',
+            error_code: 'HTTP_429',
+            attempts: [{ attempt: 1, retry: false, generatedSql: null, llm: { ok: false, durationMs: 5, code: 'HTTP_429', error: { message: 'rate limited' } }, validation: null, execution: null }],
+          },
+        ],
+      },
     ],
   };
   assert.equal(recordedRepetitions(legacy.results[0]).length, 1);
@@ -191,6 +204,10 @@ test('runs cut short keep their status unless a recorded attempt now completes; 
     [records.timed_out.repetitions[0].status, records.timed_out.repetitions[0].outcome, records.timed_out.repetitions[0].error_code],
     ['aborted', 'timeout', 'CASE_TIMEOUT']
   );
+  assert.equal(records.timed_out.repetitions[0].rescore.inherited, true);
+  assert.equal(records.legacy_pass.repetitions[0].rescore.inherited, false);
+  const outage = records.outage.repetitions[0];
+  assert.deepEqual([outage.status, outage.outcome, outage.error_code, outage.counted, outage.rescore.inherited], ['llm_error', 'llm_outage', 'HTTP_429', false, true]);
   assert.deepEqual([records.db_was_down.repetitions[0].status, records.db_was_down.repetitions[0].outcome], ['pass', 'pass']);
 
   // An infrastructure failure during the replay stops it as infra_error.

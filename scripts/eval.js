@@ -225,7 +225,17 @@ function markdownPathFor(reportPath) {
  * profile, any failed case in a single-repetition run); else 0.
  */
 export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false } = {}) {
-  const byOutcome = report.attribution?.repetitions?.byOutcome || {};
+  // A rescore keeps outcomes it could not re-check (a recorded outage or a
+  // run cut short); only what happened today counts as a harness failure.
+  const repetitions = (report.results || []).flatMap((record) => record.repetitions || []);
+  const byOutcome = {};
+  if (repetitions.length > 0) {
+    for (const repetition of repetitions.filter((entry) => !entry.rescore?.inherited)) {
+      byOutcome[repetition.outcome] = (byOutcome[repetition.outcome] || 0) + 1;
+    }
+  } else {
+    Object.assign(byOutcome, report.attribution?.repetitions?.byOutcome || {});
+  }
   const harness = [];
   for (const [outcome, label] of [
     ['expected_sql_error', 'gold SQL failed'],
@@ -255,7 +265,7 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     }
   }
   if (failOnAnyFailure && report.stats.repeat <= 1) {
-    const failed = report.results.filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
+    const failed = (report.results || []).filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
     if (failed > 0) {
       failures.push(`${failed} case(s) failed (benchmark profile, single run)`);
     }
@@ -293,12 +303,13 @@ function isGithubActions(env = process.env) {
 function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
   const status = result.status === 'aborted' && result.timed_out ? 'timeout' : result.status;
+  const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
   const seconds = Number.isFinite(totalMs) ? (totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${Math.round(totalMs)}ms`) : '';
   const cost = Number.isFinite(result.llm_cost?.totalCost) ? `$${result.llm_cost.totalCost.toFixed(5)}` : '';
   const rep = repeat > 1 ? ` rep ${repetition}/${repeat}` : '';
   const warnings = result.warnings?.length ? ` (warnings: ${result.warnings.join(', ')})` : '';
-  return `[${String(completed).padStart(width)}/${total}] ${status === 'pass' ? 'ok  ' : 'FAIL'} ${testCase.id}${rep}: ${status}${warnings} ${seconds} ${cost}`.trimEnd();
+  return `[${String(completed).padStart(width)}/${total}] ${label} ${testCase.id}${rep}: ${status}${warnings} ${seconds} ${cost}`.trimEnd();
 }
 
 function printVerification(cli, verification) {
@@ -327,7 +338,7 @@ async function writeReport(report, { reportPath, cli }) {
   cli.log(`Report: ${markdownPath}`);
   cli.log(`JSON:   ${reportPath}`);
   if (report.traceFile) {
-    cli.log(`Trace:  ${report.traceFile}`);
+    cli.log(`Trace:  ${path.resolve(REPO_ROOT, report.traceFile)}`);
   }
   return markdownPath;
 }
@@ -348,6 +359,9 @@ async function loadBaseline(options, model, cli, { fallback = null } = {}) {
   }
   const report = await readJson(baselinePath, 'baseline report');
   cli.log(`Baseline: ${baselinePath}`);
+  if (report.model && report.model !== model) {
+    cli.log(`  note: the baseline was run with ${report.model}, this run uses ${model}.`);
+  }
   return { path: baselinePath, report };
 }
 
@@ -492,7 +506,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     budget: { limitUsd: options.budgetUsd, spentUsd: run.spentUsd, exhausted: run.budgetExhausted, skippedCases: run.skippedCaseIds },
     caseRecords,
     comparison,
-    traceFile: trace.filePath,
+    traceFile: repoRelative(trace.filePath),
   });
   await trace.emit('run.completed', {
     stats: { strictAccuracy: report.stats.strictAccuracy, majority: report.stats.majority, cost: report.stats.cost },
@@ -674,7 +688,19 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
 
   const connections = await openFixtureConnections({ fixtures, env });
   try {
-    const controlsIndex = options.checkControls ? await loadControlsIndex({ controlsDir: options.controlsDir }) : null;
+    // Controls are needed by the verify gate; without it they are only
+    // hashed into the provenance, so an unreadable directory is not fatal.
+    let controlsIndex = null;
+    if (options.checkControls) {
+      try {
+        controlsIndex = await loadControlsIndex({ controlsDir: options.controlsDir });
+      } catch (error) {
+        if (options.verify) {
+          throw new HarnessError(`Cannot load the oracle controls: ${error.message}`, { code: 'CONTROLS_INVALID', cause: error });
+        }
+        cli.log(`  warning: oracle controls not loaded (${error.message}).`);
+      }
+    }
     let verification = { skipped: true };
     if (options.verify) {
       const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];

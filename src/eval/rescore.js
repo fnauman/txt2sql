@@ -22,7 +22,9 @@
 // Kept as recorded: LLM usage, cost and timings (nothing is re-generated),
 // and repetitions that never reached the model (skipped_budget, harness
 // errors). Runs that were cut short (aborted, infra_error) keep their status
-// unless a recorded attempt now completes. Rescoring the same report twice
+// unless a recorded attempt now completes; such recorded outcomes (and
+// recorded provider outages) are flagged `rescore.inherited`, so they do not
+// make a rescore exit as a harness failure today. Rescoring the same report twice
 // gives identical results: validation and execution durations are not
 // re-measured (null), and all statistics are seeded.
 
@@ -122,7 +124,7 @@ export async function rescoreRepetition(repetition, {
   const originalStatus = recorded.status;
   const attempts = [...(recorded.attempts || [])].sort((left, right) => left.attempt - right.attempt);
   if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
-    return { ...recorded, rescore: { replayed: false, reason: 'no recorded generation to replay', originalStatus } };
+    return { ...recorded, rescore: { replayed: false, reason: 'no recorded generation to replay', originalStatus, inherited: true } };
   }
 
   const prompt = await validate.promptFor(testCase.question);
@@ -208,6 +210,9 @@ export async function rescoreRepetition(repetition, {
     originalStatus,
     originalAttemptCount: recorded.attempt_count ?? attempts.length,
     replayTruncated: false,
+    // True when the outcome is the recording's (a run cut short, a provider
+    // outage), not something the replay found today.
+    inherited: false,
   };
 
   if (final) {
@@ -262,7 +267,7 @@ export async function rescoreRepetition(repetition, {
       error_stage: recorded.error_stage,
       error_code: recorded.error_code,
       ...(recorded.timed_out ? { timed_out: true } : {}),
-      rescore,
+      rescore: { ...rescore, inherited: true },
     };
   }
 
@@ -275,7 +280,7 @@ export async function rescoreRepetition(repetition, {
     error: keepOutage ? recorded.error : lastFailure?.message || 'Unknown failure',
     error_stage: stage,
     error_code: keepOutage ? recorded.error_code : lastFailure?.code ?? null,
-    rescore,
+    rescore: { ...rescore, inherited: keepOutage },
   };
 }
 

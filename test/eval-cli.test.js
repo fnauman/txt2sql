@@ -79,6 +79,23 @@ test('exit codes: 2 for harness/infra, 1 for a failed gate, else 0', () => {
   assert.equal(computeExitCode(fakeReport({ strict: 0.5 }), { gate: true, minAccuracy: 0.6 }).code, 1);
   assert.equal(computeExitCode(fakeReport({ strict: 0.6 }), { gate: true, minAccuracy: 0.6 }).code, 0);
 
+  // A rescore does not fail on outcomes it inherited from the recording.
+  const rescored = {
+    ...fakeReport({ byOutcome: { pass: 1, llm_outage: 1 } }),
+    results: [
+      {
+        summary: { counted: 1, passes: 1 },
+        repetitions: [
+          { outcome: 'pass', rescore: { replayed: true, inherited: false } },
+          { outcome: 'llm_outage', rescore: { replayed: true, inherited: true } },
+        ],
+      },
+    ],
+  };
+  assert.equal(computeExitCode(rescored).code, 0);
+  rescored.results[0].repetitions[1].rescore.inherited = false;
+  assert.equal(computeExitCode(rescored).code, 2);
+
   // Benchmark profile: any failed case in a single-repetition run.
   const results = [{ summary: { counted: 1, passes: 1 } }, { summary: { counted: 1, passes: 0 } }];
   assert.equal(computeExitCode(fakeReport({ results }), { failOnAnyFailure: true }).code, 1);
