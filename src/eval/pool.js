@@ -11,6 +11,12 @@
 // no NEW case is started; every repetition of a case that has not started is
 // recorded as `skipped_budget`. Cases already started finish all their
 // repetitions, so the overshoot is at most the cost of the cases in flight.
+//
+// Stop: when `stopSignal` aborts (Ctrl-C, or a provider that rejects the API
+// key), no task starts any more, in-flight tasks are aborted through their
+// signal (and abandoned after the grace period), and every task that did not
+// finish is recorded as `cancelled` (excluded from accuracy), so a partial
+// report can still be written.
 
 export const DEFAULT_CONCURRENCY = 4;
 export const DEFAULT_CASE_TIMEOUT_MS = 120_000;
@@ -93,6 +99,50 @@ function skippedResult(budgetUsd) {
   };
 }
 
+export function stopReasonOf(signal) {
+  const reason = signal?.reason;
+  return reason?.message || (typeof reason === 'string' ? reason : 'the run was stopped');
+}
+
+function cancelledResult(reason, extra = {}) {
+  return {
+    status: 'cancelled',
+    warnings: [],
+    error: `Not finished: ${reason}.`,
+    error_stage: null,
+    error_code: 'RUN_CANCELLED',
+    attempts: [],
+    attempt_count: 0,
+    llm_usage: null,
+    llm_cost: null,
+    ...extra,
+  };
+}
+
+// Resolves when `signal` aborts; `dispose` removes the listener.
+function abortedPromise(signal) {
+  if (!signal) {
+    return { promise: new Promise(() => {}), dispose() {} };
+  }
+  let listener = null;
+  const promise = new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    listener = () => resolve();
+    signal.addEventListener('abort', listener, { once: true });
+  });
+  return {
+    promise,
+    dispose() {
+      if (listener) {
+        signal.removeEventListener('abort', listener);
+      }
+    },
+  };
+}
+
 function timeoutResult(timeoutMs) {
   return {
     status: 'aborted',
@@ -112,8 +162,9 @@ function timeoutResult(timeoutMs) {
  * Runs every (case, repetition) through `runRepetition({ testCase, caseIndex,
  * repetition, signal })`, which returns an evaluateQuestion-shaped result.
  * Returns { repetitions: result[][] (per case, per repetition), spentUsd,
- * budgetExhausted, skippedCaseIds }. `onResult(info)` is awaited after each
- * task (progress output, trace). A thrown error becomes 'evaluation_error'.
+ * budgetExhausted, skippedCaseIds, stopped: reason | null, cancelledCaseIds }.
+ * `onResult(info)` is awaited after each task (progress output, trace). A
+ * thrown error becomes 'evaluation_error'.
  */
 export async function runCaseRepetitions({
   cases,
@@ -122,6 +173,7 @@ export async function runCaseRepetitions({
   caseTimeoutMs = DEFAULT_CASE_TIMEOUT_MS,
   graceMs = DEFAULT_GRACE_MS,
   budgetUsd = null,
+  stopSignal = null,
   runRepetition,
   onResult = null,
   costOf = costOfResult,
@@ -134,34 +186,59 @@ export async function runCaseRepetitions({
   const results = list.map(() => new Array(repetitions).fill(null));
   const started = new Set();
   const skipped = new Set();
+  const cancelled = new Set();
   let spentUsd = 0;
   let completed = 0;
 
   const runTask = async (task) => {
     const deadline = createDeadline(caseTimeoutMs);
-    const TIMEOUT = Symbol('timeout');
+    const ABANDONED = Symbol('abandoned');
+    // The task's signal fires at its deadline or when the run is stopped.
+    const controller = new AbortController();
+    const forward = (source) => () => {
+      if (!controller.signal.aborted) {
+        controller.abort(source.reason);
+      }
+    };
+    const onDeadline = forward(deadline.signal);
+    const onStop = stopSignal ? forward(stopSignal) : null;
+    deadline.signal.addEventListener('abort', onDeadline, { once: true });
+    if (stopSignal) {
+      if (stopSignal.aborted) {
+        onStop();
+      } else {
+        stopSignal.addEventListener('abort', onStop, { once: true });
+      }
+    }
+    const stopped = abortedPromise(stopSignal);
     let pending = null;
     let settled = false;
     let graceTimer = null;
-    // After the deadline fires, wait graceMs for the task to notice the
-    // signal before abandoning it (the timer is cleared once the task ends).
-    const abandoned = deadline.expired.then(
+    // After the deadline fires (or the run is stopped), wait graceMs for the
+    // task to notice the signal before abandoning it (the timer is cleared
+    // once the task ends).
+    const abandoned = Promise.race([deadline.expired, stopped.promise]).then(
       () =>
         new Promise((resolve) => {
           if (!settled) {
-            graceTimer = setTimeout(() => resolve(TIMEOUT), graceMs);
+            graceTimer = setTimeout(() => resolve(ABANDONED), graceMs);
           }
         })
     );
+    const wasStopped = () => Boolean(stopSignal?.aborted) && !deadline.timedOut;
     try {
-      pending = Promise.resolve().then(() => runRepetition({ ...task, signal: deadline.signal }));
+      pending = Promise.resolve().then(() => runRepetition({ ...task, signal: controller.signal }));
       const raced = await Promise.race([pending, abandoned]);
-      if (raced === TIMEOUT) {
+      if (raced === ABANDONED) {
         pending.catch(() => {});
-        return timeoutResult(caseTimeoutMs);
+        return wasStopped() ? cancelledResult(stopReasonOf(stopSignal), { cancelled_in_flight: true }) : timeoutResult(caseTimeoutMs);
       }
       if (raced?.status === 'aborted' && deadline.timedOut) {
         return { ...raced, timed_out: true };
+      }
+      if (raced?.status === 'aborted' && wasStopped()) {
+        // Keep what the task recorded (attempts, cost) but not as a verdict.
+        return { ...raced, status: 'cancelled', error: `Not finished: ${stopReasonOf(stopSignal)}.`, error_code: 'RUN_CANCELLED', cancelled_in_flight: true };
       }
       return raced;
     } catch (error) {
@@ -179,6 +256,11 @@ export async function runCaseRepetitions({
     } finally {
       settled = true;
       deadline.clear();
+      deadline.signal.removeEventListener('abort', onDeadline);
+      if (onStop) {
+        stopSignal.removeEventListener('abort', onStop);
+      }
+      stopped.dispose();
       if (graceTimer) {
         clearTimeout(graceTimer);
       }
@@ -189,13 +271,19 @@ export async function runCaseRepetitions({
     tasks,
     async (task) => {
       let result;
-      if (!started.has(task.caseIndex) && (skipped.has(task.caseIndex) || (budgetUsd != null && spentUsd >= budgetUsd))) {
+      if (stopSignal?.aborted) {
+        cancelled.add(task.caseIndex);
+        result = cancelledResult(stopReasonOf(stopSignal));
+      } else if (!started.has(task.caseIndex) && (skipped.has(task.caseIndex) || (budgetUsd != null && spentUsd >= budgetUsd))) {
         skipped.add(task.caseIndex);
         result = skippedResult(budgetUsd);
       } else {
         started.add(task.caseIndex);
         result = await runTask(task);
         spentUsd += costOf(result);
+        if (result.status === 'cancelled') {
+          cancelled.add(task.caseIndex);
+        }
       }
       results[task.caseIndex][task.repetition - 1] = result;
       completed += 1;
@@ -211,5 +299,7 @@ export async function runCaseRepetitions({
     spentUsd: Number(spentUsd.toFixed(6)),
     budgetExhausted: skipped.size > 0,
     skippedCaseIds: [...skipped].sort((left, right) => left - right).map((index) => list[index].id),
+    stopped: stopSignal?.aborted ? stopReasonOf(stopSignal) : null,
+    cancelledCaseIds: [...cancelled].sort((left, right) => left - right).map((index) => list[index].id),
   };
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -24,7 +24,8 @@ import { loadBenchmarkDataset } from '../src/benchmark.js';
 // - core_public_007 gets SQL without the IsActive filter -> wrong_result;
 // - in the "regressed" mode six paraphrase cases get `SELECT 1`;
 // - in the "expensive" mode every call reports 1M prompt tokens;
-// - in the "slow" mode it answers after 5 s.
+// - in the "slow" mode it answers after 5 s;
+// - in the "unauthorized" mode it answers HTTP 401 (a wrong API key).
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configured = Boolean(process.env.TEST_MARIADB_PORT);
@@ -60,6 +61,11 @@ before(async () => {
       body += chunk;
     });
     request.on('end', () => {
+      if (mode === 'unauthorized') {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } }));
+        return;
+      }
       const payload = JSON.parse(body || '{}');
       const userText = (payload.messages || []).filter((message) => message.role === 'user').map((message) => message.content).join('\n');
       const testCase = byQuestion.find((entry) => userText.includes(entry.question));
@@ -108,8 +114,8 @@ after(async () => {
   }
 });
 
-function runEval(args, label) {
-  const env = {
+function evalEnv() {
+  return {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     DB_HOST: process.env.TEST_MARIADB_HOST || '127.0.0.1',
@@ -125,11 +131,19 @@ function runEval(args, label) {
     OPENAI_BASE_URL: baseUrl,
     MODEL_NAME: 'gpt-4o-mini',
   };
+}
+
+function evalArgs(args, outputDir) {
+  return [path.join(REPO_ROOT, 'scripts/eval.js'), '--no-docker', '--no-baseline', '--output-dir', outputDir, ...args];
+}
+
+function runEval(args, label) {
+  const env = evalEnv();
   const outputDir = path.join(outputRoot, label);
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [path.join(REPO_ROOT, 'scripts/eval.js'), '--no-docker', '--no-baseline', '--output-dir', outputDir, ...args],
+      evalArgs(args, outputDir),
       { env, cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr, outputDir })
     );
@@ -274,4 +288,43 @@ test('--case-timeout-ms aborts a slow case and records a timeout (a harness fail
   assert.deepEqual([rep.status, rep.outcome, rep.counted, rep.error_code], ['aborted', 'timeout', true, 'CASE_TIMEOUT']);
   assert.ok(Date.now() - started < 30_000);
   mode = 'base';
+});
+
+test('a rejected API key stops the run after the first answer instead of attempting every case', { skip }, async () => {
+  mode = 'unauthorized';
+  const run = await runEval(['--dataset', 'core-public', '--concurrency', '1', '--skip-verify'], 'unauthorized');
+  mode = 'base';
+  assert.equal(run.code, 2, `${run.stdout}\n${run.stderr}`);
+  assert.match(run.stdout, /Stopping: the LLM provider rejected the request \(HTTP_401: check OPENAI_API_KEY, OPENAI_BASE_URL and the model\)/);
+  const { report } = await findReport(run.outputDir);
+  assert.deepEqual(report.attribution.repetitions.byOutcome, { llm_outage: 1, cancelled: 8 });
+  assert.equal(report.stopped.cancelledCases.length, 8);
+  assert.match(run.stdout, /HARNESS: the run was stopped early: the LLM provider rejected the request/);
+});
+
+test('Ctrl-C (SIGINT) aborts in-flight cases and still writes a partial report (exit 130)', { skip }, async () => {
+  mode = 'slow';
+  const outputDir = path.join(outputRoot, 'sigint');
+  const child = spawn(process.execPath, evalArgs(['--dataset', 'core-public', '--concurrency', '2', '--skip-verify'], outputDir), { env: evalEnv(), cwd: REPO_ROOT });
+  let stdout = '';
+  let signalled = false;
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+    if (!signalled && /Running 9 case/.test(stdout)) {
+      signalled = true;
+      setTimeout(() => child.kill('SIGINT'), 1000);
+    }
+  });
+  child.stderr.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  const code = await new Promise((resolve) => child.on('close', (exitCode) => resolve(exitCode)));
+  mode = 'base';
+  assert.equal(code, 130, stdout);
+  assert.match(stdout, /Stopping: SIGINT received; in-flight cases are aborted and a partial report is written/);
+  assert.match(stdout, /INTERRUPTED: interrupted by SIGINT; the report is partial/);
+  const { report } = await findReport(outputDir);
+  assert.equal(report.stopped.signal, 'SIGINT');
+  assert.deepEqual(report.attribution.repetitions.byOutcome, { cancelled: 9 });
+  assert.ok(report.results.filter((record) => record.repetitions[0].cancelled_in_flight).length === 2, 'the two in-flight cases were aborted');
 });

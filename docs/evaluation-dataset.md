@@ -494,7 +494,13 @@ npm run eval -- --help                              # every flag
    LLM call, and a query already running ends at its statement timeout). `--repeat N` keeps every repetition. `--budget-usd X`
    stops starting new cases once the LLM cost of finished cases reaches X; the
    rest are `skipped_budget`. Cases already started finish their repetitions,
-   so the overshoot is at most the cases in flight.
+   so the overshoot is at most the cases in flight. A provider answer of HTTP
+   401 or 403 (wrong key, endpoint or model) stops the run at once instead of
+   failing every case: the rest are `cancelled` and the run exits 2. Ctrl-C
+   (SIGINT, or SIGTERM as in a cancelled CI job) aborts the cases in flight,
+   writes a partial report (`stopped` in report.json, a note in report.md)
+   and exits 130; a second Ctrl-C a second later exits at once without a
+   report.
 5. **Attribution, statistics, comparison, report.** Guardrail rejections are
    re-run on the fixtures (below), every repetition gets an outcome, and
    `report.json`, `report.md` and `trace.jsonl` are written to
@@ -545,6 +551,7 @@ there too.
   | `infra_error` | infra | excluded | the database failed: in the product loop, in a gold query, or while re-checking a guardrail rejection of an otherwise model-bucket failure (tagged `guardrail_unverified`: it might have been a false rejection) |
   | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/429/5xx |
   | `skipped_budget` | skipped | excluded | not run, budget spent |
+  | `cancelled` | skipped | excluded | the run was stopped (Ctrl-C, or the provider rejected the key) before this repetition finished |
   | `expected_sql_error` | harness | excluded | the gold failed (no LLM call was made) |
   | `harness_error` | harness | excluded | the runner itself threw |
 
@@ -679,7 +686,12 @@ Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
 case); 2 harness, dataset or infrastructure failure: unreachable database,
 fixtures that cannot be seeded, failed verification, bad flags, and any
 repetition that ended as `expected_sql_error`, `harness_error`, `infra_error`,
-`llm_outage`, `timeout` or `aborted`, or a run with no counted case. Exit 2
+`llm_outage`, `timeout`, `aborted` or `cancelled`, a run stopped early, or a
+run with no counted case; 130 when interrupted (the report is still
+written). Any provider outage left after the SDK's own retries makes the run
+exit 2 even when the other cases ran: the report is complete for what ran,
+but its accuracy leaves those repetitions out, so it is not used for gating
+or as a baseline without a look. Exit 2
 wins over 1: a run that hit the deadline is never reported as "significantly
 worse".
 

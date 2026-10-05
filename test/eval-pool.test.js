@@ -170,3 +170,68 @@ test('evaluateQuestion passes the deadline signal to the product loop', async ()
   assert.equal(result.status, 'aborted');
   assert.equal(result.error_code, 'CASE_TIMEOUT');
 });
+
+test('a stopped run starts nothing more, aborts what is in flight and records it as cancelled', async () => {
+  const stop = new AbortController();
+  const started = [];
+  const run = await runCaseRepetitions({
+    cases: cases(5),
+    concurrency: 3,
+    caseTimeoutMs: 10_000,
+    graceMs: 50,
+    stopSignal: stop.signal,
+    runRepetition: ({ testCase, signal }) => {
+      started.push(testCase.id);
+      if (testCase.id === 'case_1') {
+        return passResult();
+      }
+      if (testCase.id === 'case_2') {
+        // Ignores the signal: abandoned after the grace period.
+        return new Promise(() => {});
+      }
+      // case_3 stops the run, then honours the signal like the product loop.
+      stop.abort(new Error('the LLM provider rejected the request (HTTP_401)'));
+      const aborted = { status: 'aborted', attempts: [{ attempt: 1 }], llm_cost: null };
+      return signal.aborted ? aborted : new Promise((resolve) => signal.addEventListener('abort', () => resolve(aborted), { once: true }));
+    },
+  });
+  assert.deepEqual(started, ['case_1', 'case_2', 'case_3']);
+  assert.deepEqual(run.repetitions.map(([result]) => result.status), ['pass', 'cancelled', 'cancelled', 'cancelled', 'cancelled']);
+  assert.deepEqual(run.repetitions[2][0].attempts, [{ attempt: 1 }], 'what the in-flight case recorded is kept');
+  assert.deepEqual([run.repetitions[1][0].cancelled_in_flight, run.repetitions[2][0].cancelled_in_flight, run.repetitions[3][0].cancelled_in_flight], [true, true, undefined]);
+  assert.equal(run.repetitions[3][0].error, 'Not finished: the LLM provider rejected the request (HTTP_401).');
+  assert.equal(run.stopped, 'the LLM provider rejected the request (HTTP_401)');
+  assert.deepEqual(run.cancelledCaseIds, ['case_2', 'case_3', 'case_4', 'case_5']);
+  assert.equal(run.budgetExhausted, false);
+});
+
+test('a deadline during a stopped run is still a timeout, and a stop signal never leaks listeners', async () => {
+  const stop = new AbortController();
+  let listeners = 0;
+  const signal = stop.signal;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = (...args) => {
+    listeners += 1;
+    return add(...args);
+  };
+  signal.removeEventListener = (...args) => {
+    listeners -= 1;
+    return remove(...args);
+  };
+  const run = await runCaseRepetitions({
+    cases: cases(6),
+    concurrency: 3,
+    caseTimeoutMs: 20,
+    graceMs: 1000,
+    stopSignal: signal,
+    runRepetition: ({ testCase, signal: caseSignal }) =>
+      testCase.id === 'case_1'
+        ? new Promise((resolve) => caseSignal.addEventListener('abort', () => resolve({ status: 'aborted', attempts: [] }), { once: true }))
+        : passResult(),
+  });
+  assert.deepEqual(run.repetitions.map(([result]) => result.status), ['aborted', 'pass', 'pass', 'pass', 'pass', 'pass']);
+  assert.equal(run.repetitions[0][0].timed_out, true);
+  assert.equal(run.stopped, null);
+  assert.ok(listeners <= 0, `listeners left on the stop signal: ${listeners}`);
+});

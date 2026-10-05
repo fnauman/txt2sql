@@ -365,10 +365,14 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     // trusted, or gated, as a measurement of the model.
     ['timeout', 'hit the case deadline; raise --case-timeout-ms or check the provider'],
     ['aborted', 'were aborted before they finished'],
+    ['cancelled', 'did not finish because the run was stopped'],
   ]) {
     if (byOutcome[outcome]) {
       harness.push(`${byOutcome[outcome]} repetition(s): ${label} (${outcome})`);
     }
+  }
+  if (report.stopped?.reason) {
+    harness.push(`the run was stopped early: ${report.stopped.reason}`);
   }
   if (report.stats?.strictAccuracy?.value == null) {
     harness.push('no case was counted, so there is no accuracy to report');
@@ -426,7 +430,7 @@ function isGithubActions(env = process.env) {
 function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
   const status = result.status === 'aborted' && result.timed_out ? 'timeout' : result.status;
-  const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' ? 'skip' : 'FAIL';
+  const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
   const seconds = Number.isFinite(totalMs) ? (totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${Math.round(totalMs)}ms`) : '';
   const cost = Number.isFinite(result.llm_cost?.totalCost) ? `$${result.llm_cost.totalCost.toFixed(5)}` : '';
@@ -488,7 +492,7 @@ async function loadBaseline(options, model, cli) {
 function finish(result, options, cli) {
   const { code, reasons } = result;
   // 1 is a failed --gate, or (benchmark profile) a failed case.
-  const label = code === 2 ? 'HARNESS' : options.gate ? 'GATE' : 'FAIL';
+  const label = code === 130 ? 'INTERRUPTED' : code === 2 ? 'HARNESS' : options.gate ? 'GATE' : 'FAIL';
   for (const reason of reasons) {
     cli.log(`${label}: ${reason}`);
   }
@@ -538,6 +542,62 @@ async function checkGateBaseline(options, cli) {
   );
 }
 
+// Provider answers that mean the key, endpoint or model is wrong: every
+// further call would fail the same way.
+const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_403']);
+
+// Under `npm run eval` one Ctrl-C arrives twice (the terminal signals the
+// process group and npm forwards it to the script), so a repeat within this
+// window is the same keypress.
+const REPEAT_SIGNAL_WINDOW_MS = 1000;
+
+/**
+ * Stops a live run early: `stop(reason)` aborts the pool's stopSignal (no
+ * new task starts, in-flight ones are aborted and recorded as cancelled).
+ * SIGINT / SIGTERM stop it the same way, so a partial report is still
+ * written (exit 130); a second signal (after REPEAT_SIGNAL_WINDOW_MS) exits
+ * at once.
+ */
+export function createRunStopper({ cli, signals = process, exit = (code) => process.exit(code), now = Date.now } = {}) {
+  const controller = new AbortController();
+  let interruptedBy = null;
+  let firstSignalAt = null;
+  const stop = (reason) => {
+    if (!controller.signal.aborted) {
+      cli.log(`Stopping: ${reason}.`);
+      controller.abort(new Error(reason));
+    }
+  };
+  const onSignal = (name) => {
+    if (firstSignalAt !== null) {
+      if (now() - firstSignalAt >= REPEAT_SIGNAL_WINDOW_MS) {
+        cli.error(`${name} again: exiting without a report.`);
+        exit(130);
+      }
+      return;
+    }
+    firstSignalAt = now();
+    interruptedBy = name;
+    stop(`${name} received; in-flight cases are aborted and a partial report is written (send it again to exit at once)`);
+  };
+  const handlers = ['SIGINT', 'SIGTERM'].map((name) => [name, () => onSignal(name)]);
+  for (const [name, handler] of handlers) {
+    signals.on(name, handler);
+  }
+  return {
+    signal: controller.signal,
+    stop,
+    get interruptedBy() {
+      return interruptedBy;
+    },
+    dispose() {
+      for (const [name, handler] of handlers) {
+        signals.off(name, handler);
+      }
+    },
+  };
+}
+
 /** The OpenAI client for a live run, checked before anything is set up or spent. */
 function createLiveClient(options) {
   let client;
@@ -560,7 +620,7 @@ function createLiveClient(options) {
   return client;
 }
 
-async function runLive({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client }) {
+async function runLive({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
   const model = options.model;
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
@@ -618,92 +678,108 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
   );
   const goldCache = createGoldCache();
   const startedAt = Date.now();
-  const run = await runCaseRepetitions({
-    cases: entries.map((entry) => entry.testCase),
-    repeat: options.repeat,
-    concurrency: options.concurrency,
-    caseTimeoutMs: options.caseTimeoutMs,
-    budgetUsd: options.budgetUsd,
-    runRepetition: ({ testCase, caseIndex, repetition, signal }) =>
-      evaluateQuestion({
-        client,
-        connections,
-        schema,
-        model,
-        testCase,
-        caseIndex: caseIndex + 1,
-        datasetName: entries[caseIndex].datasets[0],
-        // Every trace line of this case carries its repetition number.
-        trace: { enabled: true, emit: (event, payload = {}) => trace.emit(event, { ...payload, repetition }) },
-        goldCache,
-        maxRetries,
-        statementTimeoutMs,
-        signal,
-      }),
-    onResult: async (info) => {
-      cli.log(formatProgress({ ...info, repeat: options.repeat }));
-      if (info.result.status === 'evaluation_error' || info.result.status === 'skipped_budget' || info.result.timed_out) {
-        await trace.emit('case.runner_outcome', {
-          caseId: info.testCase.id,
-          repetition: info.repetition,
-          status: info.result.status,
-          timedOut: Boolean(info.result.timed_out),
-          error: info.result.error || null,
-        });
-      }
-    },
-  });
-  cli.log(`Ran in ${((Date.now() - startedAt) / 1000).toFixed(1)} s; attributing failures (re-running guardrail-rejected SQL on the fixtures)...`);
+  const stop = createRunStopper({ cli, signals });
+  try {
+    const run = await runCaseRepetitions({
+      cases: entries.map((entry) => entry.testCase),
+      repeat: options.repeat,
+      concurrency: options.concurrency,
+      caseTimeoutMs: options.caseTimeoutMs,
+      budgetUsd: options.budgetUsd,
+      stopSignal: stop.signal,
+      runRepetition: ({ testCase, caseIndex, repetition, signal }) =>
+        evaluateQuestion({
+          client,
+          connections,
+          schema,
+          model,
+          testCase,
+          caseIndex: caseIndex + 1,
+          datasetName: entries[caseIndex].datasets[0],
+          // Every trace line of this case carries its repetition number.
+          trace: { enabled: true, emit: (event, payload = {}) => trace.emit(event, { ...payload, repetition }) },
+          goldCache,
+          maxRetries,
+          statementTimeoutMs,
+          signal,
+        }),
+      onResult: async (info) => {
+        cli.log(formatProgress({ ...info, repeat: options.repeat }));
+        // A rejected key or endpoint fails every call the same way: stop
+        // instead of attempting every case.
+        if (info.result.status === 'llm_error' && CONFIG_REJECTION_CODES.has(info.result.error_code)) {
+          stop.stop(
+            `the LLM provider rejected the request (${info.result.error_code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model); no further case is started`
+          );
+        }
+        if (['evaluation_error', 'skipped_budget', 'cancelled'].includes(info.result.status) || info.result.timed_out) {
+          await trace.emit('case.runner_outcome', {
+            caseId: info.testCase.id,
+            repetition: info.repetition,
+            status: info.result.status,
+            timedOut: Boolean(info.result.timed_out),
+            error: info.result.error || null,
+          });
+        }
+      },
+    });
+    cli.log(`Ran in ${((Date.now() - startedAt) / 1000).toFixed(1)} s; attributing failures (re-running guardrail-rejected SQL on the fixtures)...`);
 
-  const caseRecords = await attributeCaseRuns(
-    entries.map((entry, index) => ({ entry, repetitions: run.repetitions[index] })),
-    { connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS }
-  );
-  const generatedAt = new Date().toISOString();
-  const comparison = baseline
-    ? compareReports(baseline.report, { results: caseRecords, model, generatedAt, provenance, mode: 'run' }, { baselineLabel: repoRelative(baseline.path) })
-    : null;
-  const report = buildReport({
-    mode: 'run',
-    generatedAt,
-    runTimestamp: runPaths.timestamp,
-    model,
-    schemaPath: repoRelative(SCHEMA_PATH),
-    suite,
-    oracle: { fixtures: fixtureStatus, maxRetries, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS },
-    runner,
-    provenance,
-    verification,
-    budget: { limitUsd: options.budgetUsd, spentUsd: run.spentUsd, exhausted: run.budgetExhausted, skippedCases: run.skippedCaseIds },
-    caseRecords,
-    comparison,
-    traceFile: repoRelative(trace.filePath),
-  });
-  await trace.emit('run.completed', {
-    stats: { strictAccuracy: report.stats.strictAccuracy, majority: report.stats.majority, cost: report.stats.cost },
-    attribution: { repetitions: report.attribution.repetitions, system: report.attribution.system },
-    comparison: comparison ? { verdict: comparison.verdict, mcnemar: comparison.mcnemar, delta: comparison.accuracy.delta } : null,
-    reportPath,
-  });
-  await writeReport(report, { reportPath, cli });
-  const exit = computeExitCode(report, options);
-  if (options.writeBaseline) {
-    const target = defaultBaselinePath(model);
-    const refusal = baselineRefusal(report, exit);
-    if (refusal) {
-      cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
-    } else {
-      await writeJsonFile(target, report);
-      cli.log(`Baseline written: ${target}`);
-      if (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length) {
-        cli.log('  note: this run used a subset of the default suite; a committed baseline should cover the whole suite.');
-      }
-      if (report.provenance?.git?.dirty) {
-        cli.log('  note: the working tree is dirty; commit first so the baseline records a reproducible git sha.');
+    const caseRecords = await attributeCaseRuns(
+      entries.map((entry, index) => ({ entry, repetitions: run.repetitions[index] })),
+      { connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS }
+    );
+    const generatedAt = new Date().toISOString();
+    const comparison = baseline
+      ? compareReports(baseline.report, { results: caseRecords, model, generatedAt, provenance, mode: 'run' }, { baselineLabel: repoRelative(baseline.path) })
+      : null;
+    const report = buildReport({
+      mode: 'run',
+      generatedAt,
+      runTimestamp: runPaths.timestamp,
+      model,
+      schemaPath: repoRelative(SCHEMA_PATH),
+      suite,
+      oracle: { fixtures: fixtureStatus, maxRetries, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS },
+      runner,
+      provenance,
+      verification,
+      budget: { limitUsd: options.budgetUsd, spentUsd: run.spentUsd, exhausted: run.budgetExhausted, skippedCases: run.skippedCaseIds },
+      stopped: run.stopped ? { reason: run.stopped, signal: stop.interruptedBy, cancelledCases: run.cancelledCaseIds } : null,
+      caseRecords,
+      comparison,
+      traceFile: repoRelative(trace.filePath),
+    });
+    await trace.emit('run.completed', {
+      stats: { strictAccuracy: report.stats.strictAccuracy, majority: report.stats.majority, cost: report.stats.cost },
+      attribution: { repetitions: report.attribution.repetitions, system: report.attribution.system },
+      comparison: comparison ? { verdict: comparison.verdict, mcnemar: comparison.mcnemar, delta: comparison.accuracy.delta } : null,
+      reportPath,
+    });
+    await writeReport(report, { reportPath, cli });
+    const exit = stop.interruptedBy
+      ? { code: 130, reasons: [`interrupted by ${stop.interruptedBy}; ${run.stopped ? 'the report is partial' : 'the run had finished, the report is complete'}`] }
+      : computeExitCode(report, options);
+    if (options.writeBaseline) {
+      const target = defaultBaselinePath(model);
+      const refusal = baselineRefusal(report, exit);
+      if (refusal) {
+        cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
+      } else {
+        await writeJsonFile(target, report);
+        cli.log(`Baseline written: ${target}`);
+        if (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length) {
+          cli.log('  note: this run used a subset of the default suite; a committed baseline should cover the whole suite.');
+        }
+        if (report.provenance?.git?.dirty) {
+          cli.log('  note: the working tree is dirty; commit first so the baseline records a reproducible git sha.');
+        }
       }
     }
+    return finish(exit, options, cli);
+  } finally {
+    stop.dispose();
   }
-  return finish(exit, options, cli);
 }
 
 async function runRescore({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification }) {

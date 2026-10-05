@@ -21,7 +21,7 @@ import { OUTCOME_BUCKETS } from './attribution.js';
 import { goldFingerprint } from './controls.js';
 import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, mcnemarExact, mean, pairedBootstrapDeltaInterval, round } from './stats.js';
 
-const LEGACY_EXCLUDED = new Set(['infra_error', 'expected_sql_error', 'evaluation_error', 'skipped_budget']);
+const LEGACY_EXCLUDED = new Set(['infra_error', 'expected_sql_error', 'evaluation_error', 'skipped_budget', 'cancelled']);
 
 function isInfraOutcome(outcome) {
   return OUTCOME_BUCKETS[outcome] === 'infra';

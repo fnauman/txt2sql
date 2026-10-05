@@ -34,6 +34,9 @@
 //                                        timeout, unreachable, 401/403/429/5xx;
 //                                        excluded)
 //   skipped_budget              skipped (excluded)
+//   cancelled                   skipped (the run was stopped, by Ctrl-C or a
+//                                        rejected API key, before this
+//                                        repetition finished; excluded)
 //   expected_sql_error          harness (gold failed; excluded)
 //   harness_error               harness (the runner itself threw; excluded)
 //
@@ -64,12 +67,13 @@ export const OUTCOME_BUCKETS = Object.freeze({
   infra_error: 'infra',
   llm_outage: 'infra',
   skipped_budget: 'skipped',
+  cancelled: 'skipped',
   expected_sql_error: 'harness',
   harness_error: 'harness',
 });
 
 // Outcomes left out of the strict-accuracy denominator (reported separately).
-export const EXCLUDED_OUTCOMES = Object.freeze(new Set(['infra_error', 'llm_outage', 'skipped_budget', 'expected_sql_error', 'harness_error']));
+export const EXCLUDED_OUTCOMES = Object.freeze(new Set(['infra_error', 'llm_outage', 'skipped_budget', 'cancelled', 'expected_sql_error', 'harness_error']));
 
 // Display order, also the tie-break when picking a case's majority outcome
 // (earlier = preferred on a tie, so a tie never hides a failure behind pass).
@@ -88,6 +92,7 @@ export const OUTCOME_ORDER = Object.freeze([
   'expected_sql_error',
   'harness_error',
   'skipped_budget',
+  'cancelled',
 ]);
 
 export const BUCKET_ORDER = Object.freeze(['pass', 'model', 'system', 'infra', 'skipped', 'harness']);
@@ -136,6 +141,9 @@ export function classifyRepetition(repetition, testCase = {}) {
       break;
     case 'skipped_budget':
       outcome = 'skipped_budget';
+      break;
+    case 'cancelled':
+      outcome = 'cancelled';
       break;
     case 'expected_sql_error':
       // A gold query that failed because the database went away is an
@@ -366,7 +374,7 @@ export function guardrailConfusion(caseRecords) {
   const unknownBy = { unsafe: 0, checkFailed: 0, unchecked: 0, infra: 0, notFinal: 0 };
   for (const record of caseRecords || []) {
     for (const repetition of record.repetitions || []) {
-      if (['skipped_budget', 'expected_sql_error', 'evaluation_error'].includes(repetition.status)) {
+      if (['skipped_budget', 'cancelled', 'expected_sql_error', 'evaluation_error'].includes(repetition.status)) {
         continue;
       }
       const attempts = repetition.attempts || [];

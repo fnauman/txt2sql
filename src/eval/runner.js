@@ -5,7 +5,7 @@
 // (total/passed/failed/accuracy/statusCounts/warningCounts describe the FIRST
 // repetition, `reliability` is the old pooled block, now labelled as such) and
 // adds: mode, suite, runner, provenance, verification, stats, attribution,
-// budget, comparison, rescoredFrom. Each results[i] is one case: its dataset
+// budget, stopped (why a run ended early, or null), comparison, rescoredFrom. Each results[i] is one case: its dataset
 // fields, the first repetition's fields at the top level (as before), every
 // repetition in `repetitions[]` (each with outcome / bucket / counted /
 // outcome_tags from attribution.js) and a per-case `summary`.
@@ -18,6 +18,9 @@ import { summarizeReliability, summarizeRunStatistics } from './stats.js';
 import { caseSplit, scoringFingerprint } from './suite.js';
 
 export const REPORT_VERSION = 2;
+
+// Repetitions that never produced a verdict (budget, a stopped run).
+const NOT_RUN = new Set(['skipped_budget', 'cancelled']);
 
 /** Dataset fields of a case as recorded in results[i]. */
 export function caseMetadata(testCase, datasets = []) {
@@ -114,7 +117,7 @@ export function legacySummary(caseRecords) {
   const perRepetition = [];
   for (let index = 0; index < repeat; index += 1) {
     const withIds = caseRecords
-      .filter((record) => record.repetitions[index] && record.repetitions[index].status !== 'skipped_budget')
+      .filter((record) => record.repetitions[index] && !NOT_RUN.has(record.repetitions[index].status))
       .map((record) => ({ id: record.id, intentId: record.intentId, question: record.question, status: record.repetitions[index].status }));
     const summary = summarizeBenchmarkResults(withIds);
     perRepetition.push({
@@ -127,7 +130,7 @@ export function legacySummary(caseRecords) {
       accuracy: summary.total === 0 ? 0 : Number((summary.passed / summary.total).toFixed(4)),
     });
   }
-  const firstResults = caseRecords.map((record) => record.repetitions[0]).filter((repetition) => repetition && repetition.status !== 'skipped_budget');
+  const firstResults = caseRecords.map((record) => record.repetitions[0]).filter((repetition) => repetition && !NOT_RUN.has(repetition.status));
   const first = summarizeBenchmarkResults(firstResults);
   const reliability = summarizeReliability(perRepetition, Math.max(1, repeat));
   return {
@@ -156,6 +159,7 @@ export function buildReport({
   provenance,
   verification = null,
   budget = null,
+  stopped = null,
   caseRecords,
   comparison = null,
   rescoredFrom = null,
@@ -192,6 +196,7 @@ export function buildReport({
     stats: summarizeRunStatistics(caseRecords, statsOptions),
     attribution: summarizeAttribution(caseRecords),
     budget,
+    stopped,
     comparison,
     rescoredFrom,
     ...legacy,

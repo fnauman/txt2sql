@@ -8,7 +8,7 @@ const BUCKET_LABELS = {
   model: 'model errors',
   system: 'system errors (guardrail false rejections, retrieval misses)',
   infra: 'infrastructure (timeouts, DB/provider failures)',
-  skipped: 'skipped (budget)',
+  skipped: 'skipped (budget, or the run was stopped)',
   harness: 'harness (gold or runner errors)',
 };
 
@@ -106,6 +106,13 @@ function headline(report) {
     lines.push('');
     lines.push(
       `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
+    );
+  }
+  if (report.stopped) {
+    lines.push('');
+    lines.push(
+      `**The run was stopped early**: ${report.stopped.reason}. ${report.stopped.cancelledCases?.length || 0} case(s) did not finish ` +
+        '(outcome `cancelled`, excluded); the numbers cover only what finished.'
     );
   }
   if (report.mode === 'rescore' && report.rescoredFrom) {
@@ -550,6 +557,9 @@ export function renderHeadline(report) {
     `Cost ${formatUsd(stats.cost.total)} (${formatUsd(stats.cost.perQuestion, 5)}/question, ${formatUsd(stats.cost.perCorrect, 5)}/correct) · ` +
       `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
   ];
+  if (report.stopped) {
+    lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);
+  }
   if (report.comparison) {
     lines.push(renderComparisonConsole(report.comparison));
   }

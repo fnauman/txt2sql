@@ -28,8 +28,8 @@
 // validator no longer makes would still count as a false rejection.
 //
 // Kept as recorded: LLM usage, cost and timings (nothing is re-generated),
-// and repetitions that never reached the model (skipped_budget, harness
-// errors). Runs that were cut short (aborted, infra_error) keep their status
+// and repetitions that never reached the model or were cut off by a stopped
+// run (skipped_budget, cancelled, harness errors). Runs that were cut short (aborted, infra_error) keep their status
 // unless a recorded attempt now completes; such recorded outcomes (and
 // recorded provider outages) are flagged `rescore.inherited`, so they do not
 // make a rescore exit as a harness failure today. Rescoring the same report twice
@@ -43,7 +43,7 @@ import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGo
 
 const STAGE_STATUS = { llm: 'llm_error', validation: 'validation_error', execution: 'execution_error', infra: 'infra_error' };
 const EXECUTED_STATUSES = new Set(['pass', 'result_mismatch', 'retrieval_miss']);
-const KEPT_STATUSES = new Set(['skipped_budget', 'evaluation_error']);
+const KEPT_STATUSES = new Set(['skipped_budget', 'cancelled', 'evaluation_error']);
 const CUT_SHORT_STATUSES = new Set(['aborted', 'infra_error']);
 
 const CASE_FIELDS = [

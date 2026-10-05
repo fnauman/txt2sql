@@ -4,7 +4,7 @@ import test from 'node:test';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { verifySuite } from '../src/eval/verify.js';
-import { baselineRefusal, computeExitCode, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval } from '../scripts/eval.js';
+import { baselineRefusal, computeExitCode, createRunStopper, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval } from '../scripts/eval.js';
 
 test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline', () => {
   const options = parseEvalArgs([], { env: {} });
@@ -357,4 +357,45 @@ test('configuration problems fail before any setup: --gate without a baseline, a
       process.env.OPENAI_API_KEY = saved;
     }
   }
+});
+
+test('Ctrl-C stops the run once; a repeat within a second (npm forwards it) is ignored, a later one exits', () => {
+  const handlers = new Map();
+  const signals = { on: (name, handler) => handlers.set(name, handler), off: (name) => handlers.delete(name) };
+  const logs = [];
+  const exits = [];
+  let clock = 1000;
+  const stopper = createRunStopper({ cli: { log: (line) => logs.push(line), error: (line) => logs.push(line) }, signals, exit: (code) => exits.push(code), now: () => clock });
+  assert.equal(stopper.signal.aborted, false);
+  handlers.get('SIGINT')();
+  assert.equal(stopper.signal.aborted, true);
+  assert.equal(stopper.interruptedBy, 'SIGINT');
+  assert.match(logs[0], /^Stopping: SIGINT received; in-flight cases are aborted and a partial report is written/);
+  clock += 5;
+  handlers.get('SIGINT')();
+  assert.deepEqual(exits, [], 'the forwarded copy of the same keypress');
+  clock += 2000;
+  handlers.get('SIGTERM')();
+  assert.deepEqual(exits, [130]);
+  stopper.dispose();
+  assert.equal(handlers.size, 0);
+
+  // A provider rejection stops it without a signal.
+  const other = createRunStopper({ cli: { log: () => {} }, signals: { on: () => {}, off: () => {} } });
+  other.stop('the LLM provider rejected the request (HTTP_401)');
+  assert.equal(other.signal.reason.message, 'the LLM provider rejected the request (HTTP_401)');
+  assert.equal(other.interruptedBy, null);
+});
+
+test('a stopped run exits 2 and says why; cancelled repetitions are excluded', () => {
+  const result = computeExitCode({
+    ...fakeReport({ byOutcome: { pass: 1, llm_outage: 1, cancelled: 4 } }),
+    stopped: { reason: 'the LLM provider rejected the request (HTTP_401)', cancelledCases: ['b', 'c'] },
+  });
+  assert.equal(result.code, 2);
+  assert.deepEqual(result.reasons, [
+    '1 repetition(s): LLM provider outage errors (llm_outage)',
+    '4 repetition(s): did not finish because the run was stopped (cancelled)',
+    'the run was stopped early: the LLM provider rejected the request (HTTP_401)',
+  ]);
 });

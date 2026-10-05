@@ -174,8 +174,11 @@ function breakdown(records, keysOf) {
 }
 
 // Repetitions that actually asked the model (skipped and gold-error
-// repetitions made no call).
+// repetitions made no call; a cancelled one only if it got that far).
 function isExecuted(repetition) {
+  if (repetition.status === 'cancelled') {
+    return (repetition.attempts || []).length > 0;
+  }
   return !['skipped_budget', 'expected_sql_error', 'evaluation_error'].includes(repetition.status);
 }
 
