@@ -141,6 +141,7 @@ const PAYLOADS = [
   // resolves both of these to the real secret_audit table.
   ['WITH a AS (SELECT * FROM secret_audit), secret_audit AS (SELECT 1 AS id) SELECT * FROM a', 'TABLE_SCOPE'],
   ['WITH secret_audit AS (SELECT * FROM secret_audit) SELECT * FROM secret_audit', 'TABLE_SCOPE'],
+  ['(SELECT * FROM secret_audit)', 'TABLE_SCOPE'],
   // Metadata schemas, bare and backtick-quoted (the old denylist blanked backticks).
   ['SELECT * FROM (`information_schema`.`TABLES`)', 'METADATA_SCHEMA'],
   ['SELECT * FROM(`mysql`.`user`)', 'METADATA_SCHEMA'],
@@ -200,7 +201,8 @@ const PAYLOADS = [
   ['WITH x AS (SELECT 1) DELETE FROM Customer', 'NOT_READ_ONLY'],
   ['TABLE Customer', 'NOT_SELECT'],
   ['VALUES (1),(2)', 'NOT_SELECT'],
-  ['(SELECT 1)', 'NOT_SELECT'],
+  ['(VALUES (1))', 'NOT_SELECT'],
+  ['(TABLE Customer)', 'NOT_SELECT'],
   ['SELECT 1; SELECT 2', 'MULTI_STATEMENT'],
   ['SELECT 1;;', 'MULTI_STATEMENT'],
   // Malformed input fails closed.
@@ -261,6 +263,22 @@ test('the battery covers every audit payload class', () => {
   ]) {
     assert.ok(codes.has(code), `no payload exercises ${code}`);
   }
+});
+
+test('a query expression may open with parentheses', () => {
+  for (const sql of [
+    '(SELECT CustomerName FROM Customer) UNION (SELECT CustomerName FROM Customer)',
+    '((SELECT CustomerName FROM Customer LIMIT 1))',
+    '(WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM x)',
+  ]) {
+    // Basic and neutral-question paths (the net-sales path would also demand
+    // the metric column, which is unrelated to the statement head).
+    for (const { name, allowedTables, promptContext } of PATHS.slice(0, 2)) {
+      const result = validateReadOnlySql(sql, allowedTables, { promptContext });
+      assert.deepEqual(result.tablesUsed, ['Customer'], `[${name}] ${sql}`);
+    }
+  }
+  assert.equal(validateSqlSafety('(SELECT 1) UNION (SELECT 2)').firstKeyword, 'SELECT');
 });
 
 // Known gap, deferred to SAFE-11 (resource bounds enforced at the connection:

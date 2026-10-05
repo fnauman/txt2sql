@@ -1881,7 +1881,8 @@ function findTokenPolicyViolation(tokens) {
  *   @/@@ variables, restricted and session-information functions, sequences,
  *   WITH RECURSIVE, index hints, FOR SYSTEM_TIME, metadata schemas and
  *   cross-database references,
- * - anything but a single SELECT/WITH statement (one trailing ';' is allowed),
+ * - anything but a single SELECT/WITH statement (one trailing ';' is allowed;
+ *   the statement may open with parentheses, as in `(SELECT ...) UNION (...)`),
  * - table references outside `allowedTables`, including parenthesized table
  *   references and table functions after FROM/JOIN (fail closed). CTE names are
  *   query-local and are not checked, but the tables inside CTE bodies are.
@@ -1939,7 +1940,13 @@ export function validateSqlSafety(sql, allowedTables = []) {
     throw safetyError(code, message || SAFETY_MESSAGES[code]);
   }
 
-  const firstKeyword = isKeywordToken(statementTokens[0], 'SELECT', 'WITH') ? statementTokens[0].upper : null;
+  // A query expression may open with parentheses: `(SELECT ...) UNION (SELECT
+  // ...)` and `((SELECT ...))` are plain reads, so skip leading '(' tokens.
+  let headIndex = 0;
+  while (isPunctToken(statementTokens[headIndex], '(')) {
+    headIndex += 1;
+  }
+  const firstKeyword = isKeywordToken(statementTokens[headIndex], 'SELECT', 'WITH') ? statementTokens[headIndex].upper : null;
   if (!firstKeyword) {
     throw safetyError('NOT_SELECT', 'Only SELECT or WITH queries are allowed.');
   }
