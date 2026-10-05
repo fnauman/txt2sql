@@ -114,6 +114,33 @@ const PAYLOADS = [
   ['WITH otherdb AS (SELECT 1 AS a) SELECT * FROM otherdb.payroll', 'CROSS_DATABASE'],
   ['SELECT otherdb.some_function(1)', 'CROSS_DATABASE'],
   ["SELECT jt.v FROM JSON_TABLE('[1,2]', '$[*]' COLUMNS (v INT PATH '$')) AS jt", 'TABLE_FUNCTION'],
+  // Index hints and FOR SYSTEM_TIME can be followed by `, another_table` inside
+  // a FROM list; the old FOR terminator ended the comma-list scan there, so the
+  // next table was never checked (each ran on MariaDB 10.6 and returned the
+  // planted row). They are rejected outright.
+  ['SELECT c.CustomerName FROM Customer c FORCE INDEX FOR ORDER BY (PRIMARY), secret_audit s', 'INDEX_HINT'],
+  ['SELECT * FROM Customer USE INDEX FOR ORDER BY (PRIMARY), secret_audit', 'INDEX_HINT'],
+  ['SELECT c.CustomerName FROM Customer c IGNORE KEY FOR GROUP BY (PRIMARY), secret_audit', 'INDEX_HINT'],
+  ['SELECT c.CustomerName, p.salary FROM Customer c USE INDEX FOR GROUP BY (PRIMARY), otherdb.payroll p LIMIT 2', 'INDEX_HINT'],
+  ['SELECT * FROM Customer c FORCE INDEX FOR ORDER BY (PRIMARY), otherdb.payroll p', 'INDEX_HINT'],
+  ['SELECT * FROM Customer c USE INDEX FOR JOIN (PRIMARY) JOIN secret_audit s ON 1 = 1', 'INDEX_HINT'],
+  ['SELECT * FROM Customer c USE INDEX (PRIMARY), secret_audit', 'INDEX_HINT'],
+  ['SELECT * FROM Customer FOR SYSTEM_TIME ALL c, secret_audit s', 'SYSTEM_TIME'],
+  // MINUS (a set operator only under sql_mode=ORACLE) and WINDOW are legal
+  // aliases / column / CTE names in MariaDB 10.6, so they must not end the
+  // FROM-list scan either (all verified to return the planted row).
+  ['SELECT * FROM Customer minus, secret_audit LIMIT 1', 'TABLE_SCOPE'],
+  ['SELECT * FROM Customer AS minus, otherdb.payroll LIMIT 1', 'CROSS_DATABASE'],
+  ['WITH minus AS (SELECT 1 AS a) SELECT * FROM minus, secret_audit', 'TABLE_SCOPE'],
+  ['SELECT * FROM (SELECT 1 AS a) minus, secret_audit', 'TABLE_SCOPE'],
+  ['SELECT * FROM Customer c JOIN (SELECT 1 AS minus) w ON minus = 1, secret_audit LIMIT 1', 'TABLE_SCOPE'],
+  ['SELECT * FROM Customer c JOIN (SELECT 1 AS window) w ON window = 1, secret_audit LIMIT 1', 'TABLE_SCOPE'],
+  ['WITH window AS (SELECT 1 AS a) SELECT * FROM window, secret_audit', 'TABLE_SCOPE'],
+  // CTE visibility: a CTE is visible only after its own definition, and inside
+  // its own (non-recursive) body the name still means the real table. MariaDB
+  // resolves both of these to the real secret_audit table.
+  ['WITH a AS (SELECT * FROM secret_audit), secret_audit AS (SELECT 1 AS id) SELECT * FROM a', 'TABLE_SCOPE'],
+  ['WITH secret_audit AS (SELECT * FROM secret_audit) SELECT * FROM secret_audit', 'TABLE_SCOPE'],
   // Metadata schemas, bare and backtick-quoted (the old denylist blanked backticks).
   ['SELECT * FROM (`information_schema`.`TABLES`)', 'METADATA_SCHEMA'],
   ['SELECT * FROM(`mysql`.`user`)', 'METADATA_SCHEMA'],
@@ -229,7 +256,28 @@ test('the battery covers every audit payload class', () => {
     'CROSS_DATABASE',
     'PARENTHESIZED_TABLE',
     'RECURSIVE_CTE',
+    'INDEX_HINT',
+    'SYSTEM_TIME',
   ]) {
     assert.ok(codes.has(code), `no payload exercises ${code}`);
+  }
+});
+
+// Known gap, deferred to SAFE-11 (resource bounds enforced at the connection:
+// max_statement_time, sql_select_limit). These SAFE-10 payloads exhaust time or
+// memory, not the read-only/table-scope policy, so layer 1 knowingly accepts
+// them on the basic path. Verified on MariaDB 10.6: a REPEAT() result larger
+// than max_allowed_packet (16 MiB) is returned as NULL with warning 1301, so the
+// "memory bomb" is capped by the server; a cartesian self-join only costs time,
+// which only a statement timeout can bound. When SAFE-11 lands, move these into
+// PAYLOADS (or delete them) instead of keeping this list.
+const KNOWN_ACCEPTED_RESOURCE_PAYLOADS = [
+  "SELECT LENGTH(REPEAT('x', 1073741824)) AS n",
+  'SELECT COUNT(*) AS n FROM SalesDocumentLine a, SalesDocumentLine b, SalesDocumentLine c, SalesDocumentLine d, SalesDocumentLine e',
+];
+
+test('known gap (SAFE-11): resource-exhaustion payloads still pass layer 1', () => {
+  for (const sql of KNOWN_ACCEPTED_RESOURCE_PAYLOADS) {
+    assert.doesNotThrow(() => validateSqlSafety(sql, ALL_TABLES), sql);
   }
 });

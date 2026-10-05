@@ -314,6 +314,48 @@ test('GROUP BY ... WITH ROLLUP is not a CTE clause', () => {
   assert.deepEqual(analysis.issues, []);
 });
 
+test('only reserved words end a FROM-list scan; aliases named minus or window do not', () => {
+  // MINUS is an identifier outside sql_mode=ORACLE and WINDOW is a legal column
+  // and CTE name in MariaDB 10.6, so neither may hide a later comma-listed table.
+  for (const [sql, expected] of [
+    ['SELECT * FROM Customer minus, secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer AS minus, otherdb.payroll', ['Customer', 'payroll']],
+    ['SELECT * FROM (SELECT 1 AS a) minus, secret_audit', ['secret_audit']],
+    ['SELECT * FROM Customer c JOIN (SELECT 1 AS window) w ON window = 1, secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer c JOIN (SELECT 1 AS minus) w ON minus.x = 1, secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer USE INDEX FOR ORDER BY (PRIMARY), secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer IGNORE KEY FOR GROUP BY (PRIMARY), secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer USE INDEX FOR JOIN (PRIMARY), secret_audit', ['Customer', 'secret_audit']],
+    ['SELECT * FROM Customer FOR SYSTEM_TIME ALL c, secret_audit', ['Customer', 'secret_audit']],
+  ]) {
+    const analysis = analyzeSqlStructure(sql);
+    assert.deepEqual(
+      analysis.tableRefs.filter((ref) => ref.kind === 'table').map((ref) => ref.name),
+      expected,
+      sql
+    );
+  }
+
+  const cte = analyzeSqlStructure('WITH window AS (SELECT 1 AS a) SELECT * FROM window, secret_audit');
+  assert.deepEqual(cte.tableRefs.map((ref) => [ref.kind, ref.name]), [['cte', 'window'], ['table', 'secret_audit']]);
+
+  // A real WINDOW clause and the reserved terminators still end the scan.
+  for (const sql of [
+    'SELECT ROW_NUMBER() OVER w FROM Customer c WINDOW w AS (ORDER BY c.CustomerName), x',
+    'SELECT a, b FROM Customer ORDER BY a, b',
+    'SELECT a, b FROM Customer GROUP BY a, b',
+    'SELECT a FROM Customer LIMIT 1, 2',
+  ]) {
+    assert.deepEqual(analyzeSqlStructure(sql).tableRefs.map((ref) => ref.name), ['Customer'], sql);
+  }
+});
+
+test('MINUS is not a set operator outside sql_mode=ORACLE', () => {
+  const analysis = analyzeSqlStructure('SELECT SUM(d.NetAmount) FROM SalesDocument minus JOIN SalesDocumentLine l ON 1 = 1');
+  assert.equal(new Set(analysis.tableRefs.map((ref) => ref.blockId)).size, 1);
+  assert.equal(analysis.tableRefs[0].alias, 'minus');
+});
+
 test('SELECT blocks split at UNION and nested queries get their own scope', () => {
   const analysis = analyzeSqlStructure(
     'SELECT a FROM t1 JOIN t2 ON 1 = 1 UNION SELECT b FROM t3 WHERE EXISTS (SELECT 1 FROM t4)'

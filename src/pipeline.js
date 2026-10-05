@@ -1766,6 +1766,8 @@ const SAFETY_MESSAGES = {
   SESSION_INFO_FUNCTION: 'Server/session information functions are not allowed.',
   PROCEDURE_CLAUSE: 'PROCEDURE clauses are not allowed.',
   RECURSIVE_CTE: 'Recursive CTEs (WITH RECURSIVE) are not allowed.',
+  INDEX_HINT: 'Index hints (USE/FORCE/IGNORE INDEX or KEY) are not allowed.',
+  SYSTEM_TIME: 'System-versioned table queries (FOR SYSTEM_TIME) are not allowed.',
   CROSS_DATABASE: 'Cross-database references (db.table or db.function()) are not allowed.',
 };
 
@@ -1828,6 +1830,16 @@ function findTokenPolicyViolation(tokens) {
     if (word === 'FOR' && isKeywordToken(next, 'UPDATE', 'SHARE')) {
       return ['LOCKING_READ', `Locking reads (FOR ${next.upper}) are not allowed.`];
     }
+    // Index hints and FOR SYSTEM_TIME sit inside a FROM list and may be followed
+    // by `, another_table`. Generated analytics SQL never needs them, so they are
+    // rejected outright instead of being parsed (USE, FORCE and IGNORE are
+    // reserved, so `USE INDEX` cannot be an alias followed by a column).
+    if ((word === 'USE' || word === 'FORCE' || word === 'IGNORE') && isKeywordToken(next, 'INDEX', 'KEY')) {
+      return ['INDEX_HINT'];
+    }
+    if (word === 'FOR' && isKeywordToken(next, 'SYSTEM_TIME')) {
+      return ['SYSTEM_TIME'];
+    }
     if (word === 'LOCK') {
       return ['LOCKING_READ', 'Locking reads (LOCK IN SHARE MODE) are not allowed.'];
     }
@@ -1867,7 +1879,8 @@ function findTokenPolicyViolation(tokens) {
  *   backslash-escaped quotes (ambiguous under NO_BACKSLASH_ESCAPES),
  * - write/DDL keywords, SELECT ... INTO, locking reads, PROCEDURE, SET,
  *   @/@@ variables, restricted and session-information functions, sequences,
- *   WITH RECURSIVE, metadata schemas and cross-database references,
+ *   WITH RECURSIVE, index hints, FOR SYSTEM_TIME, metadata schemas and
+ *   cross-database references,
  * - anything but a single SELECT/WITH statement (one trailing ';' is allowed),
  * - table references outside `allowedTables`, including parenthesized table
  *   references and table functions after FROM/JOIN (fail closed). CTE names are

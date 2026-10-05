@@ -431,6 +431,19 @@ const FROM_ARGUMENT_FUNCTIONS = new Set(['EXTRACT', 'TRIM', 'SUBSTRING', 'SUBSTR
 
 // Keywords that end a FROM clause at its own nesting depth. ON/USING are part of
 // the clause (a comma after a join condition still introduces another table).
+//
+// Ending the scan too early hides every later comma-listed table from the
+// allow-list check, while scanning too far can only add tables (a false
+// rejection). So every word here must be reserved in MariaDB 10.6's default
+// sql_mode, i.e. it can never be a table alias, CTE name or column name (each
+// verified on the server). Deliberately NOT terminators:
+// - MINUS is a set operator only under sql_mode=ORACLE; otherwise it is a legal
+//   alias (`FROM Customer minus, secret_audit`).
+// - WINDOW is a legal column and CTE name (`ON window = 1, secret_audit`); it
+//   only ends the clause as `WINDOW name AS (...)`, see isWindowClause().
+// - FOR only starts index hints (`USE INDEX FOR ORDER BY (...)`), FOR
+//   SYSTEM_TIME and locking clauses here, all of which layer 1 rejects; a FOR
+//   hint can be followed by `, another_table`, so the scan continues past it.
 const FROM_CLAUSE_TERMINATORS = new Set([
   'WHERE',
   'GROUP',
@@ -442,9 +455,6 @@ const FROM_CLAUSE_TERMINATORS = new Set([
   'UNION',
   'EXCEPT',
   'INTERSECT',
-  'MINUS',
-  'WINDOW',
-  'FOR',
   'INTO',
   'PROCEDURE',
   'LOCK',
@@ -454,6 +464,8 @@ const FROM_CLAUSE_TERMINATORS = new Set([
 // Words that can follow a table reference without being its alias.
 const TABLE_ALIAS_STOPWORDS = new Set([
   ...FROM_CLAUSE_TERMINATORS,
+  'FOR',
+  'WINDOW',
   'AS',
   'ON',
   'USING',
@@ -491,7 +503,9 @@ const SELECT_OPTION_WORDS = new Set([
   'SQL_CALC_FOUND_ROWS',
 ]);
 
-const SET_OPERATORS = new Set(['UNION', 'EXCEPT', 'INTERSECT', 'MINUS']);
+// MINUS is not here: outside sql_mode=ORACLE it is an identifier, and treating
+// an alias named `minus` as a block boundary would split one SELECT in two.
+const SET_OPERATORS = new Set(['UNION', 'EXCEPT', 'INTERSECT']);
 
 export function isKeywordToken(token, ...words) {
   return Boolean(token) && token.type === 'word' && !token.afterDot && words.includes(token.upper);
@@ -707,6 +721,15 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
 
   // Pass 4: table references after FROM, JOIN/STRAIGHT_JOIN and FROM-list commas.
   const tableRefs = [];
+  // Token indexes that belong to a parsed table reference (name, qualifier,
+  // AS and alias). The FROM-list scan never treats them as clause keywords, so
+  // an alias can never end the scan early.
+  const consumed = new Set();
+  const consume = (from, to) => {
+    for (let index = from; index <= to; index += 1) {
+      consumed.add(index);
+    }
+  };
   const parseAlias = (index) => {
     const token = tokens[index];
     if (isKeywordToken(token, 'AS')) {
@@ -757,7 +780,8 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
         );
         return;
       }
-      const { alias } = parseAlias(group.close + 1);
+      const { alias, end } = parseAlias(group.close + 1);
+      consume(group.close + 1, end);
       tableRefs.push({ ...base, kind: 'derived', name: null, schema: null, alias, open: group.open, close: group.close });
       return;
     }
@@ -773,6 +797,7 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
       return;
     }
     if (token.type === 'word' && token.upper === 'DUAL') {
+      consume(index, index);
       tableRefs.push({ ...base, kind: 'dual', name: 'DUAL', schema: null, alias: null });
       return;
     }
@@ -791,7 +816,9 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
       end = index + 2;
     }
 
-    const { alias } = parseAlias(end + 1);
+    const aliasEnd = parseAlias(end + 1);
+    const { alias } = aliasEnd;
+    consume(index, aliasEnd.end);
     const cte = schema === null ? resolveCte(tableName, index) : null;
     tableRefs.push({
       ...base,
@@ -802,6 +829,27 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
       alias,
       cteName: cte ? cte.name : null,
     });
+  };
+
+  // `WINDOW w AS (...)` is the only form in which WINDOW ends a FROM clause.
+  const isWindowClause = (index) =>
+    isKeywordToken(tokens[index], 'WINDOW') && isIdentifierToken(tokens[index + 1]) && isKeywordToken(tokens[index + 2], 'AS');
+
+  const isFromClauseTerminator = (index) => {
+    const token = tokens[index];
+    if (consumed.has(index) || token.type !== 'word' || token.afterDot) {
+      return false;
+    }
+    // `minus.x` / `window.x`: a word followed by '.' is a qualifier, never a keyword.
+    if (isPunct(tokens[index + 1], '.')) {
+      return false;
+    }
+    // Index hint `... INDEX FOR ORDER BY (...)` / `FOR GROUP BY (...)`: the
+    // ORDER/GROUP belongs to the hint, and the FROM list goes on after it.
+    if (isKeywordToken(tokens[index - 1], 'FOR')) {
+      return false;
+    }
+    return FROM_CLAUSE_TERMINATORS.has(token.upper) || isWindowClause(index);
   };
 
   const scanFromClause = (fromIndex) => {
@@ -819,7 +867,7 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
       if (innermostGroup(token) !== groupId) {
         return;
       }
-      if (token.type === 'word' && !token.afterDot && FROM_CLAUSE_TERMINATORS.has(token.upper)) {
+      if (isFromClauseTerminator(cursor)) {
         return;
       }
       if (isPunct(token, ',')) {
@@ -828,6 +876,9 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
     }
   };
 
+  // Pass 4a: the reference right after every FROM / JOIN / STRAIGHT_JOIN, so
+  // their aliases are known (consumed) before any comma list is scanned.
+  const fromKeywordIndexes = [];
   for (const token of tokens) {
     if (token.type !== 'word' || token.afterDot) {
       continue;
@@ -839,10 +890,14 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
         continue;
       }
       parseTableRef(token.index + 1, token.index, 'FROM');
-      scanFromClause(token.index);
+      fromKeywordIndexes.push(token.index);
       continue;
     }
     if (token.upper === 'JOIN') {
+      // `USE INDEX FOR JOIN (...)` is an index hint scope, not a join.
+      if (isKeywordToken(tokens[token.index - 1], 'FOR')) {
+        continue;
+      }
       parseTableRef(token.index + 1, token.index, 'JOIN');
       continue;
     }
@@ -853,6 +908,11 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
       }
       parseTableRef(token.index + 1, token.index, 'STRAIGHT_JOIN');
     }
+  }
+
+  // Pass 4b: comma-separated FROM lists at the FROM keyword's own depth.
+  for (const fromIndex of fromKeywordIndexes) {
+    scanFromClause(fromIndex);
   }
 
   tableRefs.sort((left, right) => left.index - right.index);
