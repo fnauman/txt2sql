@@ -271,3 +271,73 @@ test('a recorded guardrail verdict never survives a rescore: today\'s rejections
   assert.deepEqual([unsafeRep.outcome, unsafeRep.bucket], ['wrong_result', 'model']);
   assert.ok(!sent.some((line) => line.includes('-- all')), 'a safety rejection is never executed');
 });
+
+test('the validator probe throws a database failure in the master-data lookup instead of hiding it', async () => {
+  let attempts = 0;
+  const closed = () => Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+  const flaky = {
+    async query() {
+      attempts += 1;
+      throw attempts === 1 ? closed() : Object.assign(new Error('Query execution was interrupted (max_statement_time exceeded)'), { code: 'ER_STATEMENT_TIMEOUT' });
+    },
+  };
+  const probe = createValidatorProbe({ schema, connection: flaky, statementTimeoutMs: 5000 });
+  const question = 'seltzer sales by month';
+  await assert.rejects(probe.promptFor(question), /closed state/);
+  // Not cached: the next call looks up again; a statement timeout degrades to no candidates, as in the product.
+  const prompt = await probe.promptFor(question);
+  assert.deepEqual(prompt.masterDataCandidates, []);
+  assert.equal(attempts, 2);
+
+  // In a rescore, the repetition becomes infra_error (excluded, and a harness failure today).
+  const source = await loadSource();
+  const record = source.results.find((entry) => entry.id === 'rec_active_customers');
+  const failing = async () => Promise.reject(closed());
+  const validate = Object.assign(async () => null, { promptFor: failing });
+  const { connections } = fakeFixtures();
+  const [rescored] = await rescoreReportCases(
+    { ...source, results: [record] },
+    { connections, goldCache: createGoldCache(), schema, validate, statementTimeoutMs: 8000 }
+  );
+  assert.deepEqual(
+    rescored.repetitions.map((rep) => [rep.status, rep.error_stage, rep.rescore.inherited]),
+    [
+      ['infra_error', 'infra', false],
+      ['infra_error', 'infra', false],
+    ]
+  );
+});
+
+test('a recorded gold failure whose gold passes today is marked stale, and a gold that fails on a dead connection is infra', async () => {
+  const source = await loadSource();
+  const record = source.results.find((entry) => entry.id === 'rec_active_customers');
+  const goldFailed = {
+    ...source,
+    results: [
+      {
+        ...record,
+        repetitions: [{ repetition: 1, status: 'expected_sql_error', error: 'gold failed', error_stage: 'gold', error_code: 'ER_NO_SUCH_TABLE', attempts: [], attempt_count: 0 }],
+      },
+    ],
+  };
+  const { report } = await rescoreToReport(goldFailed);
+  const [rep] = report.results[0].repetitions;
+  assert.deepEqual([rep.status, rep.outcome, rep.counted, rep.rescore.staleGoldError, rep.rescore.inherited], ['expected_sql_error', 'expected_sql_error', false, true, true]);
+  assert.deepEqual(rep.outcome_tags, ['gold_passes_now']);
+
+  // A gold query that fails on a dead fixture connection (no code, fatal) is the database's failure.
+  const { connections } = fakeFixtures();
+  connections[1].connection.query = async () => {
+    throw Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+  };
+  const validate = createValidatorProbe({ schema, connection: connections[0].connection });
+  const [rescored] = await rescoreReportCases({ ...source, results: [record] }, { connections, goldCache: createGoldCache(), schema, validate });
+  const records = await attributeCaseRuns([{ entry: rescored.entry, repetitions: rescored.repetitions }], { connections, goldCache: createGoldCache(), schema });
+  assert.deepEqual(
+    records[0].repetitions.map((entry) => [entry.status, entry.error_infra, entry.outcome]),
+    [
+      ['expected_sql_error', true, 'infra_error'],
+      ['expected_sql_error', true, 'infra_error'],
+    ]
+  );
+});

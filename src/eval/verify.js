@@ -27,6 +27,7 @@ import {
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
+import { isInfraError } from '../query-service.js';
 import { goldFingerprint, resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
@@ -39,27 +40,37 @@ import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlErro
  * own list (rescore passes the recorded one). Returns null when accepted, else
  * the error. `validate.promptFor(question)` exposes the cached prompt context
  * ({ context, allowedTables, masterDataCandidates }).
+ *
+ * Master-data lookup failures are handled like the product loop handles them:
+ * an infrastructure failure (the database went away) is thrown, not hidden
+ * behind an empty candidate list, because the prompt context, and so every
+ * guardrail decision, would silently differ; other lookup failures (e.g. a
+ * statement timeout) degrade to no candidates. The lookup runs under
+ * `statementTimeoutMs` like the product's.
  */
-export function createValidatorProbe({ schema, connection = null }) {
+export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null }) {
   const prompts = new Map();
   const promptFor = async (question) => {
     if (!prompts.has(question)) {
-      prompts.set(
-        question,
-        (async () => {
-          const semanticPlan = buildSemanticPlan(question);
-          let masterDataCandidates = [];
-          if (connection) {
-            try {
-              masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan });
-            } catch {
-              masterDataCandidates = [];
+      const pending = (async () => {
+        const semanticPlan = buildSemanticPlan(question);
+        let masterDataCandidates = [];
+        if (connection) {
+          try {
+            masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan, statementTimeoutMs });
+          } catch (error) {
+            if (isInfraError(error)) {
+              throw error;
             }
+            masterDataCandidates = [];
           }
-          const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
-          return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName), masterDataCandidates };
-        })()
-      );
+        }
+        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
+        return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName), masterDataCandidates };
+      })();
+      prompts.set(question, pending);
+      // A failed lookup is not cached: the next call tries again.
+      pending.catch(() => prompts.delete(question));
     }
     return prompts.get(question);
   };

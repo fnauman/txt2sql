@@ -11,6 +11,7 @@ import { createCaseTraceLogger, extractAttempts } from '../src/eval/case-trace.j
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { PRIMARY_FIXTURE } from '../src/eval/fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, scoreAgainstGold } from '../src/eval/oracle.js';
+import { isEvalInfraError } from '../src/eval/attribution.js';
 import { runOptimizedQuestion } from '../src/query-service.js';
 import { createTimer, serializeError } from '../src/trace.js';
 
@@ -128,6 +129,9 @@ export async function evaluateQuestion({
       error: error.message,
       error_stage: 'gold',
       error_code: error.cause?.code || error.code || null,
+      // The database going away is not a broken gold (mysql2's fatal errors
+      // carry no code, so the code alone cannot tell).
+      error_infra: isEvalInfraError(error.cause || error),
       attempts: [],
       attempt_count: 0,
       llm_usage: null,

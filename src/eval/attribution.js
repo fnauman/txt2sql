@@ -14,14 +14,22 @@
 //   llm_error                   model   (truncated/refused/unparseable output)
 //   guardrail_false_rejection   system  (a guardrail rejected SQL that matches
 //                                        the gold on every fixture, in ANY
-//                                        attempt of a failed repetition)
+//                                        attempt of a repetition that would
+//                                        otherwise be a model failure; a
+//                                        repetition that ended in another
+//                                        non-pass outcome keeps it and is
+//                                        tagged guardrail_false_rejection)
 //   ... + tag retrieval_miss    system  (a model-bucket failure where an
 //                                        expected table was not retrieved:
 //                                        the retrieved set is the allow-list)
 //   timeout / aborted           infra   (case deadline; counted as a failure)
 //   infra_error                 infra   (excluded from accuracy; also a gold
 //                                        query that failed because the
-//                                        database went away)
+//                                        database went away, and a model-bucket
+//                                        failure whose guardrail rejection
+//                                        could not be re-checked because the
+//                                        database failed: it might have been a
+//                                        false rejection)
 //   llm_outage                  infra   (llm_error from a provider outage:
 //                                        timeout, unreachable, 401/403/429/5xx;
 //                                        excluded)
@@ -32,7 +40,11 @@
 // Guardrail-rejected SQL is checked by re-running it: if it passes the layer-1
 // safety check (validateSqlSafety) it runs read-only on every fixture through
 // the oracle (scoreAgainstGold); a match makes the rejection false. A
-// safety-layer rejection is never executed.
+// safety-layer rejection is never executed. A re-check that fails (the
+// database went away) is never resolved in the model's disfavour: the
+// repetition becomes infra_error (or harness_error for a non-infrastructure
+// failure of the check), both excluded and both harness failures for the exit
+// code.
 
 import { findMissingExpectedTables } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
@@ -88,6 +100,19 @@ function finalAttempt(repetition) {
   return attempts.length ? attempts[attempts.length - 1] : null;
 }
 
+// Connection-level failures the product loop does not classify as infra yet,
+// but that say nothing about the SQL either.
+const EXTRA_INFRA_CODES = new Set(['ER_CONNECTION_KILLED']);
+
+/**
+ * True for a database failure that is the infrastructure's, not the SQL's:
+ * the product loop's predicate (connection/pool/auth codes, mysql2's fatal
+ * flag) plus a few codes it does not cover.
+ */
+export function isEvalInfraError(error) {
+  return Boolean(error) && (isInfraError(error) || EXTRA_INFRA_CODES.has(error.code));
+}
+
 // An attempt that a guardrail rejected, as recorded in its CURRENT validation
 // (a rescore re-validates attempts; a verdict only counts while the rejection
 // it judged still stands).
@@ -114,8 +139,12 @@ export function classifyRepetition(repetition, testCase = {}) {
       break;
     case 'expected_sql_error':
       // A gold query that failed because the database went away is an
-      // infrastructure failure, not a broken gold.
-      outcome = isInfraError({ code: repetition.error_code }) ? 'infra_error' : 'expected_sql_error';
+      // infrastructure failure, not a broken gold. `error_infra` is recorded
+      // by evaluateQuestion / rescore (mysql2's fatal errors carry no code).
+      outcome = repetition.error_infra === true || isEvalInfraError({ code: repetition.error_code }) ? 'infra_error' : 'expected_sql_error';
+      if (repetition.rescore?.staleGoldError) {
+        tags.push('gold_passes_now');
+      }
       break;
     case 'evaluation_error':
       outcome = 'harness_error';
@@ -131,15 +160,7 @@ export function classifyRepetition(repetition, testCase = {}) {
       break;
     case 'validation_error': {
       const validation = finalAttempt(repetition)?.validation;
-      if (validation?.layer === 'guardrail') {
-        outcome = 'guardrail_true_rejection';
-        const verdict = finalAttempt(repetition)?.guardrailCheck?.verdict;
-        if (verdict && verdict !== 'true_rejection' && verdict !== 'false_rejection') {
-          tags.push('guardrail_unverified');
-        }
-      } else {
-        outcome = 'safety_rejection';
-      }
+      outcome = validation?.layer === 'guardrail' ? 'guardrail_true_rejection' : 'safety_rejection';
       break;
     }
     case 'execution_error':
@@ -154,14 +175,33 @@ export function classifyRepetition(repetition, testCase = {}) {
       tags.push(`unknown_status:${status}`);
   }
 
-  // A correct answer thrown away by a guardrail is the system's failure even
-  // when a later (wrong) retry is what the repetition ended with.
-  if (
-    outcome !== 'pass' &&
-    OUTCOME_BUCKETS[outcome] === 'model' &&
-    (repetition.attempts || []).some((attempt) => isGuardrailRejected(attempt) && attempt.guardrailCheck?.verdict === 'false_rejection')
-  ) {
-    outcome = 'guardrail_false_rejection';
+  // Verdicts of the guardrail rejections that stand today (see
+  // checkGuardrailRejections).
+  const verdicts = (repetition.attempts || []).filter(isGuardrailRejected).map((attempt) => attempt.guardrailCheck || null);
+  const falselyRejected = verdicts.some((check) => check?.verdict === 'false_rejection');
+  const checkFailed = verdicts.filter((check) => check?.verdict === 'error');
+  if (verdicts.some((check) => check?.verdict === 'unsafe')) {
+    tags.push('guardrail_unsafe');
+  }
+  if (verdicts.some((check) => !check)) {
+    tags.push('guardrail_unchecked');
+  }
+
+  if (outcome !== 'pass' && falselyRejected) {
+    if (OUTCOME_BUCKETS[outcome] === 'model') {
+      // A correct answer thrown away by a guardrail is the system's failure
+      // even when a later (wrong) retry is what the repetition ended with.
+      outcome = 'guardrail_false_rejection';
+    } else {
+      // E.g. the retry after the false rejection hit a provider outage: the
+      // outcome stays (excluded or infra), the false rejection is reported.
+      tags.push('guardrail_false_rejection');
+    }
+  } else if (OUTCOME_BUCKETS[outcome] === 'model' && checkFailed.length > 0) {
+    // A rejection that could not be re-checked might have been a false one:
+    // never charge it to the model.
+    tags.push('guardrail_unverified');
+    outcome = checkFailed.some((check) => check.infra !== false) ? 'infra_error' : 'harness_error';
   }
 
   let bucket = OUTCOME_BUCKETS[outcome];
@@ -226,13 +266,18 @@ export function summarizeCaseRepetitions(repetitions) {
   };
 }
 
+function firstInfraMessage(result) {
+  return (result.perFixture || []).find((entry) => entry.error?.infra)?.error.message || 'infrastructure error while re-running the SQL';
+}
+
 /**
  * Re-checks every guardrail-layer rejection of a repetition: the SQL must pass
  * the layer-1 safety check, then runs read-only on every fixture through the
  * oracle. Each such attempt gets `guardrailCheck`:
  *   { verdict: 'false_rejection' | 'true_rejection', matchedGold, reason, killedOn }
  *   { verdict: 'unsafe', code }      (fails validateSqlSafety now; never run)
- *   { verdict: 'error', message }    (gold error or infrastructure failure)
+ *   { verdict: 'error', infra, message }  (the re-check failed: infra true for
+ *                                    a database failure, false otherwise)
  * Safety-layer rejections are never executed. `cache` (a Map) shares checks
  * of identical SQL across repetitions of the same case.
  */
@@ -273,7 +318,7 @@ export async function checkGuardrailRejections(repetition, {
     try {
       const result = await score({ testCase, predictedSql: sql, connections, goldCache, timeoutMs, goldTimeoutMs, schema });
       if (!result.match && result.infraError) {
-        return { verdict: 'error', message: result.executionError?.message || 'infrastructure error while re-running the SQL' };
+        return { verdict: 'error', infra: true, message: result.executionError?.message || firstInfraMessage(result) };
       }
       return {
         verdict: result.match ? 'false_rejection' : 'true_rejection',
@@ -282,7 +327,9 @@ export async function checkGuardrailRejections(repetition, {
         killedOn: result.killedOn,
       };
     } catch (error) {
-      return { verdict: 'error', message: error.message };
+      // A gold query failing here (it passed before the run) is the database
+      // going away; anything else is a harness failure.
+      return { verdict: 'error', infra: isEvalInfraError(error.cause || error), message: error.message };
     }
   };
 
@@ -315,6 +362,8 @@ export async function checkGuardrailRejections(repetition, {
  */
 export function guardrailConfusion(caseRecords) {
   const matrix = { tp: 0, fp: 0, fn: 0, tn: 0, unknown: 0, safetyRejections: 0, attempts: 0 };
+  // Why an attempt's correctness is unknown.
+  const unknownBy = { unsafe: 0, checkFailed: 0, unchecked: 0, infra: 0, notFinal: 0 };
   for (const record of caseRecords || []) {
     for (const repetition of record.repetitions || []) {
       if (['skipped_budget', 'expected_sql_error', 'evaluation_error'].includes(repetition.status)) {
@@ -340,12 +389,14 @@ export function guardrailConfusion(caseRecords) {
             matrix.fp += 1;
           } else {
             matrix.unknown += 1;
+            unknownBy[verdict === 'unsafe' ? 'unsafe' : verdict === 'error' ? 'checkFailed' : 'unchecked'] += 1;
           }
           return;
         }
         if (attempt.execution?.ok === false) {
           if (attempt.execution.stage === 'infra') {
             matrix.unknown += 1;
+            unknownBy.infra += 1;
           } else {
             matrix.fn += 1;
           }
@@ -357,6 +408,7 @@ export function guardrailConfusion(caseRecords) {
           matrix.fn += 1;
         } else {
           matrix.unknown += 1;
+          unknownBy[attempt.execution?.stage === 'infra' || ['infra_error', 'aborted'].includes(repetition.status) ? 'infra' : 'notFinal'] += 1;
         }
       });
     }
@@ -364,6 +416,7 @@ export function guardrailConfusion(caseRecords) {
   const ratio = (numerator, denominator) => (denominator > 0 ? Number((numerator / denominator).toFixed(4)) : null);
   return {
     ...matrix,
+    unknownBy,
     precision: ratio(matrix.tp, matrix.tp + matrix.fp),
     recall: ratio(matrix.tp, matrix.tp + matrix.fn),
     falseRejectionRate: ratio(matrix.fp, matrix.fp + matrix.tn),
@@ -406,9 +459,25 @@ export function summarizeAttribution(caseRecords) {
       byOutcome: ordered(countBy(records, (record) => record.summary?.outcome), OUTCOME_ORDER),
       byBucket: ordered(countBy(records, (record) => record.summary?.bucket), BUCKET_ORDER),
     },
+    // Outcome x bucket: a model outcome tagged retrieval_miss is a system error.
+    byOutcomeBucket: Object.fromEntries(
+      OUTCOME_ORDER.filter((outcome) => repetitions.some((repetition) => repetition.outcome === outcome)).map((outcome) => [
+        outcome,
+        ordered(
+          countBy(repetitions.filter((repetition) => repetition.outcome === outcome), (repetition) => repetition.bucket),
+          BUCKET_ORDER
+        ),
+      ])
+    ),
     system: {
       guardrailFalseRejections: failed.filter((repetition) => repetition.outcome === 'guardrail_false_rejection').length,
       retrievalMisses: failed.filter((repetition) => (repetition.outcome_tags || []).includes('retrieval_miss')).length,
+      // False rejections in repetitions that ended in another non-pass outcome
+      // (an outage or timeout on the retry): reported, not in the counts above.
+      guardrailFalseRejectionsElsewhere: repetitions.filter((repetition) => (repetition.outcome_tags || []).includes('guardrail_false_rejection')).length,
+      // Model-bucket failures turned into infra/harness because a guardrail
+      // re-check failed.
+      guardrailUnverified: repetitions.filter((repetition) => (repetition.outcome_tags || []).includes('guardrail_unverified')).length,
     },
     excluded: ordered(
       countBy(repetitions.filter((repetition) => !repetition.counted), (repetition) => repetition.outcome),

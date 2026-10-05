@@ -533,10 +533,10 @@ there too.
   | `safety_rejection` | model | counted | the safety layer rejected it (never executed) |
   | `execution_error` | model | counted | MariaDB rejected the final SQL |
   | `llm_error` | model | counted | truncated, refused or unusable output |
-  | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a failed repetition |
+  | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a repetition that would otherwise be a model failure (a repetition that ended in an outage or timeout keeps that outcome and is tagged `guardrail_false_rejection`) |
   | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not retrieved, so it was not allowed |
   | `timeout` / `aborted` | infra | counted | the case deadline fired |
-  | `infra_error` | infra | excluded | the database failed (also a gold query that failed because the database went away) |
+  | `infra_error` | infra | excluded | the database failed: in the product loop, in a gold query, or while re-checking a guardrail rejection of an otherwise model-bucket failure (tagged `guardrail_unverified`: it might have been a false rejection) |
   | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/429/5xx |
   | `skipped_budget` | skipped | excluded | not run, budget spent |
   | `expected_sql_error` | harness | excluded | the gold failed (no LLM call was made) |
@@ -545,14 +545,20 @@ there too.
   To decide a guardrail rejection, its SQL must first pass the safety layer
   (`validateSqlSafety`); then it runs read-only on every fixture through the
   oracle. A match makes it a false rejection. Safety-layer rejections are never
-  executed. A timeout counts as a failure on purpose, so slow cases cannot
+  executed; a guardrail-rejected SQL that fails the safety layer today stays
+  the model's (tagged `guardrail_unsafe`). A re-check that fails because the
+  database did is never resolved against the model (see `infra_error`); one
+  that fails for another reason is `harness_error`. The Bucket column splits
+  an outcome whose repetitions moved, e.g. `model 3 / system 1` when one was
+  tagged `retrieval_miss`. A timeout counts as a failure on purpose, so slow cases cannot
   inflate accuracy.
 - **Guardrail confusion matrix**, over every attempt including retries:
   rejected and incorrect (caught), rejected and correct (false rejection),
   accepted and incorrect (missed; an accepted attempt that failed at execution
   counts here), accepted and correct; with precision, recall and the false
-  rejection rate. Unverifiable attempts and safety-layer rejections are counted
-  separately.
+  rejection rate. Attempts of unknown correctness (rejected SQL that fails the
+  safety layer today, a failed re-check, a database failure, a run cut short)
+  and safety-layer rejections are counted separately, with the reason.
 - **Cases**: id, question, passes / counted repetitions, the majority outcome
   and its attribution.
 - **By failure class, difficulty and tag**: cases, accuracy, majority passes.

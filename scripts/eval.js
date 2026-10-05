@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR } from '../src/benchmark.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
+import { isEvalInfraError } from '../src/eval/attribution.js';
 import { compareReports } from '../src/eval/compare.js';
 import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
@@ -47,7 +48,7 @@ import { describeFilters, parseList, selectSuite, SPLITS } from '../src/eval/sui
 import { createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { calculateCost } from '../src/pricing.js';
-import { resolveMaxRetries } from '../src/query-service.js';
+import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
 import { evaluateQuestion } from './evaluate.js';
 
@@ -547,7 +548,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const currentCases = new Map(selection.entries.map((entry) => [entry.testCase.id, entry.testCase]));
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
-  const validate = createValidatorProbe({ schema, connection: primary.connection });
+  const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs });
   const goldCache = createGoldCache();
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
   const rescored = await rescoreReportCases(source, {
@@ -703,16 +704,24 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     let verification = { skipped: true };
     if (options.verify) {
       const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
-      const result = await verifySuite({
-        datasets: selection.datasets,
-        connections,
-        goldCache: createGoldCache(),
-        validate: createValidatorProbe({ schema, connection: primary.connection }),
-        controlsIndex,
-        checkControls: options.checkControls,
-        minKillRate: options.minKillRate,
-        minHeldoutKillRate: options.minHeldoutKillRate,
-      });
+      let result;
+      try {
+        result = await verifySuite({
+          datasets: selection.datasets,
+          connections,
+          goldCache: createGoldCache(),
+          validate: createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs: resolveStatementTimeoutMs() }),
+          controlsIndex,
+          checkControls: options.checkControls,
+          minKillRate: options.minKillRate,
+          minHeldoutKillRate: options.minHeldoutKillRate,
+        });
+      } catch (error) {
+        if (isEvalInfraError(error) || isEvalInfraError(error?.cause)) {
+          throw new HarnessError(`The database failed during verification: ${error.message}`, { code: errorCodeOf(error) || 'DB_FAILED', cause: error });
+        }
+        throw error;
+      }
       verification = { skipped: false, ...result };
       cli.log(`Verify: ${result.cases} unique case(s) on ${connections.length} fixture(s), ${result.problems.length} with problems.`);
       printVerification(cli, result);

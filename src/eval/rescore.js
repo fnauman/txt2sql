@@ -38,6 +38,7 @@
 
 import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
+import { isEvalInfraError } from './attribution.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 
 const STAGE_STATUS = { llm: 'llm_error', validation: 'validation_error', execution: 'execution_error', infra: 'infra_error' };
@@ -107,6 +108,7 @@ function goldErrorRepetition(repetition, error) {
     error: error.message,
     error_stage: 'gold',
     error_code: error.cause?.code || error.code || null,
+    error_infra: isEvalInfraError(error.cause || error),
     oracle: null,
     rescore: { replayed: false, reason: 'gold failed', originalStatus: repetition.status },
   };
@@ -166,10 +168,43 @@ export async function rescoreRepetition(repetition, {
   const originalStatus = recorded.status;
   const attempts = [...(recorded.attempts || [])].sort((left, right) => left.attempt - right.attempt);
   if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
-    return { ...recorded, rescore: { replayed: false, reason: 'no recorded generation to replay', originalStatus, inherited: true } };
+    // A recorded gold failure whose gold passes today (this function only runs
+    // after the gold check) was never sent to the model: nothing to replay,
+    // but say that the recorded reason is gone.
+    const staleGoldError = originalStatus === 'expected_sql_error';
+    return {
+      ...recorded,
+      rescore: {
+        replayed: false,
+        reason: staleGoldError ? 'the gold failed in the recording but passes today; no generation to replay' : 'no recorded generation to replay',
+        originalStatus,
+        inherited: true,
+        ...(staleGoldError ? { staleGoldError: true } : {}),
+      },
+    };
   }
 
-  const prompt = await validate.promptFor(testCase.question);
+  let prompt;
+  try {
+    prompt = await validate.promptFor(testCase.question);
+  } catch (error) {
+    if (!isEvalInfraError(error)) {
+      throw error;
+    }
+    // The master-data lookup failed on the database: the prompt context (and
+    // so every guardrail decision) is unknown, as in the product loop's
+    // 'infra' stage.
+    return {
+      ...recorded,
+      status: 'infra_error',
+      warnings: [],
+      error: `Master-data lookup failed: ${error.message}`,
+      error_stage: 'infra',
+      error_code: error.code || null,
+      oracle: null,
+      rescore: { replayed: false, reason: 'master-data lookup failed on the database', originalStatus, inherited: false },
+    };
+  }
   const replayed = [];
   let final = null;
   let lastFailure = null;

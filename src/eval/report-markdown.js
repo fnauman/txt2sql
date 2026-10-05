@@ -144,6 +144,17 @@ function formatSignedInterval(interval) {
   return `${formatPoints(interval.lower)} to ${formatPoints(interval.upper)}`;
 }
 
+// The outcome's bucket, split when some repetitions moved (a model outcome
+// tagged retrieval_miss is a system error): "model 3 / system 1".
+function bucketText(attribution, outcome) {
+  const split = attribution.byOutcomeBucket?.[outcome];
+  const entries = split ? Object.entries(split) : [];
+  if (entries.length <= 1) {
+    return entries[0]?.[0] || OUTCOME_BUCKETS[outcome];
+  }
+  return entries.map(([bucket, count]) => `${bucket} ${count}`).join(' / ');
+}
+
 function attributionSection(report) {
   const attribution = report.attribution;
   const lines = ['## Attribution', ''];
@@ -168,7 +179,7 @@ function attributionSection(report) {
       ['Outcome', 'Bucket', 'Repetitions', 'Cases (majority)', 'In accuracy'],
       OUTCOME_ORDER.filter((outcome) => attribution.repetitions.byOutcome[outcome] || attribution.cases.byOutcome[outcome]).map((outcome) => [
         outcome,
-        OUTCOME_BUCKETS[outcome],
+        bucketText(attribution, outcome),
         attribution.repetitions.byOutcome[outcome] || 0,
         attribution.cases.byOutcome[outcome] || 0,
         EXCLUDED_OUTCOMES.has(outcome) ? 'excluded' : 'counted',
@@ -177,10 +188,24 @@ function attributionSection(report) {
   );
   lines.push('');
   lines.push(
-    `System errors (repetitions): ${attribution.system.guardrailFalseRejections} guardrail false rejection(s), ` +
+    `System errors (counted repetitions): ${attribution.system.guardrailFalseRejections} guardrail false rejection(s), ` +
       `${attribution.system.retrievalMisses} retrieval miss(es) (a failure where an expected table was not retrieved, so not allowed). ` +
       'A model-bucket failure tagged retrieval_miss is counted as a system error.'
   );
+  if (attribution.system.guardrailFalseRejectionsElsewhere) {
+    lines.push('');
+    lines.push(
+      `${attribution.system.guardrailFalseRejectionsElsewhere} more repetition(s) had a guardrail false rejection but ended in another outcome ` +
+        '(e.g. the retry hit a provider outage or the deadline); they keep that outcome and are tagged guardrail_false_rejection.'
+    );
+  }
+  if (attribution.system.guardrailUnverified) {
+    lines.push('');
+    lines.push(
+      `${attribution.system.guardrailUnverified} repetition(s) with a guardrail rejection that could not be re-checked (the database failed) ` +
+        'are infra_error, not model errors: the rejection might have been a false one.'
+    );
+  }
   const excluded = Object.entries(attribution.excluded);
   lines.push('');
   lines.push(
@@ -189,6 +214,21 @@ function attributionSection(report) {
       : 'Excluded from accuracy: none.'
   );
   return lines.join('\n');
+}
+
+const UNKNOWN_LABELS = {
+  unsafe: 'rejected SQL fails the safety layer now, not run',
+  checkFailed: 're-check failed',
+  unchecked: 'not re-checked',
+  infra: 'database failure',
+  notFinal: 'accepted, run cut short',
+};
+
+function unknownBreakdown(unknownBy) {
+  const parts = Object.entries(unknownBy || {})
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => `${UNKNOWN_LABELS[key] || key} ${count}`);
+  return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
 function confusionSection(report) {
@@ -211,7 +251,7 @@ function confusionSection(report) {
   lines.push('');
   lines.push(
     `Precision ${formatPercent(matrix.precision)} · recall ${formatPercent(matrix.recall)} · false rejection rate ${formatPercent(matrix.falseRejectionRate)} · ` +
-      `unknown ${matrix.unknown} · safety-layer rejections (never run) ${matrix.safetyRejections} · attempts ${matrix.attempts}`
+      `unknown ${matrix.unknown}${unknownBreakdown(matrix.unknownBy)} · safety-layer rejections (never run) ${matrix.safetyRejections} · attempts ${matrix.attempts}`
   );
   return lines.join('\n');
 }

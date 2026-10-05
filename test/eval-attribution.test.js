@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { evaluateQuestion } from '../scripts/evaluate.js';
 import {
   attributeRepetition,
   checkGuardrailRejections,
@@ -92,9 +93,9 @@ test('retrieval misses re-attribute model-looking failures to the system', () =>
   // An LLM failure is not explained by retrieval.
   const llm = classifyRepetition({ ...repetition('llm_error', [], { error_code: 'LLM_REFUSAL' }), ...missing }, testCase);
   assert.deepEqual([llm.outcome, llm.bucket, llm.outcome_tags], ['llm_error', 'model', []]);
-  // Unverified guardrail rejections are tagged.
+  // Unverified guardrail rejections are tagged (and never charged to the model).
   const unverified = classifyRepetition(repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'X', { guardrailCheck: { verdict: 'error', message: 'down' } })]), testCase);
-  assert.deepEqual(unverified.outcome_tags, ['guardrail_unverified']);
+  assert.deepEqual([unverified.outcome, unverified.outcome_tags], ['infra_error', ['guardrail_unverified']]);
 });
 
 test('case summary: pass rate over counted repetitions, strict majority, failure wins ties', () => {
@@ -162,8 +163,9 @@ test('confusion matrix covers every attempt, retries included', () => {
         repetition('pass', [accepted('e', { ok: false, stage: 'execution', code: 'ER_PARSE_ERROR' }), accepted('f')]),
         // safety rejection, then an infra failure: neither is a guardrail decision with known correctness
         repetition('infra_error', [rejected('g', 'safety', 'NOT_SELECT'), accepted('h', { ok: false, stage: 'infra', code: 'ECONNRESET' })]),
-        // unverified rejection
-        repetition('validation_error', [rejected('i', 'guardrail', 'M', { guardrailCheck: { verdict: 'error' } })]),
+        // unverified rejections: the re-check failed, or the SQL fails the safety layer now
+        repetition('validation_error', [rejected('i', 'guardrail', 'M', { guardrailCheck: { verdict: 'error', infra: true } })]),
+        repetition('validation_error', [rejected('j', 'guardrail', 'M', { guardrailCheck: { verdict: 'unsafe', code: 'SQL_COMMENT' } })]),
         // skipped repetitions carry no attempts that count
         repetition('skipped_budget'),
       ],
@@ -172,8 +174,9 @@ test('confusion matrix covers every attempt, retries included', () => {
   const matrix = guardrailConfusion(records);
   assert.deepEqual(
     [matrix.tp, matrix.fp, matrix.fn, matrix.tn, matrix.unknown, matrix.safetyRejections, matrix.attempts],
-    [1, 1, 2, 2, 2, 1, 9]
+    [1, 1, 2, 2, 3, 1, 10]
   );
+  assert.deepEqual(matrix.unknownBy, { unsafe: 1, checkFailed: 1, unchecked: 0, infra: 1, notFinal: 0 });
   assert.equal(matrix.precision, 0.5);
   assert.equal(matrix.recall, Number((1 / 3).toFixed(4)));
   assert.equal(matrix.falseRejectionRate, Number((1 / 3).toFixed(4)));
@@ -193,7 +196,9 @@ test('attribution summary separates model, system, infra, skipped and harness', 
   const summary = summarizeAttribution(records);
   assert.deepEqual(summary.repetitions.byBucket, { pass: 1, model: 1, system: 2, infra: 1, skipped: 1, harness: 1 });
   assert.equal(summary.repetitions.counted, 4);
-  assert.deepEqual(summary.system, { guardrailFalseRejections: 1, retrievalMisses: 1 });
+  assert.deepEqual(summary.system, { guardrailFalseRejections: 1, retrievalMisses: 1, guardrailFalseRejectionsElsewhere: 0, guardrailUnverified: 0 });
+  // The outcome x bucket split shows the retrieval miss moved to the system.
+  assert.deepEqual(summary.byOutcomeBucket.wrong_result, { model: 1, system: 1 });
   assert.deepEqual(summary.excluded, { infra_error: 1, expected_sql_error: 1, skipped_budget: 1 });
   assert.equal(summary.cases.byOutcome.guardrail_false_rejection, 1);
   assert.equal(summary.guardrailConfusion.fp, 1);
@@ -217,4 +222,82 @@ test('checkGuardrailRejections drops a carried-over verdict from attempts no gua
   ]);
   const checked = await checkGuardrailRejections(stale, { testCase, connections: [], schema: { tables: [] }, score: async () => assert.fail('nothing to re-run') });
   assert.deepEqual(checked.attempts.map((attempt) => 'guardrailCheck' in attempt), [false, false]);
+});
+
+test('a guardrail re-check the database could not finish is infra, never the model\'s', () => {
+  const down = { verdict: 'error', infra: true, message: "Can't add new command when connection is in closed state" };
+  // The final rejection could not be verified: infra_error, excluded.
+  const final = classifyRepetition(repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'FAN_OUT', { guardrailCheck: down })]), testCase);
+  assert.deepEqual([final.outcome, final.bucket, final.counted, final.outcome_tags], ['infra_error', 'infra', false, ['guardrail_unverified']]);
+  // An earlier rejection could not be verified, the retry was wrong: it might
+  // have been a false rejection, so the model is not blamed either.
+  const earlier = classifyRepetition(repetition('result_mismatch', [rejected('SELECT 1', 'guardrail', 'FAN_OUT', { guardrailCheck: down }), accepted('SELECT 2')]), testCase);
+  assert.deepEqual([earlier.outcome, earlier.counted], ['infra_error', false]);
+  // A non-infrastructure failure of the check is the harness's.
+  const broken = classifyRepetition(
+    repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'FAN_OUT', { guardrailCheck: { verdict: 'error', infra: false, message: 'bug' } })]),
+    testCase
+  );
+  assert.deepEqual([broken.outcome, broken.bucket, broken.counted], ['harness_error', 'harness', false]);
+  // A pass stays a pass; a known false rejection still wins over an unverified one.
+  assert.equal(classifyRepetition(repetition('pass', [rejected('SELECT 1', 'guardrail', 'M', { guardrailCheck: down }), accepted('SELECT 2')]), testCase).outcome, 'pass');
+  const mixed = repetition('result_mismatch', [
+    rejected('SELECT 1', 'guardrail', 'M', { guardrailCheck: { verdict: 'false_rejection' } }),
+    rejected('SELECT 2', 'guardrail', 'M', { guardrailCheck: down }),
+    accepted('SELECT 3'),
+  ]);
+  assert.equal(classifyRepetition(mixed, testCase).outcome, 'guardrail_false_rejection');
+  // Unsafe SQL (fails the safety layer today) is not executed and stays the model's.
+  const unsafe = classifyRepetition(repetition('validation_error', [rejected('SELECT 1 -- x', 'guardrail', 'M', { guardrailCheck: { verdict: 'unsafe' } })]), testCase);
+  assert.deepEqual([unsafe.outcome, unsafe.bucket, unsafe.outcome_tags], ['guardrail_true_rejection', 'model', ['guardrail_unsafe']]);
+});
+
+test('checkGuardrailRejections says whether a failed re-check was the database\'s', async () => {
+  const closed = Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+  const goldDown = Object.assign(new Error('Gold SQL (expected_sql) failed on fixture v3: closed'), { code: 'GOLD_SQL_ERROR', cause: closed });
+  const verdictFor = async (score) =>
+    (await checkGuardrailRejections(repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'M')]), { testCase, connections: [], score })).attempts[0].guardrailCheck;
+  assert.deepEqual(
+    await verdictFor(async () => ({ match: false, infraError: true, perFixture: [{ error: { infra: true, message: 'closed state' } }] })),
+    { verdict: 'error', infra: true, message: 'closed state' }
+  );
+  assert.deepEqual(await verdictFor(async () => Promise.reject(goldDown)), { verdict: 'error', infra: true, message: goldDown.message });
+  assert.deepEqual(await verdictFor(async () => Promise.reject(new TypeError('bug'))), { verdict: 'error', infra: false, message: 'bug' });
+});
+
+test('a false rejection followed by an outage keeps the outage and is reported', () => {
+  const reps = [
+    repetition('llm_error', [rejected('SELECT ok', 'guardrail', 'FAN_OUT', { guardrailCheck: { verdict: 'false_rejection' } })], { error_code: 'HTTP_503' }),
+  ].map((rep) => attributeRepetition(rep, testCase));
+  assert.deepEqual([reps[0].outcome, reps[0].counted, reps[0].outcome_tags], ['llm_outage', false, ['guardrail_false_rejection']]);
+  const summary = summarizeAttribution([{ id: 'c', repetitions: reps, summary: summarizeCaseRepetitions(reps) }]);
+  assert.equal(summary.system.guardrailFalseRejections, 0);
+  assert.equal(summary.system.guardrailFalseRejectionsElsewhere, 1);
+  assert.equal(summary.guardrailConfusion.fp, 1);
+});
+
+test('a gold query that failed because the database went away is infra_error, not a broken gold', async () => {
+  // mysql2's closed-connection error has no code, only fatal: true.
+  const connection = {
+    async query() {
+      throw Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+    },
+  };
+  const trace = { enabled: true, emit: async () => {} };
+  const result = await evaluateQuestion({
+    client: null,
+    connection,
+    schema: { tables: [] },
+    model: 'gpt-4o-mini',
+    testCase: { id: 'g1', question: 'How many customers?', expected_sql: 'SELECT COUNT(*) FROM Customer' },
+    caseIndex: 1,
+    trace,
+    dependencies: { runQuestion: async () => assert.fail('no LLM call after a gold failure') },
+  });
+  assert.deepEqual([result.status, result.error_code, result.error_infra], ['expected_sql_error', 'GOLD_SQL_ERROR', true]);
+  assert.deepEqual([classifyRepetition(result, testCase).outcome, classifyRepetition(result, testCase).counted], ['infra_error', false]);
+  // A genuinely broken gold stays expected_sql_error.
+  const broken = classifyRepetition({ status: 'expected_sql_error', error_code: 'ER_NO_SUCH_TABLE', error_infra: false }, testCase);
+  assert.equal(broken.outcome, 'expected_sql_error');
+  assert.equal(classifyRepetition({ status: 'expected_sql_error', error_code: 'ER_CONNECTION_KILLED' }, testCase).outcome, 'infra_error');
 });

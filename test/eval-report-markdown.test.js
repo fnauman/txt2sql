@@ -137,3 +137,18 @@ test('cell escaping and truncation', () => {
   assert.equal(truncate('abcdef', 4), 'abc…');
   assert.equal(truncate('  a   b  ', 10), 'a b');
 });
+
+test('the outcome table splits an outcome whose repetitions moved buckets, and names unknown attempts', async () => {
+  const report = await sampleReport();
+  report.attribution.byOutcomeBucket.wrong_result = { model: 1, system: 1 };
+  report.attribution.system.guardrailFalseRejectionsElsewhere = 1;
+  report.attribution.system.guardrailUnverified = 2;
+  report.attribution.guardrailConfusion.unknown = 3;
+  report.attribution.guardrailConfusion.unknownBy = { unsafe: 1, checkFailed: 2, unchecked: 0, infra: 0, notFinal: 0 };
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /\| wrong_result \| model 1 \/ system 1 \| 1 \| 1 \| counted \|/);
+  assert.match(markdown, /\| pass \| pass \| 3 \|/);
+  assert.match(markdown, /1 more repetition\(s\) had a guardrail false rejection but ended in another outcome/);
+  assert.match(markdown, /2 repetition\(s\) with a guardrail rejection that could not be re-checked/);
+  assert.match(markdown, /unknown 3 \(rejected SQL fails the safety layer now, not run 1, re-check failed 2\)/);
+});
