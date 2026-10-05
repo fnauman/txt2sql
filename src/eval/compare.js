@@ -12,6 +12,9 @@
 // an exact two-sided McNemar test, and a paired case bootstrap gives a CI for
 // the change in strict accuracy (mean per-case pass rate).
 //
+// Abstain / clarify (behavior) cases are skipped: they never count in strict
+// accuracy.
+//
 // Reports from before the runner rewrite (no results[i].summary) are read too:
 // their per-case pass rate comes from reliability.perCase when present, else
 // from the single recorded status.
@@ -43,6 +46,10 @@ export function caseOutcomesFromReport(report) {
   const outcomes = new Map();
   const legacyPerCase = new Map((report?.reliability?.perCase || []).map((entry) => [entry.id, entry]));
   for (const result of report?.results || []) {
+    // Abstain / clarify cases are not in strict accuracy, so not compared.
+    if (result.expected_behavior && result.expected_behavior !== 'answer') {
+      continue;
+    }
     const fingerprint = result.gold_fingerprint || (result.expected_sql ? goldFingerprint(result.expected_sql) : null);
     let entry;
     if (result.summary) {

@@ -97,7 +97,8 @@ export async function writeRowCountPins(datasetPath, countsByCaseId) {
   let changed = 0;
   for (const testCase of raw) {
     const counts = countsByCaseId.get(String(testCase.id));
-    if (!counts) {
+    // No counts: not verified, or an abstain / clarify case (no gold to pin).
+    if (!counts || Object.keys(counts).length === 0) {
       continue;
     }
     const merged = { ...(testCase.expected_row_counts || {}), ...counts };
@@ -241,7 +242,9 @@ export async function main(argv = process.argv.slice(2)) {
         totalCases += 1;
         const result = await verifyCase(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
         caseResults.push(result);
-        const counts = fixtureNames.map((name) => `${name}=${result.goldRowCounts[name] ?? '?'}`).join(' ');
+        const counts = result.behavior
+          ? `none (${result.behavior} case)`
+          : fixtureNames.map((name) => `${name}=${result.goldRowCounts[name] ?? '?'}`).join(' ');
         const controls = result.controls
           ? ` controls: -${result.controls.negative.filter((control) => control.killed).length}/${result.controls.negative.length} +${result.controls.positive.filter((control) => control.match && !control.rejection).length}/${result.controls.positive.length}`
           : '';

@@ -18,9 +18,20 @@
 //   a column-mapping search cut off by its bound (the oracle fails closed,
 //   which is right for a model's SQL) is undecided, not a kill: it is listed
 //   and counts as not killed, like a survivor.
+//
+// A case flagged `known_validator_rejection: <code>` documents a product gap:
+// the production validator rejects correct answers to that question (for
+// example retrieval does not pick a table the answer needs). Its gold, its
+// alternatives and its positive controls rejected with that code are notes,
+// not problems; when the validator rejects none of its gold variants any more
+// the flag is stale, which is a problem (so it is removed).
+// Abstain / clarify cases (expected_behavior) have no gold and no controls:
+// nothing is executed for them.
 
 import {
+  CASE_SPLITS,
   compareResults,
+  isBehaviorCase,
   listGoldVariants,
   resolveExpectedRowCount,
   runSignalChecks,
@@ -161,6 +172,19 @@ export async function verifyCase(testCase, {
   const goldRowCounts = {};
   const variants = listGoldVariants(testCase);
   let goldFailed = false;
+  const split = testCase.split ?? 'dev';
+  if (!CASE_SPLITS.includes(split)) {
+    problems.push(`split "${split}" is not one of ${CASE_SPLITS.join(', ')}`);
+  }
+  if (isBehaviorCase(testCase)) {
+    if (controlsIndex?.byCaseId?.has(testCase.id)) {
+      problems.push(`controls are defined for ${testCase.id}, but a ${testCase.expected_behavior} case has no gold to run them against`);
+    }
+    notes.push(`${testCase.expected_behavior} case: no gold SQL to execute and no controls`);
+    return { id: testCase.id, problems, notes, goldRowCounts, controls: null, behavior: testCase.expected_behavior };
+  }
+  const knownRejection = testCase.known_validator_rejection || null;
+  let knownRejectionsSeen = 0;
 
   for (const variant of variants) {
     for (const fixtureConnection of connections) {
@@ -191,10 +215,16 @@ export async function verifyCase(testCase, {
     }
     if (validate) {
       const rejection = await validate(testCase.question, variant.sql);
-      if (rejection) {
+      if (rejection && knownRejection && rejection.code === knownRejection) {
+        knownRejectionsSeen += 1;
+        notes.push(`${variant.label}: known validator rejection (${rejection.code})`);
+      } else if (rejection) {
         problems.push(`${variant.label} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
       }
     }
+  }
+  if (validate && knownRejection && knownRejectionsSeen === 0 && !goldFailed) {
+    problems.push(`known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`);
   }
 
   let controls = null;
@@ -215,6 +245,8 @@ export async function verifyCase(testCase, {
       if (rejection) {
         if (control.validator_known_false_rejection) {
           notes.push(`positive control ${control.id}: known validator false rejection (${rejection.code})`);
+        } else if (knownRejection && rejection.code === knownRejection) {
+          notes.push(`positive control ${control.id}: known validator rejection of this question (${rejection.code})`);
         } else {
           problems.push(`positive control ${control.id} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
         }

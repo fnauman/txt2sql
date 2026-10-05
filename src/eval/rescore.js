@@ -39,11 +39,13 @@
 // run (skipped_budget, cancelled, harness errors). Runs that were cut short (aborted, infra_error) keep their status
 // unless a recorded attempt now completes; such recorded outcomes (and
 // recorded provider outages) are flagged `rescore.inherited`, so they do not
-// make a rescore exit as a harness failure today. Rescoring the same report twice
+// make a rescore exit as a harness failure today. Abstain / clarify cases are
+// not replayed (there is no gold; their outcome depends only on whether the
+// recorded run produced SQL) and are flagged inherited. Rescoring the same report twice
 // gives identical results: validation and execution durations are not
 // re-measured (null), and all statistics are seeded.
 
-import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
+import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
@@ -61,6 +63,8 @@ const CASE_FIELDS = [
   'difficulty',
   'tags',
   'split',
+  'expected_behavior',
+  'known_validator_rejection',
   'expected_sql',
   'alternative_expected_sql',
   'expected_tables',
@@ -191,6 +195,19 @@ export async function rescoreRepetition(repetition, {
 }) {
   const recorded = stripAttribution(repetition);
   const originalStatus = recorded.status;
+  if (isBehaviorCase(testCase)) {
+    // No gold to re-score against: whether the recorded run produced SQL is
+    // all an abstain / clarify case is judged on, and that does not change.
+    return {
+      ...recorded,
+      rescore: {
+        replayed: false,
+        reason: `${testCase.expected_behavior} case: judged on whether the recorded run produced SQL, which a rescore cannot change`,
+        originalStatus,
+        inherited: true,
+      },
+    };
+  }
   const attempts = (recorded.attempts || []).map(asRecordedAttempt).sort((left, right) => left.attempt - right.attempt);
   if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
     // A recorded gold failure whose gold passes today (this function only runs

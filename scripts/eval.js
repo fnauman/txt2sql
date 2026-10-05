@@ -33,7 +33,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR } from '../src/benchmark.js';
+import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR, isBehaviorCase } from '../src/benchmark.js';
+import { classifyRepetition } from '../src/eval/attribution.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
@@ -548,7 +549,9 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (report.stopped?.reason) {
     harness.push(`the run was stopped early: ${report.stopped.reason}`);
   }
-  if (report.stats?.strictAccuracy?.value == null) {
+  // A selection of only abstain / clarify cases has no accuracy by design.
+  const answerCases = (report.stats?.cases?.selected ?? 0) - (report.stats?.cases?.behavior ?? 0);
+  if (report.stats?.strictAccuracy?.value == null && (answerCases > 0 || !(report.behavior?.cases > 0))) {
     harness.push('no case was counted, so there is no accuracy to report');
   }
   if (gate && report.comparison) {
@@ -648,13 +651,20 @@ function isGithubActions(env = process.env) {
 
 function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
-  const status =
+  let status =
     result.status === 'aborted' && result.timed_out
       ? `timeout${result.late_status ? ` (finished late: ${result.late_status})` : ''}`
       : result.status === 'expected_sql_error' && result.error_infra
         ? 'expected_sql_error (the database failed)'
         : result.status;
-  const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
+  let passed = status === 'pass';
+  if (isBehaviorCase(testCase) && !['skipped_budget', 'cancelled'].includes(status)) {
+    // An abstain / clarify case passes when the product returned no SQL.
+    const { outcome } = classifyRepetition(result, testCase);
+    passed = outcome === 'declined';
+    status = `${outcome} (expects ${testCase.expected_behavior})`;
+  }
+  const label = passed ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
   const seconds = Number.isFinite(totalMs) ? (totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${Math.round(totalMs)}ms`) : '';
   const cost = Number.isFinite(result.llm_cost?.totalCost) ? `$${result.llm_cost.totalCost.toFixed(5)}` : '';

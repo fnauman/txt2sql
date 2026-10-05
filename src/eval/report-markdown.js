@@ -102,6 +102,18 @@ function headline(report) {
     `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}) · ` +
       `intent-clustered accuracy ${formatPercent(stats.intentClustered.value)} (95% CI ${formatInterval(stats.intentClustered.ci95)}, ${stats.intentClustered.intents} intents)`
   );
+  const splits = stats.bySplit || [];
+  if (splits.length > 1) {
+    lines.push('');
+    lines.push(
+      `By split: ${splits.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases} case${entry.cases === 1 ? '' : 's'})`).join(' · ')}. ` +
+        'Dev cases are the wording the prompt rules and the semantic layer were tuned on; holdout cases are new intents in wording they do not contain.'
+    );
+  }
+  if (report.behavior?.cases > 0) {
+    lines.push('');
+    lines.push(behaviorLine(report.behavior) + ' Not in strict accuracy (see Behaviour cases).');
+  }
   if (stats.cases.excluded > 0) {
     lines.push('');
     lines.push(
@@ -320,6 +332,7 @@ function breakdownSection(report) {
   const stats = report.stats;
   const rows = [];
   for (const [label, entries] of [
+    ['split', stats.bySplit || []],
     ['failure_class', stats.byFailureClass],
     ['difficulty', stats.byDifficulty],
     ['tag', stats.byTag],
@@ -328,18 +341,69 @@ function breakdownSection(report) {
       rows.push([label, entry.key, entry.cases, formatPercent(entry.accuracy), `${entry.majorityPasses}/${entry.cases}`]);
     }
   }
-  return ['## By failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
+  return ['## By split, failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
+}
+
+function behaviorPassText(summary) {
+  const behavior = summary?.behavior;
+  return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} declined` : 'excluded';
 }
 
 function casesSection(report) {
-  const rows = report.results.map((record) => [
-    record.id,
-    truncate(record.question, 60),
-    passRateText(record.summary),
-    record.summary?.outcome || record.status,
-    [record.summary?.bucket, ...(record.summary?.tags || [])].filter(Boolean).join(', '),
-  ]);
+  const rows = report.results.map((record) => {
+    const behavior = record.expected_behavior && record.expected_behavior !== 'answer';
+    return [
+      record.id,
+      truncate(record.question, 60),
+      behavior ? behaviorPassText(record.summary) : passRateText(record.summary),
+      record.summary?.outcome || record.status,
+      [behavior ? `expects ${record.expected_behavior}` : null, record.summary?.bucket, ...(record.summary?.tags || [])].filter(Boolean).join(', '),
+    ];
+  });
   return ['## Cases', '', table(['Case', 'Question', 'Passes', 'Outcome', 'Attribution'], rows)].join('\n');
+}
+
+export function behaviorLine(behavior) {
+  return `Behaviour cases: abstain/clarify — ${behavior.cases} case${behavior.cases === 1 ? '' : 's'}, ${behavior.handled} handled correctly` +
+    (behavior.counted < behavior.cases ? ` (${behavior.cases - behavior.counted} without a counted repetition)` : '') +
+    '.';
+}
+
+function behaviorSection(report) {
+  const behavior = report.behavior;
+  if (!behavior || behavior.cases === 0) {
+    return '';
+  }
+  const lines = ['## Behaviour cases (abstain / clarify)', '', behaviorLine(behavior), ''];
+  lines.push(
+    'These questions have no correct SQL: the data cannot answer them (abstain) or they are ambiguous (clarify). A case is handled when the ' +
+      'product returned no SQL in more than half of its counted repetitions (`declined`); producing SQL is `answered_instead_of_abstain` / ' +
+      '`answered_instead_of_clarify` (model bucket, tagged `not_executed` when the SQL was rejected or failed). The product has no ' +
+      'abstention or clarification channel yet, so today it is expected to fail these. They are not in strict accuracy or the paired comparison.'
+  );
+  lines.push('');
+  lines.push(
+    table(
+      ['Expected behaviour', 'Cases', 'Handled', 'Outcomes (majority)'],
+      Object.entries(behavior.byBehavior).map(([name, entry]) => [
+        name,
+        entry.cases,
+        `${entry.handled}/${entry.counted}`,
+        Object.entries(entry.outcomes)
+          .map(([outcome, count]) => `${outcome} ${count}`)
+          .join(', '),
+      ])
+    )
+  );
+  const cases = report.results.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  lines.push('');
+  lines.push(
+    table(
+      ['Case', 'Question', 'Expects', 'Declined', 'Outcome'],
+      cases.map((record) => [record.id, truncate(record.question, 60), record.expected_behavior, behaviorPassText(record.summary), record.summary?.outcome || record.status])
+    )
+  );
+  return lines.join('\n');
 }
 
 function costSection(report) {
@@ -561,6 +625,7 @@ export function renderReportMarkdown(report) {
     attributionSection(report),
     confusionSection(report),
     report.comparison ? comparisonSection(report.comparison) : '',
+    behaviorSection(report),
     casesSection(report),
     breakdownSection(report),
     costSection(report),
@@ -583,6 +648,10 @@ export function renderHeadline(report) {
     `Attribution (repetitions): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
       `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}) · ` +
       `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
+    ...((stats.bySplit || []).length > 1
+      ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]
+      : []),
+    ...(report.behavior?.cases > 0 ? [`${behaviorLine(report.behavior)} (not in accuracy)`] : []),
     `Cost ${formatUsd(stats.cost.total)} (${formatUsd(stats.cost.perQuestion, 5)}/question, ${formatUsd(stats.cost.perCorrect, 5)}/correct) · ` +
       `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
   ];

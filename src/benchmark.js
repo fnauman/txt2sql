@@ -57,6 +57,44 @@ function normalizeSignalChecks(signalChecks) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+// Dataset splits: `dev` cases are the ones the prompt rules and the semantic
+// layer were tuned on; `holdout` cases (new intents, and wording the semantic
+// layer does not contain) estimate how the product does on what it was not
+// tuned for. A case without a split is dev.
+export const CASE_SPLITS = Object.freeze(['dev', 'holdout']);
+
+// What a correct product does with a case: answer it with SQL (scored against
+// the gold), abstain (the data cannot answer it: no gold SQL), or ask a
+// clarifying question (the question is ambiguous: no gold SQL). Behaviour
+// cases are reported on their own and never count in strict accuracy.
+export const EXPECTED_BEHAVIORS = Object.freeze(['answer', 'abstain', 'clarify']);
+
+export function isBehaviorCase(testCase) {
+  return Boolean(testCase?.expected_behavior) && testCase.expected_behavior !== 'answer';
+}
+
+function normalizeSplit(value, id) {
+  if (value === undefined || value === null || value === '') {
+    return 'dev';
+  }
+  const split = String(value).trim().toLowerCase();
+  if (!CASE_SPLITS.includes(split)) {
+    throw new Error(`Benchmark case ${id} has split "${value}"; use one of ${CASE_SPLITS.join(', ')}.`);
+  }
+  return split;
+}
+
+function normalizeExpectedBehavior(value, id) {
+  if (value === undefined || value === null || value === '') {
+    return 'answer';
+  }
+  const behavior = String(value).trim().toLowerCase();
+  if (!EXPECTED_BEHAVIORS.includes(behavior)) {
+    throw new Error(`Benchmark case ${id} has expected_behavior "${value}"; use one of ${EXPECTED_BEHAVIORS.join(', ')}.`);
+  }
+  return behavior;
+}
+
 export function normalizeBenchmarkCase(testCase) {
   if (!testCase || typeof testCase !== 'object') {
     throw new Error('Benchmark cases must be objects.');
@@ -74,6 +112,43 @@ export function normalizeBenchmarkCase(testCase) {
     throw new Error(`Benchmark case ${id} is missing question.`);
   }
 
+  const split = normalizeSplit(testCase.split, id);
+  const expectedBehavior = normalizeExpectedBehavior(testCase.expected_behavior, id);
+  const knownValidatorRejection = testCase.known_validator_rejection ? String(testCase.known_validator_rejection).trim() : null;
+
+  if (expectedBehavior !== 'answer') {
+    // No SQL is a correct answer to an abstain or clarify case, so there is
+    // nothing to score against: a gold here would be ignored, so it is an error.
+    const stray = ['expected_sql', 'alternative_expected_sql', 'comparison', 'expected_row_counts', 'known_validator_rejection'].filter((field) => {
+      const value = testCase[field];
+      return value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && value.length === 0);
+    });
+    if (stray.length > 0) {
+      throw new Error(`Benchmark case ${id} expects behavior "${expectedBehavior}" and must not carry ${stray.join(', ')}.`);
+    }
+    return {
+      ...testCase,
+      id,
+      intentId: String(testCase.intentId || id).trim(),
+      split,
+      expected_behavior: expectedBehavior,
+      question,
+      canonicalQuestion: String(testCase.canonicalQuestion || question).trim(),
+      difficulty: testCase.difficulty || null,
+      tags: uniqueStrings(testCase.tags),
+      expected_sql: '',
+      expected_tables: uniqueStrings(testCase.expected_tables),
+      expected_columns: [],
+      disallowed_columns: [],
+      signal_checks: null,
+      comparison: null,
+      alternative_expected_sql: [],
+      expected_row_counts: null,
+      known_validator_rejection: null,
+      failure_class: testCase.failure_class || null,
+    };
+  }
+
   if (!expectedSql) {
     throw new Error(`Benchmark case ${id} is missing expected_sql.`);
   }
@@ -82,6 +157,8 @@ export function normalizeBenchmarkCase(testCase) {
     ...testCase,
     id,
     intentId: String(testCase.intentId || id).trim(),
+    split,
+    expected_behavior: expectedBehavior,
     question,
     canonicalQuestion: String(testCase.canonicalQuestion || question).trim(),
     difficulty: testCase.difficulty || null,
@@ -97,6 +174,7 @@ export function normalizeBenchmarkCase(testCase) {
     comparison: normalizeComparison(testCase.comparison),
     alternative_expected_sql: uniqueStrings(testCase.alternative_expected_sql).filter((sql) => sql !== expectedSql),
     expected_row_counts: normalizeExpectedRowCounts(testCase.expected_row_counts),
+    known_validator_rejection: knownValidatorRejection,
     failure_class: testCase.failure_class || null,
   };
 }
@@ -130,6 +208,9 @@ export function resolveExpectedRowCount(testCase, fixtureName, { primaryFixture 
 
 /** Gold SQL variants a prediction may match: the gold first, then alternatives. */
 export function listGoldVariants(testCase) {
+  if (isBehaviorCase(testCase)) {
+    return [];
+  }
   return [
     { label: 'expected_sql', sql: testCase.expected_sql },
     ...(testCase.alternative_expected_sql || []).map((sql, index) => ({ label: `alternative_expected_sql[${index}]`, sql })),

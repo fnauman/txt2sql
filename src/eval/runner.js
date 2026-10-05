@@ -5,13 +5,14 @@
 // (total/passed/failed/accuracy/statusCounts/warningCounts describe the FIRST
 // repetition, `reliability` is the old pooled block, now labelled as such) and
 // adds: mode, suite, runner, provenance, verification, stats, attribution,
+// behavior (abstain / clarify cases, reported apart from strict accuracy),
 // budget, stopped (why a run ended early, or null), comparison, rescoredFrom. Each results[i] is one case: its dataset
 // fields, the first repetition's fields at the top level (as before), every
 // repetition in `repetitions[]` (each with outcome / bucket / counted /
 // outcome_tags from attribution.js) and a per-case `summary`.
 
-import { summarizeBenchmarkResults } from '../benchmark.js';
-import { attributeRepetition, checkGuardrailRejections, summarizeAttribution, summarizeCaseRepetitions } from './attribution.js';
+import { isBehaviorCase, summarizeBenchmarkResults } from '../benchmark.js';
+import { attributeRepetition, checkGuardrailRejections, summarizeAttribution, summarizeBehavior, summarizeCaseRepetitions } from './attribution.js';
 import { goldFingerprint } from './controls.js';
 import { scoreAgainstGold } from './oracle.js';
 import { summarizeReliability, summarizeRunStatistics } from './stats.js';
@@ -21,6 +22,11 @@ export const REPORT_VERSION = 2;
 
 // Repetitions that never produced a verdict (budget, a stopped run).
 const NOT_RUN = new Set(['skipped_budget', 'cancelled']);
+
+/** True for a result record of an abstain / clarify case (never in strict accuracy). */
+export function isBehaviorRecord(record) {
+  return Boolean(record?.expected_behavior) && record.expected_behavior !== 'answer';
+}
 
 /** Dataset fields of a case as recorded in results[i]. */
 export function caseMetadata(testCase, datasets = []) {
@@ -41,6 +47,8 @@ export function caseMetadata(testCase, datasets = []) {
     tags: testCase.tags,
     failure_class: testCase.failure_class,
     split: caseSplit(testCase),
+    expected_behavior: testCase.expected_behavior || 'answer',
+    known_validator_rejection: testCase.known_validator_rejection ?? null,
     datasets,
     gold_fingerprint: goldFingerprint(testCase.expected_sql),
     scoring_fingerprint: scoringFingerprint(testCase),
@@ -80,7 +88,8 @@ export async function attributeCaseRuns(caseRuns, {
   for (const run of caseRuns) {
     const repetitions = [];
     for (const [index, result] of run.repetitions.entries()) {
-      const checked = checkGuardrails
+      // A behavior case has no gold to re-check a guardrail rejection against.
+      const checked = checkGuardrails && !isBehaviorCase(run.entry.testCase)
         ? await checkGuardrailRejections(result, {
             testCase: run.entry.testCase,
             connections,
@@ -166,7 +175,11 @@ export function buildReport({
   traceFile = null,
   statsOptions = {},
 }) {
-  const legacy = legacySummary(caseRecords);
+  // Behavior cases (abstain / clarify) have no gold: they are reported in
+  // `behavior` and left out of the accuracy, legacy and attribution blocks
+  // (cost, latency and tokens in `stats` still cover every case).
+  const answerRecords = caseRecords.filter((record) => !isBehaviorRecord(record));
+  const legacy = legacySummary(answerRecords);
   const singleDataset = suite.datasets.length === 1 ? suite.datasets[0] : null;
   return {
     reportVersion: REPORT_VERSION,
@@ -194,7 +207,8 @@ export function buildReport({
     provenance,
     verification,
     stats: summarizeRunStatistics(caseRecords, statsOptions),
-    attribution: summarizeAttribution(caseRecords),
+    attribution: summarizeAttribution(answerRecords),
+    behavior: summarizeBehavior(caseRecords),
     budget,
     stopped,
     comparison,

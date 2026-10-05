@@ -88,7 +88,7 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
   assert.match(markdown, /\*\*Strict accuracy 50\.0%\*\* \(95% CI [\d.]+%–[\d.]+%, case bootstrap\) · 3 cases · 3 intents · 2 repetitions · gpt-4o-mini · 2026-10-05 10:00:00 UTC/);
   assert.match(markdown, /Majority-pass cases 1\/3 \(Wilson 95% /);
   assert.match(markdown, /1 of 4 selected case\(s\) had no counted repetition/);
-  for (const heading of ['## Attribution', '## Guardrail confusion matrix', '## Cases', '## By failure class, difficulty and tag', '## Cost, latency, retries, tokens', '## Verification', '## Provenance', '## Legacy pooled reliability']) {
+  for (const heading of ['## Attribution', '## Guardrail confusion matrix', '## Cases', '## By split, failure class, difficulty and tag', '## Cost, latency, retries, tokens', '## Verification', '## Provenance', '## Legacy pooled reliability']) {
     assert.ok(markdown.includes(`\n${heading}\n`), heading);
   }
   assert.match(markdown, /\| system errors \(guardrail false rejections, retrieval misses\) \| 2 \| 1 \|/);

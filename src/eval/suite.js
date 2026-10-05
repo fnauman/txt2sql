@@ -41,15 +41,19 @@ export function parseList(value) {
 
 /**
  * Scoring fingerprint: everything the oracle compares against (gold,
- * accepted alternatives, comparison spec). A change means old verdicts no
- * longer answer the same question.
+ * accepted alternatives, comparison spec) and, for an abstain or clarify case,
+ * the expected behavior. A change means old verdicts no longer answer the same
+ * question. (An answer case leaves the behavior out, so fingerprints recorded
+ * before behavior cases existed still match.)
  */
 export function scoringFingerprint(testCase) {
+  const behavior = testCase.expected_behavior && testCase.expected_behavior !== 'answer' ? { behavior: testCase.expected_behavior } : {};
   return sha256Hex(
     stableStringify({
       gold: normalizeSqlText(testCase.expected_sql),
       alternatives: [...(testCase.alternative_expected_sql || [])].map(normalizeSqlText).sort(),
       comparison: testCase.comparison ?? null,
+      ...behavior,
     })
   ).slice(0, 16);
 }

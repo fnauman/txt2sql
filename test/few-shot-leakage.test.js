@@ -29,8 +29,9 @@ function loadDatasetCases() {
 }
 
 const CASES = loadDatasetCases();
+// Abstain / clarify cases have no gold SQL.
 const GOLD_SQL = CASES.flatMap((testCase) =>
-  [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].map((sql) => ({ sql, label: `${testCase.dataset}/${testCase.id}` }))
+  [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].filter(Boolean).map((sql) => ({ sql, label: `${testCase.dataset}/${testCase.id}` }))
 );
 
 export function normalizeQuestion(text) {

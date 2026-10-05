@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants } from '../src/benchmark.js';
+import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, listGoldVariants } from '../src/benchmark.js';
 import { createCaseTraceLogger, extractAttempts } from '../src/eval/case-trace.js';
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { PRIMARY_FIXTURE } from '../src/eval/fixtures.js';
@@ -92,6 +92,10 @@ function sumDurations(attempts, step) {
  *   broken gold nor a verdict.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
+ * - An abstain / clarify case (expected_behavior) has no gold: nothing is run
+ *   before the product loop and nothing is scored after it. A product loop
+ *   that ends with executed SQL is status 'answered'; a failed one keeps its
+ *   stage status. Attribution decides whether the product declined.
  */
 export async function evaluateQuestion({
   client,
@@ -209,7 +213,8 @@ export async function evaluateQuestion({
   let status;
   let score = null;
   const oracleTimer = createTimer();
-  if (run.success) {
+  const behaviorCase = isBehaviorCase(testCase);
+  if (run.success && !behaviorCase) {
     try {
       score = await scorePrediction({
         testCase,
@@ -230,9 +235,19 @@ export async function evaluateQuestion({
     }
   }
   // The signal fired while the fixtures were being scored: whatever the
-  // oracle returned (or threw) is not a verdict.
-  const abortedWhileScoring = run.success && Boolean(signal?.aborted);
-  if (abortedWhileScoring) {
+  // oracle returned (or threw) is not a verdict. (A behaviour case is never
+  // scored.)
+  const abortedWhileScoring = run.success && !behaviorCase && Boolean(signal?.aborted);
+  if (run.success && behaviorCase) {
+    status = 'answered';
+    await trace.emit('behavior.checked', {
+      ...caseContext,
+      ...oracleTimer.stop(),
+      expectedBehavior: testCase.expected_behavior,
+      answered: true,
+      retrievedTables,
+    });
+  } else if (abortedWhileScoring) {
     status = 'aborted';
   } else if (run.success) {
     status = score.match
@@ -260,6 +275,15 @@ export async function evaluateQuestion({
     });
   } else {
     status = STAGE_STATUS[run.errorStage] || 'execution_error';
+    if (behaviorCase) {
+      await trace.emit('behavior.checked', {
+        ...caseContext,
+        expectedBehavior: testCase.expected_behavior,
+        answered: false,
+        errorStage: run.errorStage || null,
+        errorCode: run.errorCode || null,
+      });
+    }
   }
 
   const signalWarnings = score?.signalWarnings || [];
