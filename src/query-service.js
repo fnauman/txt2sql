@@ -14,6 +14,7 @@ import {
 } from './pipeline.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
+import { clearSemanticLayerCache } from './semantic-layer.js';
 import { createTimer, serializeError } from './trace.js';
 import { createResultInsights, inferColumns, normalizeRows, suggestVisualizations } from './result-intelligence.js';
 
@@ -21,6 +22,115 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
 export const DEFAULT_MODELS_DIR = path.resolve(REPO_ROOT, 'models');
 export const DEFAULT_SCHEMA_PATH = path.resolve(REPO_ROOT, 'generated/schema.json');
+
+// Where a failed question stopped. Returned on every failed result (and by the
+// web API) so callers can tell "blocked by guardrails" from "MariaDB error" or
+// "LLM unavailable" without parsing message text.
+export const ERROR_STAGES = Object.freeze(['llm', 'validation', 'execution', 'aborted', 'infra']);
+
+export const DEFAULT_MAX_RETRIES = 1;
+const MAX_RETRIES_LIMIT = 5;
+
+export function resolveMaxRetries(env = process.env) {
+  const raw = env.WEB_QUERY_MAX_RETRIES;
+  if (raw === undefined || String(raw).trim() === '') {
+    return DEFAULT_MAX_RETRIES;
+  }
+
+  const value = Number(String(raw).trim());
+  if (!Number.isInteger(value) || value < 0 || value > MAX_RETRIES_LIMIT) {
+    const error = new Error(`WEB_QUERY_MAX_RETRIES must be an integer between 0 and ${MAX_RETRIES_LIMIT}; got "${raw}".`);
+    error.code = 'INVALID_CONFIG';
+    throw error;
+  }
+
+  return value;
+}
+
+export function resolveDbConnectionLimit(env = process.env) {
+  const raw = env.WEB_DB_CONNECTION_LIMIT;
+  if (raw === undefined || String(raw).trim() === '') {
+    return 5;
+  }
+
+  const value = Number(String(raw).trim());
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    const error = new Error(`WEB_DB_CONNECTION_LIMIT must be an integer between 1 and 100; got "${raw}".`);
+    error.code = 'INVALID_CONFIG';
+    throw error;
+  }
+
+  return value;
+}
+
+// Stable machine-readable code for an error: error.code when the source set
+// one (mysql2 ER_* / E* codes, LLM_TRUNCATED, ...), otherwise a few known
+// shapes that arrive without a code.
+export function errorCodeOf(error) {
+  if (!error) {
+    return null;
+  }
+
+  if (typeof error.code === 'string' && error.code) {
+    return error.code;
+  }
+
+  if (error.errno === 1969) {
+    return 'ER_STATEMENT_TIMEOUT';
+  }
+
+  const message = String(error.message || '');
+  if (/^Pool is closed/i.test(message)) {
+    return 'POOL_CLOSED';
+  }
+  if (/Queue limit reached/i.test(message)) {
+    return 'POOL_QUEUE_LIMIT';
+  }
+
+  if (error.name === 'APIConnectionTimeoutError') {
+    return 'LLM_TIMEOUT';
+  }
+  if (error.name === 'APIConnectionError') {
+    return 'LLM_CONNECTION_ERROR';
+  }
+  if (Number.isInteger(error.status)) {
+    return `HTTP_${error.status}`;
+  }
+
+  return null;
+}
+
+// Connection-, pool- and auth-level failures say nothing about the SQL, so
+// sending them back to the model as a "database error" only buys a paid retry
+// of a query that was fine. They fail fast as 'infra' instead.
+const INFRA_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'PROTOCOL_CONNECTION_LOST',
+  'PROTOCOL_SEQUENCE_TIMEOUT',
+  'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+  'PROTOCOL_ENQUEUE_AFTER_QUIT',
+  'ER_ACCESS_DENIED_ERROR',
+  'ER_CON_COUNT_ERROR',
+  'ER_TOO_MANY_USER_CONNECTIONS',
+  'ER_SERVER_SHUTDOWN',
+  'POOL_CLOSED',
+  'POOL_QUEUE_LIMIT',
+  'DB_NOT_CONFIGURED',
+]);
+
+export function isInfraError(error) {
+  if (!error) {
+    return false;
+  }
+
+  return INFRA_ERROR_CODES.has(errorCodeOf(error)) || error.fatal === true;
+}
 
 export function createNoopTraceLogger() {
   return {
@@ -57,7 +167,7 @@ export function createBufferedTraceLogger({ enabled = true, pipeline = 'optimize
   };
 }
 
-function createEmptyResult({ question, questionIndex, error, response = null, sql = '', llmCalls = [], llmUsage = null, llmCost = null, promptTables = [], masterDataCandidates = [], attemptCount = 0 }) {
+function createEmptyResult({ question, questionIndex, error, stage, response = null, sql = '', llmCalls = [], llmUsage = null, llmCost = null, promptTables = [], masterDataCandidates = [], attemptCount = 0 }) {
   return {
     success: false,
     question,
@@ -69,6 +179,8 @@ function createEmptyResult({ question, questionIndex, error, response = null, sq
     insights: [],
     response,
     error,
+    errorStage: stage,
+    errorCode: errorCodeOf(error),
     serializedError: serializeError(error),
     llmCalls,
     llmUsage,
@@ -82,10 +194,17 @@ function createEmptyResult({ question, questionIndex, error, response = null, sq
   };
 }
 
-function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, masterDataCandidates, attemptCount, rowLimit, includeInsights }) {
-  const totalRowCount = Array.isArray(rawRows) ? rawRows.length : 0;
-  const hasRowLimit = Number.isFinite(rowLimit) && rowLimit >= 0;
+function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, masterDataCandidates, attemptCount, rowLimit, maxRows, includeInsights }) {
+  const fetchedRowCount = Array.isArray(rawRows) ? rawRows.length : 0;
+  const hasRowLimit = Number.isInteger(rowLimit) && rowLimit >= 0;
   const rows = normalizeRows(rawRows, { limit: hasRowLimit ? rowLimit : null });
+  const truncated = hasRowLimit && fetchedRowCount > rows.length;
+  // The server caps the fetch at maxRows (= rowLimit + 1), so a truncated result
+  // only proves there are MORE than rowLimit rows: the exact total is unknown and
+  // is reported as null rather than a misleading number. (An explicit LIMIT in
+  // the SQL takes precedence over the cap; if more than maxRows came back, the
+  // fetched count is the exact total.)
+  const totalRowCount = truncated && maxRows != null && fetchedRowCount <= maxRows ? null : fetchedRowCount;
   const columns = inferColumns(rows);
   const visualizations = suggestVisualizations(rows, columns);
   const insights = includeInsights
@@ -102,6 +221,8 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
     visualizations,
     insights,
     response,
+    errorStage: null,
+    errorCode: null,
     llmCalls,
     llmUsage,
     llmCost,
@@ -110,7 +231,7 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
     attemptCount,
     rowCount: rows.length,
     totalRowCount,
-    truncated: hasRowLimit && totalRowCount > rows.length,
+    truncated,
   };
 }
 
@@ -119,9 +240,25 @@ export async function loadOptimizedQueryRuntime({
   modelsDir = DEFAULT_MODELS_DIR,
   schemaPath = DEFAULT_SCHEMA_PATH,
   trace = createNoopTraceLogger(),
-  connectionLimit = Number(process.env.WEB_DB_CONNECTION_LIMIT || 5),
+  connectionLimit = undefined,
+  clientOptions = {},
 } = {}) {
   const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const effectiveConnectionLimit = connectionLimit ?? resolveDbConnectionLimit();
+
+  // The OpenAI client is cheap and fails fast on missing/invalid settings, so it
+  // is created first: a misconfigured server never compiles the schema or opens
+  // a pool for a runtime it cannot use.
+  const client = createOpenAiClient(clientOptions);
+  await trace.emit('openai.client_ready', {
+    model,
+    openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
+  });
+
+  if (refreshSchema) {
+    // A refresh also re-reads metadata/semantic-layer.json.
+    clearSemanticLayerCache();
+  }
 
   const schemaTimer = createTimer();
   const schema = await loadNarrowSchema({
@@ -135,19 +272,14 @@ export async function loadOptimizedQueryRuntime({
     tableCount: schema.tables.length,
   });
 
-  const client = createOpenAiClient();
-  await trace.emit('openai.client_ready', {
-    model,
-    openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
-  });
-
   const connectionTimer = createTimer();
-  const connection = createMariaDbPool({ connectionLimit });
+  const connection = createMariaDbPool({ connectionLimit: effectiveConnectionLimit });
   await trace.emit('database.pool_ready', {
     ...connectionTimer.stop(),
-    connectionLimit,
+    connectionLimit: effectiveConnectionLimit,
   });
 
+  let closePromise = null;
   return {
     model,
     schema,
@@ -155,19 +287,35 @@ export async function loadOptimizedQueryRuntime({
     connection,
     modelsDir,
     schemaPath,
-    async close() {
-      await connection.end();
+    close() {
+      closePromise ||= connection.end();
+      return closePromise;
     },
   };
 }
 
-function createAbortError(signal) {
-  if (signal?.reason instanceof Error) {
-    return signal.reason;
+function createAbortError(signal, cause = null) {
+  const reason = signal?.reason;
+  if (reason instanceof Error && typeof reason.code === 'string') {
+    return reason;
   }
   const error = new Error('Request aborted before completion.');
   error.name = 'AbortError';
+  error.code = 'ABORTED';
+  if (cause || reason) {
+    error.cause = cause || reason;
+  }
   return error;
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.name === 'APIUserAbortError';
+}
+
+function assertNonNegativeInteger(name, value) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative integer; got ${value}.`);
+  }
 }
 
 export async function runOptimizedQuestion({
@@ -178,7 +326,7 @@ export async function runOptimizedQuestion({
   question,
   questionIndex = 1,
   trace = createNoopTraceLogger(),
-  maxRetries = Number(process.env.WEB_QUERY_MAX_RETRIES || 1),
+  maxRetries = undefined,
   rowLimit = null,
   includeInsights = true,
   statementTimeoutMs = null,
@@ -201,6 +349,15 @@ export async function runOptimizedQuestion({
     throw new Error('Compiled schema is required.');
   }
 
+  const effectiveMaxRetries = maxRetries ?? resolveMaxRetries();
+  assertNonNegativeInteger('maxRetries', effectiveMaxRetries);
+  if (rowLimit != null) {
+    assertNonNegativeInteger('rowLimit', rowLimit);
+  }
+  // Fetch one row beyond the display limit so truncation is detected without
+  // materializing the whole result in Node (sql_select_limit, server-side).
+  const maxRows = rowLimit == null ? null : rowLimit + 1;
+
   const questionContext = {
     questionIndex,
     question: normalizedQuestion,
@@ -217,6 +374,7 @@ export async function runOptimizedQuestion({
       question: normalizedQuestion,
       questionIndex,
       error: createAbortError(signal),
+      stage: 'aborted',
     });
   }
 
@@ -228,6 +386,8 @@ export async function runOptimizedQuestion({
     masterDataCandidates = await resolveMasterDataCandidates({
       connection,
       semanticPlan,
+      statementTimeoutMs,
+      signal,
     });
     await trace.emit('master_data.resolved', {
       ...questionContext,
@@ -244,6 +404,31 @@ export async function runOptimizedQuestion({
       ...masterDataTimer.stop(),
       error: serializeError(error),
     });
+
+    if (signal?.aborted) {
+      await trace.emit('question.aborted', { ...questionContext });
+      return createEmptyResult({
+        question: normalizedQuestion,
+        questionIndex,
+        error: createAbortError(signal, error),
+        stage: 'aborted',
+      });
+    }
+
+    // The database is down or rejecting us: generating SQL now would only pay
+    // for an LLM call whose query cannot run. Other lookup failures (e.g. a
+    // statement timeout) degrade to "no candidates" as before.
+    if (isInfraError(error)) {
+      const result = createEmptyResult({ question: normalizedQuestion, questionIndex, error, stage: 'infra' });
+      await trace.emit('question.completed', {
+        ...questionContext,
+        success: false,
+        attempts: 0,
+        errorStage: 'infra',
+        error: serializeError(error),
+      });
+      return result;
+    }
   }
 
   const promptTimer = createTimer();
@@ -259,6 +444,7 @@ export async function runOptimizedQuestion({
   });
 
   const allowedTables = (prompt.tables || schema.tables).map((table) => table.tableName);
+  const promptTables = prompt.tables.map((table) => table.tableName);
   let attempt = 0;
   let lastResponse = null;
   let lastError = null;
@@ -270,7 +456,43 @@ export async function runOptimizedQuestion({
   const getLlmUsage = () => mergeUsage(llmUsages);
   const getLlmCost = () => mergeCosts(llmCosts);
 
-  while (attempt <= maxRetries) {
+  const buildFailure = ({ error, stage, sql = lastResponse?.sql || '', response = lastResponse, attemptCount }) =>
+    createEmptyResult({
+      question: normalizedQuestion,
+      questionIndex,
+      sql,
+      error,
+      stage,
+      response,
+      llmCalls,
+      llmUsage: getLlmUsage(),
+      llmCost: getLlmCost(),
+      promptTables,
+      masterDataCandidates,
+      attemptCount,
+    });
+
+  const completeWithFailure = async (failure) => {
+    const result = buildFailure(failure);
+    await trace.emit('question.completed', {
+      ...questionContext,
+      success: false,
+      attempts: result.attemptCount,
+      sql: result.sql || null,
+      llmUsage: result.llmUsage,
+      llmCost: result.llmCost,
+      errorStage: result.errorStage,
+      error: serializeError(result.error),
+    });
+    return result;
+  };
+
+  const abortWith = async (attemptContext, failure) => {
+    await trace.emit('question.aborted', { ...questionContext, ...attemptContext });
+    return buildFailure({ ...failure, stage: 'aborted' });
+  };
+
+  while (attempt <= effectiveMaxRetries) {
     const retryContext =
       attempt === 0
         ? null
@@ -300,23 +522,20 @@ export async function runOptimizedQuestion({
     } catch (error) {
       lastError = error;
       lastErrorStage = 'llm';
+      // A truncated/refused completion was still billed; keep the totals honest.
+      if (error?.usage) {
+        llmUsages.push(error.usage);
+      }
+      if (error?.cost) {
+        llmCosts.push(error.cost);
+      }
 
       // If the client went away (SSE closed -> AbortController fired), stop here:
       // do not retry (which would start a fresh, equally-doomed LLM call) and do
       // not keep working on a result no one will read.
-      if (signal?.aborted || error?.name === 'AbortError' || error?.name === 'APIUserAbortError') {
-        await trace.emit('question.aborted', { ...questionContext, ...attemptContext });
-        return createEmptyResult({
-          question: normalizedQuestion,
-          questionIndex,
-          sql: lastResponse?.sql || '',
-          error,
-          response: lastResponse,
-          llmCalls,
-          llmUsage: getLlmUsage(),
-          llmCost: getLlmCost(),
-          promptTables: prompt.tables.map((table) => table.tableName),
-          masterDataCandidates,
+      if (signal?.aborted || isAbortError(error)) {
+        return abortWith(attemptContext, {
+          error: signal?.aborted ? createAbortError(signal, error) : error,
           attemptCount: attempt + 1,
         });
       }
@@ -329,32 +548,8 @@ export async function runOptimizedQuestion({
       });
 
       attempt += 1;
-      if (attempt > maxRetries) {
-        const result = createEmptyResult({
-          question: normalizedQuestion,
-          questionIndex,
-          sql: lastResponse?.sql || '',
-          error,
-          response: lastResponse,
-          llmCalls,
-          llmUsage: getLlmUsage(),
-          llmCost: getLlmCost(),
-          promptTables: prompt.tables.map((table) => table.tableName),
-          masterDataCandidates,
-          attemptCount: attempt,
-        });
-
-        await trace.emit('question.completed', {
-          ...questionContext,
-          success: false,
-          attempts: attempt,
-          sql: result.sql || null,
-          llmUsage: result.llmUsage,
-          llmCost: result.llmCost,
-          error: serializeError(error),
-        });
-
-        return result;
+      if (attempt > effectiveMaxRetries) {
+        return completeWithFailure({ error, stage: 'llm', attemptCount: attempt });
       }
 
       continue;
@@ -412,32 +607,8 @@ export async function runOptimizedQuestion({
       });
 
       attempt += 1;
-      if (attempt > maxRetries) {
-        const result = createEmptyResult({
-          question: normalizedQuestion,
-          questionIndex,
-          sql: response.sql,
-          error,
-          response,
-          llmCalls,
-          llmUsage: getLlmUsage(),
-          llmCost: getLlmCost(),
-          promptTables: prompt.tables.map((table) => table.tableName),
-          masterDataCandidates,
-          attemptCount: attempt,
-        });
-
-        await trace.emit('question.completed', {
-          ...questionContext,
-          success: false,
-          attempts: attempt,
-          sql: result.sql || null,
-          llmUsage: result.llmUsage,
-          llmCost: result.llmCost,
-          error: serializeError(error),
-        });
-
-        return result;
+      if (attempt > effectiveMaxRetries) {
+        return completeWithFailure({ error, stage: 'validation', sql: response.sql, response, attemptCount: attempt });
       }
 
       continue;
@@ -460,25 +631,21 @@ export async function runOptimizedQuestion({
     // we reach the database, skip execution rather than run a query whose rows
     // can no longer be delivered.
     if (signal?.aborted) {
-      await trace.emit('question.aborted', { ...questionContext, ...attemptContext });
-      return createEmptyResult({
-        question: normalizedQuestion,
-        questionIndex,
-        sql: validated.sql,
+      return abortWith(attemptContext, {
         error: createAbortError(signal),
+        sql: validated.sql,
         response,
-        llmCalls,
-        llmUsage: getLlmUsage(),
-        llmCost: getLlmCost(),
-        promptTables: prompt.tables.map((table) => table.tableName),
-        masterDataCandidates,
         attemptCount: attempt + 1,
       });
     }
 
     const executionTimer = createTimer();
     try {
-      const rawRows = await executeReadOnlySql(connection, validated.sql, { timeoutMs: statementTimeoutMs });
+      const rawRows = await executeReadOnlySql(connection, validated.sql, {
+        timeoutMs: statementTimeoutMs,
+        maxRows,
+        signal,
+      });
       const result = createSuccessResult({
         question: normalizedQuestion,
         questionIndex,
@@ -488,10 +655,11 @@ export async function runOptimizedQuestion({
         llmCalls,
         llmUsage: getLlmUsage(),
         llmCost: getLlmCost(),
-        promptTables: prompt.tables.map((table) => table.tableName),
+        promptTables,
         masterDataCandidates,
         attemptCount: attempt + 1,
         rowLimit,
+        maxRows,
         includeInsights,
       });
 
@@ -517,69 +685,38 @@ export async function runOptimizedQuestion({
 
       return result;
     } catch (error) {
+      if (signal?.aborted) {
+        return abortWith(attemptContext, {
+          error: createAbortError(signal, error),
+          sql: validated.sql,
+          response,
+          attemptCount: attempt + 1,
+        });
+      }
+
+      const stage = isInfraError(error) ? 'infra' : 'execution';
       lastError = error;
-      lastErrorStage = 'execution';
+      lastErrorStage = stage;
       await trace.emit('sql.execution_failed', {
         ...attemptContext,
         ...executionTimer.stop(),
         sql: validated.sql,
+        errorStage: stage,
         error: serializeError(error),
       });
 
       attempt += 1;
-      if (attempt > maxRetries) {
-        const result = createEmptyResult({
-          question: normalizedQuestion,
-          questionIndex,
-          sql: response.sql,
-          error,
-          response,
-          llmCalls,
-          llmUsage: getLlmUsage(),
-          llmCost: getLlmCost(),
-          promptTables: prompt.tables.map((table) => table.tableName),
-          masterDataCandidates,
-          attemptCount: attempt,
-        });
-
-        await trace.emit('question.completed', {
-          ...questionContext,
-          success: false,
-          attempts: attempt,
-          sql: result.sql || null,
-          llmUsage: result.llmUsage,
-          llmCost: result.llmCost,
-          error: serializeError(error),
-        });
-
-        return result;
+      // Infra failures fail fast: the SQL was fine, so asking the model to
+      // "fix" it would only pay for another call that cannot succeed.
+      if (stage === 'infra' || attempt > effectiveMaxRetries) {
+        return completeWithFailure({ error, stage, sql: response.sql, response, attemptCount: attempt });
       }
     }
   }
 
-  const result = createEmptyResult({
-    question: normalizedQuestion,
-    questionIndex,
-    sql: lastResponse?.sql || '',
+  return completeWithFailure({
     error: lastError || new Error('Unknown optimized execution failure.'),
-    response: lastResponse,
-    llmCalls,
-    llmUsage: getLlmUsage(),
-    llmCost: getLlmCost(),
-    promptTables: prompt.tables.map((table) => table.tableName),
-    masterDataCandidates,
+    stage: lastErrorStage || 'execution',
     attemptCount: attempt,
   });
-
-  await trace.emit('question.completed', {
-    ...questionContext,
-    success: false,
-    attempts: attempt,
-    sql: result.sql || null,
-    llmUsage: result.llmUsage,
-    llmCost: result.llmCost,
-    error: serializeError(result.error),
-  });
-
-  return result;
 }

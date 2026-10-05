@@ -1,3 +1,4 @@
+import { executeReadOnlySql } from './pipeline.js';
 import { loadSemanticLayerSync } from './semantic-layer.js';
 import { uniqueStrings } from './utils.js';
 
@@ -208,6 +209,8 @@ export async function resolveProductMasterDataCandidates(
     semanticLayer = loadSemanticLayerSync(),
     queryLimit = DEFAULT_PRODUCT_QUERY_LIMIT,
     limitPerTerm = DEFAULT_LIMIT_PER_TERM,
+    statementTimeoutMs = null,
+    signal = null,
   } = {}
 ) {
   const terms = extractProductSearchTerms(semanticPlan);
@@ -225,9 +228,17 @@ export async function resolveProductMasterDataCandidates(
     };
   }
 
+  // Leading-wildcard LIKE scans run once per term, so each lookup gets the same
+  // statement timeout as model SQL (null = QUERY_STATEMENT_TIMEOUT_MS) and the
+  // request's abort signal. The SQL stays parameterized: only the fixed
+  // SET STATEMENT prefix is added, the search terms remain bound values.
   const rowsByTerm = new Map();
   for (const query of queries) {
-    const [rows] = await connection.query(query.sql, query.params);
+    const rows = await executeReadOnlySql(connection, query.sql, {
+      params: query.params,
+      timeoutMs: statementTimeoutMs,
+      signal,
+    });
     rowsByTerm.set(query.term, rows);
   }
   const termResults = expandedTermGroups.map(
@@ -250,11 +261,15 @@ export async function resolveMasterDataCandidates({
   semanticLayer = loadSemanticLayerSync(),
   queryLimit = DEFAULT_PRODUCT_QUERY_LIMIT,
   limitPerTerm = DEFAULT_LIMIT_PER_TERM,
+  statementTimeoutMs = null,
+  signal = null,
 } = {}) {
   const productCandidates = await resolveProductMasterDataCandidates(connection, semanticPlan, {
     semanticLayer,
     queryLimit,
     limitPerTerm,
+    statementTimeoutMs,
+    signal,
   });
 
   return productCandidates.terms.length > 0 ? [productCandidates] : [];

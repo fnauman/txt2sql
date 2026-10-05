@@ -1523,6 +1523,48 @@ export const BASIC_MODEL_REQUEST_OPTIONS = {
   max_completion_tokens: 1200,
 };
 
+// Typed failure for a completion that must not be parsed: the model hit the
+// token limit (finish_reason 'length', so the SQL/JSON is cut off) or declined
+// to answer (finish_reason 'content_filter', or a structured-output refusal).
+// Parsing partial output would execute a truncated query or a refusal string,
+// so callers get error.code 'LLM_TRUNCATED' / 'LLM_REFUSED' (stage 'llm')
+// instead. usage/cost ride along because those tokens were still billed.
+export class LlmResponseError extends Error {
+  constructor(message, { code, finishReason = null, refusal = null, rawText = '', usage = null, cost = null, responseId = null, responseModel = null } = {}) {
+    super(message);
+    this.name = 'LlmResponseError';
+    this.code = code;
+    this.stage = 'llm';
+    this.finishReason = finishReason;
+    this.refusal = refusal;
+    this.rawText = rawText;
+    this.usage = usage;
+    this.cost = cost;
+    this.responseId = responseId;
+    this.responseModel = responseModel;
+  }
+}
+
+function assertCompleteChoice(choice, details) {
+  const finishReason = choice?.finish_reason || null;
+  if (finishReason === 'length') {
+    throw new LlmResponseError(
+      'The model response was cut off at the completion token limit (finish_reason=length); the partial output was discarded.',
+      { ...details, code: 'LLM_TRUNCATED', finishReason }
+    );
+  }
+
+  const refusal = typeof choice?.message?.refusal === 'string' && choice.message.refusal ? choice.message.refusal : null;
+  if (finishReason === 'content_filter' || refusal) {
+    throw new LlmResponseError(
+      finishReason === 'content_filter'
+        ? 'The model response was blocked by the provider content filter (finish_reason=content_filter).'
+        : `The model declined to answer: ${refusal}`,
+      { ...details, code: 'LLM_REFUSED', finishReason, refusal }
+    );
+  }
+}
+
 export async function generateBasicSql({ client, model, prompt }) {
   const request = {
     model,
@@ -1541,6 +1583,14 @@ export async function generateBasicSql({ client, model, prompt }) {
   const rawText = extractMessageText(response.choices[0]?.message?.content);
   const usage = response.usage || null;
   const responseModel = response.model || model;
+
+  assertCompleteChoice(response.choices[0], {
+    rawText,
+    usage,
+    cost: calculateCost(responseModel, usage),
+    responseId: response.id || null,
+    responseModel,
+  });
 
   return {
     sql: cleanModelOutput(rawText),
@@ -1630,6 +1680,15 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   const rawText = extractMessageText(response.choices[0]?.message?.content);
   const usage = response.usage || null;
   const responseModel = response.model || model;
+
+  // A truncated or refused completion is a typed failure, never parsed below.
+  assertCompleteChoice(response.choices[0], {
+    rawText,
+    usage,
+    cost: calculateCost(responseModel, usage),
+    responseId: response.id || null,
+    responseModel,
+  });
 
   const cleaned = cleanModelOutput(rawText);
 
@@ -2017,25 +2076,163 @@ export function validateReadOnlySql(sql, allowedTables, { promptContext = null, 
   };
 }
 
-// Bound the execution tail. The generated SQL is model-authored, so a
-// pathological join could otherwise run unbounded and pin the MariaDB instance,
-// which may also host sensitive non-demo databases. MariaDB's
-// `SET STATEMENT max_statement_time=<seconds> FOR <stmt>` scopes the timeout to
-// this single statement (seconds, fractional allowed). Pass timeoutMs<=0 (or set
-// WEB_QUERY_STATEMENT_TIMEOUT_MS=0) to disable and preserve the old behavior.
-export async function executeReadOnlySql(connection, sql, { timeoutMs } = {}) {
-  // Opt-in tail bounding. When a positive timeout is supplied, MariaDB's
-  // `SET STATEMENT max_statement_time=<seconds> FOR <stmt>` scopes it to this one
-  // statement (seconds, fractional allowed). Callers that pass nothing keep the
-  // original unbounded behavior — the web layer is what opts in, since it is the
-  // path exposed to model-authored SQL against the shared MariaDB instance.
-  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-    const seconds = (timeoutMs / 1000).toFixed(3);
-    const [rows] = await connection.query(`SET STATEMENT max_statement_time=${seconds} FOR ${sql}`);
-    return rows;
+// --- Execution bounds -------------------------------------------------------
+// The generated SQL is model-authored, so a pathological join could otherwise
+// run unbounded and pin the MariaDB instance, which may also host sensitive
+// non-demo databases. Every path (web, CLI, benchmark, master-data lookups) is
+// bounded by default: QUERY_STATEMENT_TIMEOUT_MS (default 8000; 0 disables).
+export const DEFAULT_STATEMENT_TIMEOUT_MS = 8000;
+
+function configError(message) {
+  const error = new Error(message);
+  error.code = 'INVALID_CONFIG';
+  return error;
+}
+
+function readIntegerEnv(env, name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = env[name];
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return fallback;
   }
 
-  const [rows] = await connection.query(sql);
+  const value = Number(String(raw).trim());
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw configError(`${name} must be an integer between ${min} and ${max}; got "${raw}".`);
+  }
+
+  return value;
+}
+
+export function resolveStatementTimeoutMs(env = process.env) {
+  return readIntegerEnv(env, 'QUERY_STATEMENT_TIMEOUT_MS', DEFAULT_STATEMENT_TIMEOUT_MS, { min: 0 });
+}
+
+// MariaDB's `SET STATEMENT var=value[, ...] FOR <stmt>` scopes session variables
+// to this one statement:
+// - max_statement_time (seconds, fractional allowed) bounds the execution tail.
+// - sql_select_limit caps the rows the server returns WITHOUT rewriting the
+//   query: it applies only to the outermost SELECT (subqueries, derived tables,
+//   CTEs and window frames still see every row), keeps ORDER BY, and an
+//   explicit LIMIT in the query takes precedence. Verified on MariaDB 10.6.
+export function buildBoundedStatement(sql, { timeoutMs = 0, maxRows = null } = {}) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError(`timeoutMs must be a non-negative number of milliseconds; got ${timeoutMs}.`);
+  }
+
+  if (maxRows != null && (!Number.isInteger(maxRows) || maxRows < 1)) {
+    throw new TypeError(`maxRows must be a positive integer; got ${maxRows}.`);
+  }
+
+  const settings = [];
+  if (timeoutMs > 0) {
+    // Never round a tiny positive timeout down to 0, which would disable it.
+    settings.push(`max_statement_time=${(Math.max(timeoutMs, 1) / 1000).toFixed(3)}`);
+  }
+  if (maxRows != null) {
+    settings.push(`sql_select_limit=${maxRows}`);
+  }
+
+  return settings.length > 0 ? `SET STATEMENT ${settings.join(', ')} FOR ${sql}` : sql;
+}
+
+function createQueryAbortError(signal, cause = null) {
+  const reason = signal?.reason;
+  const error = new Error('The database query was cancelled because the request was aborted.');
+  error.name = 'AbortError';
+  error.code = typeof reason?.code === 'string' ? reason.code : 'QUERY_ABORTED';
+  error.cause = cause || reason || null;
+  return error;
+}
+
+// How long to wait for an in-flight KILL QUERY before giving up on returning the
+// connection to the pool (it is destroyed instead, see below).
+const KILL_SETTLE_TIMEOUT_MS = 2000;
+
+function waitForSettle(promise, timeoutMs) {
+  let timer;
+  // Not unref'd: the caller is awaiting this, so it must keep the process alive.
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  return Promise.race([promise.then(() => 'settled'), timeout]).finally(() => clearTimeout(timer));
+}
+
+// Best-effort cancellation for pools: run the statement on a dedicated pool
+// connection and, if the signal aborts mid-query, issue `KILL QUERY <threadId>`
+// through a separate pool connection (MariaDB lets a user kill its own threads
+// without extra privileges). The killed statement fails with
+// ER_QUERY_INTERRUPTED and its connection stays usable.
+async function executeKillableQuery(pool, statement, params, signal, killSettleTimeoutMs) {
+  const connection = await pool.getConnection();
+  let killPromise = null;
+
+  const onAbort = () => {
+    const threadId = Number(connection.threadId);
+    if (!Number.isInteger(threadId) || threadId <= 0) {
+      return;
+    }
+    killPromise = Promise.resolve()
+      .then(() => pool.query(`KILL QUERY ${threadId}`))
+      .catch(() => null);
+  };
+
+  if (signal.aborted) {
+    connection.release();
+    throw createQueryAbortError(signal);
+  }
+
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const [rows] = params === undefined ? await connection.query(statement) : await connection.query(statement, params);
+    return rows;
+  } catch (error) {
+    if (signal.aborted) {
+      throw createQueryAbortError(signal, error);
+    }
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    if (!killPromise) {
+      connection.release();
+    } else if ((await waitForSettle(killPromise, killSettleTimeoutMs)) === 'settled') {
+      // The KILL has landed (or failed) while we still own the thread, so it
+      // cannot interrupt another request's query after the connection is reused.
+      connection.release();
+    } else {
+      // A KILL that is still queued could hit whatever runs next on this
+      // thread; never hand it back to the pool.
+      connection.destroy();
+    }
+  }
+}
+
+// Executes model-authored, already-validated SQL with server-side bounds.
+// - timeoutMs: per-statement max_statement_time. Omitted/null uses
+//   QUERY_STATEMENT_TIMEOUT_MS (default 8000); 0 disables.
+// - maxRows: server-side cap on returned rows (sql_select_limit). Callers that
+//   display N rows pass N + 1 so truncation is detectable without fetching more.
+// - signal: when it aborts during execution on a pool, the query is killed.
+// - params: optional placeholders (client-side escaped by mysql2), used by the
+//   parameterized master-data lookups.
+// - killSettleTimeoutMs: how long to wait for an issued KILL QUERY (tests).
+export async function executeReadOnlySql(
+  connection,
+  sql,
+  { timeoutMs = null, maxRows = null, signal = null, params = undefined, killSettleTimeoutMs = KILL_SETTLE_TIMEOUT_MS } = {}
+) {
+  const effectiveTimeoutMs = timeoutMs == null ? resolveStatementTimeoutMs() : timeoutMs;
+  const statement = buildBoundedStatement(sql, { timeoutMs: effectiveTimeoutMs, maxRows });
+
+  if (signal) {
+    if (signal.aborted) {
+      throw createQueryAbortError(signal);
+    }
+    if (typeof connection.getConnection === 'function') {
+      return executeKillableQuery(connection, statement, params, signal, killSettleTimeoutMs);
+    }
+  }
+
+  const [rows] = params === undefined ? await connection.query(statement) : await connection.query(statement, params);
   return rows;
 }
 
@@ -2067,14 +2264,43 @@ export function compareRows(expectedRows, actualRows) {
   return expected.every((value, index) => value === actual[index]);
 }
 
-export function createOpenAiClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required.');
+// Explicit transport bounds for the OpenAI SDK. Its defaults (10-minute timeout,
+// 2 retries) let one question run for over an hour against a hung provider, and
+// the app's own self-correction loop multiplies that. OPENAI_TIMEOUT_MS (default
+// 60000) bounds each HTTP attempt; OPENAI_MAX_RETRIES (default 1) bounds
+// transport retries (connection errors, 408/409/429/5xx) inside one app attempt.
+export const DEFAULT_OPENAI_TIMEOUT_MS = 60_000;
+export const DEFAULT_OPENAI_MAX_RETRIES = 1;
+
+export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env = process.env) {
+  const resolvedTimeoutMs =
+    timeoutMs ?? readIntegerEnv(env, 'OPENAI_TIMEOUT_MS', DEFAULT_OPENAI_TIMEOUT_MS, { min: 1, max: 600_000 });
+  const resolvedMaxRetries =
+    maxRetries ?? readIntegerEnv(env, 'OPENAI_MAX_RETRIES', DEFAULT_OPENAI_MAX_RETRIES, { min: 0, max: 10 });
+
+  if (!Number.isInteger(resolvedTimeoutMs) || resolvedTimeoutMs < 1) {
+    throw configError(`OpenAI timeoutMs must be a positive integer; got ${timeoutMs}.`);
+  }
+  if (!Number.isInteger(resolvedMaxRetries) || resolvedMaxRetries < 0) {
+    throw configError(`OpenAI maxRetries must be a non-negative integer; got ${maxRetries}.`);
   }
 
+  return { timeoutMs: resolvedTimeoutMs, maxRetries: resolvedMaxRetries };
+}
+
+export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } = {}) {
+  if (!env.OPENAI_API_KEY) {
+    const error = new Error('OPENAI_API_KEY is required.');
+    error.code = 'OPENAI_NOT_CONFIGURED';
+    throw error;
+  }
+
+  const options = resolveOpenAiClientOptions({ timeoutMs, maxRetries }, env);
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    ...(process.env.OPENAI_BASE_URL && { baseURL: process.env.OPENAI_BASE_URL }),
+    apiKey: env.OPENAI_API_KEY,
+    ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),
+    timeout: options.timeoutMs,
+    maxRetries: options.maxRetries,
   });
 }
 
