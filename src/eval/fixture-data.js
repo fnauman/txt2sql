@@ -9,8 +9,9 @@
 //
 // A few master rows exist only to make wrong SQL produce wrong answers (from
 // the audit's mutation workstream, .local/audit-2026-10-05/mutation/v2_fixture.sql):
-// - Customer 7 "Harbor Kiosk": active but never ordered, so "active" read as
-//   "has sales" counts differently.
+// - Customer 7 "Harbor Kiosk": active but never ordered (in seed and v3; in
+//   v2 it orders once while the inactive customer 6 buys too), so "active"
+//   read as "has sales" counts differently.
 // - Customer 8 "Summit Grocers": a second customer with the same name as
 //   customer 5, so GROUP BY CustomerName (or COUNT(DISTINCT name)) merges two
 //   customers.

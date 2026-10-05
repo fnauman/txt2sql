@@ -27,7 +27,7 @@ import { expandProductSearchTerms, rankProductCandidates } from '../src/master-d
 // FIXTURE_GENERATOR_VERSION when the change is intentional.
 const EXPECTED_CONTENT_HASHES = {
   seed: '094282546fe55afd',
-  v2: 'ab5bb5fbd8606946',
+  v2: 'c629bc562d05cf0b',
   v3: '92a17806c3746036',
 };
 
@@ -92,8 +92,8 @@ test('v2 ports the audit fixture: separated metrics, header discounts, boundary 
   const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
   const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
 
-  assert.equal(facts.SalesDocument.length, 32);
-  assert.equal(facts.SalesDocumentLine.length, 45);
+  assert.equal(facts.SalesDocument.length, 33);
+  assert.equal(facts.SalesDocumentLine.length, 46);
   assert.equal(facts.AccountingPosting.length, 37);
   for (const document of facts.SalesDocument) {
     assert.ok(Math.abs(document.NetPayableAmount - document.NetAmount - 12.5) < 1e-9, `doc ${document.SalesDocumentId} NetPayable`);
@@ -161,6 +161,11 @@ test('v2c adds prior-year postings, same-amount twins, inactive customer/product
   assert.equal(linesOf(31)[0].ProductId, 11);
   assert.ok(!march2026Products.has(11));
   assert.ok(linesOf(30).some((line) => line.ProductId === null), 'a February delivery fee');
+
+  // Customers with sales (8) != active customers (7), also in v2.
+  const buyers = new Set(facts.SalesDocument.filter(live).map((document) => document.CustomerId));
+  assert.equal(buyers.size, 8);
+  assert.equal(MASTER_DATA.Customer.filter((customer) => customer.IsActive === 1).length, 7);
 });
 
 test('v3 is a large seeded fact set with the traps the oracle needs', () => {

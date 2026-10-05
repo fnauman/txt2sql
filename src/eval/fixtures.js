@@ -275,7 +275,11 @@ export function buildV2Facts() {
  *   Sugar in March, so the March category totals are not in category-ID
  *   order (a ranking without ORDER BY that GROUP BY happens to sort) while
  *   at most nine products sell in March (a LEFT JOIN's NULL product group
- *   stays inside a top-10).
+ *   stays inside a top-10);
+ * - 33: Harbor Kiosk (active, never orders in seed and v3) orders in April
+ *   2026, so with customer 6 buying, the number of customers with sales (8)
+ *   differs from the number of active customers (7) here too ("active" read
+ *   as "has sales").
  * Every document keeps v2's separated header metrics (NetPayable = Net +
  * 12.50, BillTotal = Gross + 7.25) and line TotalAmount = Net x 1.05.
  */
@@ -317,6 +321,7 @@ function addV2cFacts(facts) {
     [30, '2026-02-18', '2026-02-18', 6, 2, 4, 3, 0, 75.0, 82.5, 0, 77.5],
     [31, '2026-02-10', '2026-02-10', 5, 1, 1, 2, 1, 110.0, 121.0, 0, 115.5],
     [32, '2026-03-17', '2026-03-18', 1, 2, 4, 1, 0, 300.0, 330.0, 300.0, 315.0],
+    [33, '2026-04-10', '2026-04-10', 7, 2, 4, 1, 0, 30.0, 33.0, 30.0, 31.5],
   ];
   facts.SalesDocument.push(...v2cDocuments.map(document));
 
@@ -333,6 +338,7 @@ function addV2cFacts(facts) {
     [43, 28, 1, 'Sparkling Water 12 Pack', 5, 60, 315.0, 300.0, 'Beverages', 'Northstar Goods'],
     [44, 30, null, 'Delivery Fee', 1, 25, 25.0, 25.0, null, null],
     [45, 32, 7, 'Cane Sugar 2kg', 6, 50, 315.0, 300.0, 'Pantry', 'Riverbend Pantry'],
+    [46, 33, 10, 'Spring Water 24 Pack', 2, 15, 31.5, 30.0, 'Beverages', 'Clearspring Waters'],
   ];
   for (const values of v2cLines) {
     facts.SalesDocumentLine.push(Object.fromEntries(TABLE_COLUMNS.SalesDocumentLine.map((column, index) => [column, values[index]])));
