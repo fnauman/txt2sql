@@ -87,6 +87,25 @@ test('unqualified columns resolve to the only joined table that has them', () =>
   assertFanOut(BRAND_QUESTION, `SELECT AVG(\`GrossAmount\` - 0) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
   // A qualified column in another case is the same column too (6500 instead of 5500).
   assertFanOut(BRAND_QUESTION, `SELECT SUM(d.netamount) AS net ${HEADER_LINES}`);
+  // Unqualified columns of a derived table or CTE resolve through its lineage
+  // too (6500 instead of 5500, 7130 instead of 6010).
+  const LINES_OF_H = 'FROM h JOIN SalesDocumentLine l ON l.SalesDocumentId = h.SalesDocumentId';
+  assertFanOut(BRAND_QUESTION, `WITH h AS (SELECT SalesDocumentId, NetAmount AS doc_net FROM SalesDocument) SELECT SUM(doc_net) AS g ${LINES_OF_H}`);
+  assertFanOut(BRAND_QUESTION, `WITH h AS (SELECT SalesDocumentId, GrossAmount FROM SalesDocument) SELECT SUM(GrossAmount) AS g ${LINES_OF_H}`, {
+    column: 'GrossAmount',
+  });
+  assertFanOut(
+    BRAND_QUESTION,
+    'SELECT SUM(`GrossAmount`) AS g FROM (SELECT SalesDocumentId, GrossAmount FROM SalesDocument) h JOIN SalesDocumentLine l ON l.SalesDocumentId = h.SalesDocumentId',
+    { column: 'GrossAmount' }
+  );
+  assertFanOut(
+    BRAND_QUESTION,
+    `WITH h AS (SELECT SalesDocumentId, NetAmount AS doc_net FROM SalesDocument) SELECT l.ProductId, SUM(doc_net) AS g ${LINES_OF_H} GROUP BY l.ProductId`
+  );
+  assert.doesNotThrow(() =>
+    validateFor(LINES_QUESTION, `WITH h AS (SELECT SalesDocumentId, NetAmount AS doc_net FROM SalesDocument) SELECT SUM(Quantity) AS q ${LINES_OF_H}`)
+  );
 });
 
 test('fan-out inside a CTE body or a derived table is rejected', () => {

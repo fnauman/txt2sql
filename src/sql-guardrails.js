@@ -1644,6 +1644,21 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
     return coarse ? { coarse: { tableName, columnName, entry } } : 'fine';
   };
 
+  // A column of a joined entry, by its own spelling. A derived column that
+  // copies one table column is that column (`h.amt` for `d.NetAmount AS amt`
+  // is SalesDocument.NetAmount); any other column of a single-table body is
+  // at that table's grain.
+  const entryColumnGrain = (entry, columnName) => {
+    if (!entry.viaDerived) {
+      return columnGrain(entry, entry.tableName, columnName);
+    }
+    const [origin, ...more] = entry.relation?.origins.get(columnName) || [];
+    if (origin && more.length === 0) {
+      return columnGrain(entry, origin.tableName, origin.columnName);
+    }
+    return entry.tableName ? columnGrain(entry, entry.tableName, columnName) : null;
+  };
+
   // SUM(MAX(d.NetAmount)) OVER (): the inner, non-window MIN/MAX ignores the
   // repeated parent rows and yields one value per group. When every GROUP BY
   // key reads only that parent's columns (or there is no GROUP BY), the groups
@@ -1758,27 +1773,22 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
       } else if (walker.qualifiedColumnAt(index)) {
         const { qualifier, column } = walker.qualifiedColumnAt(index);
         const entry = qualifierEntries.get(qualifier);
-        if (entry?.viaDerived) {
-          // A derived column that copies one table column is that column (`h.amt`
-          // for `d.NetAmount AS amt` is SalesDocument.NetAmount); any other
-          // column of a single-table body is at that table's grain.
-          const [origin, ...more] = entry.relation?.origins.get(findDerivedColumnName(entry.relation, column)) || [];
-          if (origin && more.length === 0) {
-            grains.push(columnGrain(entry, origin.tableName, origin.columnName));
-          } else if (entry.tableName) {
-            grains.push(columnGrain(entry, entry.tableName, column));
-          }
-        } else if (entry && findColumnName(knownTables, entry.tableName, column)) {
-          grains.push(columnGrain(entry, entry.tableName, findColumnName(knownTables, entry.tableName, column)));
+        const columnName =
+          entry && (entry.viaDerived ? findDerivedColumnName(entry.relation, column) : findColumnName(knownTables, entry.tableName, column));
+        const grain = columnName ? entryColumnGrain(entry, columnName) : null;
+        if (grain) {
+          grains.push(grain);
         }
         index += 3;
         continue;
       } else if (tokenIdentifierName(token) && !token.afterDot) {
-        // Unqualified column, plain or backtick-quoted; MariaDB column names are
-        // case-insensitive (`grossamount` is SalesDocument.GrossAmount).
+        // Unqualified column, plain or backtick-quoted, of a table or of a
+        // derived table or CTE; MariaDB column names are case-insensitive
+        // (`grossamount` is SalesDocument.GrossAmount).
         const owners = unqualifiedOwners(tokenIdentifierName(token));
-        if (owners.length === 1) {
-          grains.push(columnGrain(owners[0].entry, owners[0].entry.tableName, owners[0].columnName));
+        const grain = owners.length === 1 ? entryColumnGrain(owners[0].entry, owners[0].columnName) : null;
+        if (grain) {
+          grains.push(grain);
         }
       }
       index = next;
@@ -1859,14 +1869,15 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         qualifierEntries.set(entry.tableName, entry);
       }
     }
-    // One joined table per name that has an unqualified `name` column, with the
-    // table's spelling of it.
+    // One joined table per name (and each derived table or CTE) that has an
+    // unqualified `name` column, with its own spelling of it.
     const unqualifiedOwners = (name) => {
       const owners = new Map();
       for (const entry of entries) {
-        const columnName = entry.viaDerived ? null : findColumnName(knownTables, entry.tableName, name);
-        if (columnName && !owners.has(entry.tableName)) {
-          owners.set(entry.tableName, { entry, columnName });
+        const columnName = entry.viaDerived ? findDerivedColumnName(entry.relation, name) : findColumnName(knownTables, entry.tableName, name);
+        const ownerKey = entry.viaDerived ? entry : entry.tableName;
+        if (columnName && !owners.has(ownerKey)) {
+          owners.set(ownerKey, { entry, columnName });
         }
       }
       return [...owners.values()];
