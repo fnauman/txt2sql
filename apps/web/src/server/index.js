@@ -93,15 +93,8 @@ function corsOrigin(origin, callback) {
   callback(null, !origin || allowedOrigins.has(origin));
 }
 
-function defaultEnvArgs() {
-  if (process.env.ENV_FILE || process.env.ENV_DIR || process.env.USE_HOME_ENV === '1') {
-    return [];
-  }
-
-  return ['--env-file', path.resolve(repoRoot, '.env')];
-}
-
-const envInfo = await loadEnvironment(defaultEnvArgs());
+// ENV_FILE / ENV_DIR / USE_HOME_ENV still take precedence over this default.
+const envInfo = await loadEnvironment([], { defaultPath: path.resolve(repoRoot, '.env') });
 let runtimePromise = null;
 let refreshRuntimePromise = null;
 let dbSchemaPromise = null;

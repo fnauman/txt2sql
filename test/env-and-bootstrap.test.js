@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { getPositionalArgs, resolveEnvPath } from '../src/env.js';
+import {
+  ENV_OPTIONS_WITH_VALUES,
+  getPositionalArgs,
+  loadEnvironment,
+  resolveEnvPath,
+} from '../src/env.js';
 import { mapColumnTypeToMariaDb } from '../src/mariadb-bootstrap.js';
 
 function withEnv(overrides, fn) {
@@ -56,6 +62,55 @@ test('resolveEnvPath keeps CLI use-home-env ahead of environment defaults', () =
     () => {
       assert.equal(resolveEnvPath(['--use-home-env']), path.join(os.homedir(), '.env'));
     }
+  );
+});
+
+test('resolveEnvPath accepts --dotenv <path> and --dotenv=<path> ahead of env vars', () => {
+  const env = { ENV_FILE: '/tmp/ignored.env', ENV_DIR: '/tmp/also-ignored', USE_HOME_ENV: '1' };
+  assert.equal(resolveEnvPath(['--dotenv', './config/dev.env'], { env }), path.resolve('config/dev.env'));
+  assert.equal(resolveEnvPath(['--dotenv=./config/dev.env'], { env }), path.resolve('config/dev.env'));
+  assert.equal(resolveEnvPath(['--dotenv=~/x.env'], { env }), path.join(os.homedir(), 'x.env'));
+});
+
+test('resolveEnvPath falls back to ENV_FILE / ENV_DIR / USE_HOME_ENV, then defaultPath, then ./.env', () => {
+  assert.equal(resolveEnvPath([], { env: { ENV_FILE: './a.env', ENV_DIR: '/tmp/b' } }), path.resolve('a.env'));
+  assert.equal(resolveEnvPath([], { env: { ENV_DIR: '/tmp/b' } }), path.join('/tmp/b', '.env'));
+  assert.equal(resolveEnvPath([], { env: { USE_HOME_ENV: '1' } }), path.join(os.homedir(), '.env'));
+  // The web server passes the repo-root .env as its default; env vars still win.
+  assert.equal(resolveEnvPath([], { env: {}, defaultPath: '/srv/app/.env' }), '/srv/app/.env');
+  assert.equal(resolveEnvPath([], { env: { ENV_FILE: '/x/y.env' }, defaultPath: '/srv/app/.env' }), '/x/y.env');
+  assert.equal(resolveEnvPath([], { env: {} }), path.join(process.cwd(), '.env'));
+});
+
+test('resolveEnvPath rejects the Node-reserved --env-file flag with a pointer to --dotenv', () => {
+  for (const argv of [['--env-file', 'x.env'], ['--env-file=x.env']]) {
+    assert.throws(() => resolveEnvPath(argv, { env: {} }), /reserved by Node\.js.*--dotenv/);
+  }
+});
+
+test('loadEnvironment loads the selected file without overriding existing values', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txt2sql-env-'));
+  const file = path.join(dir, 'app.env');
+  fs.writeFileSync(file, 'FROM_FILE=1\nALREADY_SET=from-file\n');
+  try {
+    const env = { ALREADY_SET: 'from-shell' };
+    const info = await loadEnvironment([`--dotenv=${file}`], { env });
+    assert.deepEqual(info, { loaded: true, path: file, candidate: file });
+    assert.equal(env.FROM_FILE, '1');
+    assert.equal(env.ALREADY_SET, 'from-shell');
+
+    const missing = await loadEnvironment([], { env: {}, defaultPath: path.join(dir, 'missing.env') });
+    assert.equal(missing.loaded, false);
+    assert.equal(missing.candidate, path.join(dir, 'missing.env'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('getPositionalArgs skips env-source option values', () => {
+  assert.deepEqual(
+    getPositionalArgs(['top', '--dotenv', '/x/y.env', 'customers', '--env-dir=/cfg'], [...ENV_OPTIONS_WITH_VALUES]),
+    ['top', 'customers']
   );
 });
 
