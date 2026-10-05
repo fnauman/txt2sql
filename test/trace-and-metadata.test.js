@@ -331,150 +331,50 @@ test('createCliOutput redirects human-readable output to stderr when tracing use
   assert.match(stderrText, /world/);
 });
 
-test('evaluateQuestion emits case.completed when expected SQL fails', async () => {
+// Behavior change (EVAL-3): evaluateQuestion used to reimplement the product
+// loop and threw when the gold SQL failed. It now runs the gold first on every
+// fixture and reports a broken gold as 'expected_sql_error' without calling the
+// model; the rest of the trace comes from runOptimizedQuestion itself (see
+// test/eval-benchmark.test.js).
+test('evaluateQuestion reports a failing gold as expected_sql_error before any LLM call', async () => {
   const { trace, events } = createTraceCollector();
-  const expectedError = new Error('Unknown table legacy_customer');
+  let llmCalls = 0;
+  const client = createMockClient('{}', {}, () => {
+    llmCalls += 1;
+  });
+  const connection = {
+    async query() {
+      throw Object.assign(new Error("Table 'demo_retail.legacy_customer' doesn't exist"), { code: 'ER_NO_SUCH_TABLE' });
+    },
+  };
 
-  await assert.rejects(
-    evaluateQuestion({
-      client: null,
-      connection: null,
-      schema: { tables: [] },
-      model: 'gpt-4o-mini',
-      testCase: {
-        id: 7,
-        question: 'List legacy customers',
-        expected_sql: 'SELECT * FROM legacy_customer',
-      },
-      caseIndex: 1,
-      trace,
-      dependencies: {
-        buildPrompt() {
-          return {
-            system: 'system prompt',
-            user: 'user prompt',
-            context: {},
-            tables: [],
-          };
-        },
-        async executeSql() {
-          throw expectedError;
-        },
-      },
-    }),
-    /Unknown table legacy_customer/
-  );
+  const result = await evaluateQuestion({
+    client,
+    connection,
+    schema: { tables: [] },
+    model: 'gpt-4o-mini',
+    testCase: {
+      id: '7',
+      question: 'List legacy customers',
+      expected_sql: 'SELECT * FROM legacy_customer',
+    },
+    caseIndex: 1,
+    trace,
+  });
 
+  assert.equal(result.status, 'expected_sql_error');
+  assert.equal(result.error_code, 'ER_NO_SUCH_TABLE');
+  assert.equal(llmCalls, 0);
   assert.deepEqual(
     events.map((entry) => entry.event),
-    ['case.started', 'master_data.resolved', 'prompt.built', 'expected_sql.failed', 'case.completed']
+    ['case.started', 'expected_sql.failed', 'case.completed']
   );
-  assert.equal(events.find((entry) => entry.event === 'master_data.resolved').totalCandidateCount, 0);
-
   const completionEvent = events.at(-1);
   assert.equal(completionEvent.success, false);
   assert.equal(completionEvent.status, 'expected_sql_error');
   assert.equal(completionEvent.attempts, 0);
-  assert.equal(completionEvent.error.message, 'Unknown table legacy_customer');
-});
-
-test('evaluateQuestion emits retrieval and signal-check events for suspicious successes', async () => {
-  const { trace, events } = createTraceCollector();
-
-  const result = await evaluateQuestion({
-    client: null,
-    connection: null,
-    schema: {
-      tables: [{ tableName: 'Customer' }],
-    },
-    model: 'gpt-4o-mini',
-    datasetName: 'paraphrase-public',
-    testCase: {
-      id: 'public_021',
-      intentId: 'customer_net_sales_march_2026',
-      question: 'Who are our biggest buyers in March 2026?',
-      expected_sql: 'SELECT NULL AS CustomerName, 0 AS total_net_amount',
-      expected_tables: ['Customer', 'SalesDocument'],
-      disallowed_columns: ['CustomerName'],
-      signal_checks: {
-        require_nonzero_columns: ['total_net_amount'],
-        require_nonnull_columns: ['CustomerName'],
-      },
-    },
-    caseIndex: 1,
-    trace,
-    dependencies: {
-      buildPrompt() {
-        return {
-          system: 'system prompt',
-          user: 'user prompt',
-          context: {
-            retrieval: {
-              initialTableNames: ['Customer'],
-              expandedTableNames: ['Customer'],
-              connectorTableNames: [],
-              fallbackToDefaultSelection: false,
-              tableScores: [],
-            },
-          },
-          tables: [{ tableName: 'Customer' }],
-        };
-      },
-      async executeSql() {
-        return [{ CustomerName: null, total_net_amount: 0 }];
-      },
-      async generateResponse() {
-        return {
-          sql: 'SELECT CustomerName, 0 AS total_net_amount FROM Customer',
-          explanation: 'test explanation',
-          assumptions: [],
-          tables_used: ['Customer'],
-          request: { model: 'gpt-4o-mini', messages: [] },
-          responseId: 'resp_456',
-          responseModel: 'gpt-test',
-          finishReason: 'stop',
-        };
-      },
-      validateSql(sql) {
-        return {
-          sql,
-          tablesUsed: ['Customer'],
-          firstKeyword: 'SELECT',
-          statementCount: 1,
-        };
-      },
-      rowsMatch() {
-        return true;
-      },
-    },
-  });
-
-  // The generated SQL matches the (degenerate) gold value but selects a
-  // disallowed column. Only values decide the status now; the lint finding and
-  // the failed signal checks are reported, not turned into a failure.
-  assert.equal(result.status, 'pass');
-  assert.deepEqual(result.disallowed_columns_used, ['CustomerName']);
-  assert.deepEqual(
-    events.map((entry) => entry.event),
-    [
-      'case.started',
-      'master_data.resolved',
-      'prompt.built',
-      'retrieval.completed',
-      'expected_sql.executed',
-      'llm.completed',
-      'sql.validated',
-      'sql.executed',
-      'result.compared',
-      'result.signal_checked',
-      'case.completed',
-    ]
-  );
-  assert.equal(events.find((entry) => entry.event === 'master_data.resolved').totalCandidateCount, 0);
-
-  const signalEvent = events.find((entry) => entry.event === 'result.signal_checked');
-  assert.equal(signalEvent.signalCheckResult.passed, false);
-  assert.deepEqual(signalEvent.disallowedColumnsUsed, ['CustomerName']);
+  assert.equal(events[1].fixture, 'seed');
+  assert.match(completionEvent.error.message, /legacy_customer/);
 });
 
 test('applyEvaluationFailureExitCode sets a non-zero exit code only when failures exist', () => {

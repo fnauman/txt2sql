@@ -255,7 +255,13 @@ export async function scoreAgainstGold({
   }
 
   const errors = predictions.map((prediction) => prediction.error).filter(Boolean);
+  const reportedIndex = scored.indexOf(reported);
   return {
+    // First rows on the primary fixture, for reports.
+    preview: {
+      gold: goldRows[reportedIndex][0].slice(0, 5),
+      actual: predictions[0].rows ? predictions[0].rows.slice(0, 5) : [],
+    },
     match: Boolean(matched),
     matchedGold: matched ? matched.label : null,
     reason: matched ? 'match' : reported.reason,
