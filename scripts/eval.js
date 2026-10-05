@@ -1,8 +1,9 @@
 // One-command evaluation: `npm run eval`.
 //
 //  1. Preflight: MariaDB answers as the query user; a local database that is
-//     down is started with `docker compose up -d --wait mariadb` (unless
-//     --no-docker).
+//     down is started with `docker compose up -d --wait --no-recreate mariadb`
+//     (unless --no-docker; a compose service that is running but unreachable
+//     is never touched).
 //  2. Fixtures: every fixture database is re-hashed; missing, stale or drifted
 //     ones are seeded with the admin role (unless --no-seed).
 //  3. Verify: every gold query and the oracle controls, in process, with the
@@ -929,7 +930,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
 
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH, refreshSchema: options.refreshSchema });
 
-  const database = await preflightDatabase({ env, allowDocker: options.docker, repoRoot: REPO_ROOT, log: (line) => cli.log(line) });
+  const database = await preflightDatabase({ env, allowDocker: options.docker, allowSeed: options.seed, repoRoot: REPO_ROOT, log: (line) => cli.log(line) });
   cli.log(`Database: ${database.status === 'started' ? 'started with docker compose' : 'reachable'}.`);
 
   const fixtureStatus = await ensureFixtures({
@@ -937,6 +938,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     schema,
     env,
     allowSeed: options.seed,
+    noSeedReason: options.profile === 'benchmark' ? 'profile' : 'flag',
     strict: options.profile !== 'benchmark',
     log: (line) => cli.log(line),
   });

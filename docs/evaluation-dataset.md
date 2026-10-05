@@ -470,10 +470,17 @@ npm run eval -- --help                              # every flag
 
 1. **Database preflight.** Connects as the query user. When nothing answers at
    a local `DB_HOST` and Docker is available, it runs
-   `docker compose up -d --wait mariadb` and waits (up to 2 minutes) until the
-   query user can connect; `--no-docker` turns that off. Compose needs
-   `DB_PASSWORD` (the read-only user's password); a missing or inconsistent
-   setting is reported before anything starts.
+   `docker compose up -d --wait --no-recreate mariadb` and waits (up to 2
+   minutes) until the query user can connect; `--no-docker` turns that off.
+   Compose needs `DB_PASSWORD` (the read-only user's password); a missing or
+   inconsistent setting is reported before anything starts, and so is a
+   missing admin password when seeding may be needed (a fresh volume always
+   needs it; its root password is the first of `DB_ADMIN_PASSWORD`,
+   `MARIADB_ROOT_PASSWORD` and `DB_PASSWORD`). If the compose `mariadb`
+   service is already running but does not answer at `DB_HOST:DB_PORT` (e.g.
+   a mistyped `DB_PORT`), nothing is started or recreated: the run stops and
+   says to check the setting. A database the run started keeps running
+   afterwards; `docker compose stop` stops it.
 2. **Fixtures.** Every fixture database is re-hashed (`checkFixtureContent`).
    Missing, stale or drifted ones, and any whose master data differs, are
    seeded (`seedFixture`, which also creates the database and tables) with the

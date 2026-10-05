@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
-import { composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
+import { adminCredentialsHint, composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { verifySuite } from '../src/eval/verify.js';
 import { baselineRefusal, computeExitCode, createRunStopper, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval } from '../scripts/eval.js';
 
@@ -175,9 +175,9 @@ test('preflight: a local database that is down is started with docker compose an
   const logs = [];
   const result = await preflightDatabase({ env: LOCAL_ENV, connect, run, wait: async () => {}, log: (line) => logs.push(line) });
   assert.deepEqual(result, { status: 'started' });
-  assert.deepEqual(commands, ['docker compose version', 'docker compose up -d --wait mariadb']);
+  assert.deepEqual(commands, ['docker compose version', 'docker compose ps --status running -q mariadb', 'docker compose up -d --wait --no-recreate mariadb']);
   assert.equal(probes, 3);
-  assert.match(logs[0], /starting it: docker compose up -d --wait mariadb/);
+  assert.match(logs[0], /starting it: docker compose up -d --wait --no-recreate mariadb/);
 
   // Missing compose settings are named before anything starts.
   const started = [];
@@ -398,4 +398,66 @@ test('a stopped run exits 2 and says why; cancelled repetitions are excluded', (
     '4 repetition(s): did not finish because the run was stopped (cancelled)',
     'the run was stopped early: the LLM provider rejected the request (HTTP_401)',
   ]);
+});
+
+test('preflight never starts or recreates a compose database that is already running but unreachable', async () => {
+  const commands = [];
+  const run = async (command, args) => {
+    commands.push(args.join(' '));
+    return args[1] === 'ps' ? { code: 0, stdout: '3f2a9c1d0b7e\n' } : { code: 0 };
+  };
+  await assert.rejects(
+    preflightDatabase({ env: { ...LOCAL_ENV, DB_PORT: '3307' }, connect: async () => Promise.reject(refused()), run }),
+    (error) =>
+      error.code === 'DB_UNREACHABLE' &&
+      /not reachable at 127\.0\.0\.1:3307 \(ECONNREFUSED\), but the docker-compose mariadb service is already running/.test(error.message) &&
+      /Check DB_HOST \/ DB_PORT/.test(error.message)
+  );
+  assert.deepEqual(commands, ['compose version', 'compose ps --status running -q mariadb'], 'no up, no recreate');
+
+  // A failing "up" names the usual causes, not only the volume.
+  await assert.rejects(
+    preflightDatabase({
+      env: LOCAL_ENV,
+      connect: async () => Promise.reject(refused()),
+      run: async (command, args) => (args[1] === 'up' ? { code: 1 } : { code: 0, stdout: '' }),
+    }),
+    (error) => error.code === 'DB_START_FAILED' && /Docker daemon is not running/.test(error.message) && /container name/.test(error.message)
+  );
+});
+
+test('preflight warns before starting a database that it cannot seed (no admin credentials)', async () => {
+  assert.equal(adminCredentialsHint(LOCAL_ENV), null);
+  assert.match(adminCredentialsHint({ DB_PASSWORD: 'pw' }), /no admin credentials are set .* set DB_ADMIN_PASSWORD to it/);
+  const logs = [];
+  let probes = 0;
+  const env = { DB_HOST: '127.0.0.1', DB_PORT: '3306', DB_USER: 'demo_readonly', DB_PASSWORD: 'pw' };
+  const connect = async () => {
+    probes += 1;
+    if (probes === 1) {
+      throw refused();
+    }
+    return fakeConnection();
+  };
+  await preflightDatabase({ env, connect, run: async () => ({ code: 0, stdout: '' }), wait: async () => {}, log: (line) => logs.push(line) });
+  assert.match(logs[0], /^warning: no admin credentials are set/);
+  assert.match(logs[1], /starting it/);
+  // Not when seeding is off.
+  probes = 0;
+  logs.length = 0;
+  await preflightDatabase({ env, allowSeed: false, connect, run: async () => ({ code: 0, stdout: '' }), wait: async () => {}, log: (line) => logs.push(line) });
+  assert.ok(!logs.some((line) => line.startsWith('warning')));
+});
+
+test('a fixture that cannot be seeded gives advice that fits the profile', async () => {
+  const connect = async () => ({ end: async () => {} });
+  const stale = async () => checkResult('missing');
+  await assert.rejects(
+    ensureFixtures({ fixtures: FIXTURES, schema: {}, env: LOCAL_ENV, allowSeed: false, noSeedReason: 'profile', strict: false, connect, check: stale }),
+    (error) => /use "npm run eval", which seeds them/.test(error.message) && !/--no-seed/.test(error.message)
+  );
+  await assert.rejects(
+    ensureFixtures({ fixtures: FIXTURES, schema: {}, env: LOCAL_ENV, allowSeed: false, connect, check: stale }),
+    (error) => /drop --no-seed/.test(error.message)
+  );
 });

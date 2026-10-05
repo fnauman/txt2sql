@@ -82,19 +82,43 @@ export function composeEnvProblems(env = process.env) {
   return problems;
 }
 
-/** Runs a command with its output on stderr (or discarded when quiet); resolves { code }. */
-export function runCommand(command, args, { cwd, env, quiet = false } = {}) {
+/**
+ * Runs a command with its output on stderr (or discarded when quiet, or
+ * captured with `capture`); resolves { code, stdout? }.
+ */
+export function runCommand(command, args, { cwd, env, quiet = false, capture = false } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command, args, { cwd, env, stdio: quiet ? 'ignore' : ['ignore', 2, 2] });
+      child = spawn(command, args, { cwd, env, stdio: capture ? ['ignore', 'pipe', 'ignore'] : quiet ? 'ignore' : ['ignore', 2, 2] });
     } catch (error) {
       resolve({ code: null, error });
       return;
     }
+    let stdout = '';
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk;
+    });
     child.on('error', (error) => resolve({ code: null, error }));
-    child.on('close', (code) => resolve({ code }));
+    child.on('close', (code) => resolve(capture ? { code, stdout } : { code }));
   });
+}
+
+/**
+ * Says what is missing for seeding a fresh docker-compose database (it always
+ * needs seeding): null when admin credentials are configured.
+ */
+export function adminCredentialsHint(env = process.env) {
+  const credentials = resolveMariaDbCredentials({ role: 'admin', env });
+  if (!credentials.fallback && nonBlank(credentials.password)) {
+    return null;
+  }
+  return (
+    'no admin credentials are set (DB_ADMIN_PASSWORD, or MARIADB_ROOT_PASSWORD). A fresh docker-compose database has no fixture ' +
+    'databases yet, so the run will stop at the seeding step. The compose root password is the first of DB_ADMIN_PASSWORD, ' +
+    'MARIADB_ROOT_PASSWORD and DB_PASSWORD that was set when its data volume was created: set DB_ADMIN_PASSWORD to it ' +
+    '(and DB_ADMIN_USER if it is not root), or pass --no-seed if the fixtures are already seeded.'
+  );
 }
 
 function sleep(ms) {
@@ -106,12 +130,16 @@ function sleep(ms) {
 /**
  * Makes sure MariaDB answers as the query user. When it does not answer at a
  * local address and Docker is allowed and available, runs
- * `docker compose up -d --wait mariadb` (the repo's docker-compose.yml) and
- * waits until it answers (bounded). Returns { status: 'reachable' | 'started' }.
+ * `docker compose up -d --wait --no-recreate mariadb` (the repo's
+ * docker-compose.yml) and waits until it answers (bounded). A compose service
+ * that is already running but not reachable is never touched (a mistyped
+ * DB_PORT must not move or restart the developer's database): that is an
+ * error naming the setting to check. Returns { status: 'reachable' | 'started' }.
  */
 export async function preflightDatabase({
   env = process.env,
   allowDocker = true,
+  allowSeed = true,
   repoRoot = process.cwd(),
   log = () => {},
   connect = createMariaDbConnection,
@@ -161,12 +189,28 @@ export async function preflightDatabase({
     );
   }
 
-  log(`MariaDB is not reachable at ${target}; starting it: docker compose up -d --wait mariadb`);
-  const up = await run('docker', ['compose', 'up', '-d', '--wait', 'mariadb'], { cwd: repoRoot, env });
+  const running = await run('docker', ['compose', 'ps', '--status', 'running', '-q', 'mariadb'], { cwd: repoRoot, env, capture: true });
+  if (running.code === 0 && String(running.stdout || '').trim() !== '') {
+    throw new HarnessError(
+      `MariaDB is not reachable at ${target} (${first.code}), but the docker-compose mariadb service is already running, so it is ` +
+        'not started or recreated. Check DB_HOST / DB_PORT: compose publishes it on 127.0.0.1 at the DB_PORT it was started with ' +
+        '("docker compose port mariadb 3306" shows it).',
+      { code: 'DB_UNREACHABLE', cause: first.error }
+    );
+  }
+  const adminHint = allowSeed ? adminCredentialsHint(env) : null;
+  if (adminHint) {
+    log(`warning: ${adminHint}`);
+  }
+
+  log(`MariaDB is not reachable at ${target}; starting it: docker compose up -d --wait --no-recreate mariadb`);
+  const up = await run('docker', ['compose', 'up', '-d', '--wait', '--no-recreate', 'mariadb'], { cwd: repoRoot, env });
   if (up.code !== 0) {
     throw new HarnessError(
-      `"docker compose up -d --wait mariadb" failed (exit ${up.code ?? up.error?.message}). ` +
-        'If a data volume from an earlier setup has other passwords, recreate it with "docker compose down -v".',
+      `"docker compose up -d --wait --no-recreate mariadb" failed (exit ${up.code ?? up.error?.message}); see the compose output above. ` +
+        'Common causes: the Docker daemon is not running or this user cannot reach it, the port is in use, another checkout ' +
+        'already owns the container name, or a data volume from an earlier setup has other passwords ("docker compose down -v" ' +
+        'recreates it, deleting its data).',
       { code: 'DB_START_FAILED' }
     );
   }
@@ -188,9 +232,12 @@ export async function preflightDatabase({
     }
     await wait(pollMs);
   }
-  throw new HarnessError(`MariaDB did not become reachable at ${target} within ${Math.round(waitTimeoutMs / 1000)} s (${last?.code}).`, {
-    code: 'DB_UNREACHABLE',
-  });
+  throw new HarnessError(
+    `MariaDB did not become reachable at ${target} within ${Math.round(waitTimeoutMs / 1000)} s (${last?.code}). ` +
+      'If the compose container was created earlier with another DB_PORT, it keeps that port ("docker compose port mariadb 3306" ' +
+      'shows it); fix DB_PORT, or recreate it with "docker compose up -d --force-recreate mariadb".',
+    { code: 'DB_UNREACHABLE' }
+  );
 }
 
 const MISSING_DATABASE_CODES = new Set(['ER_BAD_DB_ERROR', 'ER_NO_SUCH_TABLE', 'ER_DBACCESS_DENIED_ERROR', 'ER_TABLEACCESS_DENIED_ERROR']);
@@ -240,12 +287,15 @@ function describeProblem(status) {
  * - allowSeed false: no writes; with `strict` any fixture that is not current
  *   is an error, otherwise only missing ones and master-data mismatches are
  *   (the benchmark profile warns about stale/drifted content, as before).
+ *   `noSeedReason` ('flag' for --no-seed, 'profile' for the benchmark profile)
+ *   picks the advice in the error.
  */
 export async function ensureFixtures({
   fixtures,
   schema,
   env = process.env,
   allowSeed = true,
+  noSeedReason = 'flag',
   strict = true,
   log = () => {},
   connect = createMariaDbConnection,
@@ -272,10 +322,11 @@ export async function ensureFixtures({
   if (!allowSeed) {
     const blocking = strict ? pending : pending.filter((status) => status.status === 'missing' || status.masterDataMatches === false);
     if (blocking.length > 0) {
-      throw new HarnessError(
-        `Fixture database(s) not usable: ${list}. Run "npm run seed-fixtures" (admin credentials), or let the evaluation seed them (drop --no-seed).`,
-        { code: 'FIXTURES_NOT_CURRENT' }
-      );
+      const advice =
+        noSeedReason === 'profile'
+          ? 'Run "npm run seed-fixtures" (admin credentials), or use "npm run eval", which seeds them.'
+          : 'Run "npm run seed-fixtures" (admin credentials), or let the evaluation seed them (drop --no-seed).';
+      throw new HarnessError(`Fixture database(s) not usable: ${list}. ${advice}`, { code: 'FIXTURES_NOT_CURRENT' });
     }
     return statuses.map((status) => ({ ...status, action: needsSeeding(status) ? 'stale-not-seeded' : 'checked' }));
   }
