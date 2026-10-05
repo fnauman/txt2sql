@@ -159,3 +159,29 @@ test('run statistics with nothing counted report nulls, not zeros', () => {
   assert.equal(stats.majority.rate, null);
   assert.equal(stats.cost.perQuestion, null);
 });
+
+test('cost: only questions that used tokens without a price are "without a price"; latency is the product loop', () => {
+  const rep = (status, outcome, extra = {}) => ({ status, outcome, counted: true, attempts: [], attempt_count: 1, ...extra });
+  const records = [
+    {
+      id: 'a',
+      intentId: 'a',
+      summary: { counted: 3, passes: 1, passRate: 1 / 3, majorityPass: false },
+      repetitions: [
+        // priced, with product-loop and case wall times
+        rep('pass', 'pass', { llm_usage: { prompt_tokens: 10 }, llm_cost: { totalCost: 0.001 }, timings: { questionMs: 1000, totalMs: 4000 } }),
+        // a deadline before any LLM answer: no usage, no cost
+        rep('aborted', 'timeout', { llm_usage: null, llm_cost: null, timed_out: true }),
+        // an unknown model: tokens used, no price
+        rep('result_mismatch', 'wrong_result', { llm_usage: { prompt_tokens: 10 }, llm_cost: null, timings: { questionMs: 3000, totalMs: 6000 } }),
+      ],
+    },
+  ];
+  const stats = summarizeRunStatistics(records, { resamples: 100 });
+  assert.deepEqual([stats.cost.questions, stats.cost.questionsWithoutCost, stats.cost.questionsWithoutLlmCall], [3, 1, 1]);
+  assert.deepEqual([stats.latency.questionWallMs.n, stats.latency.questionWallMs.p50], [2, 2000]);
+  assert.deepEqual([stats.latency.caseWallMs.n, stats.latency.caseWallMs.p50], [2, 5000]);
+  // An older report without questionMs falls back to the case total.
+  const legacy = summarizeRunStatistics([{ ...records[0], repetitions: [rep('pass', 'pass', { timings: { totalMs: 2500 } })] }], { resamples: 100 });
+  assert.equal(legacy.latency.questionWallMs.p50, 2500);
+});

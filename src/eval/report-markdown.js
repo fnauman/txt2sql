@@ -345,10 +345,17 @@ function casesSection(report) {
 function costSection(report) {
   const { cost, latency, retries, tokens } = report.stats;
   const rows = [
-    ['Total LLM cost', `${formatUsd(cost.total)}${cost.questionsWithoutCost ? ` (${cost.questionsWithoutCost} question(s) without a price)` : ''}`],
+    [
+      'Total LLM cost',
+      `${formatUsd(cost.total)}${cost.questionsWithoutCost ? ` (${cost.questionsWithoutCost} question(s) used tokens without a known price, so this is a lower bound)` : ''}` +
+        `${cost.questionsWithoutLlmCall ? `; ${cost.questionsWithoutLlmCall} question(s) completed no LLM call (timeout or outage)` : ''}`,
+    ],
     ['Cost per question', formatUsd(cost.perQuestion, 5)],
     ['Cost per correct answer', formatUsd(cost.perCorrect, 5)],
-    ['Question latency p50 / p95 (wall)', `${formatMs(latency.questionWallMs.p50)} / ${formatMs(latency.questionWallMs.p95)} (n=${latency.questionWallMs.n})`],
+    ['Question latency p50 / p95 (product loop, wall)', `${formatMs(latency.questionWallMs.p50)} / ${formatMs(latency.questionWallMs.p95)} (n=${latency.questionWallMs.n})`],
+    ...(latency.caseWallMs
+      ? [['Per question incl. gold and scoring p50 / p95', `${formatMs(latency.caseWallMs.p50)} / ${formatMs(latency.caseWallMs.p95)} (n=${latency.caseWallMs.n})`]]
+      : []),
     ['LLM call latency p50 / p95', `${formatMs(latency.llmCallMs.p50)} / ${formatMs(latency.llmCallMs.p95)} (n=${latency.llmCallMs.n})`],
     [
       'Retry rate',

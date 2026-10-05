@@ -162,6 +162,7 @@ test('evaluateQuestion passes the deadline signal to the product loop', async ()
     dependencies: {
       runQuestion: async (options) => {
         seen = options.signal;
+        await tick(30);
         return { success: false, errorStage: 'aborted', errorCode: 'CASE_TIMEOUT', error: new Error('deadline'), promptTables: [] };
       },
     },
@@ -169,6 +170,8 @@ test('evaluateQuestion passes the deadline signal to the product loop', async ()
   assert.equal(seen, controller.signal);
   assert.equal(result.status, 'aborted');
   assert.equal(result.error_code, 'CASE_TIMEOUT');
+  // The product loop's own wall time is recorded apart from the case total.
+  assert.ok(result.timings.questionMs >= 25 && result.timings.questionMs <= result.timings.totalMs, JSON.stringify(result.timings));
 });
 
 test('a stopped run starts nothing more, aborts what is in flight and records it as cancelled', async () => {

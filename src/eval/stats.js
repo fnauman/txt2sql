@@ -206,9 +206,17 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
   const repetitions = records.flatMap((record) => record.repetitions || []);
   const executed = repetitions.filter(isExecuted);
   const passing = repetitions.filter((repetition) => repetition.outcome === 'pass');
-  const costs = executed.map(costOf);
-  const knownCosts = costs.filter((value) => value !== null);
+  const knownCosts = executed.map(costOf).filter((value) => value !== null);
   const totalCost = knownCosts.reduce((sum, value) => sum + value, 0);
+  // A question whose LLM calls used tokens but got no price (an unknown
+  // model) understates the total; one that completed no LLM call at all (a
+  // timeout or outage before the answer) simply cost nothing.
+  const withoutPrice = executed.filter((repetition) => repetition.llm_usage && costOf(repetition) === null).length;
+  const withoutLlmCall = executed.filter((repetition) => !repetition.llm_usage && costOf(repetition) === null).length;
+  // Product-loop wall time per question (older reports only have the case
+  // total, which also includes the gold runs and the oracle).
+  const questionMs = (repetition) => repetition.timings?.questionMs ?? repetition.timings?.totalMs;
+  const caseMs = (repetition) => repetition.timings?.totalMs;
   const llmCalls = executed.flatMap((repetition) => (repetition.attempts || []).filter((attempt) => attempt.llm));
   const tokens = { prompt: 0, cached: 0, completion: 0, total: 0 };
   for (const repetition of executed) {
@@ -276,13 +284,21 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
       perQuestion: executed.length ? round(totalCost / executed.length, 6) : null,
       correct: passing.length,
       perCorrect: passing.length ? round(totalCost / passing.length, 6) : null,
-      questionsWithoutCost: costs.length - knownCosts.length,
+      questionsWithoutCost: withoutPrice,
+      questionsWithoutLlmCall: withoutLlmCall,
     },
     latency: {
       questionWallMs: {
-        n: executed.filter((repetition) => Number.isFinite(repetition.timings?.totalMs)).length,
-        p50: round(percentile(executed.map((repetition) => repetition.timings?.totalMs), 0.5), 1),
-        p95: round(percentile(executed.map((repetition) => repetition.timings?.totalMs), 0.95), 1),
+        definition: 'the product loop (master data, prompt, LLM, validation, execution, retries) per question',
+        n: executed.filter((repetition) => Number.isFinite(questionMs(repetition))).length,
+        p50: round(percentile(executed.map(questionMs), 0.5), 1),
+        p95: round(percentile(executed.map(questionMs), 0.95), 1),
+      },
+      caseWallMs: {
+        definition: 'per question including the harness: gold runs and scoring on every fixture',
+        n: executed.filter((repetition) => Number.isFinite(caseMs(repetition))).length,
+        p50: round(percentile(executed.map(caseMs), 0.5), 1),
+        p95: round(percentile(executed.map(caseMs), 0.95), 1),
       },
       llmCallMs: {
         n: llmCalls.filter((attempt) => Number.isFinite(attempt.llm.durationMs)).length,

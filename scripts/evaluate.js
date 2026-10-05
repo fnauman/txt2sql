@@ -148,6 +148,9 @@ export async function evaluateQuestion({
   }
 
   const caseTrace = createCaseTraceLogger({ forwardTo: trace, context: caseContext });
+  // The product loop's own wall time: what a user waits for, without the
+  // harness's gold runs and multi-fixture scoring.
+  const questionTimer = createTimer();
   const run = await runQuestion({
     client,
     connection: primaryConnection,
@@ -162,6 +165,7 @@ export async function evaluateQuestion({
     statementTimeoutMs,
     signal,
   });
+  const questionMs = questionTimer.stop().durationMs;
   const attempts = extractAttempts(caseTrace.events);
   const promptEvent = caseTrace.events.find((entry) => entry.event === 'prompt.built');
   const retrievedTables = Array.isArray(run.promptTables) ? run.promptTables : [];
@@ -213,7 +217,9 @@ export async function evaluateQuestion({
   const disallowedWarnings = score?.disallowedWarnings || [];
   const warnings = collectBenchmarkWarnings({ rowsMatch: status === 'pass', signalWarnings, disallowedColumnsUsed: disallowedWarnings });
   const timings = {
+    // totalMs includes the gold runs and the oracle; questionMs is the product loop alone.
     totalMs: caseTimer.stop().durationMs,
+    questionMs,
     llmMs: sumDurations(attempts, 'llm'),
     validationMs: sumDurations(attempts, 'validation'),
     executionMs: sumDurations(attempts, 'execution'),

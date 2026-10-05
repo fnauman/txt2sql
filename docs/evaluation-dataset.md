@@ -586,9 +586,13 @@ there too.
   and its attribution.
 - **By failure class, difficulty and tag**: cases, accuracy, majority passes.
 - **Cost, latency, retries, tokens**: total cost, cost per question and per
-  correct answer, p50/p95 wall time per question and per LLM call, the share of
-  questions that needed a retry, prompt (cached) and completion tokens, and the
-  budget.
+  correct answer, p50/p95 wall time per question (the product loop alone:
+  master data, prompt, LLM, validation, execution, retries) and per LLM call,
+  the same per question including the harness's gold runs and scoring, the
+  share of questions that needed a retry, prompt (cached) and completion
+  tokens, and the budget. Questions that used tokens without a known price
+  (the total is then a lower bound) and questions that completed no LLM call
+  (a timeout or outage) are counted separately.
 - **Verification**: fixture status and the kill rates per dataset.
 - **Provenance**: git sha (and whether the tree was dirty), prompt version
   (sha256 of the optimized system prompt, `BUSINESS_RULES`,
