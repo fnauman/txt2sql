@@ -10,6 +10,9 @@
 //   non-finite `retireGraceMs` (null: requests have no deadline) means no
 //   forced close at all; only close() (shutdown) closes a runtime still in use.
 // - A runtime that fails to load is not cached: the next acquire() retries.
+// - close() (shutdown) closes every runtime but waits at most `closeTimeoutMs`
+//   (WEB_SHUTDOWN_TIMEOUT_MS): a load cannot be aborted, so one that is stalled
+//   is not waited for past that; its runtime is closed as soon as it loads.
 //
 // Each runtime also carries a `memo` object for per-runtime caches (e.g. the
 // DB schema readiness check), which disappear with the runtime.
@@ -17,6 +20,7 @@
 export function createRuntimeManager({
   factory,
   retireGraceMs = 330_000,
+  closeTimeoutMs = 10_000,
   logger = console,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -139,6 +143,11 @@ export function createRuntimeManager({
       entry.inFlight -= 1;
       throw error;
     }
+    if (closed) {
+      // Shutdown started while this runtime was loading; it is being closed.
+      entry.inFlight -= 1;
+      throw shuttingDownError();
+    }
 
     let released = false;
     return {
@@ -194,7 +203,21 @@ export function createRuntimeManager({
       entries.add(current);
     }
     current = null;
-    await Promise.all([...entries].map((entry) => closeEntry(entry)));
+    // closeEntry() waits for a runtime that is still loading and then closes
+    // it, so stopping the wait here never leaks it.
+    const closing = Promise.all([...entries].map((entry) => closeEntry(entry)));
+    let timer = null;
+    const timedOut = new Promise((resolve) => {
+      timer = setTimer(() => resolve(true), closeTimeoutMs);
+    });
+    const late = await Promise.race([closing.then(() => false), timedOut]);
+    clearTimer(timer);
+    if (late) {
+      logger.warn?.(
+        `[runtime] stopped waiting after ${closeTimeoutMs} ms for runtimes that are still loading or closing; ` +
+          'each is closed as soon as it is ready.'
+      );
+    }
   }
 
   function status() {

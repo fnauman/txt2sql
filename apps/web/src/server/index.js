@@ -347,6 +347,7 @@ export function createApp({
     createRuntimeManager({
       factory: runtimeFactory || createDefaultRuntimeFactory(config),
       retireGraceMs: config.runtimeRetireGraceMs,
+      closeTimeoutMs: config.shutdownTimeoutMs,
       logger,
     });
   const cache =

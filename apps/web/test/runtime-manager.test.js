@@ -233,3 +233,46 @@ test('a refresh that completes while the first runtime is loading never closes i
   assert.equal(loads[0].runtime.closed, 1, 'closed once the waiting request is done');
   assert.equal(loads[1].runtime.closed, 0);
 });
+
+// --- Shutdown is bounded and closes every runtime it knows about -------------
+
+function settlesWithin(promise, ms) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Loads that finish only when the test says so.
+function createDeferredFactory() {
+  const loads = [];
+  const factory = (options) =>
+    new Promise((resolve) => {
+      const runtime = {
+        id: loads.length + 1,
+        options,
+        closed: 0,
+        async close() {
+          runtime.closed += 1;
+        },
+      };
+      loads.push({ runtime, resolve: () => resolve(runtime) });
+    });
+  return { factory, loads };
+}
+
+test('close() does not hang on a stalled runtime load; that runtime is closed as soon as it loads', async () => {
+  const { factory, loads } = createDeferredFactory();
+  const manager = createRuntimeManager({ factory, logger: silent, closeTimeoutMs: 20 });
+  const waiting = manager.acquire(); // the load stalls (e.g. a schema compile or DB that hangs)
+  await tick();
+
+  assert.equal(await settlesWithin(manager.close().then(() => 'closed'), 500), 'closed');
+  assert.equal(loads[0].runtime.closed, 0);
+
+  loads[0].resolve(); // the load finishes after shutdown
+  await assert.rejects(waiting, { code: 'SHUTTING_DOWN' }, 'no lease on a runtime that is being closed');
+  await tick();
+  assert.equal(loads[0].runtime.closed, 1, 'closed as soon as it finished loading');
+});
