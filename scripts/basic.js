@@ -172,6 +172,14 @@ async function main() {
         try {
           generated = await generateBasicSql({ client, model, prompt });
         } catch (error) {
+          // A truncated/refused completion (LlmResponseError) was still billed;
+          // keep the run totals honest.
+          if (error?.usage) {
+            runUsages.push(error.usage);
+          }
+          if (error?.cost) {
+            runCosts.push(error.cost);
+          }
           await trace.emit('llm.failed', {
             ...questionContext,
             ...llmTimer.stop(),

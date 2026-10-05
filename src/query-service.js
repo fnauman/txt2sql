@@ -2,6 +2,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
+
 import {
   buildOptimizedPrompt,
   buildSemanticPlan,
@@ -63,12 +65,37 @@ export function resolveDbConnectionLimit(env = process.env) {
   return value;
 }
 
+// The OpenAI SDK's transport errors set neither `code` nor `name` (both stay
+// the generic Error defaults), so they are recognized by class. The constructor
+// name check covers an error thrown by a second copy of the SDK.
+function isSdkError(error, ErrorClass) {
+  return error instanceof ErrorClass || error?.constructor?.name === ErrorClass.name;
+}
+
 // Stable machine-readable code for an error: error.code when the source set
 // one (mysql2 ER_* / E* codes, LLM_TRUNCATED, ...), otherwise a few known
-// shapes that arrive without a code.
+// shapes that arrive without a code. OpenAI SDK errors map to LLM_TIMEOUT /
+// LLM_CONNECTION_ERROR / LLM_ABORTED, and provider HTTP errors to
+// HTTP_<status> (the provider's own body code, e.g. invalid_api_key, stays in
+// the message).
 export function errorCodeOf(error) {
   if (!error) {
     return null;
+  }
+
+  // Subclass before superclass: a timeout is also an APIConnectionError, and
+  // both are APIErrors.
+  if (isSdkError(error, APIConnectionTimeoutError)) {
+    return 'LLM_TIMEOUT';
+  }
+  if (isSdkError(error, APIUserAbortError)) {
+    return 'LLM_ABORTED';
+  }
+  if (isSdkError(error, APIConnectionError)) {
+    return 'LLM_CONNECTION_ERROR';
+  }
+  if (isSdkError(error, APIError) && Number.isInteger(error.status)) {
+    return `HTTP_${error.status}`;
   }
 
   if (typeof error.code === 'string' && error.code) {
@@ -87,17 +114,27 @@ export function errorCodeOf(error) {
     return 'POOL_QUEUE_LIMIT';
   }
 
-  if (error.name === 'APIConnectionTimeoutError') {
-    return 'LLM_TIMEOUT';
-  }
-  if (error.name === 'APIConnectionError') {
-    return 'LLM_CONNECTION_ERROR';
-  }
   if (Number.isInteger(error.status)) {
     return `HTTP_${error.status}`;
   }
 
   return null;
+}
+
+// Provider-side LLM failures that say nothing about the prompt: the provider
+// timed out, was unreachable, rejected the key, rate-limited us or failed
+// (5xx). The SDK has already retried these at the transport level
+// (OPENAI_MAX_RETRIES), so they fail fast instead of paying for another app
+// attempt, and the web API answers them as gateway errors (502/503/504), not
+// as an unprocessable question (422).
+const LLM_UNAVAILABLE_CODES = new Set(['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_429']);
+
+export function isLlmUnavailableCode(code) {
+  return LLM_UNAVAILABLE_CODES.has(code) || /^HTTP_5\d\d$/.test(String(code || ''));
+}
+
+export function isLlmUnavailableError(error) {
+  return isLlmUnavailableCode(errorCodeOf(error));
 }
 
 // Connection-, pool- and auth-level failures say nothing about the SQL, so
@@ -309,7 +346,7 @@ function createAbortError(signal, cause = null) {
 }
 
 function isAbortError(error) {
-  return error?.name === 'AbortError' || error?.name === 'APIUserAbortError';
+  return error?.name === 'AbortError' || isSdkError(error, APIUserAbortError);
 }
 
 function assertNonNegativeInteger(name, value) {
@@ -544,11 +581,15 @@ export async function runOptimizedQuestion({
         ...attemptContext,
         ...llmTimer.stop(),
         retryContext,
+        errorCode: errorCodeOf(error),
         error: serializeError(error),
       });
 
       attempt += 1;
-      if (attempt > effectiveMaxRetries) {
+      // A provider outage (timeout, unreachable, bad key, rate limit, 5xx) was
+      // already retried by the SDK; another app attempt would wait out the same
+      // outage, so it fails fast.
+      if (isLlmUnavailableError(error) || attempt > effectiveMaxRetries) {
         return completeWithFailure({ error, stage: 'llm', attemptCount: attempt });
       }
 

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 
-import { createBufferedTraceLogger, errorCodeOf, resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
+import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
+
+import {
+  createBufferedTraceLogger,
+  errorCodeOf,
+  isLlmUnavailableCode,
+  resolveMaxRetries,
+  runOptimizedQuestion,
+} from '../src/query-service.js';
 
 // These tests pin the default statement timeout (8000 ms); keep a developer's
 // shell setting from leaking in.
@@ -384,6 +392,72 @@ test('a statement timeout surfaces as ER_STATEMENT_TIMEOUT even though mysql2 gi
   assert.equal(errorCodeOf(error), 'ER_STATEMENT_TIMEOUT');
   assert.equal(errorCodeOf(new Error('Pool is closed.')), 'POOL_CLOSED');
   assert.equal(errorCodeOf(null), null);
+});
+
+// The SDK sets neither `code` nor a distinctive `name` on its transport errors
+// (all are name 'Error'), so these use real instances, not look-alikes.
+test('errorCodeOf classifies real OpenAI SDK errors by class', () => {
+  assert.equal(new APIConnectionTimeoutError().name, 'Error', 'the SDK does not set a distinctive name');
+  assert.equal(errorCodeOf(new APIConnectionTimeoutError()), 'LLM_TIMEOUT');
+  assert.equal(errorCodeOf(new APIConnectionError({})), 'LLM_CONNECTION_ERROR');
+  assert.equal(errorCodeOf(new APIUserAbortError()), 'LLM_ABORTED');
+  // Provider HTTP errors map to their status even when the body carries a code.
+  const rateLimited = APIError.generate(429, { error: { message: 'slow down', code: 'rate_limit_exceeded' } }, 'slow down', {});
+  assert.equal(errorCodeOf(rateLimited), 'HTTP_429');
+  assert.equal(errorCodeOf(APIError.generate(401, { error: { message: 'bad key', code: 'invalid_api_key' } }, 'bad key', {})), 'HTTP_401');
+  assert.equal(errorCodeOf(APIError.generate(503, { error: { message: 'down' } }, 'down', {})), 'HTTP_503');
+
+  for (const code of ['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_429', 'HTTP_500', 'HTTP_503']) {
+    assert.equal(isLlmUnavailableCode(code), true, code);
+  }
+  for (const code of ['LLM_TRUNCATED', 'LLM_REFUSED', 'HTTP_400', 'ER_BAD_FIELD_ERROR', null]) {
+    assert.equal(isLlmUnavailableCode(code), false, String(code));
+  }
+});
+
+test('a provider outage fails fast as "llm" with a typed code instead of a second app attempt', async () => {
+  const outages = [
+    [new APIConnectionTimeoutError(), 'LLM_TIMEOUT'],
+    [new APIConnectionError({}), 'LLM_CONNECTION_ERROR'],
+    [APIError.generate(429, { error: { message: 'slow down' } }, 'slow down', {}), 'HTTP_429'],
+    [APIError.generate(502, { error: { message: 'bad gateway' } }, 'bad gateway', {}), 'HTTP_502'],
+  ];
+  for (const [error, code] of outages) {
+    const client = createScriptedClient([error, answer('SELECT CustomerName FROM Customer')]);
+    const connection = {
+      async query() {
+        return [[]];
+      },
+    };
+    const result = await runOptimizedQuestion({ client, connection, schema, question: 'List customers', maxRetries: 1 });
+    assert.equal(result.errorStage, 'llm', code);
+    assert.equal(result.errorCode, code);
+    assert.equal(client.requests.length, 1, `${code}: the SDK already retried the transport`);
+  }
+
+  // An LLM failure that is not an outage still gets the self-correction retry.
+  const flaky = createScriptedClient([new Error('unexpected provider payload'), answer('SELECT CustomerName FROM Customer')]);
+  const connection = {
+    async query() {
+      return [[{ CustomerName: 'A' }]];
+    },
+  };
+  const recovered = await runOptimizedQuestion({ client: flaky, connection, schema, question: 'List customers', maxRetries: 1 });
+  assert.equal(recovered.success, true);
+  assert.equal(flaky.requests.length, 2);
+});
+
+test('a real SDK abort error is reported as "aborted" without a retry', async () => {
+  const client = createScriptedClient([new APIUserAbortError(), answer('SELECT CustomerName FROM Customer')]);
+  const connection = {
+    async query() {
+      return [[]];
+    },
+  };
+  const result = await runOptimizedQuestion({ client, connection, schema, question: 'List customers', maxRetries: 1 });
+  assert.equal(result.errorStage, 'aborted');
+  assert.equal(result.errorCode, 'LLM_ABORTED');
+  assert.equal(client.requests.length, 1);
 });
 
 test('connection-level failures fail fast as "infra" without a paid LLM retry', async () => {
