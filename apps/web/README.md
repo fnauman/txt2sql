@@ -22,7 +22,10 @@ settings: an invalid value (for example a non-integer `WEB_API_PORT`; integer
 settings accept plain decimal digits only) stops startup with one error that
 lists every problem. The env file is the repository root `.env` unless
 `--dotenv <path>`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` selects another;
-variables already set in the shell win over the file.
+variables already set in the shell win over the file. From the repository root,
+pass the flag through npm (`npm run web:start -- --dotenv ./config/dev.env`, same
+for `web:dev`); relative paths resolve against the directory npm was run from
+(`INIT_CWD`), not `apps/web`.
 
 ## Configuration
 
@@ -46,6 +49,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 |---|---|---|
 | `WEB_API_HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only on trusted networks, with `WEB_API_TOKEN` set. |
 | `WEB_API_PORT` | `8787` | API port. |
+| `WEB_FRONTEND_HOST` | `127.0.0.1` | Vite dev-server bind address (read by `vite.config.ts`). Set `0.0.0.0` or a LAN IP only on trusted networks; browsers on other hosts also need their origin in `WEB_ALLOWED_ORIGINS`. |
 | `WEB_FRONTEND_PORT` | `5173` | Vite dev-server port for `web:dev` (falls back to `VITE_PORT`). Also part of the default allowed origins. |
 | `WEB_ALLOWED_HOSTS` | _(empty)_ | Extra `Host` names to accept, comma/space-separated; a leading dot (`.example.test`) also matches subdomains. On a loopback bind, requests for any other non-loopback `Host` get 403 `HOST_NOT_ALLOWED` (DNS-rebinding protection). A non-loopback bind is only checked when this is set. |
 | `WEB_ALLOWED_ORIGINS` | `http://{localhost,127.0.0.1,[::1]}` on the frontend and API ports | Browser origins allowed to call the API. An API request from any other `Origin` gets 403 `ORIGIN_NOT_ALLOWED`. Same-origin requests are accepted only when the `Host` header is validated (loopback bind or `WEB_ALLOWED_HOSTS`), so a non-loopback bind without `WEB_ALLOWED_HOSTS` must list its own origin here for the built SPA. |
@@ -56,7 +60,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 | `WEB_MAX_QUESTION_LENGTH` | `2000` | Max question length (longer questions get 413 `QUESTION_TOO_LONG`). |
 | `WEB_QUERY_ROW_LIMIT` | `1000` | Max rows returned to the browser (the server-side row cap). |
 | `WEB_QUERY_STATEMENT_TIMEOUT_MS` | `QUERY_STATEMENT_TIMEOUT_MS`, else `8000` | MariaDB statement timeout for generated SQL (bounds the tail so a pathological join can't pin the shared instance). `0` disables. |
-| `WEB_QUERY_MAX_RETRIES` | `1` | Extra model attempts after a failed generation, validation or execution (0 to 5). Provider outages and infra failures are not retried. |
+| `WEB_QUERY_MAX_RETRIES` | `1` | Extra model attempts after a failed generation, validation or execution (0 to 5). Provider outages and infra failures are not retried. The `optimized` CLI reads it too. |
 | `WEB_REQUEST_TIMEOUT_MS` | `120000` | Per-request deadline; when it passes, the OpenAI call is aborted and the running query killed. `0` disables. |
 | `WEB_DB_CONNECTION_LIMIT` | `5` | MariaDB pool size. |
 | `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. On by default; set to `0` (or `false`/`no`/`off`) to disable. It only caches results from `demo_retail` read as `demo_readonly`. |
@@ -67,7 +71,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 
 **Endpoints besides the query routes:**
 
-- `GET /api/health` is unauthenticated and cheap (the status bar polls it). `GET /api/health?deep=1` touches the database; it requires the token when one is configured. Only callers that present the token see the DB host/port, env path, schema and the query-user privilege report; anonymous callers never do.
+- `GET /api/health` is unauthenticated and cheap (the status bar polls it). `GET /api/health?deep=1` loads the query runtime and touches the database; it requires the token when one is configured. The runtime creates the OpenAI client first, so without `OPENAI_API_KEY` the deep check returns 503 `OPENAI_NOT_CONFIGURED` with `dbReachable: null` (the database was not tried) and no privilege report. Only callers that present the token see the DB host/port, env path, schema and the query-user privilege report; anonymous callers never do.
 - `POST /api/admin/refresh-schema` rebuilds the runtime from a freshly compiled schema and clears the result cache. It requires `WEB_API_TOKEN` (403 `ADMIN_DISABLED` when none is configured). In-flight questions finish on the old runtime, whose pool is closed once they are done. The old `refreshSchema` flag in query bodies is ignored.
 
 **Request hardening:** responses carry `X-Content-Type-Options: nosniff`,

@@ -17,7 +17,8 @@ Docker with Compose v2.
     npm run seed-demo
 
 To use another env file, pass `--dotenv <path>` (or set `ENV_FILE`), not
-`--env-file`: Node.js reserves that flag. See the [README](README.md) for the
+`--env-file`: Node.js reserves that flag. Through npm, put it after `--`
+(`npm run web:start -- --dotenv <path>`). See the [README](README.md) for the
 full setup and architecture.
 
 ## Ground rules

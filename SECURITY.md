@@ -26,8 +26,9 @@ a few days.
   `INTO OUTFILE`), no writes or DDL, no other databases. Admin credentials
   (`DB_ADMIN_*` / `MARIADB_ROOT_PASSWORD`) are used only by `bootstrap-db` and
   `seed-demo`. The web server at startup, the `basic`/`optimized` CLIs and the
-  token-authorized deep health check warn when the query user has more than
-  `SELECT`/`USAGE`, or grants that reach system schemas or other databases.
+  token-authorized deep health check (which also needs `OPENAI_API_KEY`) warn
+  when the query user has more than `SELECT`/`USAGE`, or grants that reach
+  system schemas or other databases.
   See the README "Demo data and safety" section for non-Compose setups.
 - **Read-only validation is defense in depth.** Generated SQL is read through
   one MariaDB-faithful tokenizer (`src/sql-tokenizer.js`) and must be a single

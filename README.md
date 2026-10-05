@@ -96,7 +96,7 @@ Why two users: least privilege is the real security boundary. The SQL validator 
 docker compose up -d --wait mariadb
 ```
 
-When the data volume is first created, `docker/mariadb/initdb/01-readonly-user.sh` creates the query user (`DB_READONLY_USER`, default `demo_readonly`, with password `DB_READONLY_PASSWORD`, default `DB_PASSWORD`) with `SELECT` on `` `demo\_retail%`.* `` only. Root gets the first non-blank of `DB_ADMIN_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `DB_PASSWORD`, the same order the admin scripts use. Compose refuses to start when neither `DB_PASSWORD` nor `DB_READONLY_PASSWORD` is set.
+When the data volume is first created, `docker/mariadb/initdb/01-readonly-user.sh` creates the query user (`DB_READONLY_USER`, default `demo_readonly`, with password `DB_READONLY_PASSWORD`, default `DB_PASSWORD`) with `SELECT` on `` `demo\_retail%`.* `` only. Root gets the first non-blank of `DB_ADMIN_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `DB_PASSWORD`, the same order the admin scripts use; when none of them is set (only `DB_READONLY_PASSWORD`), Compose falls back to the literal root password `secret`, so set one. Compose refuses to start when neither `DB_PASSWORD` nor `DB_READONLY_PASSWORD` is set. Because the grant is `` `demo\_retail%`.* ``, keep `DB_NAME` within that pattern (for example `demo_retail` or `demo_retail_v2`): with any other name the query user gets "Access denied".
 
 Init scripts run only on a fresh volume. If your volume predates the query user (for example `demo_readonly` gets "Access denied"), reset it with `docker compose down -v` (this deletes the database) and repeat steps 4 to 6.
 
@@ -178,6 +178,7 @@ Common variables:
 - `MODEL_NAME`, `OPENAI_BASE_URL`
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
+- `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
 
 See [.env.example](.env.example) for a starting point.
 
@@ -224,7 +225,7 @@ The application-layer checks (read-only validation, single statement, table allo
   ```
 
   Then set `DB_USER` / `DB_PASSWORD` to that user, and `DB_ADMIN_USER` / `DB_ADMIN_PASSWORD` to a separate user for `bootstrap-db` and `seed-demo`. With only these grants, a query that gets past the validator still cannot write, read server files (no `FILE` privilege) or read other databases on the instance.
-- The app checks this for you: the web server at startup, the `basic`/`optimized` CLIs (on stderr) and the token-authorized deep health check warn when the query user has more than `SELECT`/`USAGE`, or has grants that reach system schemas or databases other than `DB_NAME`. The check only warns; it never blocks.
+- The app checks this for you: the web server at startup, the `basic`/`optimized` CLIs (on stderr) and the token-authorized deep health check (which also needs `OPENAI_API_KEY`) warn when the query user has more than `SELECT`/`USAGE`, or has grants that reach system schemas or databases other than `DB_NAME`. The check only warns; it never blocks.
 - Keep the API server bound to `127.0.0.1` (the default). Before exposing it on a shared network, set `WEB_API_TOKEN`, `WEB_ALLOWED_HOSTS` and `WEB_ALLOWED_ORIGINS` (see [Web App](#web-app)).
 
 ## Usage
@@ -358,7 +359,7 @@ Default local URLs (`WEB_FRONTEND_PORT` and `WEB_API_PORT` change them; `web:dev
 - Frontend: `http://localhost:5173`
 - API: `http://127.0.0.1:8787`
 
-The API server (`apps/web/src/server/main.js`) loads the env file first, then validates its settings: an invalid `WEB_*` value stops startup with one error listing every problem, so values set only in `.env` (such as `WEB_API_TOKEN`) take effect. It loads the repository root `.env` by default unless `--dotenv`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set. It binds to `127.0.0.1` by default; on a loopback bind, requests whose `Host` header is not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403, and API requests from an `Origin` outside `WEB_ALLOWED_ORIGINS` get 403. Set `WEB_API_HOST=0.0.0.0` only for trusted networks, together with `WEB_API_TOKEN`. SIGTERM/SIGINT drain in-flight requests for up to `WEB_SHUTDOWN_TIMEOUT_MS`. See `apps/web/README.md` for every setting, the admin schema-refresh endpoint and the health checks.
+The API server (`apps/web/src/server/main.js`) loads the env file first, then validates its settings: an invalid `WEB_*` value stops startup with one error listing every problem, so values set only in `.env` (such as `WEB_API_TOKEN`) take effect. It loads the repository root `.env` by default unless `--dotenv`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set; pass the flag through npm as `npm run web:start -- --dotenv <path>` (same for `web:dev`), and relative paths resolve against the directory you ran npm from. It binds to `127.0.0.1` by default; on a loopback bind, requests whose `Host` header is not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403, and API requests from an `Origin` outside `WEB_ALLOWED_ORIGINS` get 403. Set `WEB_API_HOST=0.0.0.0` only for trusted networks, together with `WEB_API_TOKEN`. SIGTERM/SIGINT drain in-flight requests for up to `WEB_SHUTDOWN_TIMEOUT_MS`. See `apps/web/README.md` for every setting, the admin schema-refresh endpoint and the health checks.
 
 ## LLM Cost Tracking
 
@@ -367,6 +368,8 @@ Every LLM call automatically estimates token costs based on the model used. Cost
 Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset. The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
 Supported cost estimates: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
+
+To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. Models that are not listed above cannot be added this way, and malformed JSON is ignored.
 
 Example CLI output:
 
