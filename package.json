@@ -37,6 +37,7 @@
     "evaluate": "node scripts/eval.js --profile benchmark",
     "verify-dataset": "node scripts/verify-dataset.js",
     "build-edge-dataset": "node scripts/build-edge-dataset.mjs",
+    "build-eval-dataset": "node scripts/build-eval-dataset.mjs",
     "test": "node --test \"test/**/*.test.js\" \"apps/web/test/**/*.test.js\" \"apps/web/test/**/*.test.ts\"",
     "debug-retrieval": "node scripts/debug-retrieval.js",
     "evaluate-retrieval": "node scripts/evaluate-retrieval.js",

@@ -16,6 +16,13 @@ import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler
 // No gold query filters on product IDs (the sparkling-water case uses LIKE), so
 // no master-data candidates are needed; with candidates the ID check would only
 // constrain explicit ProductId literals.
+//
+// The exception is documented per case: a case flagged
+// `known_validator_rejection: <code>` is a product gap the dataset measures on
+// purpose (retrieval does not pick a table the answer needs, or a guardrail
+// misreads the wording). Its gold must still be rejected with that code, so
+// the flag is removed once the product is fixed. Abstain / clarify cases have
+// no gold.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASETS_DIR = path.join(REPO_ROOT, 'datasets');
@@ -29,6 +36,9 @@ function loadGoldPairs() {
     const raw = JSON.parse(fs.readFileSync(path.join(DATASETS_DIR, fileName), 'utf8'));
     const cases = Array.isArray(raw) ? raw : raw.cases || [];
     for (const testCase of cases) {
+      if (testCase.expected_behavior && testCase.expected_behavior !== 'answer') {
+        continue;
+      }
       const key = `${testCase.question}\u0000${testCase.expected_sql}`;
       if (!pairs.has(key)) {
         pairs.set(key, { ...testCase, dataset: fileName });
@@ -40,11 +50,32 @@ function loadGoldPairs() {
 
 const GOLD = loadGoldPairs();
 
-test('the gold corpus has the expected size (26 unique question/SQL pairs)', () => {
-  assert.equal(GOLD.length, 26);
+test('the gold corpus has the expected size (211 unique question/SQL pairs, 14 known validator rejections)', () => {
+  assert.equal(GOLD.length, 211);
+  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 14);
 });
 
-for (const testCase of GOLD) {
+for (const testCase of GOLD.filter((entry) => entry.known_validator_rejection)) {
+  test(`known validator rejection is still real: ${testCase.id} (${testCase.dataset}) ${testCase.known_validator_rejection}`, () => {
+    const semanticPlan = buildSemanticPlan(testCase.question);
+    const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan });
+    const allowedTables = prompt.tables.map((table) => table.tableName);
+    const codes = [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].map((sql) => {
+      try {
+        validateReadOnlySql(sql, allowedTables, { promptContext: prompt.context, response: { sql, tables_used: validateReadOnlySql(sql, ALL_TABLES).tablesUsed } });
+        return null;
+      } catch (error) {
+        return error.code;
+      }
+    });
+    assert.ok(codes.includes(testCase.known_validator_rejection), `every variant passes now (${codes.join(', ')}): remove known_validator_rejection`);
+    assert.ok(codes.every((code) => code === null || code === testCase.known_validator_rejection), codes.join(', '));
+    // The basic path (no prompt context, every table allowed) admits it.
+    assert.doesNotThrow(() => validateReadOnlySql(testCase.expected_sql, ALL_TABLES));
+  });
+}
+
+for (const testCase of GOLD.filter((entry) => !entry.known_validator_rejection)) {
   test(`gold SQL passes the production validator: ${testCase.id} (${testCase.dataset})`, () => {
     const semanticPlan = buildSemanticPlan(testCase.question);
     const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan });
@@ -67,7 +98,7 @@ for (const testCase of GOLD) {
 
 // Alternative gold readings (alternative_expected_sql) are correct answers too,
 // so the validator must admit them in the same prompt context.
-for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_expected_sql))) {
+for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_expected_sql) && !entry.known_validator_rejection)) {
   testCase.alternative_expected_sql.forEach((sql, index) => {
     test(`alternative gold SQL passes the production validator: ${testCase.id} [${index}] (${testCase.dataset})`, () => {
       const semanticPlan = buildSemanticPlan(testCase.question);
