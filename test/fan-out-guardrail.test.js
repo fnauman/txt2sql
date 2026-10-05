@@ -482,6 +482,57 @@ test('a UNION (DISTINCT) child is unique on its output columns; UNION ALL is not
   }
 });
 
+test('a CTE or derived parent is a fan-out when its own body or its grouping grain repeats the summed value', () => {
+  const CUSTOMER_QUESTION = 'Show the top customers by total net sales amount in March 2026.';
+  const T = `WITH t AS (SELECT d.SalesDocumentId, d.NetAmount, l.ProductId ${HEADER_LINES})`;
+  // The header joined to its lines inside the CTE: 6500 instead of 5500 on
+  // the seeded demo DB, also through a CTE chain, a line-level GROUP BY in
+  // the body, or a window SUM over an inner MAX grouped by a line column (5100).
+  for (const sql of [
+    `${T} SELECT SUM(t.NetAmount) AS n FROM t`,
+    `${T} SELECT t.ProductId, SUM(t.NetAmount) AS n FROM t GROUP BY t.ProductId`,
+    `${T}, u AS (SELECT * FROM t) SELECT SUM(u.NetAmount) AS n FROM u`,
+    `${T} SELECT SUM(NetAmount) AS n FROM t`,
+    `WITH t AS (SELECT d.SalesDocumentId, d.NetAmount ${HEADER_LINES} GROUP BY d.SalesDocumentId, l.ProductId) SELECT SUM(t.NetAmount) AS n FROM t`,
+    `${T} SELECT t.ProductId, SUM(MAX(t.NetAmount)) OVER () AS total FROM t GROUP BY t.ProductId`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+  // Collapsed back to one row per document inside the body: 5500.
+  for (const sql of [
+    `WITH t AS (SELECT DISTINCT d.SalesDocumentId, d.NetAmount ${HEADER_LINES}) SELECT SUM(t.NetAmount) AS n FROM t`,
+    `WITH t AS (SELECT d.SalesDocumentId, MAX(d.NetAmount) AS NetAmount, SUM(l.Quantity) AS q ${HEADER_LINES} GROUP BY d.SalesDocumentId) SELECT SUM(t.NetAmount) AS n FROM t`,
+    `WITH t AS (SELECT d.SalesDocumentId, l.NetAmount, l.ProductId ${HEADER_LINES}) SELECT SUM(t.NetAmount) AS n FROM t`,
+    'SELECT SUM(t.NetAmount) AS n FROM (SELECT d.SalesDocumentId, d.NetAmount FROM SalesDocument d WHERE EXISTS (SELECT 1 FROM SalesDocumentLine l WHERE l.SalesDocumentId = d.SalesDocumentId)) t',
+  ]) {
+    assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
+  }
+
+  // A body grouped by a foreign key has one row per referenced row: per-customer
+  // totals joined back to the documents repeat per document (10500, not 5500),
+  // and per-document line totals joined back to the lines repeat per line (6500).
+  const CUSTOMER_TOTALS = 'WITH ct AS (SELECT CustomerId, SUM(NetAmount) AS total FROM SalesDocument GROUP BY CustomerId)';
+  assertFanOut(CUSTOMER_QUESTION, `${CUSTOMER_TOTALS} SELECT SUM(ct.total) AS n FROM ct JOIN SalesDocument d ON d.CustomerId = ct.CustomerId`, {
+    table: 'Customer',
+    column: 'total',
+    child: 'SalesDocument',
+  });
+  assertFanOut(
+    LINES_QUESTION,
+    'SELECT SUM(x.lt) AS n FROM SalesDocumentLine l JOIN (SELECT SalesDocumentId, SUM(NetAmount) AS lt FROM SalesDocumentLine GROUP BY SalesDocumentId) x ON x.SalesDocumentId = l.SalesDocumentId',
+    { column: 'lt' }
+  );
+  for (const [question, sql] of [
+    [CUSTOMER_QUESTION, `${CUSTOMER_TOTALS} SELECT c.CustomerName, SUM(ct.total) AS n FROM Customer c JOIN ct ON ct.CustomerId = c.CustomerId GROUP BY c.CustomerName`],
+    [
+      LINES_QUESTION,
+      'SELECT SUM(l.NetAmount / x.lt) AS share, MAX(x.lt) AS biggest FROM SalesDocumentLine l JOIN (SELECT SalesDocumentId, SUM(NetAmount) AS lt FROM SalesDocumentLine GROUP BY SalesDocumentId) x ON x.SalesDocumentId = l.SalesDocumentId',
+    ],
+  ]) {
+    assert.doesNotThrow(() => validateFor(question, sql), sql);
+  }
+});
+
 test('one-to-one keys are skipped only when the FK is the sole primary-key column', () => {
   const column = (name, extra = {}) => ({ name, type: 'INTEGER', primaryKey: false, allowNull: true, ...extra });
   const promptContext = {

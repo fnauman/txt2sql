@@ -427,10 +427,12 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     return [{ outputName: alias, origins: [], key, source: null }];
   };
 
-  // Positions of the select items each GROUP BY key matches: the same column
-  // or expression, a position (`GROUP BY 1`) or an output alias that is not a
-  // FROM column. An empty list means the key is not projected.
-  const groupKeyPositions = (block, projected) => {
+  // Each GROUP BY key as { positions, key, origins }: the positions of the
+  // select items it matches (the same column or expression, a position
+  // `GROUP BY 1`, or an output alias that is not a FROM column; none when it
+  // is not projected), what it reads (see expressionKey) and the table
+  // columns it copies.
+  const groupKeyItems = (block, projected) => {
     const range = findGroupByRange(walker, block);
     if (!range) {
       return null;
@@ -440,13 +442,18 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
       if (to - from > 1 && isKeywordToken(tokens[to - 1], 'ASC', 'DESC')) {
         to -= 1;
       }
+      let positions;
+      let key = null;
       if (to - from === 1 && tokens[from].type === 'number') {
         const position = Number(tokens[from].value) - 1;
-        return projected[position] ? [position] : [];
+        positions = projected[position] ? [position] : [];
+      } else {
+        key = expressionKey(block, from, to);
+        const matches = (column) => column.key === key || (key.startsWith('name:') && column.outputName?.toLowerCase() === key.slice(5));
+        positions = projected.flatMap((column, position) => (matches(column) ? [position] : []));
       }
-      const key = expressionKey(block, from, to);
-      const matches = (column) => column.key === key || (key.startsWith('name:') && column.outputName?.toLowerCase() === key.slice(5));
-      return projected.flatMap((column, position) => (matches(column) ? [position] : []));
+      const [first] = positions.length > 0 ? positions.map((position) => projected[position]) : key ? projectItem(block, [from, to]) : [];
+      return { positions, key: first?.key ?? key ?? '', origins: first?.origins || [] };
     });
   };
 
@@ -490,9 +497,10 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     } else if (selectList && bodyBlocks.slice(1).every(isDistinctSetOperation)) {
       // UNION [DISTINCT] (and INTERSECT / EXCEPT without ALL) removes
       // duplicate rows: the result is unique on all its output columns.
-      uniqueness = { singleRow: false, keys: [renamed.map((column) => (column ? [column.outputName] : []))] };
+      uniqueness = { singleRow: false, keys: [renamed.map((column) => (column ? [column.outputName] : []))], bases: [], grainOrigin: null };
     }
-    return { columns, origins, orderedColumns: renamed, sourceTables, uniqueness };
+    const blockId = bodyBlocks.length === 1 ? block.id : null;
+    return { columns, origins, orderedColumns: renamed, sourceTables, blockId, uniqueness };
   };
 
   // Whether a block after the first of a body is joined by a duplicate-removing
@@ -503,19 +511,25 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
   };
 
   /**
-   * What makes a single-SELECT body's rows unique, as { singleRow, keys }:
-   * singleRow when it returns at most one row (an aggregate without GROUP BY,
-   * or LIMIT 0/1); each key is a list of components, each the output names
-   * that carry one key value, and the rows are unique on any key whose every
-   * component is pinned (see isDerivedUniqueOn):
+   * What makes a single-SELECT body's rows unique, as { singleRow, keys,
+   * bases, grainOrigin }: singleRow when it returns at most one row (an
+   * aggregate without GROUP BY, or LIMIT 0/1); each key is a list of
+   * components, each the output names that carry one key value, and the rows
+   * are unique on any key whose every component is pinned (see
+   * isDerivedUniqueOn):
    * - the GROUP BY keys (a key that is not projected has no names),
    * - every output column of a DISTINCT select list,
    * - for a row-level pass-through of one table, its primary key,
    * - for a row-level pass-through of one derived table or CTE, that
    *   relation's own keys, through the columns that copy them.
+   * bases lists what the body's own GROUP BY keys and DISTINCT outputs read
+   * (expressionKey), and grainOrigin is the table column that a single GROUP
+   * BY key (or a single DISTINCT output) copies: the body has one row per
+   * value of it. A pass-through keeps the grainOrigin of what it reads.
    */
   const describeUniqueness = (block, selectList, projected, renamed) => {
-    const groupKeys = groupKeyPositions(block, projected);
+    const groupItems = groupKeyItems(block, projected);
+    const groupKeys = groupItems && groupItems.map(({ positions }) => positions);
     const aggregated = block.tokenIndexes.some(
       (index) =>
         isKeywordToken(tokens[index], ...ROW_COLLAPSING_AGGREGATES) &&
@@ -525,11 +539,18 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     const limit = findLimitCount(walker, block);
     let singleRow = (aggregated && !groupKeys) || (limit !== null && limit <= 1);
     const keys = [];
+    const bases = [];
+    const singleOrigin = (origins) => (origins.length === 1 ? origins[0] : null);
+    let grainOrigin = null;
     if (groupKeys) {
       keys.push(groupKeys.map((positions) => positions.map((position) => renamed[position]?.outputName).filter(Boolean)));
+      bases.push(groupItems.map(({ key }) => key));
+      grainOrigin = groupItems.length === 1 ? singleOrigin(groupItems[0].origins) : null;
     }
     if (selectList.distinct) {
       keys.push(renamed.map((column) => (column ? [column.outputName] : [])));
+      bases.push(projected.map(({ key }) => key));
+      grainOrigin = grainOrigin || (projected.length === 1 ? singleOrigin(projected[0].origins) : null);
     }
 
     const blockRefs = analysis.tableRefs.filter((candidate) => candidate.blockId === block.id);
@@ -542,6 +563,7 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
         if (inner) {
           singleRow = singleRow || inner.singleRow;
           keys.push(...inner.keys.map((key) => key.map((component) => component.flatMap(copies))));
+          grainOrigin = inner.grainOrigin;
         }
       } else {
         const keyColumns = primaryKeyOf(relationName);
@@ -550,7 +572,7 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
         }
       }
     }
-    return { singleRow, keys };
+    return { singleRow, keys, bases, grainOrigin };
   };
 
   for (const key of bodies.keys()) {
@@ -1630,7 +1652,7 @@ function isDerivedUniqueOn(relation, pinned) {
  * factor is fine: SUM(l.Quantity * p.Price) is a per-line value. WHEN/IF
  * conditions only filter rows and do not set the grain.
  */
-function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOwners, knownTables, isCoarse, isGroupedWithin }) {
+function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOwners, knownTables, isCoarse, isGroupedWithin, derivedColumn }) {
   const { tokens } = walker;
   const references = [];
 
@@ -1638,25 +1660,22 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
   const combineMultiplicative = (grains) =>
     grains.includes('fine') ? 'fine' : grains.find((grain) => grain.coarse) || 'const';
 
-  const columnGrain = (entry, tableName, columnName) => {
-    const coarse = isCoarse(tableName, entry);
-    references.push({ entry, tableName, columnName, coarse });
-    return coarse ? { coarse: { tableName, columnName, entry } } : 'fine';
+  // `edge` is set for a derived column whose value its own body already
+  // repeats once per child row.
+  const columnGrain = (entry, tableName, columnName, edge = null) => {
+    const coarse = Boolean(edge) || isCoarse(tableName, entry);
+    references.push({ entry, tableName, columnName, coarse, repeatedInBody: Boolean(edge) });
+    return coarse ? { coarse: { tableName, columnName, entry, edge } } : 'fine';
   };
 
-  // A column of a joined entry, by its own spelling. A derived column that
-  // copies one table column is that column (`h.amt` for `d.NetAmount AS amt`
-  // is SalesDocument.NetAmount); any other column of a single-table body is
-  // at that table's grain.
+  // A column of a joined entry, by its own spelling; a derived column is the
+  // table column it stands for (see derivedColumn in validateFanOut).
   const entryColumnGrain = (entry, columnName) => {
     if (!entry.viaDerived) {
       return columnGrain(entry, entry.tableName, columnName);
     }
-    const [origin, ...more] = entry.relation?.origins.get(columnName) || [];
-    if (origin && more.length === 0) {
-      return columnGrain(entry, origin.tableName, origin.columnName);
-    }
-    return entry.tableName ? columnGrain(entry, entry.tableName, columnName) : null;
+    const column = derivedColumn(entry, columnName);
+    return column ? columnGrain(entry, column.tableName, column.columnName, column.edge) : null;
   };
 
   // SUM(MAX(d.NetAmount)) OVER (): the inner, non-window MIN/MAX ignores the
@@ -1666,7 +1685,9 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
   // SUM adds each value once per group, not once per child row. The parent key
   // itself is not required (GROUP BY d.CustomerId is fine), but a key from
   // another table (l.ProductId) splits a parent across groups and still fans
-  // out. An inner SUM/AVG is not reduced and stays a fan-out.
+  // out. An inner SUM/AVG is not reduced and stays a fan-out, and so is a
+  // derived column that its own body repeats (the GROUP BY cannot tell which
+  // of its columns are the parent's).
   const isReducedPerParent = (nameToken, closeIndex, innerReferences) => {
     if (
       nameToken.type !== 'word' ||
@@ -1676,8 +1697,9 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
     ) {
       return false;
     }
-    const coarseEntries = new Set(innerReferences.filter((reference) => reference.coarse).map((reference) => reference.entry));
-    return coarseEntries.size === 1 && isGroupedWithin([...coarseEntries][0]);
+    const coarse = innerReferences.filter((reference) => reference.coarse);
+    const coarseEntries = new Set(coarse.map((reference) => reference.entry));
+    return coarseEntries.size === 1 && !coarse.some((reference) => reference.repeatedInBody) && isGroupedWithin([...coarseEntries][0]);
   };
 
   const splitAt = (start, end, isSeparator) => {
@@ -1827,6 +1849,13 @@ function describeFanOut({ aggregate, tableName, columnName, edge, knownTables })
  * or a child pinned to one row by its key keeps one row per parent, and a
  * derived table or CTE counts as every table it reads unless it is provably
  * unique on the columns that join it to the parent (isDerivedUniqueOn).
+ *
+ * A derived table or CTE is also a parent: its columns stand for the table
+ * columns they copy, a body grouped (or DISTINCT) on one key column is at the
+ * grain of that column's table (its parent's, for a foreign key: one row per
+ * customer for GROUP BY SalesDocument.CustomerId), and a column whose own body
+ * already repeats it per child row (a header joined to its lines inside the
+ * CTE) is a fan-out wherever it is summed.
  */
 function validateFanOut(analysis, knownTables, promptContext, model) {
   const columnMetadata = collectColumnMetadata(promptContext);
@@ -1838,8 +1867,52 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
 
   const walker = createTokenWalker(analysis);
   const { tokens } = analysis;
+  const blocksById = new Map(analysis.blocks.map((block) => [block.id, block]));
+  const relationships = Array.isArray(promptContext.relationships) ? promptContext.relationships : [];
 
-  for (const block of analysis.blocks) {
+  // The table a grouped or DISTINCT body has one row per key of: the key
+  // column's own table for its sole primary key, the referenced table for a
+  // foreign key, or null.
+  const grainTableOf = (relation) => {
+    const origin = relation?.uniqueness?.grainOrigin;
+    if (!origin) {
+      return null;
+    }
+    const keyColumns = primaryKeyColumnsOf(columnMetadata, origin.tableName);
+    if (keyColumns.length === 1 && keyColumns[0] === origin.columnName) {
+      return origin.tableName;
+    }
+    const reference = relationships.find(
+      (relationship) =>
+        relationship.fromTable === origin.tableName && relationship.fromColumn === origin.columnName && relationship.toTable !== origin.tableName
+    );
+    return reference ? reference.toTable : null;
+  };
+
+  // The table column a derived column stands for in the grain analysis, as
+  // { tableName, columnName, edge } (see repeatedInBody for edge), or null.
+  let repeatedInBody;
+  const derivedColumn = (entry, columnName, seen = new Set()) => {
+    const repeated = repeatedInBody(entry.relation, columnName, seen);
+    if (repeated) {
+      return repeated;
+    }
+    if (entry.grainTable) {
+      return { tableName: entry.grainTable, columnName };
+    }
+    const [origin, ...more] = entry.relation?.origins.get(columnName) || [];
+    if (origin && more.length === 0) {
+      return { tableName: origin.tableName, columnName: origin.columnName };
+    }
+    return entry.tableName ? { tableName: entry.tableName, columnName } : null;
+  };
+
+  // Joined references and the fan-out helpers of one SELECT block.
+  const contexts = new Map();
+  const contextOf = (block) => {
+    if (contexts.has(block.id)) {
+      return contexts.get(block.id);
+    }
     const entries = [];
     for (const ref of analysis.tableRefs.filter((candidate) => candidate.blockId === block.id)) {
       if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
@@ -1852,12 +1925,9 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         const qualifier = ref.alias || (ref.kind === 'cte' ? ref.name : null);
         if (relation?.sourceTables.size > 0 && qualifier) {
           const tableName = relation.sourceTables.size === 1 ? [...relation.sourceTables][0] : null;
-          entries.push({ ref, tableName, childTables: relation.sourceTables, qualifier, viaDerived: true, relation });
+          entries.push({ ref, tableName, childTables: relation.sourceTables, qualifier, viaDerived: true, relation, grainTable: grainTableOf(relation) });
         }
       }
-    }
-    if (entries.length < 2) {
-      continue;
     }
 
     const antiJoined = collectAntiJoinedRefs(walker, block, entries, columnMetadata);
@@ -1982,6 +2052,48 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
       return Array.isArray(groupByOwners) && groupByOwners.every((owner) => owner === entry);
     };
 
+    const context = { entries, qualifierEntries, unqualifiedOwners, childEdgesOf, isGroupedWithin };
+    contexts.set(block.id, context);
+    return context;
+  };
+
+  // { tableName, columnName, edge } when the body of a derived table or CTE
+  // repeats its `outputName` column once per child row: the column copies a
+  // parent's column, and the body joins a child of that parent that is not
+  // restricted to one row (the same check as for a SUM in that block), unless
+  // the body returns one row, or groups or DISTINCTs only on that parent's
+  // columns. Through CTE chains too.
+  repeatedInBody = (relation, outputName, seen) => {
+    if (!relation?.blockId || !relation.uniqueness || relation.uniqueness.singleRow || seen.has(relation)) {
+      return null;
+    }
+    seen.add(relation);
+    const column = relation.orderedColumns.find((candidate) => candidate?.outputName === outputName);
+    if (!column?.source) {
+      return null;
+    }
+    const context = contextOf(blocksById.get(relation.blockId));
+    const entry = context.qualifierEntries.get(column.source.qualifier);
+    const prefix = `col:${entry?.qualifier}.`;
+    if (!entry || relation.uniqueness.bases.some((basis) => basis.length > 0 && basis.every((key) => key.startsWith(prefix)))) {
+      return null;
+    }
+    const grain = entry.viaDerived
+      ? derivedColumn(entry, column.source.columnName, seen)
+      : { tableName: entry.tableName, columnName: column.source.columnName };
+    if (!grain || grain.edge) {
+      return grain;
+    }
+    const [edge] = context.childEdgesOf(grain.tableName, entry);
+    return edge ? { ...grain, edge } : null;
+  };
+
+  for (const block of analysis.blocks) {
+    const { entries, qualifierEntries, unqualifiedOwners, childEdgesOf, isGroupedWithin } = contextOf(block);
+    if (entries.length < 2 && !entries.some((entry) => entry.viaDerived)) {
+      continue;
+    }
+
     for (const index of block.tokenIndexes) {
       const token = tokens[index];
       if (!isKeywordToken(token, ...FAN_OUT_AGGREGATES) || !isPunctToken(tokens[index + 1], '(')) {
@@ -1996,6 +2108,7 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         knownTables,
         isCoarse: (tableName, owner) => childEdgesOf(tableName, owner).length > 0,
         isGroupedWithin,
+        derivedColumn,
       });
       const grain = evaluator.evaluateExpression(group.open + 1, group.close);
       if (evaluator.references.length === 0) {
@@ -2009,7 +2122,7 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
       }
 
       const { tableName, columnName, entry } = grain.coarse;
-      const [edge] = childEdgesOf(tableName, entry);
+      const edge = grain.coarse.edge || childEdgesOf(tableName, entry)[0];
       throw guardrailError(
         'FAN_OUT',
         describeFanOut({ aggregate: token.upper, tableName, columnName, edge, knownTables }),
