@@ -10,11 +10,12 @@ import {
   buildOptimizedPrompt,
   generateBasicSql,
   generateOptimizedResponse,
+  LlmResponseError,
   OPTIMIZED_MODEL_REQUEST_OPTIONS,
   validateReadOnlySql,
 } from '../src/pipeline.js';
 import { applyEvaluationFailureExitCode, evaluateQuestion } from '../scripts/evaluate.js';
-import { createCliOutput, createTraceLogger, resolveTraceOptions } from '../src/trace.js';
+import { createCliOutput, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
 function createWideTable(tableName, columnCount = 30) {
   return {
@@ -494,4 +495,34 @@ test('resolveTraceOptions enables tracing for stdout or file output', () => {
   });
 
   assert.equal(resolveTraceOptions(['--trace-file', './generated/basic.jsonl']).enabled, true);
+});
+
+test('serializeError keeps the validation code, layer and any failure stage for traces', () => {
+  let safetyError;
+  try {
+    validateReadOnlySql('SELECT 1 -- note', []);
+  } catch (error) {
+    safetyError = error;
+  }
+  const serialized = serializeError(safetyError);
+  assert.equal(serialized.name, 'SqlValidationError');
+  assert.equal(serialized.code, 'SQL_COMMENT');
+  assert.equal(serialized.layer, 'safety');
+
+  const staged = Object.assign(new Error('provider timed out'), { code: 'LLM_TIMEOUT', errorStage: 'llm' });
+  assert.deepEqual(
+    { code: serializeError(staged).code, errorStage: serializeError(staged).errorStage },
+    { code: 'LLM_TIMEOUT', errorStage: 'llm' }
+  );
+
+  // LlmResponseError carries its stage as `stage`.
+  const truncated = new LlmResponseError('cut off', { code: 'LLM_TRUNCATED' });
+  assert.equal(serializeError(truncated).errorStage, 'llm');
+  assert.equal(serializeError(truncated).code, 'LLM_TRUNCATED');
+
+  // Plain errors keep the old shape: no empty layer/errorStage keys.
+  const plain = serializeError(new Error('boom'));
+  assert.equal('layer' in plain, false);
+  assert.equal('errorStage' in plain, false);
+  assert.equal(plain.code, null);
 });

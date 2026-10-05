@@ -47,12 +47,24 @@ export function serializeError(error) {
     };
   }
 
-  return {
+  const serialized = {
     name: error.name || 'Error',
     message: error.message || String(error),
     code: error.code || null,
     stack: error.stack || null,
   };
+  // Validation errors say which layer rejected the SQL ('safety' or
+  // 'guardrail'), and a failure may carry the pipeline stage it stopped in;
+  // keep both so traces can be filtered the same way the API reports them.
+  if (typeof error.layer === 'string' && error.layer) {
+    serialized.layer = error.layer;
+  }
+  // LlmResponseError names it `stage`; results and API payloads `errorStage`.
+  const stage = error.errorStage || error.stage;
+  if (typeof stage === 'string' && stage) {
+    serialized.errorStage = stage;
+  }
+  return serialized;
 }
 
 export function resolveTraceOptions(argv = process.argv.slice(2)) {
