@@ -139,6 +139,24 @@ test('findDisallowedColumnsUsed ignores comments, strings and alias definitions'
   assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(`NetPayableAmount`) FROM SalesDocument', ['NetPayableAmount']), ['NetPayableAmount']);
 });
 
+test('findDisallowedColumnsUsed treats implicit aliases and alias references in GROUP BY / HAVING / ORDER BY as names', () => {
+  const entry = ['NetPayableAmount'];
+  // Alias without AS, read the way the validator reads it.
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) NetPayableAmount FROM SalesDocument d', entry), []);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS NetPayableAmount FROM SalesDocument d ORDER BY NetPayableAmount DESC', entry), []);
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT d.CustomerId, SUM(d.NetAmount) NetPayableAmount FROM SalesDocument d GROUP BY d.CustomerId HAVING NetPayableAmount > 0', entry),
+    []
+  );
+  // Still a use: the column itself (bare or qualified, even aliased to its own
+  // name), a bare name in WHERE (aliases do not exist there), or a name that
+  // is not an alias.
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT NetPayableAmount AS NetPayableAmount FROM SalesDocument', entry), entry);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT d.NetPayableAmount AS NetPayableAmount FROM SalesDocument d', entry), entry);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS NetPayableAmount FROM SalesDocument d WHERE NetPayableAmount > 0', entry), entry);
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS total FROM SalesDocument d ORDER BY SUM(NetPayableAmount)', entry), entry);
+});
+
 test('findDisallowedColumnsUsed resolves table aliases for qualified entries', () => {
   const entry = ['SalesDocument.CampaignId'];
   assert.deepEqual(

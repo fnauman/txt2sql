@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { compareRows, extractTablesFromSql } from './pipeline.js';
+import { outputAliasDefinitions } from './sql-guardrails.js';
 import { analyzeSqlStructure, isKeywordToken, tokenizeSql } from './sql-tokenizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -443,6 +444,7 @@ function collectColumnReferences(significant, skippedIndexes) {
         end += 2;
       }
       references.push({
+        index,
         qualifier: tokenIdentifierName(significant[end - 2]).toLowerCase(),
         column: tokenIdentifierName(significant[end]).toLowerCase(),
         whole: significant.slice(index, end + 1).map(tokenIdentifierName).join('.').toLowerCase(),
@@ -456,15 +458,42 @@ function collectColumnReferences(significant, skippedIndexes) {
       continue;
     }
     const name = tokenIdentifierName(token);
-    references.push({ qualifier: null, column: name.toLowerCase(), whole: name.toLowerCase() });
+    references.push({ index, qualifier: null, column: name.toLowerCase(), whole: name.toLowerCase() });
   }
   return references;
 }
 
+const CLAUSE_KEYWORDS = new Set(['SELECT', 'FROM', 'WHERE', 'ON', 'USING', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'WINDOW', 'UNION']);
+
+// The clause keyword each significant token falls under, at its own
+// parenthesis depth (a parenthesized expression inherits the outer clause).
+function clauseOfTokens(significant) {
+  const clauses = new Array(significant.length).fill(null);
+  const current = [null];
+  let depth = 0;
+  significant.forEach((token, index) => {
+    if (isPunctTokenValue(token, '(')) {
+      depth += 1;
+      current[depth] = current[depth - 1];
+    } else if (isPunctTokenValue(token, ')')) {
+      depth = Math.max(0, depth - 1);
+    } else if (token.type === 'word' && !token.afterDot && CLAUSE_KEYWORDS.has(token.upper)) {
+      current[depth] = token.upper;
+    }
+    clauses[index] = current[depth];
+  });
+  return clauses;
+}
+
+// Clauses where a bare name may refer to an output alias instead of a column.
+const ALIAS_REFERENCE_CLAUSES = new Set(['GROUP', 'HAVING', 'ORDER']);
+
 /**
  * Token-based lint: which `disallowed_columns` entries the SQL actually uses.
  * Reads SQL through the shared MariaDB tokenizer, so string literals, comments
- * and `AS alias` definitions never count. Entries are
+ * and output alias definitions (`AS alias` and the implicit `expr alias`, read
+ * the way the validator reads them) never count, nor does a bare name in
+ * GROUP BY / HAVING / ORDER BY that refers to such an alias. Entries are
  * - `Column`: any reference to that column, bare or qualified;
  * - `Table.Column`: a reference qualified by that table or one of its aliases,
  *   or a bare reference when the column resolves to that table (the only
@@ -519,7 +548,17 @@ export function findDisallowedColumnsUsed(sql, disallowedColumns, { schema = nul
     }
   }
   const referencedTables = new Set(tableRefs.map((ref) => ref.name.toLowerCase()));
-  const references = collectColumnReferences(significant, skippedIndexes);
+  // Output alias definitions are names, not column references; a bare alias
+  // name in GROUP BY / HAVING / ORDER BY refers to the alias.
+  const aliasDefinitions = outputAliasDefinitions(significant);
+  for (const index of aliasDefinitions.keys()) {
+    skippedIndexes.add(index);
+  }
+  const aliasNames = new Set([...aliasDefinitions.values()].map((name) => name.toLowerCase()));
+  const clauses = clauseOfTokens(significant);
+  const references = collectColumnReferences(significant, skippedIndexes).filter(
+    (reference) => !(reference.qualifier === null && aliasNames.has(reference.column) && ALIAS_REFERENCE_CLAUSES.has(clauses[reference.index]))
+  );
 
   const schemaColumns = new Map(
     (schema?.tables || []).map((table) => [
