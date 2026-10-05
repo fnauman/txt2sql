@@ -95,12 +95,23 @@ test('every committed case gets current (non-stale) controls', () => {
   }
 });
 
-test('the edge suite carries the ported mutation workstream: 108 design + 28 held-out negatives, 38 positives', () => {
+test('the edge suite carries the ported mutation workstream (108 design + 28 held-out) and the review controls', () => {
   const resolved = datasets['edge-cases-public'].map((testCase) => resolveCaseControls(testCase, committed));
   const negatives = resolved.flatMap((entry) => entry.negative);
-  assert.equal(negatives.filter((control) => !control.heldout).length, 108);
-  assert.equal(negatives.filter((control) => control.heldout).length, 28);
-  assert.equal(resolved.flatMap((entry) => entry.positive).length, 38);
+  const audit = negatives.filter((control) => /^[mh]\d+$/.test(control.id));
+  assert.equal(audit.filter((control) => !control.heldout).length, 108);
+  assert.equal(audit.filter((control) => control.heldout).length, 28);
+  // Families the PR review found surviving (MONTH() without YEAR(),
+  // SUM(DISTINCT), invented IsActive filters, hedged columns, ...), added as
+  // design controls once the fixtures covered them.
+  const review = negatives.filter((control) => /^r\d+$/.test(control.id));
+  assert.equal(review.length, 44);
+  assert.ok(review.every((control) => !control.heldout && control.note.startsWith('review: ')));
+  assert.equal(negatives.length, audit.length + review.length);
+  for (const type of ['date_filter', 'sum_distinct', 'filter', 'hedge']) {
+    assert.ok(review.filter((control) => control.type === type).length >= 6, `review ${type} controls`);
+  }
+  assert.equal(resolved.flatMap((entry) => entry.positive).length, 71);
   // Model output never contains comments (the validator rejects them), so no
   // positive control may either.
   for (const control of resolved.flatMap((entry) => entry.positive)) {
@@ -110,16 +121,25 @@ test('the edge suite carries the ported mutation workstream: 108 design + 28 hel
 
 // Offline twin of the verify-dataset check: every positive control passes the
 // production validator in the real prompt context (no master-data candidates
-// without a database; none of the controls filters on product IDs).
+// without a database; none of the controls filters on product IDs), except
+// the ones flagged validator_known_false_rejection, which must still be
+// rejected (so the flag is removed once the guardrail is fixed).
 test('every positive control passes the production validator', async () => {
   const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
   const validate = createValidatorProbe({ schema });
+  let knownFalseRejections = 0;
   for (const testCase of datasets['edge-cases-public']) {
     for (const control of resolveCaseControls(testCase, committed).positive) {
       const rejection = await validate(testCase.question, control.sql);
+      if (control.validator_known_false_rejection) {
+        knownFalseRejections += 1;
+        assert.ok(rejection, `${testCase.id}/${control.id} is flagged as a known false rejection but passes now`);
+        continue;
+      }
       assert.equal(rejection, null, `${testCase.id}/${control.id}: ${rejection?.code} ${rejection?.message}`);
     }
   }
+  assert.equal(knownFalseRejections, 1);
 });
 
 test('summarizeControls reports design / held-out / seed-only kill rates and fixture contributions', () => {
@@ -200,6 +220,10 @@ test('committed datasets: per-fixture pins, alternatives only where the reading 
   }
   const pivot = datasets['edge-cases-public'].find((testCase) => testCase.intentId === 'customer_month_columns_jan_feb_2026');
   assert.deepEqual(pivot.comparison.column_order, ['jan_net_amount', 'feb_net_amount']);
+  assert.deepEqual(pivot.comparison.null_as_zero, ['jan_net_amount', 'feb_net_amount']);
+  // One alternative per accepted reading: every customer (LEFT JOIN from Customer).
+  assert.equal(pivot.alternative_expected_sql.length, 1);
+  assert.match(pivot.alternative_expected_sql[0], /FROM Customer c LEFT JOIN SalesDocument d/);
 });
 
 test('the edge suite reuses the core cases verbatim', async () => {
