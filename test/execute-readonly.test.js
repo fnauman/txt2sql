@@ -299,6 +299,32 @@ test('a failed KILL does not hold the cancelled request open; the still-busy thr
   pool.finish([{ late: true }]);
 });
 
+test('a read that throws synchronously still releases its pool connection', async () => {
+  const events = [];
+  const connection = {
+    threadId: 8,
+    query() {
+      throw Object.assign(new Error('Can\'t add new command when connection is in closed state'), { code: 'PROTOCOL_ENQUEUE_AFTER_QUIT' });
+    },
+    release() {
+      events.push('release');
+    },
+    destroy() {
+      events.push('destroy');
+    },
+  };
+  const pool = {
+    async getConnection() {
+      return connection;
+    },
+  };
+  const controller = new AbortController();
+  await assert.rejects(executeReadOnlySql(pool, 'SELECT 1', { timeoutMs: 0, signal: controller.signal }), {
+    code: 'PROTOCOL_ENQUEUE_AFTER_QUIT',
+  });
+  assert.deepEqual(events, ['release']);
+});
+
 test('a single connection read is bounded by the signal too', async () => {
   const connection = {
     query() {

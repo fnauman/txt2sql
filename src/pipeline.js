@@ -2312,8 +2312,9 @@ async function executeOnPoolConnection(pool, statement, params, { signal, maxRow
   // Registered before the read is raced against the signal, so the KILL is
   // already on its way when the caller is answered.
   signal?.addEventListener('abort', onAbort, { once: true });
-  const reading = readRows(connection, statement, params, { maxRows });
+  let reading = null;
   try {
+    reading = readRows(connection, statement, params, { maxRows });
     const result = await untilAborted(reading, signal, { abortError });
     overflowed = result.overflowed && result.streamed;
     if (signal?.aborted) {
@@ -2341,7 +2342,7 @@ async function executeOnPoolConnection(pool, statement, params, { signal, maxRow
       // only once the KILL has landed (or failed) AND the statement has ended
       // while we still own it, so neither can hit the next query on it.
       // Otherwise it is dropped.
-      const ended = Promise.all([killPromise, reading.then(noop, noop)]);
+      const ended = Promise.all([killPromise, reading?.then(noop, noop)]);
       void waitForSettle(ended, killSettleTimeoutMs).then((outcome) =>
         outcome === 'settled' ? connection.release() : connection.destroy()
       );
