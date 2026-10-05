@@ -712,6 +712,18 @@ export async function runOptimizedQuestion({
         truncated: result.truncated,
       });
 
+      // executeReadOnlySql never returns rows after an abort, but the request
+      // can still be cancelled while they are shaped and traced: a cancelled
+      // request is never reported (or cached) as a success.
+      if (signal?.aborted) {
+        return abortWith(attemptContext, {
+          error: createAbortError(signal),
+          sql: validated.sql,
+          response,
+          attemptCount: attempt + 1,
+        });
+      }
+
       await trace.emit('question.completed', {
         ...questionContext,
         success: true,

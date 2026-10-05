@@ -525,6 +525,11 @@ export function createApp({
         maxRetries: config.maxRetries,
         signal,
       });
+      if (signal.aborted && result.success) {
+        // The answer arrived after the deadline (or the client left), e.g. from
+        // a runner that ignored the signal: never report or cache it.
+        throw signal.reason;
+      }
 
       const payload = publicResult(result, trace, includeDebug, dataResidency);
       if (cacheable) {

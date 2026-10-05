@@ -589,6 +589,35 @@ test('an abort during execution kills the query and reports errorStage "aborted"
   assert.equal(client.requests.length, 1, 'no retry after an abort');
 });
 
+test('a request cancelled while its result is being finished is reported as aborted, never as a success', async () => {
+  const client = createScriptedClient([answer('SELECT CustomerName FROM Customer')]);
+  const controller = new AbortController();
+  const connection = {
+    async query() {
+      return [[{ CustomerName: 'North District Market' }]];
+    },
+  };
+  const trace = createBufferedTraceLogger();
+  const emit = trace.emit.bind(trace);
+  trace.emit = async (event, payload) => {
+    await emit(event, payload);
+    if (event === 'sql.executed') {
+      // The deadline passes while the rows are being shaped and traced.
+      controller.abort(Object.assign(new Error('deadline'), { name: 'AbortError', code: 'REQUEST_TIMEOUT' }));
+    }
+  };
+
+  const result = await runOptimizedQuestion({ client, connection, schema, question: 'List customers', trace, signal: controller.signal });
+
+  assert.equal(result.success, false);
+  assert.equal(result.errorStage, 'aborted');
+  assert.equal(result.errorCode, 'REQUEST_TIMEOUT');
+  assert.deepEqual(result.rows, []);
+  const events = trace.events.map((entry) => entry.event);
+  assert.ok(events.includes('question.aborted'));
+  assert.ok(!events.includes('question.completed'), 'never completed as a success');
+});
+
 test('WEB_QUERY_MAX_RETRIES is validated instead of silently disabling every question', () => {
   assert.equal(resolveMaxRetries({}), 1);
   assert.equal(resolveMaxRetries({ WEB_QUERY_MAX_RETRIES: '0' }), 0);

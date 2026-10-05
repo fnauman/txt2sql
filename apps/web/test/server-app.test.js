@@ -771,6 +771,33 @@ test('the request deadline bounds the wait for a pool slot in the real pipeline;
   });
 });
 
+test('a success that arrives after the request deadline is neither returned nor cached', async () => {
+  const { factory } = createRuntimeFactory();
+  // A runner that ignores the signal (e.g. a statement that finished after a
+  // failed KILL) and returns rows after the deadline passed.
+  const { runQuestion, calls } = recordingRunner(async (args) => {
+    await new Promise((resolve) => setTimeout(resolve, DEADLINE_MS * 3));
+    assert.equal(args.signal.aborted, true);
+    return successResult(args.question);
+  });
+  const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+  await withApp({ config, runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.status, 504);
+    assert.equal(json.json.success, false);
+    assert.equal(json.json.errorStage, 'aborted');
+    assert.equal(json.json.errorCode, 'REQUEST_TIMEOUT');
+    assert.deepEqual(json.json.rows ?? [], []);
+
+    const frames = parseSse((await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'top customers' } })).text);
+    assert.equal(frames.find((frame) => frame.event === 'error').data.code, 'REQUEST_TIMEOUT');
+    assert.ok(!frames.some((frame) => frame.event === 'rows'), 'no rows after the deadline');
+
+    assert.equal(app.resultCache.size, 0, 'nothing was cached');
+    assert.equal(calls.length, 2, 'the second request was not served from the cache');
+  });
+});
+
 test('WEB_RESULT_CACHE=0 from config disables replay', async () => {
   const { factory } = createRuntimeFactory();
   const { runQuestion, calls } = recordingRunner();
