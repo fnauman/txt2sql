@@ -276,3 +276,27 @@ test('close() does not hang on a stalled runtime load; that runtime is closed as
   await tick();
   assert.equal(loads[0].runtime.closed, 1, 'closed as soon as it finished loading');
 });
+
+test('close() waits for a refresh that is still loading and closes its new runtime', async () => {
+  const { factory, loads } = createDeferredFactory();
+  const manager = createRuntimeManager({ factory, logger: silent, closeTimeoutMs: 1000 });
+  const first = manager.acquire();
+  await tick();
+  loads[0].resolve();
+  (await first).release();
+
+  const refreshed = manager.refresh(); // the new runtime is still loading
+  await tick();
+  let closedAll = false;
+  const closing = manager.close().then(() => {
+    closedAll = true;
+  });
+  await tick();
+  assert.equal(closedAll, false, 'shutdown waits for the runtime the refresh is building');
+
+  loads[1].resolve();
+  await settlesWithin(closing, 500);
+  assert.equal(loads[1].runtime.closed, 1, 'closed before close() resolved');
+  assert.equal(loads[0].runtime.closed, 1);
+  await assert.rejects(refreshed, { code: 'SHUTTING_DOWN' });
+});

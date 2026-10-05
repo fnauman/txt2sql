@@ -10,7 +10,8 @@
 //   non-finite `retireGraceMs` (null: requests have no deadline) means no
 //   forced close at all; only close() (shutdown) closes a runtime still in use.
 // - A runtime that fails to load is not cached: the next acquire() retries.
-// - close() (shutdown) closes every runtime but waits at most `closeTimeoutMs`
+// - close() (shutdown) closes every runtime, including the one a refresh is
+//   still building, but waits at most `closeTimeoutMs`
 //   (WEB_SHUTDOWN_TIMEOUT_MS): a load cannot be aborted, so one that is stalled
 //   is not waited for past that; its runtime is closed as soon as it loads.
 //
@@ -31,6 +32,7 @@ export function createRuntimeManager({
 
   let current = null;
   let refreshing = null;
+  let refreshingEntry = null; // the runtime a refresh is building
   let closed = false;
   let nextId = 1;
   const retiring = new Set();
@@ -176,6 +178,7 @@ export function createRuntimeManager({
     }
 
     const next = createEntry({ refreshSchema: true });
+    refreshingEntry = next;
     refreshing = next.promise
       .then((runtime) => {
         if (closed) {
@@ -192,6 +195,7 @@ export function createRuntimeManager({
       })
       .finally(() => {
         refreshing = null;
+        refreshingEntry = null;
       });
     return refreshing;
   }
@@ -201,6 +205,10 @@ export function createRuntimeManager({
     const entries = new Set(retiring);
     if (current) {
       entries.add(current);
+    }
+    // A refresh in progress is building a runtime that is in neither set yet.
+    if (refreshingEntry) {
+      entries.add(refreshingEntry);
     }
     current = null;
     // closeEntry() waits for a runtime that is still loading and then closes
