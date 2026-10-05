@@ -146,6 +146,13 @@ function printControlsSummary(summary, fixtureNames) {
   for (const survivor of [...design.survivors, ...heldout.survivors.map((entry) => `${entry} [held-out]`)]) {
     console.log(`    survivor: ${survivor}`);
   }
+  // Controls that did not execute are not kills; they count as not killed.
+  for (const entry of [...design.invalid, ...heldout.invalid.map((item) => `${item} [held-out]`)]) {
+    console.log(`    invalid (fails to execute, counted as not killed): ${entry}`);
+  }
+  for (const entry of [...design.unscored, ...heldout.unscored.map((item) => `${item} [held-out]`)]) {
+    console.log(`    unscored (infrastructure error, counted as not killed): ${entry}`);
+  }
 }
 
 export async function main(argv = process.argv.slice(2)) {

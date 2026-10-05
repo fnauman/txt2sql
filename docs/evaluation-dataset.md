@@ -316,7 +316,13 @@ core_007 readings and two master-data mutants caught by the shared master rows,
 and the swapped Jan/Feb pivot caught by name pinning. `verify-dataset` fails
 below a design kill rate of `--min-kill-rate` (default 0.95, all non-held-out
 negatives); the held-out rate is reported without a floor
-(`--min-heldout-kill-rate`, default 0).
+(`--min-heldout-kill-rate`, default 0). A negative control counts as killed
+only when it executes on every fixture and does not match: one that fails to
+execute (a bad column, a timeout) is **invalid**, and one hit by an
+infrastructure error (a dropped connection) is **unscored**. Both are
+problems that fail `verify-dataset`, and both stay in the denominator as not
+killed, so a broken control or a lost connection can only lower the reported
+rate, never raise it.
 
 **Read these as fitted numbers, not a generalization estimate.** The fixtures
 were extended until the controls died: v2b after the audit's held-out mutants

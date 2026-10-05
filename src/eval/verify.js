@@ -7,8 +7,14 @@
 //   validator in the real optimized prompt context;
 // - positive controls (correct alternatives) match the gold or an alternative
 //   on every fixture AND pass the production validator;
-// - negative controls (plausible-wrong SQL) are killed: they fail to match on
-//   at least one fixture. Their kill rate measures the oracle.
+// - negative controls (plausible-wrong SQL) are killed: they execute on every
+//   fixture and fail to match on at least one (or break the one-reading /
+//   one-mapping rules). Their kill rate measures the oracle. A control that
+//   fails to execute is not a kill: an SQL error makes it an invalid control
+//   and an infrastructure error leaves it unscored; both are problems (so
+//   verify-dataset exits non-zero) and both stay in the kill-rate denominator
+//   as not killed, so a broken control or a dropped connection can only
+//   lower the reported rate, never raise it.
 
 import {
   compareResults,
@@ -68,6 +74,14 @@ export function createValidatorProbe({ schema, connection = null }) {
     }
   };
 }
+
+/**
+ * Verdicts of a negative control: killed (executed on every fixture and did
+ * not match), survived (matched), invalid (an SQL error such as a bad column
+ * or a timeout on some fixture) or unscored (an infrastructure error such as
+ * a dropped connection). Only `killed` counts as a kill.
+ */
+export const NEGATIVE_STATUS = Object.freeze({ killed: 'killed', survived: 'survived', invalid: 'invalid', unscored: 'unscored' });
 
 function goldColumnsOf(rows) {
   return Object.keys(rows?.[0] ?? {});
@@ -168,16 +182,35 @@ export async function verifyCase(testCase, {
     const negative = [];
     for (const control of resolved.negative) {
       const score = await scoreAgainstGold({ testCase, predictedSql: control.sql, connections, goldCache, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS });
+      const errors = score.perFixture
+        .filter((entry) => entry.error)
+        .map((entry) => ({ fixture: entry.fixture, code: entry.error.code, message: entry.error.message, infra: entry.error.infra }));
+      const status = errors.some((error) => error.infra)
+        ? NEGATIVE_STATUS.unscored
+        : errors.length > 0
+          ? NEGATIVE_STATUS.invalid
+          : score.match
+            ? NEGATIVE_STATUS.survived
+            : NEGATIVE_STATUS.killed;
+      const killed = status === NEGATIVE_STATUS.killed;
       negative.push({
         id: control.id,
         type: control.type,
         heldout: control.heldout,
         note: control.note,
-        killed: !score.match,
-        killedOn: score.killedOn,
+        status,
+        killed,
+        killedOn: killed ? score.killedOn : [],
         reason: score.reason,
         executionError: score.executionError,
+        errors,
       });
+      const where = errors.map((error) => `${error.fixture}: ${error.code} ${error.message}`).join('; ');
+      if (status === NEGATIVE_STATUS.unscored) {
+        problems.push(`negative control ${control.id} could not be scored: infrastructure error (${where}); not counted as killed`);
+      } else if (status === NEGATIVE_STATUS.invalid) {
+        problems.push(`negative control ${control.id} is invalid: it fails to execute (${where}); an error is not a kill, fix or remove it`);
+      }
     }
     controls = { source: resolved.source, matchedBy: resolved.matchedBy, positive, negative };
   }
@@ -192,7 +225,10 @@ function rate(killed, total) {
 /**
  * Kill-rate summary over verified cases:
  * { design, heldout, byType, byFixture, positive } where design/heldout are
- * { total, killed, rate, seedOnlyKilled, seedOnlyRate, survivors }.
+ * { total, killed, rate, seedOnlyKilled, seedOnlyRate, survivors, invalid,
+ * unscored, executionErrors }. `invalid` and `unscored` list the controls that
+ * did not execute (SQL error / infrastructure error); they count in `total`
+ * as not killed, so they can only lower `rate`.
  */
 export function summarizeControls(caseResults, { fixtureNames = [], primaryFixture = PRIMARY_FIXTURE.name } = {}) {
   const negatives = [];
@@ -206,16 +242,22 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
     }
   }
 
+  const statusOf = (control) => control.status ?? (control.killed ? NEGATIVE_STATUS.killed : NEGATIVE_STATUS.survived);
+  const describe = (control) => `${control.caseId}/${control.id} (${control.type}${control.note ? `: ${control.note}` : ''})`;
+  const describeErrors = (control) =>
+    `${control.caseId}/${control.id} (${(control.errors || []).map((error) => `${error.fixture}: ${error.code}`).join(', ') || control.executionError?.code || 'error'})`;
   const group = (list) => {
-    const killed = list.filter((control) => control.killed).length;
-    const seedOnlyKilled = list.filter((control) => control.killedOn.includes(primaryFixture)).length;
+    const killed = list.filter((control) => statusOf(control) === NEGATIVE_STATUS.killed).length;
+    const seedOnlyKilled = list.filter((control) => statusOf(control) === NEGATIVE_STATUS.killed && control.killedOn.includes(primaryFixture)).length;
     return {
       total: list.length,
       killed,
       rate: rate(killed, list.length),
       seedOnlyKilled,
       seedOnlyRate: rate(seedOnlyKilled, list.length),
-      survivors: list.filter((control) => !control.killed).map((control) => `${control.caseId}/${control.id} (${control.type}${control.note ? `: ${control.note}` : ''})`),
+      survivors: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.survived).map(describe),
+      invalid: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.invalid).map(describeErrors),
+      unscored: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.unscored).map(describeErrors),
       executionErrors: list.filter((control) => control.executionError).length,
     };
   };
@@ -227,19 +269,21 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
     const key = control.type;
     byType[key] ||= { total: 0, killed: 0, seedOnlyKilled: 0 };
     byType[key].total += 1;
-    byType[key].killed += control.killed ? 1 : 0;
-    byType[key].seedOnlyKilled += control.killedOn.includes(primaryFixture) ? 1 : 0;
+    const killed = statusOf(control) === NEGATIVE_STATUS.killed;
+    byType[key].killed += killed ? 1 : 0;
+    byType[key].seedOnlyKilled += killed && control.killedOn.includes(primaryFixture) ? 1 : 0;
   }
   const byFixture = {};
   for (const fixture of fixtureNames) {
+    const killedHere = negatives.filter((control) => statusOf(control) === NEGATIVE_STATUS.killed && control.killedOn.includes(fixture));
     byFixture[fixture] = {
-      killed: negatives.filter((control) => control.killedOn.includes(fixture)).length,
-      onlyThisFixture: negatives.filter((control) => control.killedOn.length === 1 && control.killedOn[0] === fixture).length,
+      killed: killedHere.length,
+      onlyThisFixture: killedHere.filter((control) => control.killedOn.length === 1).length,
     };
   }
   // Killed although every fixture alone matched some reading (mixed gold
   // variants or an inconsistent column mapping across fixtures).
-  const crossFixtureOnly = negatives.filter((control) => control.killed && control.killedOn.length === 0).length;
+  const crossFixtureOnly = negatives.filter((control) => statusOf(control) === NEGATIVE_STATUS.killed && control.killedOn.length === 0).length;
 
   return {
     design: group(design),

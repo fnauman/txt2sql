@@ -201,6 +201,73 @@ test('a surviving negative control is reported, not a problem; summarizeControls
   assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95 }), ['d: design kill rate 50.0% < 95.0%']);
 });
 
+test('a negative control that fails to execute is invalid, not killed, and a problem', async () => {
+  const testCase = caseWith();
+  const BROKEN = 'SELECT broken';
+  const SLOW = 'SELECT slow';
+  const badColumn = Object.assign(new Error("Unknown column 'x.Nope'"), { code: 'ER_BAD_FIELD_ERROR' });
+  const timeout = Object.assign(new Error('Query execution was interrupted'), { code: 'ER_STATEMENT_TIMEOUT', errno: 1969 });
+  const result = await verifyCase(testCase, {
+    // BROKEN fails everywhere; SLOW matches the seed and times out on v2.
+    connections: connectionsWith({ [BROKEN]: badColumn, [SLOW]: seedGold }, { [BROKEN]: badColumn, [SLOW]: timeout }),
+    validate: accept,
+    controlsIndex: controlsFor(testCase, {
+      negative: [
+        { id: 'm1', sql: NEGATIVE },
+        { id: 'm2', sql: BROKEN },
+        { id: 'h1', sql: SLOW, heldout: true },
+      ],
+    }),
+  });
+  assert.deepEqual(
+    result.controls.negative.map(({ id, status, killed, killedOn }) => [id, status, killed, killedOn]),
+    [
+      ['m1', 'killed', true, ['v2']],
+      ['m2', 'invalid', false, []],
+      ['h1', 'invalid', false, []],
+    ]
+  );
+  assert.deepEqual(result.controls.negative[2].errors, [
+    { fixture: 'v2', code: 'ER_STATEMENT_TIMEOUT', message: 'Query execution was interrupted', infra: false },
+  ]);
+  assert.equal(result.problems.length, 2);
+  assert.match(result.problems[0], /^negative control m2 is invalid: it fails to execute \(seed: ER_BAD_FIELD_ERROR .*; v2: ER_BAD_FIELD_ERROR .*\)/);
+  assert.match(result.problems[1], /^negative control h1 is invalid: it fails to execute \(v2: ER_STATEMENT_TIMEOUT/);
+
+  // Counted as not killed (conservative): the rate can only go down.
+  const summary = summarizeControls([result], { fixtureNames: ['seed', 'v2'] });
+  assert.deepEqual([summary.design.total, summary.design.killed, summary.design.rate], [2, 1, 0.5]);
+  assert.deepEqual(summary.design.invalid, ['c1/m2 (seed: ER_BAD_FIELD_ERROR, v2: ER_BAD_FIELD_ERROR)']);
+  assert.deepEqual(summary.design.survivors, []);
+  assert.deepEqual([summary.heldout.total, summary.heldout.killed, summary.heldout.rate], [1, 0, 0]);
+  assert.deepEqual(summary.heldout.invalid, ['c1/h1 (v2: ER_STATEMENT_TIMEOUT)']);
+  assert.deepEqual(summary.byFixture, { seed: { killed: 0, onlyThisFixture: 0 }, v2: { killed: 1, onlyThisFixture: 1 } });
+  assert.deepEqual(summary.byType.metric, { total: 3, killed: 1, seedOnlyKilled: 0 });
+});
+
+test('an infrastructure error leaves a negative control unscored, never killed', async () => {
+  // The connection drops after the gold rows were cached: the gold still
+  // "runs" from the cache, but the negative never executes.
+  const testCase = caseWith();
+  const dropped = Object.assign(new Error('Connection lost: The server closed the connection.'), { code: 'PROTOCOL_CONNECTION_LOST', fatal: true });
+  const result = await verifyCase(testCase, {
+    connections: connectionsWith({}, { [NEGATIVE]: dropped }),
+    validate: accept,
+    controlsIndex: controlsFor(testCase, { negative: [{ id: 'm1', sql: NEGATIVE }] }),
+  });
+  assert.deepEqual(
+    result.controls.negative.map(({ id, status, killed, killedOn }) => [id, status, killed, killedOn]),
+    [['m1', 'unscored', false, []]]
+  );
+  assert.deepEqual(result.problems, [
+    'negative control m1 could not be scored: infrastructure error (v2: PROTOCOL_CONNECTION_LOST Connection lost: The server closed the connection.); not counted as killed',
+  ]);
+  const summary = summarizeControls([result], { fixtureNames: ['seed', 'v2'] });
+  assert.deepEqual([summary.design.killed, summary.design.rate], [0, 0]);
+  assert.deepEqual(summary.design.unscored, ['c1/m1 (v2: PROTOCOL_CONNECTION_LOST)']);
+  assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95 }), ['d: design kill rate 0.0% < 95.0%']);
+});
+
 test('controls written for a different gold are reported as stale and not run', async () => {
   const testCase = caseWith();
   const result = await verifyCase(testCase, {
