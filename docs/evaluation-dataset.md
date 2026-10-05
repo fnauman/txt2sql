@@ -516,7 +516,10 @@ npm run eval -- --help                              # every flag
 
 The suite defaults to every dataset in `datasets/` de-duplicated: by case id
 (the edge suite repeats the 9 core cases, which run once) and by identical
-question and gold SQL. Today that is 26 cases over 17 intents. A case id with a
+question and gold SQL scored the same way (same alternatives and comparison
+spec; the same question and gold scored differently stays a separate case).
+Today that is 26 cases over 17 intents. `--case-id` with the id of a dropped
+duplicate selects the case kept in its place (the console says so). A case id with a
 different question or gold in two datasets is a dataset conflict (exit 2).
 Filters: `--dataset a,b` or `--dataset-file`, `--split dev|holdout|all` (a case
 without a `split` field is dev; default all), `--case-id`, `--tag` (any of),

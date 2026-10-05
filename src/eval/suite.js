@@ -4,8 +4,11 @@
 // not a dataset), de-duplicated:
 // - by case id: the edge suite reuses the 9 core cases verbatim, so each is
 //   evaluated once (the first dataset in name order keeps it);
-// - by identical (question, normalized gold SQL): the same question with the
-//   same answer under another id is one measurement, not two.
+// - by identical (question, normalized gold SQL), when the case is also
+//   scored the same way (same alternatives and comparison spec): the same
+//   question with the same answer under another id is one measurement, not
+//   two. The same question and gold scored differently stays a separate case.
+// --case-id resolves a dropped duplicate to the case kept in its place.
 // A case id that appears with a different question or gold in two datasets is
 // a dataset conflict: comparisons align cases by id, so it must be fixed.
 //
@@ -49,8 +52,10 @@ export function scoringFingerprint(testCase) {
   ).slice(0, 16);
 }
 
+// Question + everything the oracle scores against (the scoring fingerprint
+// covers the normalized gold, the alternatives and the comparison spec).
 function questionKey(testCase) {
-  return `${normalizeSqlText(testCase.question).toLowerCase()}\u0000${normalizeSqlText(testCase.expected_sql)}`;
+  return `${normalizeSqlText(testCase.question).toLowerCase()}\u0000${scoringFingerprint(testCase)}`;
 }
 
 /** Dataset names (files *.json) in a datasets directory, sorted. */
@@ -190,7 +195,10 @@ export async function selectSuite({ datasetsDir = DEFAULT_DATASETS_DIR, datasetN
     throw error;
   }
   const filters = { split, caseIds, tags, intents };
-  const selected = filterSuiteEntries(entries, filters);
+  // A dropped duplicate's id selects the case kept in its place.
+  const keptAs = new Map(duplicates.filter((duplicate) => duplicate.id !== duplicate.keptAs).map((duplicate) => [duplicate.id, duplicate.keptAs]));
+  const aliasedCaseIds = caseIds.filter((id) => keptAs.has(id)).map((id) => ({ id, keptAs: keptAs.get(id) }));
+  const selected = filterSuiteEntries(entries, { ...filters, caseIds: [...new Set(caseIds.map((id) => keptAs.get(id) || id))] });
   if (selected.length === 0) {
     const error = new Error(`No cases matched the selection (${describeFilters(filters) || 'no filters'}).`);
     error.code = 'EMPTY_SELECTION';
@@ -203,6 +211,7 @@ export async function selectSuite({ datasetsDir = DEFAULT_DATASETS_DIR, datasetN
     uniqueCaseCount: entries.length,
     totalCaseCount: datasets.reduce((sum, dataset) => sum + dataset.cases.length, 0),
     duplicates,
+    aliasedCaseIds,
     filters,
   };
 }

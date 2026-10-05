@@ -959,6 +959,9 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     throw new HarnessError(`Suite selection failed: ${error.message}`, { code: error.code || 'SUITE_INVALID', cause: error });
   }
   const filters = describeFilters(selection.filters);
+  for (const alias of selection.aliasedCaseIds || []) {
+    cli.log(`  note: --case-id ${alias.id} is a duplicate of ${alias.keptAs} (same question and gold), which runs in its place.`);
+  }
   cli.log(
     `Suite ${selection.name}: ${selection.entries.length} case(s) selected of ${selection.uniqueCaseCount} unique ` +
       `(${selection.totalCaseCount} in ${selection.datasets.map((dataset) => dataset.name).join(', ')}; ${selection.duplicates.length} duplicate(s) dropped)` +

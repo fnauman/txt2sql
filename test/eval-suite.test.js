@@ -99,3 +99,32 @@ test('dataset conflicts and empty selections are errors', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('the same question and gold scored differently is a separate case; a dropped id selects its keeper', async () => {
+  const datasets = [
+    { name: 'd1', cases: [makeCase('a1', 'How many?', 'SELECT 1', { comparison: { mode: 'scalar' } })] },
+    {
+      name: 'd2',
+      cases: [
+        // same question and gold, other comparison spec and an alternative gold
+        makeCase('b1', 'How  many?', 'SELECT  1', { comparison: { mode: 'rowset', tolerance: 0.5 }, alternative_expected_sql: ['SELECT 1.0'] }),
+        // identical in every way that is scored: a duplicate
+        makeCase('b2', 'how many?', 'SELECT 1', { comparison: { mode: 'scalar' } }),
+      ],
+    },
+  ];
+  const { entries, duplicates } = dedupeSuiteCases(datasets);
+  assert.deepEqual(entries.map((entry) => entry.testCase.id), ['a1', 'b1']);
+  assert.deepEqual(duplicates.map((entry) => [entry.id, entry.keptAs]), [['b2', 'a1']]);
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
+  try {
+    await fs.writeFile(path.join(dir, 'd1.json'), JSON.stringify([{ id: 'a1', question: 'How many?', expected_sql: 'SELECT 1' }]));
+    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b2', question: 'how many?', expected_sql: 'SELECT 1' }]));
+    const suite = await selectSuite({ datasetsDir: dir, caseIds: ['b2'] });
+    assert.deepEqual(suite.entries.map((entry) => entry.testCase.id), ['a1']);
+    assert.deepEqual(suite.aliasedCaseIds, [{ id: 'b2', keptAs: 'a1' }]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
