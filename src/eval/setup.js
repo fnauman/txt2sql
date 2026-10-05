@@ -82,12 +82,12 @@ export function composeEnvProblems(env = process.env) {
   return problems;
 }
 
-/** Runs a command with its output on stderr; resolves { code }. */
-export function runCommand(command, args, { cwd, env } = {}) {
+/** Runs a command with its output on stderr (or discarded when quiet); resolves { code }. */
+export function runCommand(command, args, { cwd, env, quiet = false } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command, args, { cwd, env, stdio: ['ignore', 2, 2] });
+      child = spawn(command, args, { cwd, env, stdio: quiet ? 'ignore' : ['ignore', 2, 2] });
     } catch (error) {
       resolve({ code: null, error });
       return;
@@ -144,7 +144,7 @@ export async function preflightDatabase({
       { code: 'DB_UNREACHABLE', cause: first.error }
     );
   }
-  const version = await run('docker', ['compose', 'version'], { cwd: repoRoot, env });
+  const version = await run('docker', ['compose', 'version'], { cwd: repoRoot, env, quiet: true });
   if (version.code !== 0) {
     throw new HarnessError(
       `MariaDB is not reachable at ${target} (${first.code}) and "docker compose" is not available to start it. ` +
@@ -228,6 +228,11 @@ function needsSeeding(status) {
   return status.status !== 'current' || status.masterDataMatches !== true;
 }
 
+// What is wrong with a fixture: its content status, else its master data.
+function describeProblem(status) {
+  return status.status !== 'current' ? status.status : 'master data differs';
+}
+
 /**
  * Checks every fixture (rows re-hashed) and seeds the ones that are missing,
  * stale, drifted or carry other master data, with the admin role. Returns the
@@ -262,7 +267,7 @@ export async function ensureFixtures({
   if (pending.length === 0) {
     return statuses.map((status) => ({ ...status, action: 'checked' }));
   }
-  const list = pending.map((status) => `${status.name} (${status.database}: ${status.masterDataMatches === false ? 'master data differs' : status.status})`).join(', ');
+  const list = pending.map((status) => `${status.name} (${status.database}: ${describeProblem(status)})`).join(', ');
 
   if (!allowSeed) {
     const blocking = strict ? pending : pending.filter((status) => status.status === 'missing' || status.masterDataMatches === false);
@@ -286,14 +291,24 @@ export async function ensureFixtures({
     );
   }
 
-  const admin = await connect({ includeDatabase: false, role: 'admin', env, warn: () => {} });
+  let admin;
+  try {
+    admin = await connect({ includeDatabase: false, role: 'admin', env, warn: () => {} });
+  } catch (error) {
+    throw new HarnessError(
+      `Fixture database(s) need seeding (${list}), but the admin connection failed: ${error.message} ` +
+        'For the docker-compose database the root password is the first of DB_ADMIN_PASSWORD, MARIADB_ROOT_PASSWORD and DB_PASSWORD ' +
+        'that was set when its volume was created ("docker compose down -v" recreates it).',
+      { code: errorCodeOf(error) || 'ADMIN_CONNECT_FAILED', cause: error }
+    );
+  }
   const actions = new Map();
   try {
     for (const status of pending) {
       const fixture = fixtures.find((entry) => entry.name === status.name);
       const result = await seed(admin, fixture, { schema });
       actions.set(fixture.name, result.action);
-      log(`Fixture ${fixture.name} (${fixture.database}) was ${status.masterDataMatches === false ? 'master-data mismatched' : status.status}: ${result.action}.`);
+      log(`Fixture ${fixture.name} (${fixture.database}) was ${describeProblem(status)}: ${result.action}.`);
     }
   } catch (error) {
     throw new HarnessError(`Seeding the fixtures failed: ${error.message}`, { code: errorCodeOf(error) || 'SEED_FAILED', cause: error });
