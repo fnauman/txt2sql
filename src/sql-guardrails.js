@@ -1107,7 +1107,7 @@ function findColumnName(knownTables, tableName, columnName) {
   return [...columns].find((candidate) => candidate.toLowerCase() === lower) || null;
 }
 
-// tableName -> Map(columnName -> { primaryKey, allowNull }) for the prompt tables.
+// tableName -> Map(columnName -> { primaryKey, allowNull, type }) for the prompt tables.
 function collectColumnMetadata(promptContext = {}) {
   const metadata = new Map();
   for (const table of Array.isArray(promptContext.tables) ? promptContext.tables : []) {
@@ -1117,12 +1117,17 @@ function collectColumnMetadata(promptContext = {}) {
     }
     const columns = new Map();
     for (const column of table.includedColumns || []) {
-      columns.set(column.name, { primaryKey: Boolean(column.primaryKey), allowNull: column.allowNull !== false });
+      columns.set(column.name, { primaryKey: Boolean(column.primaryKey), allowNull: column.allowNull !== false, type: column.type || null });
     }
     metadata.set(tableName, columns);
   }
   return metadata;
 }
+
+// Character column types (Sequelize and SQL spellings). MariaDB compares such a
+// column with a number numerically, so `name = 0` matches every non-numeric
+// string and does not pin the column to one value.
+const STRING_COLUMN_TYPE = /^(STRING|CHAR|VARCHAR|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|CITEXT|ENUM|UUID)\b/i;
 
 function primaryKeyColumnsOf(columnMetadata, tableName) {
   return [...(columnMetadata.get(tableName) || new Map()).entries()]
@@ -1428,8 +1433,8 @@ function findJoinCondition(walker, ref) {
 }
 
 // One side of a top-level `a = b`: { qualifier, column }, { column } for an
-// unqualified column, { constant: true } for a number or string literal, or
-// null for any other expression.
+// unqualified column, { constant: true, numeric } for a number or string
+// literal, or null for any other expression.
 function parseEqualityOperand(walker, range) {
   const { tokens } = walker;
   const [from, to] = walker.unwrapParens(range);
@@ -1437,14 +1442,14 @@ function parseEqualityOperand(walker, range) {
     return walker.qualifiedColumnAt(from);
   }
   if (to - from === 2 && isOperatorToken(tokens[from], '-', '+') && tokens[from + 1].type === 'number') {
-    return { constant: true };
+    return { constant: true, numeric: true };
   }
   if (to - from !== 1) {
     return null;
   }
   const token = tokens[from];
   if (token.type === 'number' || token.type === 'string') {
-    return { constant: true };
+    return { constant: true, numeric: token.type === 'number' };
   }
   const name = tokenIdentifierName(token);
   return name && !token.afterDot && !(token.type === 'word' && SQL_KEYWORDS.has(token.upper)) ? { column: name } : null;
@@ -1875,6 +1880,11 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
     // key is equated to the parent's. A column equated to another instance of
     // the parent's table (one joined through the child, say) is not pinned.
     let restrictingEqualities;
+    // The declared type of a resolved column (a derived column's single origin).
+    const columnTypeOf = ({ entry, columnName }) => {
+      const [origin, ...more] = entry.viaDerived ? entry.relation.origins.get(columnName) || [] : [{ tableName: entry.tableName, columnName }];
+      return origin && more.length === 0 ? columnMetadata.get(origin.tableName)?.get(origin.columnName)?.type : null;
+    };
     const resolveOperand = (operand) => {
       if (operand.constant) {
         return operand;
@@ -1910,6 +1920,10 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
       const candidates = [];
       for (const { sides, appliesTo } of restrictingEqualities) {
         if ((appliesTo && appliesTo !== entry) || !sides[0] || !sides[1]) {
+          continue;
+        }
+        const [constant, column] = sides[0].constant ? sides : [sides[1], sides[0]];
+        if (constant.numeric && !column.constant && STRING_COLUMN_TYPE.test(columnTypeOf(column) || '')) {
           continue;
         }
         links.set(find(nodeOf(sides[0])), find(nodeOf(sides[1])));

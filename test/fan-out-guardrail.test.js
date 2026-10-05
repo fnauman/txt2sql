@@ -429,6 +429,21 @@ test('join keys pin a child through chained equalities, but only to the parent r
   }
 });
 
+test('a number pins a numeric column, but not a string column it compares with numerically', () => {
+  const DISTINCT_NAMES = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT DISTINCT SalesDocumentId, ProductNameSnapshot FROM SalesDocumentLine) x ON x.SalesDocumentId = d.SalesDocumentId';
+  // Every non-numeric name equals 0: 6500 instead of 5500 on the seeded demo DB.
+  assertFanOut(LINES_QUESTION, `${DISTINCT_NAMES} AND x.ProductNameSnapshot = 0`);
+  assertFanOut(
+    LINES_QUESTION,
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT SalesDocumentId, ProductNameSnapshot FROM SalesDocumentLine GROUP BY SalesDocumentId, ProductNameSnapshot) x ON x.SalesDocumentId = d.SalesDocumentId AND x.ProductNameSnapshot = 0'
+  );
+  // A string literal is one value (650), and so is a number for an integer key.
+  assert.doesNotThrow(() => validateFor(LINES_QUESTION, `${DISTINCT_NAMES} AND x.ProductNameSnapshot = 'Cane Sugar 2kg'`));
+  assert.doesNotThrow(() =>
+    validateFor(LINES_QUESTION, `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES.replace('JOIN', 'LEFT JOIN')} AND l.SalesDocumentLineId = 1`)
+  );
+});
+
 test('a UNION (DISTINCT) child is unique on its output columns; UNION ALL is not', () => {
   const HEADER = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d';
   const ON = 'x ON x.SalesDocumentId = d.SalesDocumentId';
