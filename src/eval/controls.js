@@ -57,6 +57,21 @@ function normalizeControl(control, { kind, caseId, file }) {
   };
 }
 
+// A controls entry is an object with a `negative` and/or `positive` array. Any
+// other JSON (package.json, tsconfig.json, ...) is not a controls file, so a
+// --controls-dir pointing at the wrong directory fails instead of loading
+// entries without controls.
+function checkEntryShape(entry, { caseId, file }) {
+  const isObject = Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry);
+  const lists = isObject ? ['negative', 'positive'].filter((key) => entry[key] !== undefined) : [];
+  if (!isObject || lists.length === 0 || lists.some((key) => !Array.isArray(entry[key]))) {
+    throw Object.assign(
+      new Error(`${file}: ${caseId} is not a controls entry (an object with "negative" and/or "positive" arrays); is this a controls directory?`),
+      { code: 'CONTROLS_INVALID' }
+    );
+  }
+}
+
 function controlsNotFound(message) {
   return Object.assign(
     new Error(`${message} Pass --controls-dir <dir> with the controls files, or --skip-controls to verify without measuring the oracle.`),
@@ -66,9 +81,11 @@ function controlsNotFound(message) {
 
 /**
  * Reads every controls file of a directory into one index. A missing
- * directory, or one without any controls file, is an error (code
- * CONTROLS_NOT_FOUND), never an empty index: a typo in --controls-dir must not
- * silently skip the kill-rate gate (--skip-controls is the way to skip it).
+ * directory, one without any controls file, or files that define no control at
+ * all are an error (code CONTROLS_NOT_FOUND), never an empty index; a JSON
+ * file whose entries are not controls entries is CONTROLS_INVALID. A typo in
+ * --controls-dir must not silently skip the kill-rate gate (--skip-controls is
+ * the way to skip it).
  */
 export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } = {}) {
   let names = [];
@@ -86,6 +103,7 @@ export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } =
 
   const byCaseId = new Map();
   const byIntentId = new Map();
+  let controlCount = 0;
   for (const name of names) {
     const file = path.join(controlsDir, name);
     const raw = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -93,6 +111,7 @@ export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } =
       throw new Error(`${file} must be an object keyed by case id.`);
     }
     for (const [caseId, entry] of Object.entries(raw)) {
+      checkEntryShape(entry, { caseId, file: name });
       if (byCaseId.has(caseId)) {
         throw new Error(`Controls for case ${caseId} are defined twice (${byCaseId.get(caseId).source} and ${name}).`);
       }
@@ -105,6 +124,7 @@ export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } =
         source: `${name}#${caseId}`,
       };
       byCaseId.set(caseId, normalized);
+      controlCount += normalized.negative.length + normalized.positive.length;
       if (normalized.intentId) {
         if (!byIntentId.has(normalized.intentId)) {
           byIntentId.set(normalized.intentId, []);
@@ -112,6 +132,9 @@ export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } =
         byIntentId.get(normalized.intentId).push(normalized);
       }
     }
+  }
+  if (controlCount === 0) {
+    throw controlsNotFound(`Controls directory ${controlsDir} defines no controls (${names.join(', ')}).`);
   }
   return { byCaseId, byIntentId, files: names };
 }

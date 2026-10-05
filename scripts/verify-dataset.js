@@ -37,6 +37,7 @@ import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
 import {
+  controlsCoverageFailure,
   createValidatorProbe,
   fixtureGateFailures,
   killRateGateFailures,
@@ -174,10 +175,17 @@ export async function main(argv = process.argv.slice(2)) {
   const minKillRate = parseRate(argv, '--min-kill-rate', DEFAULT_MIN_KILL_RATE);
   const minHeldoutKillRate = parseRate(argv, '--min-heldout-kill-rate', 0);
   const reportFile = getOptionValue(argv, '--report-file');
-  const controlsIndex = checkControls
-    ? await loadControlsIndex({ controlsDir: path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR) })
-    : null;
+  const controlsDir = path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR);
+  const controlsIndex = checkControls ? await loadControlsIndex({ controlsDir }) : null;
   const targets = await resolveDatasetTargets(argv);
+  const datasetInfos = [];
+  for (const target of targets) {
+    datasetInfos.push(await loadBenchmarkDataset(target));
+  }
+  const coverageFailure = controlsCoverageFailure(datasetInfos, controlsIndex, { controlsDir });
+  if (coverageFailure) {
+    throw new Error(coverageFailure);
+  }
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH });
 
   if (process.env.DB_NAME && !FIXTURES.some((fixture) => fixture.database === process.env.DB_NAME)) {
@@ -225,8 +233,7 @@ export async function main(argv = process.argv.slice(2)) {
       throw new Error(refusal);
     }
 
-    for (const target of targets) {
-      const info = await loadBenchmarkDataset(target);
+    for (const info of datasetInfos) {
       console.log(`\n# ${info.datasetName} (${info.cases.length} cases, fixtures: ${fixtureNames.join(', ')})`);
       const caseResults = [];
       for (const testCase of info.cases) {

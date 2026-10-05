@@ -344,6 +344,28 @@ export function killRateGateFailures(summary, { datasetName, minKillRate, minHel
 }
 
 /**
+ * Why verify-dataset must stop before running when controls were requested
+ * but none apply to any case of the datasets being verified ([{ datasetName,
+ * cases }], normalized cases), or null when some do. Without this a controls
+ * directory that loads but does not cover these datasets (the wrong
+ * directory, or controls written for other cases) would skip every kill-rate
+ * gate and exit 0; --skip-controls is the intentional opt-out.
+ */
+export function controlsCoverageFailure(datasets, controlsIndex, { controlsDir } = {}) {
+  if (!controlsIndex) {
+    return null;
+  }
+  const covered = datasets.some((dataset) => dataset.cases.some((testCase) => resolveCaseControls(testCase, controlsIndex).matchedBy !== null));
+  if (covered) {
+    return null;
+  }
+  return (
+    `No oracle controls${controlsDir ? ` in ${controlsDir}` : ''} apply to ${datasets.map((dataset) => dataset.datasetName).join(', ')}, ` +
+    'so no kill-rate gate would run. Pass --controls-dir <dir> with the controls for these cases, or --skip-controls to verify without measuring the oracle.'
+  );
+}
+
+/**
  * verify-dataset's fixture gate over checkFixtureContent results
  * ([{ name, status, masterDataMatches }]): every fixture must hold exactly the
  * generated content, and its master data must be the shared MASTER_DATA.

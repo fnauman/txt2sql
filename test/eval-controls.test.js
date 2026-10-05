@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { loadBenchmarkDataset } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { goldFingerprint, loadControlsIndex, normalizeSqlText, resolveCaseControls } from '../src/eval/controls.js';
-import { createValidatorProbe, summarizeControls } from '../src/eval/verify.js';
+import { controlsCoverageFailure, createValidatorProbe, summarizeControls } from '../src/eval/verify.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import { writeRowCountPins } from '../scripts/verify-dataset.js';
 
@@ -91,6 +91,39 @@ test('a missing or empty controls directory is an error, never an empty index', 
   });
 });
 
+test('a directory whose JSON defines no controls is an error, never an empty index', async () => {
+  // A file holding `{}`, or entries with empty lists only: no controls at all.
+  for (const files of [{ 'a.json': {} }, { 'a.json': { c1: { negative: [], positive: [] } } }]) {
+    await assert.rejects(loadControlsIndex({ controlsDir: await tempControls(files) }), (error) => {
+      assert.equal(error.code, 'CONTROLS_NOT_FOUND');
+      assert.match(error.message, /defines no controls \(a\.json\)\. .*--skip-controls/);
+      return true;
+    });
+  }
+  // Other JSON (a package.json) is not a controls file.
+  const packageLike = { name: '@text-to-sql/web', private: true, scripts: { build: 'vite build' } };
+  await assert.rejects(loadControlsIndex({ controlsDir: await tempControls({ 'package.json': packageLike }) }), (error) => {
+    assert.equal(error.code, 'CONTROLS_INVALID');
+    assert.match(error.message, /package\.json: name is not a controls entry/);
+    return true;
+  });
+  await assert.rejects(loadControlsIndex({ controlsDir: await tempControls({ 'a.json': { scripts: { build: 'x' } } }) }), /scripts is not a controls entry/);
+  await assert.rejects(loadControlsIndex({ controlsDir: await tempControls({ 'a.json': { c1: { negative: {} } } }) }), /c1 is not a controls entry/);
+});
+
+test('controlsCoverageFailure: controls that apply to none of the verified cases stop the run', async () => {
+  const controlsDir = await tempControls({
+    'core.json': { c1: { intentId: 'count_customers', gold_fingerprint: goldFingerprint(GOLD), negative: [{ id: 'm1', sql: 'SELECT 1' }] } },
+  });
+  const index = await loadControlsIndex({ controlsDir });
+  const covered = { datasetName: 'core', cases: [{ id: 'c1', intentId: 'count_customers', expected_sql: GOLD }] };
+  const other = { datasetName: 'other', cases: [{ id: 'x1', intentId: 'other_intent', expected_sql: 'SELECT 2 AS n' }] };
+  assert.equal(controlsCoverageFailure([covered, other], index, { controlsDir }), null);
+  assert.equal(controlsCoverageFailure([other], null, { controlsDir }), null, '--skip-controls: no index, no gate');
+  const failure = controlsCoverageFailure([other], index, { controlsDir });
+  assert.match(failure, /^No oracle controls in .* apply to other, so no kill-rate gate would run\. .*--skip-controls/);
+});
+
 test('verify-dataset stops on a mistyped --controls-dir before touching any database', async () => {
   // No database settings at all: the run must fail on the controls directory
   // itself (before this fix it went on, and with a database it would have
@@ -109,6 +142,20 @@ test('verify-dataset stops on a mistyped --controls-dir before touching any data
   await assert.rejects(run(await tempControls({})), (error) => {
     assert.equal(error.code, 1);
     assert.match(error.stderr, /has no controls files/);
+    return true;
+  });
+  // A sibling directory that holds JSON but no controls (apps/web has
+  // package.json and tsconfig.json).
+  await assert.rejects(run(path.join(REPO_ROOT, 'apps/web')), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /Dataset verification failed: .*is not a controls entry/);
+    return true;
+  });
+  // Real controls, but for cases outside the dataset being verified.
+  const unrelated = await tempControls({ 'x.json': { not_a_core_case: { negative: [{ id: 'm1', sql: 'SELECT 1' }] } } });
+  await assert.rejects(run(unrelated), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /Dataset verification failed: No oracle controls in .* apply to core-public/);
     return true;
   });
 });

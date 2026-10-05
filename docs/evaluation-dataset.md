@@ -495,9 +495,12 @@ npm run evaluate-retrieval -- --dataset edge-cases-public
 ```
 
 The controls come from `datasets/controls` or `--controls-dir <dir>`. A
-missing directory, or one without any `*.json` controls file, stops the run
-with an error instead of silently skipping the kill-rate gate;
-`--skip-controls` is the explicit way to verify without the controls.
+missing directory, one without any `*.json` controls file, JSON that is not
+controls (an entry without `negative`/`positive` arrays, or no control at
+all), or controls that apply to none of the cases being verified stop the run
+with an error before any database is read, instead of silently skipping the
+kill-rate gate; `--skip-controls` is the explicit way to verify without the
+controls.
 
 The opt-in database tests re-seed the fixture databases and check the master
 data is identical across them (read as the query user), that edited rows are
