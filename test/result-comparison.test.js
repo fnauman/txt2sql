@@ -265,7 +265,7 @@ test('ranked mode ignores numeric-looking code strings when picking the ranking 
   assert.equal(compareResults(gold, [...actual].reverse(), { mode: 'ranked', order: 'desc' }), false);
 });
 
-// (c) column_order: values cannot tell jan from feb; position can.
+// (c) column_order: values cannot tell jan from feb; names or position can.
 test('column_order rejects swapped month columns (edge_public_008 m2)', () => {
   const gold = [
     { CustomerName: 'North District Market', jan_net_amount: 0, feb_net_amount: 700 },
@@ -279,22 +279,85 @@ test('column_order rejects swapped month columns (edge_public_008 m2)', () => {
   }));
   const renamed = gold.map((row) => ({ customer: row.CustomerName, january: row.jan_net_amount, february: row.feb_net_amount }));
   const spec = { mode: 'rowset', compare_columns: ['CustomerName', 'jan_net_amount', 'feb_net_amount'] };
-
-  // Without column_order the swap passes on any data (the old blind spot).
-  assert.equal(compareResults(gold, swapped, spec), true);
-
   const ordered = { ...spec, column_order: ['jan_net_amount', 'feb_net_amount'] };
-  assert.deepEqual(compareResultsDetailed(gold, swapped, ordered), { match: false, assignment: null, reason: 'column_order' });
+
+  // Gold-named columns holding the other month's values fail on their names
+  // alone (name pinning), with or without column_order.
+  assert.deepEqual(compareResultsDetailed(gold, swapped, spec), { match: false, assignment: null, reason: 'values' });
+  assert.deepEqual(compareResultsDetailed(gold, swapped, ordered), { match: false, assignment: null, reason: 'values' });
+
+  // Unrelated names: position decides.
+  const renamedSwapped = gold.map((row) => ({ customer: row.CustomerName, february: row.feb_net_amount, january: row.jan_net_amount }));
+  assert.equal(compareResults(gold, renamedSwapped, spec), true, 'without column_order the positional swap is invisible');
+  assert.deepEqual(compareResultsDetailed(gold, renamedSwapped, ordered), { match: false, assignment: null, reason: 'column_order' });
   assert.equal(compareResults(gold, renamed, ordered), true, 'aliases are still free');
   assert.equal(
     compareResults(gold, renamed.map(({ customer, january, february }) => ({ january, customer, february })), ordered),
     true,
     'unlisted columns may move'
   );
+
+  // A carrier named like its gold column identifies itself, so a correctly
+  // labeled February-first pivot passes...
+  const februaryFirst = gold.map((row) => ({ CustomerName: row.CustomerName, feb_net_amount: row.feb_net_amount, jan_net_amount: row.jan_net_amount }));
+  assert.equal(compareResults(gold, februaryFirst, ordered), true);
+  // ...and a carrier named like the OTHER listed column is rejected.
+  const mislabeled = gold.map((row) => ({ customer: row.CustomerName, total_feb_net_amount: row.jan_net_amount, total_jan_net_amount: row.feb_net_amount }));
+  assert.equal(compareResultsDetailed(gold, mislabeled, ordered).reason, 'column_order');
+  // Known limit: names unlike any listed column in the gold's positions are
+  // judged by position only, so a label-only swap of them still passes.
+  const labelOnlySwap = gold.map((row) => ({ customer: row.CustomerName, february: row.jan_net_amount, january: row.feb_net_amount }));
+  assert.equal(compareResults(gold, labelOnlySwap, ordered), true);
+
   // When the two months carry identical values the order is unobservable, so
   // some order-preserving assignment always exists.
   const tied = [{ CustomerName: 'A', jan_net_amount: 5, feb_net_amount: 5 }];
   assert.equal(compareResults(tied, [{ c: 'A', feb: 5, jan: 5 }], ordered), true);
+});
+
+test('name pinning: a gold-named prediction column must carry that gold column', () => {
+  const gold = [
+    { CustomerName: 'A', total_net_amount: 100 },
+    { CustomerName: 'B', total_net_amount: 60 },
+  ];
+  const spec = { mode: 'ranked', value_columns: ['total_net_amount'] };
+  // H07: the gold-named column holds NetPayable, the real net sits in an extra column.
+  const hedge = [
+    { CustomerName: 'A', total_net_amount: 112.5, net_amount_excl_fees: 100 },
+    { CustomerName: 'B', total_net_amount: 72.5, net_amount_excl_fees: 60 },
+  ];
+  assert.deepEqual(compareResultsDetailed(gold, hedge, spec), { match: false, assignment: null, reason: 'values' });
+  // The same numbers under names that are not the gold's still pass (aliases are free).
+  const aliased = hedge.map((row) => ({ customer: row.CustomerName, net_payable: row.total_net_amount, revenue: row.net_amount_excl_fees }));
+  assert.deepEqual(compareResultsDetailed(gold, aliased, spec).assignment, { CustomerName: 'customer', total_net_amount: 'revenue' });
+  // Case and punctuation do not matter for the pin.
+  assert.equal(compareResults(gold, hedge.map((row) => ({ customer: row.CustomerName, TotalNetAmount: row.total_net_amount, x: row.net_amount_excl_fees })), spec), false);
+  // A pinned column carries no other gold column: swapped labels fail.
+  const twoMetrics = [{ AccountCode: '1100', total_debit: 10, total_credit: 3 }];
+  assert.equal(compareResults(twoMetrics, [{ AccountCode: '1100', total_debit: 3, total_credit: 10 }], { mode: 'rowset' }), false);
+  assert.equal(compareResults(twoMetrics, [{ AccountCode: '1100', debit: 10, credit: 3 }], { mode: 'rowset' }), true);
+  // Two prediction columns with the same normalized name: no pin.
+  assert.equal(compareResults([{ total: 5 }], [{ Total: 4, total_: 5 }], { mode: 'rowset' }), true);
+});
+
+test('null_as_zero reads NULL as 0 in the listed columns only', () => {
+  const gold = [
+    { CustomerName: 'A', jan_net_amount: 0, feb_net_amount: 700 },
+    { CustomerName: 'B', jan_net_amount: 450, feb_net_amount: 0 },
+  ];
+  // SUM(CASE WHEN ... THEN NetAmount END) without ELSE 0: NULL for a month with no sales.
+  const withNulls = [
+    { CustomerName: 'A', jan_net_amount: null, feb_net_amount: 700 },
+    { CustomerName: 'B', jan_net_amount: 450, feb_net_amount: null },
+  ];
+  const spec = { mode: 'rowset', compare_columns: ['CustomerName', 'jan_net_amount', 'feb_net_amount'], column_order: ['jan_net_amount', 'feb_net_amount'] };
+  assert.equal(compareResults(gold, withNulls, spec), false, 'NULL is not 0 by default');
+  const lenient = { ...spec, null_as_zero: ['jan_net_amount', 'feb_net_amount'] };
+  assert.equal(compareResults(gold, withNulls, lenient), true);
+  assert.equal(compareResults(withNulls, gold, lenient), true, 'either side may hold the NULL');
+  // A wrong value is still wrong, and unlisted columns keep NULL != 0.
+  assert.equal(compareResults(gold, withNulls.map((row) => ({ ...row, feb_net_amount: row.feb_net_amount && row.feb_net_amount + 1 })), lenient), false);
+  assert.equal(compareResults([{ name: null, v: 1 }], [{ name: 0, v: 1 }], { mode: 'rowset', null_as_zero: ['v'] }), false);
 });
 
 // (d) tolerance: rounding placement legitimately differs on sub-cent lines.
@@ -331,10 +394,28 @@ test('scalar: a multi-column prediction passes only through its only column, onl
   assert.deepEqual(compareResultsDetailed(gold, [{ product_count: 4, feb_products: 1 }], spec), {
     match: false,
     assignment: null,
+    reason: 'values',
+  });
+  assert.deepEqual(compareResultsDetailed(gold, [{ products: 4, feb_products: 1 }], spec), {
+    match: false,
+    assignment: null,
     reason: 'scalar_column',
   });
   assert.equal(compareResults([{ active_customer_count: 5 }], [{ active_customer_count: 6, with_sales: 5 }], spec), false);
   assert.equal(compareResults([{ document_count: 3 }], [{ document_count: 4, canceled_docs: 1, without_postings_lines: 3 }], spec), false);
+
+  // The column named exactly like the gold is the only one that may carry it,
+  // even when a longer name containing the gold name holds the gold value.
+  assert.equal(compareResults([{ active_customer_count: 1 }], [{ active_customer_count: 7, inactive_customer_count: 1 }], spec), false);
+  assert.equal(compareResults(gold, [{ product_count: 4, feb_product_count: 1 }], spec), false);
+  assert.equal(compareResults([{ document_count: 3 }], [{ document_count: 4, canceled_document_count: 3 }], spec), false);
+  assert.equal(compareResults([{ document_count: 3 }], [{ document_count: 4, non_canceled_document_count: 3 }], spec), false);
+  // Word boundaries and negations: inactive_* is not active_*, non_canceled_* is not canceled_*.
+  assert.equal(compareResults([{ active_customer_count: 2 }], [{ customer_count: 8, inactive_customer_count: 2 }], spec), false);
+  assert.equal(compareResults([{ canceled_count: 2 }], [{ total: 9, non_canceled_count: 2 }], spec), false);
+  // The like-named column must be the only one (a hedge with two readings fails either way).
+  assert.equal(compareResults([{ document_count: 3 }], [{ posted_document_count: 3, dated_document_count: 5 }], spec), false);
+  assert.equal(compareResults([{ document_count: 3 }], [{ posted_document_count: 5, dated_document_count: 3 }], spec), false);
 
   // Only column / only numeric column / named like the gold.
   assert.equal(compareResults(gold, [{ n: 1 }], spec), true);
@@ -342,13 +423,23 @@ test('scalar: a multi-column prediction passes only through its only column, onl
   assert.equal(compareResults(gold, [{ total_products: 12, product_count: 1 }], spec), true);
   assert.equal(compareResults(gold, [{ products: 12, feb_only_product_count: 1 }], spec), true);
   assert.equal(compareResults(gold, [{ products: 12, ProductCount: 1 }], spec), true);
+  assert.equal(compareResults([{ document_count: 3 }], [{ posted_document_count: 3, net_amount: 120.5 }], spec), true);
+  assert.equal(compareResults([{ document_count: 3 }], [{ document_count: 3, net_amount: 120.5 }], spec), true);
   // A text label does not make a second number acceptable.
   assert.equal(compareResults(gold, [{ label: 'x', all_products: 12, feb_products: 1 }], spec), false);
+  // Known false negative: a correct answer plus an unrelated numeric column.
+  assert.equal(compareResults([{ total_net_amount: 1400 }], [{ urban_refresh_net_sales: 1400, line_count: 3 }], spec), false);
 
   assert.equal(isColumnNamedLike('document_count', 'posted_document_count'), true);
   assert.equal(isColumnNamedLike('document_count', 'DocumentCount'), true);
+  assert.equal(isColumnNamedLike('document_count', 'postedDocumentCount'), true);
+  assert.equal(isColumnNamedLike('document_count', 'non_canceled_document_count'), true);
   assert.equal(isColumnNamedLike('product_count', 'feb_products'), false);
   assert.equal(isColumnNamedLike('document_count', 'count'), false);
+  assert.equal(isColumnNamedLike('active_customer_count', 'inactive_customer_count'), false);
+  assert.equal(isColumnNamedLike('canceled_count', 'non_canceled_count'), false);
+  assert.equal(isColumnNamedLike('canceled_count', 'not_canceled_count'), false);
+  assert.equal(isColumnNamedLike('feb_net_amount', 'total_feb_net_amount'), true);
 });
 
 test('scalar rule only applies to a single gold value', () => {

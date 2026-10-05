@@ -616,6 +616,7 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //     tolerance: number                        // absolute numeric tolerance
 //     column_order: [..gold column names]      // these must keep their relative
 //                                              // SELECT-list order in the prediction
+//     null_as_zero: [..gold column names]      // NULL counts as 0 in these columns
 //   }
 //
 // Cells are compared by kind:
@@ -636,17 +637,34 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
 //   model's may not). The default ranking column is the first truly numeric
 //   gold column (JS numbers, not numeric-looking code strings like '4000').
-// - column_order: an assignment that maps these gold columns to prediction
-//   columns in a different relative order is rejected. Values alone cannot
-//   tell `jan_net_amount` from `feb_net_amount`; their position can.
+// - name pinning: when exactly one prediction column has a gold column's name
+//   (ignoring case and punctuation), only that column may carry that gold
+//   column, and it carries no other. Names are otherwise ignored, but a column
+//   the model labeled like the gold must hold the gold's values: a wrong
+//   `total_net_amount` cannot pass because an extra `net_amount_excl_fees`
+//   happens to hold the right numbers.
+// - column_order: values alone cannot tell `jan_net_amount` from
+//   `feb_net_amount`. For the listed gold columns, a carrier named like its
+//   gold column (see isColumnNamedLike) identifies itself; the other carriers
+//   must keep the gold's relative SELECT-list order, and none may be named
+//   like a different listed gold column. Limit: carriers named unlike any
+//   listed column (`january`, `february`) are judged by position only, so a
+//   label-only swap of such names in the right positions still passes.
+// - null_as_zero: in the listed gold columns NULL counts as 0 on both sides
+//   (a conditional SUM without ELSE 0 returns NULL for a month with no sales).
 // - scalar rule: when the gold is a single value (one row, one compared
 //   column) and the prediction has several columns, the column carrying the
-//   gold value must be the prediction's only column, its only column of the
-//   gold value's kind (only numeric column for a number), or be named like the
-//   gold column (same name ignoring case and punctuation, or a longer name that
-//   contains it, e.g. `posted_document_count` for `document_count`). A
-//   correct-looking incidental extra column can then not carry a wrong
-//   headline number (`{product_count: 4, feb_products: 1}` vs gold 1 fails).
+//   gold value must be the one named exactly like the gold column when there
+//   is one; otherwise the prediction's only column of the gold value's kind
+//   (only numeric column for a number), or the only column named like the
+//   gold column (a longer name containing its words, e.g.
+//   `posted_document_count` for `document_count`, but not
+//   `inactive_customer_count` for `active_customer_count` or
+//   `non_canceled_count` for `canceled_count`). A correct-looking incidental
+//   extra column can then not carry a wrong headline number
+//   (`{product_count: 4, feb_product_count: 1}` vs gold 1 fails). Known false
+//   negative: a correct answer plus one more numeric column under an unrelated
+//   alias (`{urban_refresh_net_sales: 1400, line_count: 3}`) fails.
 
 const DEFAULT_DECIMALS = 2;
 // Upper bound on enumerated column assignments (and on the permutations tried
@@ -761,8 +779,11 @@ function cellsEqual(gold, actual, tolerance) {
   return gold.key === actual.key;
 }
 
-function describeColumn(rows, column, decimals) {
-  return rows.map((row) => describeCell(row?.[column], decimals));
+function describeColumn(rows, column, decimals, { nullAsZero = false } = {}) {
+  return rows.map((row) => {
+    const value = row?.[column];
+    return describeCell(nullAsZero && (value === null || value === undefined) ? 0 : value, decimals);
+  });
 }
 
 function sortedKeys(cells, kind) {
@@ -876,22 +897,73 @@ function normalizedColumnName(name) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
-export function isColumnNamedLike(goldColumn, actualColumn) {
+/** Same column name ignoring case and punctuation (`Total_Net` = `totalnet`). */
+export function isSameColumnName(goldColumn, actualColumn) {
   const gold = normalizedColumnName(goldColumn);
-  const actual = normalizedColumnName(actualColumn);
-  return Boolean(gold) && (actual === gold || actual.includes(gold));
+  return Boolean(gold) && gold === normalizedColumnName(actualColumn);
 }
 
+// Words of a column name: split at punctuation, camelCase and letter/digit
+// boundaries, lowercased (`postedDocumentCount` -> posted, document, count).
+function columnNameWords(name) {
+  return String(name || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([A-Za-z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([A-Za-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// A word right before the gold name that negates it: `non_canceled_count` is
+// not a `canceled_count`.
+const NEGATING_NAME_WORDS = new Set(['non', 'not', 'no', 'un', 'without', 'excluding', 'excl', 'except']);
+
+/**
+ * The prediction column is named like the gold column: the same name ignoring
+ * case and punctuation, or a longer name that contains the gold name's words
+ * as a whole run (`posted_document_count` for `document_count`) not directly
+ * preceded by a negation (`non_canceled_count` is not `canceled_count`).
+ * Word boundaries matter: `inactive_customer_count` is not named like
+ * `active_customer_count`.
+ */
+export function isColumnNamedLike(goldColumn, actualColumn) {
+  if (isSameColumnName(goldColumn, actualColumn)) {
+    return true;
+  }
+  const gold = columnNameWords(goldColumn);
+  const actual = columnNameWords(actualColumn);
+  if (gold.length === 0 || actual.length <= gold.length) {
+    return false;
+  }
+  for (let start = 0; start + gold.length <= actual.length; start += 1) {
+    if (gold.every((word, offset) => actual[start + offset] === word) && !NEGATING_NAME_WORDS.has(actual[start - 1])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Scalar rule (see the comparison spec above). A column with the gold
+// column's exact name is the only one allowed to carry the value; otherwise
+// the carrier must be the only column, the only column of the value's kind,
+// or the only column named like the gold column.
 function scalarRuleHolds(goldColumn, actualColumn, actualRow, actualColumns) {
   if (actualColumns.length === 1) {
     return true;
+  }
+  const exact = actualColumns.filter((column) => isSameColumnName(goldColumn, column));
+  if (exact.length > 0) {
+    return exact.includes(actualColumn);
   }
   const kind = valueKind(actualRow?.[actualColumn]);
   const sameKind = actualColumns.filter((column) => valueKind(actualRow?.[column]) === kind);
   if (sameKind.length === 1) {
     return true;
   }
-  return isColumnNamedLike(goldColumn, actualColumn);
+  const named = actualColumns.filter((column) => isColumnNamedLike(goldColumn, column));
+  return named.length === 1 && named[0] === actualColumn;
 }
 
 function rankValueOf(value) {
@@ -930,14 +1002,24 @@ function rankingHolds(actualRows, primaryActualColumn, order, tolerance) {
   return true;
 }
 
+// column_order (see the comparison spec above): a listed gold column must not
+// be carried by a column named like ANOTHER listed gold column, and the listed
+// columns whose carrier is not named like them must keep the gold's relative
+// SELECT-list order. A carrier named like its gold column identifies itself,
+// so its position does not matter.
 function columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns) {
+  const listed = columnOrder
+    .map((goldColumn) => ({ goldColumn, carrier: assignment[goldColumns.indexOf(goldColumn)] }))
+    .filter((entry) => goldColumns.includes(entry.goldColumn));
   let previousPosition = -1;
-  for (const goldColumn of columnOrder) {
-    const goldIndex = goldColumns.indexOf(goldColumn);
-    if (goldIndex === -1) {
+  for (const { goldColumn, carrier } of listed) {
+    if (isColumnNamedLike(goldColumn, carrier)) {
       continue;
     }
-    const position = actualColumns.indexOf(assignment[goldIndex]);
+    if (listed.some((other) => other.goldColumn !== goldColumn && isColumnNamedLike(other.goldColumn, carrier))) {
+      return false;
+    }
+    const position = actualColumns.indexOf(carrier);
     if (position <= previousPosition) {
       return false;
     }
@@ -1013,10 +1095,18 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
   const mode = comparison.mode || 'rowset';
   const order = String(comparison.order || 'desc').toLowerCase();
   const columnOrder = Array.isArray(comparison.column_order) ? comparison.column_order : [];
+  const nullAsZero = new Set(Array.isArray(comparison.null_as_zero) ? comparison.null_as_zero : []);
   const scalarSingleValue = mode === 'scalar' && expected.length === 1 && goldColumns.length === 1;
 
-  const goldCells = goldColumns.map((column) => describeColumn(expected, column, decimals));
+  const goldCells = goldColumns.map((column) => describeColumn(expected, column, decimals, { nullAsZero: nullAsZero.has(column) }));
   const actualCells = new Map(actualColumns.map((column) => [column, describeColumn(actual, column, decimals)]));
+  const actualCellsNullAsZero = new Map(
+    nullAsZero.size > 0 ? actualColumns.map((column) => [column, describeColumn(actual, column, decimals, { nullAsZero: true })]) : []
+  );
+  // Prediction cells as seen by gold column `goldIndex` (NULL read as 0 when
+  // that gold column is listed in null_as_zero).
+  const cellsFor = (goldIndex, column) =>
+    (nullAsZero.has(goldColumns[goldIndex]) ? actualCellsNullAsZero : actualCells).get(column);
   const goldTuples = expected.map((_row, rowIndex) => goldCells.map((cells) => cells[rowIndex]));
 
   const valueColumns =
@@ -1025,8 +1115,20 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
       : goldColumns.filter((column) => isTrulyNumericColumn(expected, column));
   const primaryValueIndex = valueColumns.length > 0 ? goldColumns.indexOf(valueColumns[0]) : -1;
 
-  const candidates = goldCells.map((cells) =>
-    actualColumns.filter((column) => columnsCompatible(cells, actualCells.get(column), tolerance))
+  // Name pinning: a gold column whose exact name (ignoring case and
+  // punctuation) appears on exactly one prediction column may only be carried
+  // by that column, and that column carries no other gold column. A wrong
+  // headline column can then not pass on the strength of an incidental extra
+  // column that happens to hold the gold values.
+  const pinned = goldColumns.map((goldColumn) => {
+    const sameName = actualColumns.filter((column) => isSameColumnName(goldColumn, column));
+    return sameName.length === 1 ? sameName[0] : null;
+  });
+  const pinnedColumns = new Set(pinned.filter(Boolean));
+  const candidates = goldCells.map((cells, goldIndex) =>
+    (pinned[goldIndex] ? [pinned[goldIndex]] : actualColumns.filter((column) => !pinnedColumns.has(column))).filter((column) =>
+      columnsCompatible(cells, cellsFor(goldIndex, column), tolerance)
+    )
   );
 
   const assignments = [];
@@ -1037,7 +1139,7 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
   const current = [];
 
   const accept = (assignment) => {
-    const actualTuples = actual.map((_row, rowIndex) => assignment.map((column) => actualCells.get(column)[rowIndex]));
+    const actualTuples = actual.map((_row, rowIndex) => assignment.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex]));
     if (!matchRowsUnordered(goldTuples, actualTuples, tolerance)) {
       return;
     }
@@ -1137,6 +1239,7 @@ function normalizeComparison(comparison) {
   const compareColumns = uniqueStrings(comparison.compare_columns);
   const valueColumns = uniqueStrings(comparison.value_columns);
   const columnOrder = uniqueStrings(comparison.column_order);
+  const nullAsZero = uniqueStrings(comparison.null_as_zero);
   if (compareColumns.length > 0) {
     normalized.compare_columns = compareColumns;
   }
@@ -1145,6 +1248,9 @@ function normalizeComparison(comparison) {
   }
   if (columnOrder.length > 0) {
     normalized.column_order = columnOrder;
+  }
+  if (nullAsZero.length > 0) {
+    normalized.null_as_zero = nullAsZero;
   }
   return normalized;
 }
