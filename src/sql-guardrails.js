@@ -1867,57 +1867,75 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
       return [...owners.values()];
     };
     // A joined child whose whole primary key is pinned to constants or to the
-    // parent's columns (`LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId =
-    // d.SalesDocumentId AND l.SalesDocumentLineId = 1`), or a derived child
-    // that is unique on its pinned columns, has at most one row per parent
-    // row, so it cannot repeat the parent's values.
+    // columns of the parent row being summed (`LEFT JOIN SalesDocumentLine l
+    // ON l.SalesDocumentId = d.SalesDocumentId AND l.SalesDocumentLineId = 1`),
+    // or a derived child that is unique on its pinned columns, has at most one
+    // row per parent row, so it cannot repeat the parent's values. Equalities
+    // chain: `amt.SalesDocumentId = qty.SalesDocumentId` pins amt when qty's
+    // key is equated to the parent's. A column equated to another instance of
+    // the parent's table (one joined through the child, say) is not pinned.
     let restrictingEqualities;
-    const pinnedColumns = (entry, parentTable) => {
-      if (!restrictingEqualities) {
-        restrictingEqualities = collectRestrictingEqualities(walker, block, analysis, entries);
+    const resolveOperand = (operand) => {
+      if (operand.constant) {
+        return operand;
       }
-      const resolve = (operand) => {
-        if (operand.constant) {
-          return operand;
+      if (operand.qualifier) {
+        const owner = qualifierEntries.get(operand.qualifier);
+        const columnName =
+          owner && (owner.viaDerived ? findDerivedColumnName(owner.relation, operand.column) : findColumnName(knownTables, owner.tableName, operand.column));
+        return columnName ? { entry: owner, columnName } : null;
+      }
+      const owners = unqualifiedOwners(operand.column);
+      return owners.length === 1 ? owners[0] : null;
+    };
+    const pinnedColumns = (entry, parentEntry) => {
+      if (!restrictingEqualities) {
+        restrictingEqualities = collectRestrictingEqualities(walker, block, analysis, entries).map(({ pair, appliesTo }) => ({
+          sides: pair.map(resolveOperand),
+          appliesTo,
+        }));
+      }
+      // Equivalence classes of the equalities that hold for every row of
+      // `entry` (WHERE, inner joins, and its own LEFT JOIN condition).
+      const links = new Map();
+      const find = (node) => {
+        let current = node;
+        while (links.has(current) && links.get(current) !== current) {
+          current = links.get(current);
         }
-        if (operand.qualifier) {
-          const owner = qualifierEntries.get(operand.qualifier);
-          const columnName =
-            owner && (owner.viaDerived ? findDerivedColumnName(owner.relation, operand.column) : findColumnName(knownTables, owner.tableName, operand.column));
-          return columnName ? { entry: owner, columnName } : null;
-        }
-        const owners = unqualifiedOwners(operand.column);
-        return owners.length === 1 ? owners[0] : null;
+        return current;
       };
-      const pinned = new Set();
-      for (const { pair, appliesTo } of restrictingEqualities) {
-        if (appliesTo && appliesTo !== entry) {
+      const nodeOf = (side) => (side.constant ? 'constant' : `${entries.indexOf(side.entry)}:${side.columnName.toLowerCase()}`);
+      const anchors = ['constant'];
+      const candidates = [];
+      for (const { sides, appliesTo } of restrictingEqualities) {
+        if ((appliesTo && appliesTo !== entry) || !sides[0] || !sides[1]) {
           continue;
         }
-        const [left, right] = pair.map(resolve);
-        for (const [side, other] of [
-          [left, right],
-          [right, left],
-        ]) {
-          if (side?.entry === entry && other && (other.constant || (other.entry !== entry && other.entry.tableName === parentTable))) {
-            pinned.add(side.columnName);
+        links.set(find(nodeOf(sides[0])), find(nodeOf(sides[1])));
+        for (const side of sides) {
+          if (side.entry === parentEntry) {
+            anchors.push(nodeOf(side));
+          } else if (side.entry === entry) {
+            candidates.push(side);
           }
         }
       }
-      return pinned;
+      const anchored = new Set(anchors.map(find));
+      return new Set(candidates.filter((side) => anchored.has(find(nodeOf(side)))).map((side) => side.columnName));
     };
-    const restrictedToOneRow = (entry, parentTable) => {
+    const restrictedToOneRow = (entry, parentEntry) => {
       if (entry.viaDerived) {
-        return isDerivedUniqueOn(entry.relation, pinnedColumns(entry, parentTable));
+        return isDerivedUniqueOn(entry.relation, pinnedColumns(entry, parentEntry));
       }
       const keyColumns = primaryKeyColumnsOf(columnMetadata, entry.tableName);
-      const pinned = keyColumns.length > 0 ? pinnedColumns(entry, parentTable) : null;
+      const pinned = keyColumns.length > 0 ? pinnedColumns(entry, parentEntry) : null;
       return Boolean(pinned) && keyColumns.every((columnName) => pinned.has(columnName));
     };
     // Edges from `tableName` to a child joined here by an entry other than
-    // `owner` (a derived table that reads both a parent and its child does not
-    // repeat its own rows).
-    const childEdgesOf = (tableName, owner = null) =>
+    // `owner`, the entry whose value is summed (a derived table that reads both
+    // a parent and its child does not repeat its own rows).
+    const childEdgesOf = (tableName, owner) =>
       edges.filter(
         (edge) =>
           edge.parentTable === tableName &&
@@ -1927,7 +1945,7 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
               entry !== owner &&
               entry.childTables.has(edge.childTable) &&
               !antiJoined.has(entry) &&
-              !restrictedToOneRow(entry, tableName)
+              !restrictedToOneRow(entry, owner)
           )
       );
 

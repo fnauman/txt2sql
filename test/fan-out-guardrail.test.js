@@ -400,6 +400,35 @@ test('a relation that filters, renames or re-projects a unique CTE or derived ta
   }
 });
 
+test('join keys pin a child through chained equalities, but only to the parent row being summed', () => {
+  const CUSTOMER_QUESTION = 'Show the top customers by total net sales amount in March 2026.';
+  const AMT = 'amt AS (SELECT SalesDocumentId, SUM(NetAmount) AS a FROM SalesDocumentLine GROUP BY SalesDocumentId)';
+  // amt is joined on qty's key, which is equated to the document's: correct
+  // per-customer totals on the seeded demo DB (customer 1: 1700).
+  for (const [question, sql] of [
+    [
+      CUSTOMER_QUESTION,
+      `WITH qty AS (SELECT SalesDocumentId, SUM(Quantity) AS q FROM SalesDocumentLine GROUP BY SalesDocumentId), ${AMT} SELECT d.CustomerId, SUM(d.NetAmount) AS net, SUM(qty.q) AS q, SUM(amt.a) AS a FROM SalesDocument d JOIN qty ON qty.SalesDocumentId = d.SalesDocumentId JOIN amt ON amt.SalesDocumentId = qty.SalesDocumentId GROUP BY d.CustomerId`,
+    ],
+    [
+      LINES_QUESTION,
+      `WITH ${AMT} SELECT SUM(d.NetAmount) AS n FROM SalesDocument d, amt, SalesDocument d2 WHERE amt.SalesDocumentId = d2.SalesDocumentId AND d2.SalesDocumentId = d.SalesDocumentId`,
+    ],
+  ]) {
+    assert.doesNotThrow(() => validateFor(question, sql), sql);
+  }
+
+  // Pinned to another SalesDocument row, not the one summed: 10500 and 5600
+  // (document 1 counted twice) instead of 5500.
+  for (const sql of [
+    `WITH ${AMT} SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN SalesDocument d2 ON d2.CustomerId = d.CustomerId JOIN amt ON amt.SalesDocumentId = d2.SalesDocumentId`,
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} JOIN SalesDocument d2 ON SalesDocumentLineId = d2.SalesDocumentId`,
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} JOIN SalesDocument d2 ON l.SalesDocumentLineId = (d2.SalesDocumentId)`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+});
+
 test('a UNION (DISTINCT) child is unique on its output columns; UNION ALL is not', () => {
   const HEADER = 'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d';
   const ON = 'x ON x.SalesDocumentId = d.SalesDocumentId';
