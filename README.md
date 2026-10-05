@@ -203,7 +203,7 @@ That gives you:
 
 Notes:
 
-- `docker compose up` fails with "Set DB_PASSWORD or DB_READONLY_PASSWORD ..." when neither is set: the init script could not create the query user.
+- `docker compose up` fails with "required variable DB_PASSWORD is missing a value" when neither `DB_PASSWORD` nor `DB_READONLY_PASSWORD` is set: the init script could not create the query user.
 - Changing the passwords in `.env` later does not change them in an existing volume; `docker compose down -v` resets it (and deletes the data).
 - `npm run bootstrap-db` creates an empty schema only. Run `npm run seed-demo` to load the bundled synthetic demo data, or supply your own seed data, for useful query results.
 - If the database already exists and you want to rebuild the tables, run `npm run bootstrap-db -- --drop-existing`.
