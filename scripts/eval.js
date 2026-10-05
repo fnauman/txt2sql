@@ -37,7 +37,7 @@ import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR } from 
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
-import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
+import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
@@ -45,7 +45,7 @@ import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdow
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite } from '../src/eval/runner.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
-import { describeFilters, filterSuiteEntries, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
+import { describeFilters, filterSuiteEntries, parseList, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { calculateCost } from '../src/pricing.js';
@@ -97,7 +97,9 @@ Compare and gate:
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X
-  --write-baseline            also save report.json as eval/baselines/<model>.json
+  --write-baseline            also save report.json as eval/baselines/<model>.json (only from a clean
+                              run of the whole default suite on every fixture)
+  --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset)
 No LLM calls:
   --rescore <report.json>     re-validate, re-execute and re-score a recorded report
   --offline                   preflight + fixtures + verify, then rescore the default baseline if present
@@ -142,6 +144,7 @@ const VALUE_FLAGS = new Set([
   '--min-heldout-kill-rate',
   '--compare',
   '--min-accuracy',
+  '--baseline-file',
   '--rescore',
   '--output-dir',
   '--results-file',
@@ -305,6 +308,7 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     gate,
     minAccuracy,
     writeBaseline: hasOptionFlag(argv, '--write-baseline'),
+    baselineFile: getOptionValue(argv, '--baseline-file') ? path.resolve(getOptionValue(argv, '--baseline-file')) : null,
     rescore: rescore ? path.resolve(rescore) : null,
     offline,
     outputDir: path.resolve(getOptionValue(argv, '--output-dir') || DEFAULT_RUNS_DIR),
@@ -318,7 +322,61 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   if (options.writeBaseline && (options.rescore || options.offline)) {
     throw usageError('--write-baseline only applies to a live run.');
   }
+  if (options.baselineFile && !options.writeBaseline) {
+    throw usageError('--baseline-file only applies with --write-baseline.');
+  }
+  if (writesDefaultBaseline(options)) {
+    // The committed baseline is what later runs pair with: a subset would
+    // hide regressions in every case it leaves out.
+    const subset = [
+      describeFilters({ split: options.split, caseIds: options.caseIds, tags: options.tags, intents: options.intents }),
+      options.fixtureNames && resolveFixtures(options.fixtureNames).length < FIXTURES.length ? `fixtures=${options.fixtureNames}` : '',
+    ].filter(Boolean);
+    if (subset.length > 0) {
+      throw usageError(
+        `--write-baseline would replace ${repoRelative(defaultBaselinePath(options.model))} with a subset run (${subset.join('; ')}); ` +
+          'the default baseline covers the whole default suite on every fixture. Drop the filters, or pass --baseline-file <path> to save this subset elsewhere.'
+      );
+    }
+  }
   return options;
+}
+
+/** Whether --write-baseline targets the default baseline eval/baselines/<model>.json. */
+export function writesDefaultBaseline(options) {
+  return Boolean(options.writeBaseline) && (!options.baselineFile || path.resolve(options.baselineFile) === defaultBaselinePath(options.model));
+}
+
+/**
+ * Why the selected suite must not become the default baseline (null when it
+ * may): filters, or a case set (ids, and the question and scoring of each)
+ * that is not exactly the default suite's (`defaultSelection`, every dataset
+ * of datasets/), e.g. --dataset core-public, --dataset-file or another
+ * --datasets-dir.
+ */
+export function baselineSuiteRefusal(selection, defaultSelection) {
+  const filters = describeFilters(selection.filters || {});
+  if (filters) {
+    return `the run uses filters ${filters}`;
+  }
+  const identity = (testCase) => `${String(testCase.question || '').trim().toLowerCase()}\u0000${scoringFingerprint(testCase)}`;
+  const mine = new Map(selection.entries.map((entry) => [entry.testCase.id, identity(entry.testCase)]));
+  const full = new Map(defaultSelection.entries.map((entry) => [entry.testCase.id, identity(entry.testCase)]));
+  const list = (ids) => (ids.length > 10 ? `${ids.slice(0, 10).join(', ')}, and ${ids.length - 10} more` : ids.join(', '));
+  const missing = [...full.keys()].filter((id) => !mine.has(id));
+  const extra = [...mine.keys()].filter((id) => !full.has(id));
+  const changed = [...mine.keys()].filter((id) => full.has(id) && full.get(id) !== mine.get(id));
+  const problems = [];
+  if (missing.length > 0) {
+    problems.push(`the run selects ${full.size - missing.length} of the default suite's ${full.size} case(s) (missing: ${list(missing)})`);
+  }
+  if (extra.length > 0) {
+    problems.push(`the run has cases that are not in the default suite (${list(extra)})`);
+  }
+  if (changed.length > 0) {
+    problems.push(`the run has cases scored differently from the default suite (${list(changed)})`);
+  }
+  return problems.length > 0 ? problems.join('; ') : null;
 }
 
 /**
@@ -799,15 +857,15 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       ? { code: 130, reasons: [`interrupted by ${stop.interruptedBy}; ${run.stopped ? 'the report is partial' : 'the run had finished, the report is complete'}`] }
       : computeExitCode(report, options);
     if (options.writeBaseline) {
-      const target = defaultBaselinePath(model);
+      const target = options.baselineFile || defaultBaselinePath(model);
       const refusal = baselineRefusal(report, exit);
       if (refusal) {
         cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
       } else {
         await writeJsonFile(target, report);
         cli.log(`Baseline written: ${target}`);
-        if (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length) {
-          cli.log('  note: this run used a subset of the default suite; a committed baseline should cover the whole suite.');
+        if (!writesDefaultBaseline(options) && (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length)) {
+          cli.log('  note: this run used a subset of the default suite; compare with it explicitly (--compare), it is not the default baseline.');
         }
         if (report.provenance?.git?.dirty) {
           cli.log('  note: the working tree is dirty; commit first so the baseline records a reproducible git sha.');
@@ -1004,6 +1062,19 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       `(${selection.totalCaseCount} in ${selection.datasets.map((dataset) => dataset.name).join(', ')}; ${selection.duplicates.length} duplicate(s) dropped)` +
       (filters ? `; filters ${filters}` : '')
   );
+  if (writesDefaultBaseline(options)) {
+    // Checked before any verification or spend: the default baseline is
+    // replaced only by a run of the whole default suite.
+    const defaultSelection = await selectSuite({ datasetsDir: DEFAULT_DATASETS_DIR });
+    const refusal = baselineSuiteRefusal(selection, defaultSelection);
+    if (refusal) {
+      throw new HarnessError(
+        `--write-baseline refused before the run: ${refusal}. ${repoRelative(defaultBaselinePath(options.model))} would no longer cover the default suite; ` +
+          'run without --dataset/--dataset-file/--datasets-dir, or pass --baseline-file <path> to save this subset elsewhere.',
+        { code: 'BASELINE_SUBSET' }
+      );
+    }
+  }
 
   const connections = await openFixtureConnections({ fixtures, env });
   try {

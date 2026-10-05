@@ -4,7 +4,17 @@ import test from 'node:test';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { adminCredentialsHint, composeEnvProblems, ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { verifySuite } from '../src/eval/verify.js';
-import { baselineRefusal, computeExitCode, createRunStopper, defaultBaselinePath, describeRunnerFlags, parseEvalArgs, runEval, verificationRefusal } from '../scripts/eval.js';
+import {
+  baselineRefusal,
+  baselineSuiteRefusal,
+  computeExitCode,
+  createRunStopper,
+  defaultBaselinePath,
+  describeRunnerFlags,
+  parseEvalArgs,
+  runEval,
+  verificationRefusal,
+} from '../scripts/eval.js';
 
 test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline', () => {
   const options = parseEvalArgs([], { env: {} });
@@ -370,6 +380,45 @@ test('--write-baseline only replaces the baseline with a clean, complete run', (
   assert.match(baselineRefusal(report, { code: 2, reasons: ['9 repetition(s): LLM provider outage errors (llm_outage)'] }), /exited 2 \(9 repetition/);
   assert.match(baselineRefusal(report, { code: 1, reasons: ['significantly worse'] }), /exited 1/);
   assert.match(baselineRefusal({ budget: { skippedCases: ['a', 'b'] } }, { code: 0, reasons: [] }), /2 case\(s\) were skipped by the budget/);
+});
+
+test('--write-baseline never replaces the default baseline with a filtered or partial suite', () => {
+  const messageOf = (argv) => {
+    try {
+      parseEvalArgs(argv, { env: {} });
+    } catch (error) {
+      assert.equal(error.exitCode, 2);
+      return error.message;
+    }
+    return null;
+  };
+  // Filters and a fixture subset are refused before anything runs...
+  for (const argv of [
+    ['--case-id', 'core_public_001'],
+    ['--tag', 'count'],
+    ['--intent', 'active_customers'],
+    ['--split', 'holdout'],
+    ['--fixtures', 'seed'],
+  ]) {
+    assert.match(messageOf(['--write-baseline', ...argv]), /--write-baseline would replace eval\/baselines\/gpt-4o-mini\.json with a subset run .*--baseline-file <path>/, argv.join(' '));
+  }
+  // ...unless the subset baseline goes to a file of its own.
+  const subset = parseEvalArgs(['--write-baseline', '--case-id', 'core_public_001', '--baseline-file', 'eval/baselines/subset.json'], { env: {} });
+  assert.match(subset.baselineFile, /eval\/baselines\/subset\.json$/);
+  // Naming the default file explicitly is the default file.
+  assert.match(messageOf(['--write-baseline', '--tag', 'count', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']), /would replace eval\/baselines\/gpt-4o-mini\.json/);
+  assert.match(messageOf(['--baseline-file', 'x.json']), /--baseline-file only applies with --write-baseline/);
+  assert.equal(messageOf(['--write-baseline', '--fixtures', 'seed,v2,v3']), null, 'every fixture is the full set');
+
+  // After suite selection: the run's cases must be the whole default suite.
+  const entry = (id, gold = `SELECT '${id}'`) => ({ testCase: normalizeBenchmarkCase({ id, question: `${id}?`, expected_sql: gold }) });
+  const full = { entries: [entry('a'), entry('b'), entry('c')], filters: { split: 'all', caseIds: [], tags: [], intents: [] } };
+  assert.equal(baselineSuiteRefusal(full, full), null);
+  assert.equal(baselineSuiteRefusal({ ...full, entries: [...full.entries].reverse() }, full), null, 'order does not matter');
+  assert.match(baselineSuiteRefusal({ ...full, entries: full.entries.slice(0, 1) }, full), /the run selects 1 of the default suite's 3 case\(s\) \(missing: b, c\)/);
+  assert.match(baselineSuiteRefusal({ ...full, entries: [...full.entries, entry('z')] }, full), /cases that are not in the default suite \(z\)/);
+  assert.match(baselineSuiteRefusal({ ...full, entries: [entry('a'), entry('b', 'SELECT 2'), entry('c')] }, full), /scored differently from the default suite \(b\)/);
+  assert.match(baselineSuiteRefusal({ ...full, filters: { ...full.filters, tags: ['x'] } }, full), /filters tag=x/);
 });
 
 test('configuration problems fail before any setup: --gate without a baseline, a live run without a key', async () => {

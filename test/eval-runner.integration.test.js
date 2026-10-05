@@ -343,3 +343,19 @@ test('npm run eval: a missing controls directory, or controls for other cases, s
   assert.match(uncovered.stdout + uncovered.stderr, /No oracle controls in .*other-controls apply to core-public/);
   assert.doesNotMatch(uncovered.stdout, /^Verify:/m, 'stopped before verification');
 });
+
+test('npm run eval --write-baseline: a run of one dataset never replaces the default baseline', { skip }, async () => {
+  requireAdmin();
+  // A model name of its own, so the default baseline path is not a real one.
+  const model = `subset-guard-${process.pid}`;
+  const target = path.join(REPO_ROOT, 'eval/baselines', `${model}.json`);
+  try {
+    const run = await runEval(['--dataset', 'core-public', '--model', model, '--write-baseline', '--skip-verify'], 'baseline-subset');
+    assert.equal(run.code, 2, run.stdout + run.stderr);
+    assert.match(run.stdout + run.stderr, /--write-baseline refused before the run: the run selects 9 of the default suite's 26 case\(s\)/);
+    assert.doesNotMatch(run.stdout, /^Running /m, 'nothing ran');
+    await assert.rejects(fs.access(target), 'no baseline written');
+  } finally {
+    await fs.rm(target, { force: true });
+  }
+});

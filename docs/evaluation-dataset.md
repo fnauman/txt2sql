@@ -725,7 +725,10 @@ The committed baseline for a model lives at `eval/baselines/<model>.json`: a
 plain report of the whole default suite (see `eval/baselines/README.md`).
 `npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree.
 It is only written when the run exits 0 with no case skipped by the budget;
-otherwise the console says why and the existing file is left alone.
+otherwise the console says why and the existing file is left alone. A
+filtered or partial run (filters, fewer fixtures, or a case set that differs
+from the default suite) is refused before it starts; `--baseline-file <path>`
+saves such a subset somewhere else.
 
 ### CI
 

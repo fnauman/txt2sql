@@ -16,8 +16,12 @@ npm run eval -- --repeat 3 --write-baseline  # writes the run's report.json here
 
 `--write-baseline` only writes after a clean, complete run (exit 0, no case
 skipped by the budget); otherwise it says why and leaves the existing file
-alone. It warns when the run used a subset of the suite or a dirty working
-tree. Check the run's `report.md` before committing the file, and
+alone. It refuses, before the run starts, to replace `<model>.json` with a
+subset: filters (`--case-id`, `--tag`, `--intent`, `--split`), fewer
+`--fixtures`, or a suite (`--dataset`, `--dataset-file`, `--datasets-dir`)
+whose cases are not exactly the default suite's. A subset can be saved with
+`--baseline-file <path>` and compared with `--compare <path>`. It warns on a
+dirty working tree. Check the run's `report.md` before committing the file, and
 commit it in its own change with a note on what was measured (model, prompt
 version, repetitions).
 
