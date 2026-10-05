@@ -39,6 +39,12 @@ function pickError(error) {
  * - execution: { ok: true, durationMs, rowCount, truncated } or
  *   { ok: false, durationMs, stage, code, message }
  * A step that never ran is null.
+ *
+ * Known gap: a failed LLM attempt has no usage/cost here even when it was
+ * billed (a truncated or refused completion). runOptimizedQuestion adds that
+ * usage to its totals (the case's llm_usage / llm_cost) but its 'llm.failed'
+ * event does not carry it, so per-attempt sums can be lower than the totals.
+ * Closing it needs the usage on that event (src/query-service.js).
  */
 export function extractAttempts(events) {
   const attempts = new Map();

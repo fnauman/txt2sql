@@ -136,7 +136,7 @@ export async function checkFixtureMeta(connection, fixture, { expected = describ
  * Deep check: re-hashes every seeded table of the fixture database and
  * compares the result with the content the code generates, so rows edited
  * after seeding are caught even when the meta row still claims the right
- * content (about 1.2k rows in all; cheap). Returns
+ * content (about 1.6k rows over the three fixtures; cheap). Returns
  * { status, expected, meta, contentHash, masterDataHash, masterDataMatches }:
  * - status 'current': the database holds exactly the generated content;
  * - 'drifted': the meta row records the generated content but the rows differ;
