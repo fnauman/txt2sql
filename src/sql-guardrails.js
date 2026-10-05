@@ -718,6 +718,11 @@ function identifierTokenName(token) {
 // `NULL AS x` is explicit anyway).
 const EXPRESSION_END_KEYWORDS = new Set(['END', 'NULL', 'TRUE', 'FALSE']);
 
+// Operator words missing from SQL_KEYWORDS (MULTIPLICATIVE_KEYWORDS and the
+// rest of OPERAND_SEPARATOR_KEYWORDS, plus BINARY and ESCAPE): the name after
+// one is an operand (`a DIV b`), never an alias.
+const OPERATOR_WORDS = new Set(['DIV', 'MOD', 'XOR', 'REGEXP', 'RLIKE', 'SOUNDS', 'BINARY', 'ESCAPE']);
+
 function endsExpression(token) {
   if (!token) {
     return false;
@@ -729,13 +734,20 @@ function endsExpression(token) {
     return true;
   }
   if (token.type === 'word') {
-    return token.afterDot || EXPRESSION_END_KEYWORDS.has(token.upper) || !SQL_KEYWORDS.has(token.upper);
+    return token.afterDot || EXPRESSION_END_KEYWORDS.has(token.upper) || (!SQL_KEYWORDS.has(token.upper) && !OPERATOR_WORDS.has(token.upper));
   }
   return false;
 }
 
+// The token after an implicit alias ends its select item: ',', the end of the
+// statement or of a subquery, or a keyword that ends the SELECT list
+// (`... TotalCount ORDER BY TotalCount`, `... x UNION SELECT ...`).
 function closesSelectItem(token) {
-  return !token || (token.type === 'punct' && [',', ')', ';'].includes(token.value)) || isKeywordToken(token, 'FROM');
+  return (
+    !token ||
+    (token.type === 'punct' && [',', ')', ';'].includes(token.value)) ||
+    (token.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper))
+  );
 }
 
 // Keywords that end a SELECT list at its own parenthesis depth (a SELECT
@@ -791,8 +803,10 @@ function selectListMask(tokens) {
  * Output alias definitions in significant tokens (no whitespace or comments),
  * as Map(token index -> alias name): `expr AS alias` anywhere, and the
  * implicit `expr alias` form at the end of a select item (followed by ',',
- * ')' or FROM) inside a SELECT list only, so a stray identifier after a
- * string literal or a number in WHERE / LIMIT is never taken for an alias.
+ * ')', the end, or a keyword that ends the SELECT list: FROM, WHERE, GROUP,
+ * HAVING, ORDER, LIMIT, WINDOW, UNION, ...) inside a SELECT list only, so a
+ * stray identifier after a string literal or a number in WHERE / LIMIT is
+ * never taken for an alias, nor is the operand after DIV, MOD, XOR, ....
  * Quoted aliases keep their full name, spaces included (`AS \`Total Net\``).
  * Also used by the benchmark's disallowed-column lint.
  */

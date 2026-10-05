@@ -238,6 +238,24 @@ const VALID = [
     'implicit aliases after a scalar subquery and a CASE, used in ORDER BY',
     "SELECT (SELECT COUNT(*) FROM Customer x) TotalCount, CASE WHEN c.IsActive = 1 THEN 'yes' ELSE 'no' END ActiveFlag FROM Customer c ORDER BY ActiveFlag, TotalCount",
   ],
+  // An implicit alias ends its select item at any keyword that ends the
+  // SELECT list, not only FROM (a SELECT without FROM).
+  [Q_LIST, 'implicit alias before ORDER BY, used there', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount ORDER BY TotalCount'],
+  [Q_LIST, 'implicit alias before LIMIT', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount LIMIT 1'],
+  [Q_LIST, 'implicit alias before HAVING, used there', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount HAVING TotalCount > 0'],
+  [Q_LIST, 'implicit alias before WHERE', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount WHERE 1 = 1'],
+  [
+    Q_LIST,
+    'implicit alias before UNION ALL, used in the ORDER BY',
+    'SELECT (SELECT COUNT(*) FROM Customer) TotalCount UNION ALL SELECT (SELECT COUNT(*) FROM Product) ORDER BY TotalCount',
+  ],
+  [Q_LIST, 'implicit alias before EXCEPT', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount EXCEPT SELECT 0 ORDER BY TotalCount'],
+  [
+    Q_LIST,
+    'implicit alias before INTERSECT',
+    'SELECT (SELECT COUNT(*) FROM Customer) TotalCount INTERSECT SELECT (SELECT COUNT(*) FROM Customer) ORDER BY TotalCount',
+  ],
+  [Q_LIST, 'implicit alias before WINDOW', "SELECT 'x' Label, (SELECT COUNT(*) FROM Customer) TotalCount WINDOW w AS (ORDER BY 1)"],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,

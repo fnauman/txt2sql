@@ -359,6 +359,19 @@ test('validateReadOnlySql accepts valid joins through simple derived table colum
   );
 });
 
+test('an implicit alias before ORDER BY is known there; other names in ORDER BY are not', () => {
+  // The accepted forms are in test/sql-valid-unusual.test.js; here the alias
+  // is known (the rejection names the stray name, not TotalCount).
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
+  assert.throws(
+    () =>
+      validateReadOnlySql('SELECT (SELECT COUNT(*) FROM Customer x) TotalCount ORDER BY TotalCount, CustomerRank', allowedTables(prompt), {
+        promptContext: prompt.context,
+      }),
+    (error) => error.code === 'UNKNOWN_IDENTIFIER' && /"CustomerRank"/.test(error.message)
+  );
+});
+
 test('guardrail rejections carry error.code and error.layer', () => {
   const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
   const cases = [
@@ -373,6 +386,9 @@ test('guardrail rejections carry error.code and error.layer', () => {
     // identifier after a literal in WHERE or after OFFSET is not one.
     ["SELECT c.CustomerName FROM Customer c WHERE c.CustomerName = 'x' CustomerDisplay", 'UNKNOWN_IDENTIFIER'],
     ['SELECT c.CustomerName FROM Customer c ORDER BY c.CustomerName LIMIT 5 OFFSET 0 CustomerRank', 'UNKNOWN_IDENTIFIER'],
+    // The name after an operator word is an operand, not an alias.
+    ['SELECT c.CustomerId DIV CustomerRank FROM Customer c', 'UNKNOWN_IDENTIFIER'],
+    ['SELECT (SELECT MAX(x.CustomerId) FROM Customer x) MOD CustomerRank ORDER BY 1', 'UNKNOWN_IDENTIFIER'],
     [
       'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
       'JOIN_PATH',

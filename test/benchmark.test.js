@@ -148,9 +148,15 @@ test('findDisallowedColumnsUsed treats implicit aliases and alias references in 
     findDisallowedColumnsUsed('SELECT d.CustomerId, SUM(d.NetAmount) NetPayableAmount FROM SalesDocument d GROUP BY d.CustomerId HAVING NetPayableAmount > 0', entry),
     []
   );
+  // An implicit alias before ORDER BY (a SELECT without FROM) is a name too.
+  assert.deepEqual(
+    findDisallowedColumnsUsed('SELECT (SELECT SUM(d.NetAmount) FROM SalesDocument d) NetPayableAmount ORDER BY NetPayableAmount', entry),
+    []
+  );
   // Still a use: the column itself (bare or qualified, even aliased to its own
-  // name), a bare name in WHERE (aliases do not exist there), or a name that
-  // is not an alias.
+  // name), a bare name in WHERE (aliases do not exist there), the operand of
+  // an operator word, or a name that is not an alias.
+  assert.deepEqual(findDisallowedColumnsUsed('SELECT d.NetAmount DIV NetPayableAmount FROM SalesDocument d', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT NetPayableAmount AS NetPayableAmount FROM SalesDocument', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT d.NetPayableAmount AS NetPayableAmount FROM SalesDocument d', entry), entry);
   assert.deepEqual(findDisallowedColumnsUsed('SELECT SUM(d.NetAmount) AS NetPayableAmount FROM SalesDocument d WHERE NetPayableAmount > 0', entry), entry);
