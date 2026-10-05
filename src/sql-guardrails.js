@@ -827,21 +827,22 @@ function collectColumnMetadata(promptContext = {}) {
   return metadata;
 }
 
+function primaryKeyColumnsOf(columnMetadata, tableName) {
+  return [...(columnMetadata.get(tableName) || new Map()).entries()]
+    .filter(([, column]) => column.primaryKey)
+    .map(([columnName]) => columnName);
+}
+
 // Child -> parent foreign keys among the prompt tables. A one-to-one key (the
 // child's FK column is its table's ONLY primary-key column) cannot fan out and
 // is skipped; an FK that is just one part of a composite key is one-to-many.
 function collectForeignKeyEdges(promptContext = {}, columnMetadata = collectColumnMetadata(promptContext)) {
-  const primaryKeyColumns = (tableName) =>
-    [...(columnMetadata.get(tableName) || new Map()).entries()]
-      .filter(([, column]) => column.primaryKey)
-      .map(([columnName]) => columnName);
-
   return (Array.isArray(promptContext.relationships) ? promptContext.relationships : [])
     .filter((relationship) => {
       if (!relationship.fromTable || !relationship.toTable || relationship.fromTable === relationship.toTable) {
         return false;
       }
-      const keyColumns = primaryKeyColumns(relationship.fromTable);
+      const keyColumns = primaryKeyColumnsOf(columnMetadata, relationship.fromTable);
       return !(keyColumns.length === 1 && keyColumns[0] === relationship.fromColumn);
     })
     .map((relationship) => ({
@@ -1068,33 +1069,33 @@ function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwne
   return owners;
 }
 
-// Columns of a joined reference that are equated in its own join condition
-// (`ON q.col = x.y` as a top-level conjunct, or `USING (col)`): for every
-// matched row they are non-NULL.
-function collectJoinKeyColumns(walker, ref, alias) {
+// The join condition of a table reference: { on: [start, end) } for
+// `ON <condition>`, { using: [columns] } for `USING (...)`, or null.
+function findJoinCondition(walker, ref) {
   const { tokens } = walker;
   const baseGroup = tokens[ref.index].parentGroupId;
-  const columns = new Set();
 
-  let cursor = ref.index + 1;
+  // Skip the reference itself (a derived table's body, the alias) up to ON/USING.
+  let cursor = ref.kind === 'derived' ? ref.close + 1 : ref.index + 1;
   while (cursor < tokens.length && tokens[cursor].parentGroupId === baseGroup && !isKeywordToken(tokens[cursor], 'ON', 'USING')) {
     if (isPunctToken(tokens[cursor], ',') || isKeywordToken(tokens[cursor], ...ON_CLAUSE_TERMINATORS)) {
-      return columns;
+      return null;
     }
     cursor = walker.nextAtom(cursor, tokens.length);
   }
 
   if (isKeywordToken(tokens[cursor], 'USING') && isPunctToken(tokens[cursor + 1], '(')) {
+    const columns = [];
     for (let index = cursor + 2; index < walker.closeOf(cursor + 1); index += 1) {
       const name = tokenIdentifierName(tokens[index]);
       if (name) {
-        columns.add(name);
+        columns.push(name);
       }
     }
-    return columns;
+    return { using: columns };
   }
   if (!isKeywordToken(tokens[cursor], 'ON')) {
-    return columns;
+    return null;
   }
 
   // The condition runs to the next join / FROM-list comma / clause keyword at
@@ -1108,7 +1109,115 @@ function collectJoinKeyColumns(walker, ref, alias) {
     }
     end = walker.nextAtom(end, tokens.length);
   }
+  return { on: [start, end] };
+}
 
+// One side of a top-level `a = b`: { qualifier, column }, { column } for an
+// unqualified column, { constant: true } for a number or string literal, or
+// null for any other expression.
+function parseEqualityOperand(walker, range) {
+  const { tokens } = walker;
+  const [from, to] = walker.unwrapParens(range);
+  if (to - from === 3) {
+    return walker.qualifiedColumnAt(from);
+  }
+  if (to - from === 2 && isOperatorToken(tokens[from], '-', '+') && tokens[from + 1].type === 'number') {
+    return { constant: true };
+  }
+  if (to - from !== 1) {
+    return null;
+  }
+  const token = tokens[from];
+  if (token.type === 'number' || token.type === 'string') {
+    return { constant: true };
+  }
+  const name = tokenIdentifierName(token);
+  return name && !token.afterDot && !(token.type === 'word' && SQL_KEYWORDS.has(token.upper)) ? { column: name } : null;
+}
+
+// Top-level `a = b` AND-conjuncts of [start, end) as [left, right] operand
+// pairs (none when an OR sits at the top level).
+function collectEqualities(walker, start, end) {
+  const pairs = [];
+  for (const conjunct of walker.splitConjuncts(start, end) || []) {
+    const [from, to] = walker.unwrapParens(conjunct);
+    const equals = [];
+    for (let index = from; index < to; index = walker.nextAtom(index, to)) {
+      if (isOperatorToken(walker.tokens[index], '=')) {
+        equals.push(index);
+      }
+    }
+    if (equals.length !== 1) {
+      continue;
+    }
+    const left = parseEqualityOperand(walker, [from, equals[0]]);
+    const right = parseEqualityOperand(walker, [equals[0] + 1, to]);
+    if (left && right) {
+      pairs.push([left, right]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Equalities that restrict the rows of a block's joined references, each as
+ * { pair, appliesTo }: top-level WHERE conjuncts and the conditions of inner
+ * joins filter every joined row (appliesTo null); a LEFT JOIN's condition only
+ * restricts the rows of the reference it joins (appliesTo = that entry), since
+ * the rows on its left are kept either way. RIGHT/NATURAL joins restrict
+ * nothing here. `USING (col)` equates the joined reference's col with each
+ * earlier entry's col.
+ */
+function collectRestrictingEqualities(walker, block, analysis, entries) {
+  const found = [];
+  const whereRange = findWhereRange(walker, block);
+  if (whereRange) {
+    for (const pair of collectEqualities(walker, whereRange[0], whereRange[1])) {
+      found.push({ pair, appliesTo: null });
+    }
+  }
+
+  for (const ref of analysis.tableRefs.filter((candidate) => candidate.blockId === block.id)) {
+    const joinType = ref.joinType || 'INNER';
+    const entry = entries.find((candidate) => candidate.ref === ref) || null;
+    if (!['INNER', 'CROSS', 'LEFT'].includes(joinType) || (joinType === 'LEFT' && !entry)) {
+      continue;
+    }
+    const condition = findJoinCondition(walker, ref);
+    const appliesTo = joinType === 'LEFT' ? entry : null;
+    if (condition?.on) {
+      for (const pair of collectEqualities(walker, condition.on[0], condition.on[1])) {
+        found.push({ pair, appliesTo });
+      }
+    } else if (condition?.using && entry) {
+      for (const column of condition.using) {
+        for (const earlier of entries.slice(0, entries.indexOf(entry))) {
+          found.push({ pair: [{ qualifier: entry.qualifier, column }, { qualifier: earlier.qualifier, column }], appliesTo });
+        }
+      }
+    }
+  }
+  return found;
+}
+
+// Columns of a joined reference that are equated in its own join condition
+// (`ON q.col = x.y` as a top-level conjunct, or `USING (col)`): for every
+// matched row they are non-NULL.
+function collectJoinKeyColumns(walker, ref, alias) {
+  const { tokens } = walker;
+  const columns = new Set();
+  const condition = findJoinCondition(walker, ref);
+  if (condition?.using) {
+    for (const name of condition.using) {
+      columns.add(name);
+    }
+    return columns;
+  }
+  if (!condition) {
+    return columns;
+  }
+
+  const [start, end] = condition.on;
   for (const conjunct of walker.splitConjuncts(start, end) || []) {
     const [from, to] = walker.unwrapParens(conjunct);
     if (to - from !== 7 || !isOperatorToken(tokens[from + 3], '=')) {
@@ -1447,9 +1556,6 @@ function validateFanOut(analysis, knownTables, promptContext) {
     }
 
     const antiJoined = collectAntiJoinedRefs(walker, block, entries, columnMetadata);
-    const presentTables = new Set(entries.filter((entry) => !antiJoined.has(entry)).map((entry) => entry.tableName));
-    const childEdgesOf = (tableName) =>
-      edges.filter((edge) => edge.parentTable === tableName && edge.childTable !== tableName && presentTables.has(edge.childTable));
 
     const qualifierEntries = new Map();
     for (const entry of entries) {
@@ -1470,6 +1576,62 @@ function validateFanOut(analysis, knownTables, promptContext) {
       }
       return [...owners.values()];
     };
+    // A joined child whose whole primary key is pinned to constants or to the
+    // parent's columns (`LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId =
+    // d.SalesDocumentId AND l.SalesDocumentLineId = 1`) has at most one row
+    // per parent row, so it cannot repeat the parent's values.
+    let restrictingEqualities;
+    const pinnedColumns = (entry, parentTable) => {
+      if (!restrictingEqualities) {
+        restrictingEqualities = collectRestrictingEqualities(walker, block, analysis, entries);
+      }
+      const resolve = (operand) => {
+        if (operand.constant) {
+          return operand;
+        }
+        if (operand.qualifier) {
+          const owner = qualifierEntries.get(operand.qualifier);
+          const columnName = owner && (owner.viaDerived ? operand.column : findColumnName(knownTables, owner.tableName, operand.column));
+          return columnName ? { entry: owner, columnName } : null;
+        }
+        const owners = unqualifiedOwners(operand.column);
+        return owners.length === 1 ? owners[0] : null;
+      };
+      const pinned = new Set();
+      for (const { pair, appliesTo } of restrictingEqualities) {
+        if (appliesTo && appliesTo !== entry) {
+          continue;
+        }
+        const [left, right] = pair.map(resolve);
+        for (const [side, other] of [
+          [left, right],
+          [right, left],
+        ]) {
+          if (side?.entry === entry && other && (other.constant || (other.entry !== entry && other.entry.tableName === parentTable))) {
+            pinned.add(side.columnName);
+          }
+        }
+      }
+      return pinned;
+    };
+    const restrictedToOneRow = (entry, parentTable) => {
+      if (entry.viaDerived) {
+        return false;
+      }
+      const keyColumns = primaryKeyColumnsOf(columnMetadata, entry.tableName);
+      const pinned = keyColumns.length > 0 ? pinnedColumns(entry, parentTable) : null;
+      return Boolean(pinned) && keyColumns.every((columnName) => pinned.has(columnName));
+    };
+    const childEdgesOf = (tableName) =>
+      edges.filter(
+        (edge) =>
+          edge.parentTable === tableName &&
+          edge.childTable !== tableName &&
+          entries.some(
+            (entry) => entry.tableName === edge.childTable && !antiJoined.has(entry) && !restrictedToOneRow(entry, tableName)
+          )
+      );
+
     let groupByOwners;
     const isGroupedWithin = (entry) => {
       if (groupByOwners === undefined) {

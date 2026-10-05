@@ -172,6 +172,63 @@ test('an aggregate that can yield a header value is at header grain, even if it 
   }
 });
 
+test('a child joined on its whole primary key pinned to constants keeps one row per parent', () => {
+  // Each returns the un-inflated total on the seeded demo DB (5500, or 800 for
+  // the one document that has line 3).
+  for (const sql of [
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND l.SalesDocumentLineId = 1',
+    "SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND (l.SalesDocumentLineId = '1')",
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} WHERE l.SalesDocumentLineId = 3`,
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} AND 3 = SalesDocumentLineId`,
+  ]) {
+    assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
+  }
+
+  for (const sql of [
+    // Under OR the key is not pinned to one value (6500 instead of 5500).
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND (l.SalesDocumentLineId = 1 OR l.SalesDocumentLineId = 2)',
+    // A later LEFT JOIN's condition does not restrict the rows on its left (6500).
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} LEFT JOIN Product p ON p.ProductId = l.ProductId AND l.SalesDocumentLineId = 1`,
+    // Two copies of the child pinned to each other still repeat the document (6500).
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} JOIN SalesDocumentLine l2 ON l2.SalesDocumentLineId = l.SalesDocumentLineId`,
+    // Not the key, or not an equality.
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} AND l.ProductId = 1`,
+    `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} AND l.SalesDocumentLineId > 1`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
+  }
+});
+
+test('a composite child key must be pinned completely, to constants or to the parent', () => {
+  const column = (name, extra = {}) => ({ name, type: 'INTEGER', primaryKey: false, allowNull: true, ...extra });
+  const promptContext = {
+    tables: [
+      { tableName: 'Invoice', includedColumns: [column('InvoiceId', { primaryKey: true, allowNull: false }), column('Total')], omittedColumnNames: [] },
+      {
+        tableName: 'InvoiceLine',
+        includedColumns: [
+          column('InvoiceId', { primaryKey: true, allowNull: false }),
+          column('LineNo', { primaryKey: true, allowNull: false }),
+          column('Amount'),
+        ],
+        omittedColumnNames: [],
+      },
+    ],
+    relationships: [{ fromTable: 'InvoiceLine', fromColumn: 'InvoiceId', toTable: 'Invoice', toColumn: 'InvoiceId' }],
+  };
+  const validate = (sql) => validateReadOnlySql(sql, ['Invoice', 'InvoiceLine'], { promptContext });
+
+  assert.doesNotThrow(() => validate('SELECT SUM(i.Total) AS t FROM Invoice i JOIN InvoiceLine l ON l.InvoiceId = i.InvoiceId AND l.LineNo = 1'));
+  assert.doesNotThrow(() => validate('SELECT SUM(i.Total) AS t FROM Invoice i JOIN InvoiceLine l USING (InvoiceId) WHERE l.LineNo = 1'));
+  for (const sql of [
+    'SELECT SUM(i.Total) AS t FROM Invoice i JOIN InvoiceLine l ON l.InvoiceId = i.InvoiceId',
+    // LineNo = 1 alone matches line 1 of every invoice.
+    'SELECT SUM(i.Total) AS t FROM Invoice i JOIN InvoiceLine l ON l.LineNo = 1',
+  ]) {
+    assert.throws(() => validate(sql), (error) => error.code === 'FAN_OUT' && error.details.childTable === 'InvoiceLine', sql);
+  }
+});
+
 test('a parent value reduced by an inner MIN/MAX per parent-level group is not repeated by an outer window SUM', () => {
   // MAX ignores the repeated document rows, and grouping only by document
   // columns keeps the groups the query has without the line join. On the

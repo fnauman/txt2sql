@@ -179,6 +179,11 @@ const VALID = [
     'SELECT d.SalesDocumentId, MAX(d.NetAmount) AS amount, SUM(MAX(d.NetAmount)) OVER () AS total FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId GROUP BY d.SalesDocumentId',
   ],
   [
+    Q_LINES,
+    'header SUM with a child restricted to one row by its primary key',
+    'SELECT SUM(d.NetAmount) FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND l.SalesDocumentLineId = 1',
+  ],
+  [
     Q_QTY,
     'COUNT/MAX over header columns with a line join',
     'SELECT p.ProductName, COUNT(DISTINCT d.SalesDocumentId) AS docs, MAX(d.NetAmount) AS biggest, SUM(l.Quantity) AS qty FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId GROUP BY p.ProductName',
