@@ -550,6 +550,24 @@ h3 {
   font-weight: 600;
 }
 
+/* Short label for the stage the question failed in (model, guardrails, ...). */
+.error-banner .error-stage {
+  align-self: flex-start;
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+  background: var(--surface);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.error-banner .error-stage-aborted {
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
 .error-banner .error-detail summary {
   cursor: pointer;
   font-weight: 550;

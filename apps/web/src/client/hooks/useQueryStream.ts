@@ -34,14 +34,17 @@ export function useQueryStream() {
       }
 
       if (!response.ok || !response.body) {
-        let message = 'Query request failed.';
+        let error: { message: string; code?: string | null; stage?: string | null } = { message: 'Query request failed.' };
         try {
           const payload = await response.json();
-          message = payload?.error?.message || message;
+          if (payload?.error?.message) {
+            // Keep the server's code/stage (e.g. QUESTION_TOO_LONG, UNAUTHORIZED).
+            error = { message: payload.error.message, code: payload.error.code ?? null, stage: payload.error.stage ?? null };
+          }
         } catch {
           /* non-JSON error body */
         }
-        dispatch({ event: 'error', data: { message } });
+        dispatch({ event: 'error', data: error });
         dispatch({ event: 'done' });
         return true;
       }

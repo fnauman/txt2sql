@@ -116,8 +116,13 @@ export default function App() {
               />
               <div className="composer-actions">
                 <div className="toggles">
-                  <label>
-                    <input type="checkbox" checked={debugEnabled} onChange={(event) => setDebugEnabled(event.target.checked)} />
+                  <label title={health?.debugAllowed === false ? 'Debug output is disabled on this server (WEB_ALLOW_DEBUG).' : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={debugEnabled && health?.debugAllowed !== false}
+                      disabled={health?.debugAllowed === false}
+                      onChange={(event) => setDebugEnabled(event.target.checked)}
+                    />
                     <span>Debug</span>
                   </label>
                   <label>

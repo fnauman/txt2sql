@@ -1,4 +1,4 @@
-import { formatCurrency, formatValue } from '../../format';
+import { formatCurrency, formatRowCount, formatValue } from '../../format';
 import type { QueryResponse } from '../../types';
 
 export function MetricStrip({ result }: { result: QueryResponse }) {
@@ -6,7 +6,9 @@ export function MetricStrip({ result }: { result: QueryResponse }) {
     <div className="metric-strip">
       <div>
         <span>Rows</span>
-        <strong>{result.totalRowCount.toLocaleString()}</strong>
+        <strong title={result.truncated ? `Showing the first ${result.rowCount.toLocaleString()} rows` : undefined}>
+          {formatRowCount(result)}
+        </strong>
       </div>
       <div>
         <span>Attempts</span>

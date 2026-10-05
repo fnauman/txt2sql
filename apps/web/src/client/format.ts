@@ -1,6 +1,8 @@
 // Pure presentation helpers, kept out of App.tsx so they can be unit-tested
 // without a DOM or React renderer.
 
+import type { ErrorStage } from './types';
+
 export function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') {
     return '-';
@@ -72,4 +74,27 @@ export function friendlyError(rawMessage: string | null | undefined): string {
   }
 
   return 'I could not answer that question. Try rephrasing it, or turn on Debug for technical details.';
+}
+
+// Row count for the metric strip. When the server stopped at its row cap the
+// exact total is unknown (totalRowCount null), so show "1,000+" rather than a
+// number that would understate the result.
+export function formatRowCount(result: { rowCount: number; totalRowCount: number | null; truncated: boolean }): string {
+  if (typeof result.totalRowCount === 'number') {
+    return result.totalRowCount.toLocaleString('en-US');
+  }
+  return result.truncated ? `${result.rowCount.toLocaleString('en-US')}+` : result.rowCount.toLocaleString('en-US');
+}
+
+const ERROR_STAGE_LABELS: Record<ErrorStage, string> = {
+  llm: 'Model',
+  validation: 'Blocked by guardrails',
+  execution: 'Database error',
+  aborted: 'Cancelled',
+  infra: 'Service unavailable',
+};
+
+// Short label for the stage a failed question stopped in (null when unknown).
+export function errorStageLabel(stage: ErrorStage | null | undefined): string | null {
+  return stage ? ERROR_STAGE_LABELS[stage] ?? null : null;
 }

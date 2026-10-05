@@ -2,7 +2,7 @@
 // it can be unit-tested in isolation. The hook (hooks/useQueryStream.ts) wires
 // this to fetch + useReducer.
 
-import type { QueryResponse } from '../types';
+import type { ErrorStage, QueryResponse } from '../types';
 
 export type PipelineStage =
   | 'planning'
@@ -43,6 +43,7 @@ export interface StreamState {
   hasInsights: boolean;
   cacheHit: boolean;
   error: string | null;
+  errorStage: ErrorStage | null;
 }
 
 export type StreamAction = { event: string; data?: any };
@@ -92,7 +93,14 @@ export function initialStreamState(question = ''): StreamState {
     hasInsights: false,
     cacheHit: false,
     error: null,
+    errorStage: null,
   };
+}
+
+const ERROR_STAGES: ErrorStage[] = ['llm', 'validation', 'execution', 'aborted', 'infra'];
+
+function asErrorStage(value: unknown): ErrorStage | null {
+  return ERROR_STAGES.includes(value as ErrorStage) ? (value as ErrorStage) : null;
 }
 
 export function streamReducer(state: StreamState, action: StreamAction): StreamState {
@@ -141,7 +149,10 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         result: {
           ...state.result,
           columns: action.data.columns ?? [],
-          totalRowCount: action.data.totalRowCount ?? 0,
+          // null is meaningful (truncated: "more than rowCount"), so only an
+          // absent field falls back to 0.
+          totalRowCount: action.data.totalRowCount === undefined ? 0 : action.data.totalRowCount,
+          rowCount: typeof action.data.rowCount === 'number' ? action.data.rowCount : state.result.rowCount,
           truncated: Boolean(action.data.truncated),
         },
       };
@@ -173,11 +184,14 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
       return { ...state, result: { ...state.result, debug: action.data } };
     case 'error': {
       const message = action.data?.message ?? 'The query could not be answered.';
+      const errorStage = asErrorStage(action.data?.stage);
+      const errorCode = typeof action.data?.code === 'string' ? action.data.code : null;
       return {
         ...state,
         status: 'error',
         error: message,
-        result: { ...state.result, success: false, error: action.data ?? { message } },
+        errorStage,
+        result: { ...state.result, success: false, errorStage, errorCode, error: action.data ?? { message } },
       };
     }
     case 'done': {

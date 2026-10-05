@@ -63,7 +63,9 @@ export function ResultRegion({
           <SqlPlanCard sql={result.sql} explanation={result.explanation} status={sqlStatus} cacheHit={cacheHit} />
         )}
 
-        {errored && state.error && <ErrorBanner error={state.error} />}
+        {errored && state.error && (
+          <ErrorBanner error={state.error} stage={state.errorStage} code={result.errorCode ?? result.error?.code ?? null} />
+        )}
 
         {!errored && (hasColumns || streaming) && (hasColumns ? <MetricStrip result={result} /> : <MetricSkeleton />)}
 

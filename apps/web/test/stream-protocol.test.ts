@@ -98,3 +98,38 @@ test('cancel before any data resets to idle; after columns keeps the partial res
   ]);
   assert.equal(late.status, 'done');
 });
+
+test('an error frame carries the failure stage and code into state', () => {
+  const state = apply([
+    { event: '@start', data: { question: 'q' } },
+    { event: 'error', data: { name: 'Error', message: 'blocked', code: null, stage: 'validation' } },
+    { event: 'done' },
+  ]);
+  assert.equal(state.status, 'error');
+  assert.equal(state.errorStage, 'validation');
+  assert.equal(state.result.errorStage, 'validation');
+  assert.equal(state.result.error?.stage, 'validation');
+
+  const typed = apply([
+    { event: '@start', data: { question: 'q' } },
+    { event: 'error', data: { message: 'cut off', code: 'LLM_TRUNCATED', stage: 'llm' } },
+  ]);
+  assert.equal(typed.result.errorCode, 'LLM_TRUNCATED');
+
+  const unknown = apply([{ event: 'error', data: { message: 'x', stage: 'bogus' } }]);
+  assert.equal(unknown.errorStage, null, 'unknown stages are dropped');
+});
+
+test('a columns frame keeps a null total (truncated at the server cap) and the displayed row count', () => {
+  const state = apply([
+    { event: '@start', data: { question: 'q' } },
+    { event: 'columns', data: { columns: [], rowCount: 1000, totalRowCount: null, truncated: true } },
+  ]);
+  assert.equal(state.result.totalRowCount, null);
+  assert.equal(state.result.rowCount, 1000);
+  assert.equal(state.result.truncated, true);
+
+  // Older servers omit the field: fall back to 0 as before.
+  const legacy = apply([{ event: 'columns', data: { columns: [] } }]);
+  assert.equal(legacy.result.totalRowCount, 0);
+});
