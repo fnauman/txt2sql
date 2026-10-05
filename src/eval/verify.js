@@ -27,7 +27,7 @@ import {
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
-import { isInfraError } from '../query-service.js';
+import { isEvalInfraError } from './infra-errors.js';
 import { goldFingerprint, resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
@@ -59,7 +59,7 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
           try {
             masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan, statementTimeoutMs });
           } catch (error) {
-            if (isInfraError(error)) {
+            if (isEvalInfraError(error)) {
               throw error;
             }
             masterDataCandidates = [];

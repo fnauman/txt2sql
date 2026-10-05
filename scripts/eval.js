@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR } from '../src/benchmark.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
-import { isEvalInfraError } from '../src/eval/attribution.js';
+import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
 import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
@@ -430,7 +430,12 @@ function isGithubActions(env = process.env) {
 
 function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
-  const status = result.status === 'aborted' && result.timed_out ? 'timeout' : result.status;
+  const status =
+    result.status === 'aborted' && result.timed_out
+      ? 'timeout'
+      : result.status === 'expected_sql_error' && result.error_infra
+        ? 'expected_sql_error (the database failed)'
+        : result.status;
   const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
   const seconds = Number.isFinite(totalMs) ? (totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${Math.round(totalMs)}ms`) : '';

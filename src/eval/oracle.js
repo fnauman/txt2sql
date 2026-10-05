@@ -28,7 +28,8 @@ import {
   runSignalChecksThroughAssignment,
 } from '../benchmark.js';
 import { createMariaDbConnection, executeReadOnlySql } from '../pipeline.js';
-import { errorCodeOf, isInfraError } from '../query-service.js';
+import { errorCodeOf } from '../query-service.js';
+import { isEvalInfraError } from './infra-errors.js';
 import { FIXTURES } from './fixtures.js';
 
 export const GOLD_STATEMENT_TIMEOUT_MS = 30_000;
@@ -109,7 +110,7 @@ function describeError(error) {
   return {
     code: errorCodeOf(error),
     message: error?.message || String(error),
-    infra: isInfraError(error),
+    infra: isEvalInfraError(error),
   };
 }
 

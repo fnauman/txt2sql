@@ -11,7 +11,7 @@ import { createCaseTraceLogger, extractAttempts } from '../src/eval/case-trace.j
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { PRIMARY_FIXTURE } from '../src/eval/fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, scoreAgainstGold } from '../src/eval/oracle.js';
-import { isEvalInfraError } from '../src/eval/attribution.js';
+import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { runOptimizedQuestion } from '../src/query-service.js';
 import { createTimer, serializeError } from '../src/trace.js';
 

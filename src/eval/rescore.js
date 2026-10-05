@@ -38,7 +38,7 @@
 
 import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
-import { isEvalInfraError } from './attribution.js';
+import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 
 const STAGE_STATUS = { llm: 'llm_error', validation: 'validation_error', execution: 'execution_error', infra: 'infra_error' };

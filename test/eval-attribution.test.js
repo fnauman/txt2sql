@@ -7,6 +7,7 @@ import {
   checkGuardrailRejections,
   classifyRepetition,
   guardrailConfusion,
+  isEvalInfraError,
   summarizeAttribution,
   summarizeCaseRepetitions,
 } from '../src/eval/attribution.js';
@@ -278,10 +279,16 @@ test('a false rejection followed by an outage keeps the outage and is reported',
 });
 
 test('a gold query that failed because the database went away is infra_error, not a broken gold', async () => {
-  // mysql2's closed-connection error has no code, only fatal: true.
+  // mysql2's promise API rejects with a fresh Error that keeps code/errno but
+  // not `fatal`: a query on a dead connection arrives with neither.
+  const promiseShaped = Object.assign(new Error("Can't add new command when connection is in closed state"), { code: undefined, errno: undefined });
+  assert.equal(isEvalInfraError(promiseShaped), true);
+  assert.equal(isEvalInfraError(Object.assign(new Error('Connection lost: The server closed the connection.'), { code: 'PROTOCOL_CONNECTION_LOST' })), true);
+  assert.equal(isEvalInfraError(Object.assign(new Error("Table 'x' doesn't exist"), { code: 'ER_NO_SUCH_TABLE' })), false);
+  assert.equal(isEvalInfraError(Object.assign(new Error("Can't add new command when connection is in closed state"), { code: 'ER_SOMETHING' })), false);
   const connection = {
     async query() {
-      throw Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+      throw promiseShaped;
     },
   };
   const trace = { enabled: true, emit: async () => {} };

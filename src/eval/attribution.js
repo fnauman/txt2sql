@@ -51,7 +51,8 @@
 
 import { findMissingExpectedTables } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
-import { isInfraError, isLlmUnavailableCode } from '../query-service.js';
+import { isLlmUnavailableCode } from '../query-service.js';
+import { isEvalInfraError } from './infra-errors.js';
 import { scoreAgainstGold } from './oracle.js';
 
 export const OUTCOME_BUCKETS = Object.freeze({
@@ -105,18 +106,8 @@ function finalAttempt(repetition) {
   return attempts.length ? attempts[attempts.length - 1] : null;
 }
 
-// Connection-level failures the product loop does not classify as infra yet,
-// but that say nothing about the SQL either.
-const EXTRA_INFRA_CODES = new Set(['ER_CONNECTION_KILLED']);
-
-/**
- * True for a database failure that is the infrastructure's, not the SQL's:
- * the product loop's predicate (connection/pool/auth codes, mysql2's fatal
- * flag) plus a few codes it does not cover.
- */
-export function isEvalInfraError(error) {
-  return Boolean(error) && (isInfraError(error) || EXTRA_INFRA_CODES.has(error.code));
-}
+// The harness's infrastructure predicate (src/eval/infra-errors.js).
+export { isEvalInfraError };
 
 // An attempt that a guardrail rejected, as recorded in its CURRENT validation
 // (a rescore re-validates attempts; a verdict only counts while the rejection
