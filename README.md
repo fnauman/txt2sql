@@ -11,7 +11,15 @@ This repo is intentionally narrow:
 - It uses only these in-scope demo tables (the source of truth is `DEFAULT_INCLUDED_TABLES` in `src/constants.js`): `SalesDocument`, `SalesDocumentLine`, `Product`, `Customer`, `StoreLocation`, `DocumentType`, `AccountingPosting`, `LedgerAccount`, `CustomerProductPrice`, `Campaign`, `ProductCategory`, `Brand`, `ProductBrand`
 - It compiles prompt context from the local `models/` directory, and automatically recompiles `generated/schema.json` whenever that cache drifts from the model files on disk, so a stale or copied-in schema cannot silently drop in-scope tables
 - It ignores foreign keys whose target models are not present
-- It generates and runs only read-only `SELECT` / `WITH` SQL, enforced by a keyword/function denylist (no DML/DDL, file I/O, locking, server variables, metadata schemas, or timing/exfiltration functions) plus single-statement and table-scope checks
+- It generates and runs only read-only `SELECT` / `WITH` SQL: a token-based validator rejects anything else before execution, and by default the query runs as the `SELECT`-only `demo_readonly` user under a statement timeout (see [Structured Output And Guardrails](#structured-output-and-guardrails))
+
+## Prerequisites
+
+- **Node.js 22.18 or newer** (`engines` in `package.json`; `.nvmrc` pins 24). 22.18 is the first 22.x release that runs the web app's `.ts` tests under `node --test` without flags.
+- **Docker with Compose v2** (`docker compose`) for the local database, which uses the **`mariadb:10.6`** image (pulled on the first `docker compose up`).
+- An **OpenAI API key** (or an OpenAI-compatible endpoint) for anything that generates SQL: `basic`, `optimized`, `benchmark` and web queries.
+
+`npm test` needs neither a database nor an API key.
 
 ## How this differs from a typical text-to-SQL project
 
@@ -19,15 +27,15 @@ Most text-to-SQL demos stop at "dump the schema into the prompt, parse whatever 
 
 | Typical demo | This repo |
 |---|---|
-| Whole schema pasted into every prompt | **Rule-based semantic retrieval** selects only the in-scope tables a question needs using lexical scoring plus the hand-curated `metadata/semantic-layer.json`, so the prompt stays narrow even when the source ERP has hundreds of tables |
-| Model output trusted and executed | **Deterministic guardrails** re-validate the SQL against the exact schema context the model saw — every table/column must exist, joins must match in-scope foreign keys or declared join hints, metrics must use their canonical columns, and filter IDs must come from a resolved candidate list |
-| "Read-only" assumed | **Read-only enforced**: first keyword must be `SELECT`/`WITH`, single statement only, plus a keyword/function denylist blocking DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@` variables, `information_schema`/`mysql`/`sys`, and timing/exfiltration functions |
+| Whole schema pasted into every prompt | **Rule-based semantic retrieval** narrows the prompt to the highest-scoring in-scope tables (plus the tables on the foreign-key paths between them) using lexical scoring and the hand-curated `metadata/semantic-layer.json`, so the prompt does not carry the whole schema. It narrows rather than picks a minimal set: "How many active customers do we have?" still retrieves 5 of the 13 tables |
+| Model output trusted and executed | **Deterministic guardrails** (optimized pipeline) re-validate the SQL against the schema context the model saw: qualified table/column references must exist, joins must match in-scope foreign keys or declared join hints, explicitly named metrics must use their canonical columns, `SUM`/`AVG` over a parent table's column while a 1:N child is joined is rejected as a fan-out, and product IDs must come from the resolved candidate list |
+| "Read-only" assumed | **Read-only checked, then enforced by grants**: a validator built on one MariaDB-faithful tokenizer allows a single `SELECT`/`WITH` statement with no comments and no `WITH RECURSIVE`, rejects cross-database and metadata-schema references, and denylists DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@` variables and timing/exfiltration functions. By default the query then runs as a `SELECT`-only user under a statement timeout |
 | Entity names guessed by the model | **Bounded master-data resolution**: ambiguous product terms are resolved against whitelisted columns *before* generation, and only the top candidate rows are passed to the prompt — the full product master never enters the context |
 | Dates left to the model | **Temporal normalization** rewrites phrases like "March 2026" into explicit half-open ranges before the model sees them, so date logic is deterministic |
-| "It got the right answer once" | **Reliability measurement**: a value-aware comparator scores answers on values not column names, and `--repeat N` reports min/mean/max accuracy with a Wilson 95% lower bound instead of one lucky run |
+| "It got the right answer once" | **Reliability measurement**: a value-aware comparator matches results on values rather than column names, and `--repeat N` reports min/mean/max accuracy with a Wilson 95% lower bound instead of one lucky run |
 | Cost ignored | **Cache-aware prompt layout** plus per-call token/cost accounting, with an offline prompt-cache-prefix estimator |
 
-The guiding idea: the LLM proposes, but a small, testable, deterministic layer disposes. Retrieval is *enforced*, not advisory; safety is *checked*, not assumed.
+The guiding idea: the LLM proposes, but a small, testable, deterministic layer disposes. Retrieval is *enforced* (optimized SQL may only use the retrieved tables), and safety is *checked* in the application and *enforced* by the database grants, not assumed.
 
 ## Repo Layout
 
@@ -46,13 +54,7 @@ The guiding idea: the LLM proposes, but a small, testable, deterministic layer d
 └── test/
 ```
 
-## Install
-
-```bash
-npm install
-```
-
-## One-Time Setup
+## Quickstart
 
 Run these steps once when setting up the repo locally.
 
@@ -68,47 +70,55 @@ npm install
 cp .env.example .env
 ```
 
-3. Edit `.env` and set at least these values:
+3. Edit `.env`. The app uses two database users:
 
 ```bash
 OPENAI_API_KEY=...
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=secret
 DB_NAME=demo_retail
+
+# Query user: everything that runs model-generated SQL (web app, basic,
+# optimized, benchmark, resolve-master-data) connects as this user.
+DB_USER=demo_readonly
+DB_PASSWORD=<query-user password>
+
+# Admin user: only bootstrap-db and seed-demo (DDL and inserts) use it.
+DB_ADMIN_USER=root
+MARIADB_ROOT_PASSWORD=<root password>   # or DB_ADMIN_PASSWORD
 ```
 
-Optional for local Docker Compose only:
-
-```bash
-# Defaults to DB_PASSWORD when omitted
-MARIADB_ROOT_PASSWORD=secret
-```
+Why two users: least privilege is the real security boundary. The SQL validator is defense in depth, but a query that gets past it still runs as a user that can only `SELECT` from the demo databases, so it cannot write, read server files, or read other databases on the same MariaDB instance.
 
 4. Start MariaDB 10.6:
 
 ```bash
-docker compose up -d mariadb
+docker compose up -d --wait mariadb
 ```
 
-5. Create the starter schema from the copied Sequelize models:
+When the data volume is first created, `docker/mariadb/initdb/01-readonly-user.sh` creates the query user (`DB_READONLY_USER`, default `demo_readonly`, with password `DB_READONLY_PASSWORD`, default `DB_PASSWORD`) with `SELECT` on `` `demo\_retail%`.* `` only. Root gets the first non-blank of `DB_ADMIN_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `DB_PASSWORD`, the same order the admin scripts use. Compose refuses to start when neither `DB_PASSWORD` nor `DB_READONLY_PASSWORD` is set.
+
+Init scripts run only on a fresh volume. If your volume predates the query user (for example `demo_readonly` gets "Access denied"), reset it with `docker compose down -v` (this deletes the database) and repeat steps 4 to 6.
+
+5. Create the starter schema from the copied Sequelize models (admin user):
 
 ```bash
 npm run bootstrap-db
 ```
 
-6. Load the synthetic demo data (small, fully fictional retail dataset):
+6. Load the synthetic demo data (small, fully fictional retail dataset; admin user):
 
 ```bash
 npm run seed-demo
 ```
 
-7. Smoke test the pipeline:
+7. Smoke test the pipeline (query user; makes one model call):
 
 ```bash
 npm run basic -- "How many active customers do we have?"
 ```
+
+The `basic` and `optimized` CLIs print a warning on stderr when the query user has more than `SELECT`/`USAGE`. Without any admin setting, `bootstrap-db` and `seed-demo` fall back to `DB_USER` with a warning, which fails for a `SELECT`-only user.
 
 If you need to rebuild the local schema from scratch:
 
@@ -126,14 +136,14 @@ npm run bootstrap-db -- --print-sql
 
 Default behavior:
 
-- Load `.env` from the current working directory
+- Load `.env` from the current working directory (the web server defaults to the repository-root `.env`)
 
 Optional overrides:
 
 ```bash
 npm run optimized -- --use-home-env
 npm run optimized -- --env-dir=/path/to/folder
-npm run optimized -- --env-file=/path/to/.env
+npm run optimized -- --dotenv=/path/to/.env      # or: --dotenv /path/to/.env
 ```
 
 Equivalent environment variables:
@@ -149,23 +159,25 @@ Loading behavior:
 - Exactly one env source is used for each run
 - Default is the current folder `.env`
 - `--use-home-env` switches the source to `~/.env`
-- `--env-dir` and `--env-file` switch the source to that explicit location
+- `--env-dir` and `--dotenv` switch the source to that explicit location; the path must exist, and the flag needs a value
+- Variables already set in the shell are not overridden by the file
+- `--env-file` is rejected with a pointer to `--dotenv`. Node.js reserves that flag and acts on it even after the script path (with a missing file, `node` exits with `not found` before the script runs), so the scripts do not use it
 
 Required environment variables:
 
-- `OPENAI_API_KEY`
-- `DB_USER`
+- `OPENAI_API_KEY` (for anything that calls the model)
 - `DB_NAME`
+- `DB_PASSWORD` (the query user's password; `DB_USER` defaults to `demo_readonly`)
+- `DB_ADMIN_PASSWORD` or `MARIADB_ROOT_PASSWORD` (only for `bootstrap-db` and `seed-demo`; `DB_ADMIN_USER` defaults to `root`)
 
-Common MariaDB variables:
+Common variables:
 
-- `DB_HOST`
-- `DB_PORT`
-- `DB_PASSWORD`
-- `DB_SOCKET`
-- `MARIADB_ROOT_PASSWORD` (optional for local Docker Compose; defaults to `DB_PASSWORD`)
-- `MODEL_NAME`
-- `OPENAI_BASE_URL`
+- `DB_HOST`, `DB_PORT`, `DB_SOCKET`
+- `DB_USER` (query user, default `demo_readonly`)
+- `DB_READONLY_USER` / `DB_READONLY_PASSWORD` (Docker Compose only: the query user the init script creates; they default to `demo_readonly` / `DB_PASSWORD`)
+- `MODEL_NAME`, `OPENAI_BASE_URL`
+- `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
+- `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -176,19 +188,22 @@ If you see `connect ECONNREFUSED 127.0.0.1:3306`, nothing is listening on that h
 Fastest local path:
 
 ```bash
-cp .env.example .env
-docker compose up -d mariadb
+cp .env.example .env          # set DB_PASSWORD and MARIADB_ROOT_PASSWORD
+docker compose up -d --wait mariadb
 npm run bootstrap-db
 ```
 
 That gives you:
 
-- MariaDB 10.6 on `127.0.0.1:${DB_PORT}`
+- MariaDB 10.6 on `127.0.0.1:${DB_PORT}` (Compose binds loopback only)
 - Database `${DB_NAME}`
+- The query user `demo_readonly` with `SELECT` on `` `demo\_retail%`.* `` only (created on first volume init)
 - The in-scope tables created from the copied Sequelize models (every table in `DEFAULT_INCLUDED_TABLES`)
 
 Notes:
 
+- `docker compose up` fails with "Set DB_PASSWORD or DB_READONLY_PASSWORD ..." when neither is set: the init script could not create the query user.
+- Changing the passwords in `.env` later does not change them in an existing volume; `docker compose down -v` resets it (and deletes the data).
 - `npm run bootstrap-db` creates an empty schema only. Run `npm run seed-demo` to load the bundled synthetic demo data, or supply your own seed data, for useful query results.
 - If the database already exists and you want to rebuild the tables, run `npm run bootstrap-db -- --drop-existing`.
 - If you only want to inspect the generated DDL, run `npm run bootstrap-db -- --print-sql`.
@@ -198,18 +213,19 @@ Notes:
 
 This repository ships with **synthetic data only**. The bundled seed (`scripts/seed-public-db.js`) is a small, fully fictional retail dataset — customers such as "North District Market", products such as "Sparkling Water 12 Pack", and generic ledger accounts. No real customer, product, or financial data is included anywhere in the code, datasets, metadata, or model comments.
 
-If you point this pipeline at a real database, the application-layer guardrails (read-only, single-statement, table allow-list, cross-database qualifier rejection) are your first line of defense, but they are **not** a substitute for database-level isolation. Recommended hardening:
+The application-layer checks (read-only validation, single statement, table allow-list, cross-database rejection) are defense in depth, **not** a substitute for database-level isolation; the database grants are the real boundary. Docker Compose sets this up for the demo. If you point the pipeline at another MariaDB instance:
 
-- Run the demo against its **own database** (default `demo_retail`), never alongside production data you don't want reachable.
-- Connect as a **dedicated least-privilege user** with `SELECT`-only grants scoped to that one database — not as `root`. For example:
+- Run it against its **own database** (default `demo_retail`), never alongside production data you don't want reachable.
+- Connect the query paths as a **dedicated least-privilege user** with `SELECT`-only grants scoped to that one database, not as `root`. For example:
 
   ```sql
   CREATE USER 'demo_readonly'@'%' IDENTIFIED BY '<strong-password>';
   GRANT SELECT ON demo_retail.* TO 'demo_readonly'@'%';
   ```
 
-  Then set `DB_USER=demo_readonly` in `.env`. This guarantees that even a misconfigured `DB_NAME` or a script that bypasses the pipeline cannot read other databases on the same MariaDB instance.
-- Keep the API server bound to `127.0.0.1` (the default) and set `WEB_API_TOKEN` / `WEB_ALLOWED_ORIGINS` before exposing it on any shared network.
+  Then set `DB_USER` / `DB_PASSWORD` to that user, and `DB_ADMIN_USER` / `DB_ADMIN_PASSWORD` to a separate user for `bootstrap-db` and `seed-demo`. With only these grants, a query that gets past the validator still cannot write, read server files (no `FILE` privilege) or read other databases on the instance.
+- The app checks this for you: the web server at startup, the `basic`/`optimized` CLIs (on stderr) and the token-authorized deep health check warn when the query user has more than `SELECT`/`USAGE`, or has grants that reach system schemas or databases other than `DB_NAME`. The check only warns; it never blocks.
+- Keep the API server bound to `127.0.0.1` (the default). Before exposing it on a shared network, set `WEB_API_TOKEN`, `WEB_ALLOWED_HOSTS` and `WEB_ALLOWED_ORIGINS` (see [Web App](#web-app)).
 
 ## Usage
 
@@ -263,22 +279,25 @@ npm run benchmark -- --dataset edge-cases-public          # public edge-case sui
 npm run benchmark -- --dataset edge-cases-public --tag join_path
 ```
 
-`npm run evaluate` is kept as an alias for the same benchmark runner.
+`npm run evaluate` is kept as an alias for the same benchmark runner. The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
 
 ### Edge-case suite and the scoring oracle
 
-`datasets/edge-cases-public.json` is a public edge-case suite built to expose weaknesses in
-the core algorithms — metric/column confusion, header↔detail grain, join-path
-traps (empty bridge tables, null foreign keys, obsolete denormalized fields),
-temporal parsing, aggregation shape, fuzzy entity matching, and empty-result
-robustness. Each case is tagged with a `failure_class` and is execution-verified
-against the public demo database.
+`datasets/edge-cases-public.json` is a public edge-case suite of 17 cases: the 9
+core cases plus 8 targeted edge cases, one per `failure_class` (metric/column
+confusion, header↔detail grain, wrong date column, stale snapshot fields, two
+join-path traps, master-data resolution, aggregation shape). Many cases also
+exercise date ranges and fuzzy entity names. Every case is execution-verified
+against the public demo database. With one case per failure class, per-class
+results are examples, not rates.
 
 It relies on a value-aware comparator (`compareResults` in `src/benchmark.js`):
-results are matched on **values**, not column names, so a correct answer with a
-different aggregate alias or extra projected columns is no longer scored as a
-mismatch (the previous exact-row oracle scored ~80% of correct answers as
-failures for cosmetic reasons). Cases opt in via a `comparison` block
+results are matched on **values**, not column names, so a different aggregate
+alias or extra projected columns do not by themselves make a result mismatch
+(the previous exact-row oracle scored ~80% of correct answers as failures for
+cosmetic reasons). A case's `signal_checks` still name expected output columns,
+so a correct answer under a different alias can be scored `low_signal_success`
+instead of `pass`. Cases opt in via a `comparison` block
 (`scalar` / `rowset` / `ranked`); datasets without one keep the legacy exact-row
 behavior. See `docs/evaluation-dataset.md` for the full taxonomy, the comparison
 spec, the current baseline, and documented coverage limits.
@@ -317,7 +336,7 @@ execution-verified `expected_sql`) before making any reliability claim.
 
 ## Web App
 
-A modular React fullstack app lives in `apps/web/`. The query console **streams over Server-Sent Events** (`POST /api/query/stream`): a live progress stepper, the generated SQL shown the instant the model returns it, then per-section results filling in via `columns → rows → viz → insights → layout` frames (a `residency` frame precedes `rows` and the `layout` frame is emitted only when present). It also includes an exact-match result cache (repeated questions replay in ~0ms), a virtualized results table, a deterministic Zod-validated adaptive layout rendered through a trusted block registry, deterministic insight cards, local dashboard pins, an optional debug trace view, and a gated client-side cross-filter for synthetic demo data. The blocking `POST /api/query` (JSON) is the same pipeline kept as a drift-free fallback for CLIs/curl/tests. See `apps/web/README.md` for details and configuration.
+A modular React fullstack app lives in `apps/web/`. The query console **streams over Server-Sent Events** (`POST /api/query/stream`): a live progress stepper, the generated SQL shown the instant the model returns it, then per-section results filling in via `columns → rows → viz → insights → layout` frames (a `residency` frame precedes `rows` and the `layout` frame is emitted only when present). Failed questions report the stage they stopped in (`errorStage`: `llm`, `validation`, `execution`, `aborted` or `infra`) and an `errorCode` in both the JSON result and the SSE `error` frame. It also includes an exact-match result cache (repeated questions replay in ~0ms; demo database read as `demo_readonly` only), a virtualized results table, a deterministic Zod-validated adaptive layout rendered through a trusted block registry, deterministic insight cards, local dashboard pins, an optional debug trace view, and a gated client-side cross-filter for synthetic demo data. The blocking `POST /api/query` (JSON) is the same pipeline kept as a drift-free fallback for CLIs/curl/tests. See `apps/web/README.md` for details and configuration.
 
 Run it from the repository root:
 
@@ -331,15 +350,15 @@ Other workspace checks (run from the repo root):
 npm run web:build      # production build to apps/web/dist
 npm run web:typecheck  # TypeScript type-check
 npm run web:test       # web unit tests
-npm run web:start      # run the built API server
+npm run web:start      # run the built API server (apps/web/src/server/main.js)
 ```
 
-Default local URLs:
+Default local URLs (`WEB_FRONTEND_PORT` and `WEB_API_PORT` change them; `web:dev` uses both):
 
 - Frontend: `http://localhost:5173`
 - API: `http://127.0.0.1:8787`
 
-The API server loads the repository root `.env` by default unless `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set. It binds to `127.0.0.1` by default; set `WEB_API_HOST=0.0.0.0` only for trusted networks, and use `WEB_ALLOWED_ORIGINS` to list allowed browser origins.
+The API server (`apps/web/src/server/main.js`) loads the env file first, then validates its settings: an invalid `WEB_*` value stops startup with one error listing every problem, so values set only in `.env` (such as `WEB_API_TOKEN`) take effect. It loads the repository root `.env` by default unless `--dotenv`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set. It binds to `127.0.0.1` by default; on a loopback bind, requests whose `Host` header is not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403, and API requests from an `Origin` outside `WEB_ALLOWED_ORIGINS` get 403. Set `WEB_API_HOST=0.0.0.0` only for trusted networks, together with `WEB_API_TOKEN`. SIGTERM/SIGINT drain in-flight requests for up to `WEB_SHUTDOWN_TIMEOUT_MS`. See `apps/web/README.md` for every setting, the admin schema-refresh endpoint and the health checks.
 
 ## LLM Cost Tracking
 
@@ -376,13 +395,13 @@ Quick test (no DB or API key needed):
 npm test
 ```
 
-This runs the full unit test suite, including retrieval, semantic-layer, master-data resolver, prompt-cache, cost, tracing, and guardrail tests.
+This runs the unit tests in `test/` and `apps/web/test/`, including retrieval, semantic-layer, master-data resolver, prompt-cache, cost, tracing, SQL validator and web server tests. The few MariaDB integration tests in `test/mariadb.integration.test.js` are skipped unless `TEST_MARIADB_PORT` (and `TEST_MARIADB_PASSWORD`) point at a running database.
 
 ## Semantic Retrieval And Master Data
 
 The optimized pipeline uses `metadata/semantic-layer.json` at runtime to map business phrasing to in-scope tables, joins, metrics, filters, and clarification hints. This is deliberately **rule-based / hand-curated semantic retrieval**, not an embedding model and not a vector database. The runtime combines lexical token scoring with curated semantic boosts, so prompts such as `biggest buyers`, `SKUs moved`, and synthetic product requests retrieve the right demo context without exposing every table.
 
-This has a useful failure mode for a reference project: when a business term is missing, the fix is visible in metadata and tests. The tradeoff is that new vocabulary must be added deliberately; hybrid lexical + embedding retrieval is listed as future work rather than silently implied.
+This has a useful failure mode for a reference project: when a business term is missing, the fix is visible in metadata and tests. The tradeoff is that new vocabulary must be added deliberately. Embedding or hybrid retrieval is not implemented.
 
 For product-name ambiguity, the pipeline resolves bounded master-data candidates before generation:
 
@@ -454,7 +473,7 @@ Key trace events:
 | `sql.executed` | SQL executed against the database |
 | `question.completed` | Per-question summary with aggregate cost |
 | `run.completed` | Final summary with total cost across all questions |
-| `llm.failed` / `sql.validation_failed` / `sql.execution_failed` | Error events with details |
+| `llm.failed` / `sql.validation_failed` / `sql.execution_failed` | Error events with details (`error.code`; validation failures also carry `error.layer`) |
 
 Notes:
 
@@ -481,15 +500,42 @@ The report includes estimated total tokens, cacheable-prefix tokens, the old mon
 
 ## Structured Output And Guardrails
 
-The optimized pipeline requests a provider-enforced JSON schema with `sql`, `explanation`, `tables_used`, and `assumptions`. After the model responds, local validation checks the SQL against the same prompt context the model saw:
+The optimized pipeline requests a provider-enforced JSON schema with `sql`, `explanation`, `tables_used`, and `assumptions`. Before anything runs, the SQL goes through two local validation layers. Both read the SQL through one MariaDB-faithful tokenizer (`src/sql-tokenizer.js`), so comments, quoted identifiers and string contents are seen the way MariaDB sees them (for example, `--` starts a comment only when followed by whitespace, a control character or the end of input). These are local JavaScript checks and add no LLM calls.
 
-- Qualified table and column references must exist in the retrieved schema context.
+**Layer 1, safety** (`validateSqlSafety` in `src/pipeline.js`; every path, including `basic`):
+
+- A single `SELECT` or `WITH` statement (one trailing `;` is allowed; the query may open with parentheses).
+- No SQL comments at all: `--`, `#` and `/* */` are rejected as `SQL_COMMENT`, and `/*! */` / `/*M! */` as `EXECUTABLE_COMMENT`. The prompts tell the model not to write them.
+- Non-recursive CTEs, including column lists and CTE chains, are accepted: CTE names are query-local, and the tables inside CTE bodies are checked like any other. `WITH RECURSIVE` is rejected (`RECURSIVE_CTE`).
+- Every table must be in the allowed set (`TABLE_SCOPE`). Any database-qualified table or `db.function()` is rejected (`CROSS_DATABASE`), as are metadata schemas such as `information_schema`, `mysql` and `sys`, bare or backtick-quoted (`METADATA_SCHEMA`).
+- Denylisted: DML/DDL keywords, any `INTO` (including `INTO OUTFILE`/`DUMPFILE`), `SET` (except `CHARACTER SET`), `PROCEDURE`, locking reads, index hints, `FOR SYSTEM_TIME`, table functions such as `JSON_TABLE`, `@`/`@@` variables, and timing, locking, file, sequence and session-information functions (`SLEEP`, `BENCHMARK`, `GET_LOCK`, `LOAD_FILE`, `NEXTVAL`, `CURRENT_USER`, ...), also when backtick-quoted.
+
+**Layer 2, guardrails** (`validateSqlGuardrails` in `src/sql-guardrails.js`; optimized pipeline only, against the prompt context the model saw):
+
+- Qualified table and column references (`c.CustomerName`) must exist in the retrieved schema context. Unqualified names are only partly checked: an unknown mixed-case identifier such as `FooBar` is rejected, but an unknown lower-case one such as `foobar` is not (MariaDB then fails it at execution).
 - Cross-table equality joins must match in-scope foreign keys or semantic join hints.
-- Semantic metrics must use their preferred columns, for example net sales uses `SalesDocument.NetAmount` or product (line-grain) net sales uses `SalesDocumentLine.NetAmount`.
-- Resolved product master-data filters such as `ProductId` and product foreign keys like `ProductId` must come from the candidate list supplied to the prompt.
+- Explicitly named metrics ("net sales", "revenue", "units sold", ...) must use their preferred columns, for example net sales uses `SalesDocument.NetAmount` and product (line-grain) net sales uses `SalesDocumentLine.NetAmount`. Metrics matched only through generic words ("sales", "sold") or in count/list questions are advisory: a missing preferred column is recorded in `guardrails.warnings[]` (`METRIC_COLUMN_NOT_USED`) instead of rejecting the SQL.
+- Fan-out: in each `SELECT` scope, `SUM`/`AVG` over a parent table's column while a 1:N child table is joined is rejected (`FAN_OUT`), because the join repeats the parent row. `COUNT`/`MIN`/`MAX`, children used only in `EXISTS`/`IN` or pre-aggregated in a subquery, and anti-joins (`child.col IS NULL`) are allowed.
+- When product master-data candidates were resolved, product ID literals compared with `ProductId` (or a product foreign key) must come from that candidate list. Other entities' IDs are not checked.
 - `tables_used` must stay inside the allowed table set and include every SQL table reference.
 
-These checks are local JavaScript validation, so they do not add any extra LLM calls. Validation details are included on `sql.validated.validation.guardrails` trace events. Query-local CTE names from `WITH ... AS (...)` are recognized as temporary identifiers during validation.
+Every rejection is a `SqlValidationError` with a stable `error.code` (such as `SQL_COMMENT`, `TABLE_SCOPE`, `UNKNOWN_COLUMN`, `JOIN_PATH`, `METRIC_COLUMN`, `FAN_OUT`) and `error.layer` (`safety` or `guardrail`). Trace events carry both, and validation details are included on `sql.validated.validation.guardrails` trace events.
+
+**Execution bounds** (`executeReadOnlySql`):
+
+- Every path (web, CLIs, benchmark, `verify-dataset`, master-data lookups) runs the statement under `SET STATEMENT max_statement_time=...` from `QUERY_STATEMENT_TIMEOUT_MS` (default 8000 ms; `0` disables; the web server can override it with `WEB_QUERY_STATEMENT_TIMEOUT_MS`).
+- The web server also caps rows server-side with `sql_select_limit` (which applies only to the outermost result, so subqueries, window functions and `GROUP BY` are unaffected) and stops reading at the cap even when the SQL has a larger explicit `LIMIT`. A capped result reports `truncated: true` and `totalRowCount: null`, and the UI shows "N+ rows".
+- When a web request is cancelled (Stop button, client disconnect or the request deadline), the OpenAI call is aborted and a running query is stopped with `KILL QUERY` over a separate connection.
+- The OpenAI client uses `OPENAI_TIMEOUT_MS` (default 60000) per attempt and `OPENAI_MAX_RETRIES` (default 1) transport retries. A response cut off at the token limit fails as `LLM_TRUNCATED`, and a content-filter block or refusal as `LLM_REFUSED`, instead of being parsed. Provider failures are classified as `LLM_TIMEOUT`, `LLM_CONNECTION_ERROR` or `HTTP_<status>`; outages (timeouts, connection errors, HTTP 401/403/429 and 5xx) fail fast without an app-level retry.
+
+**Known gaps.** The validator is defense in depth, and these are not covered by it:
+
+- Resource-heavy but otherwise read-only SQL is accepted, for example a `REPEAT()` memory bomb or a cartesian self-join. Only the statement timeout and (on the web path) the row cap bound it.
+- There is no function allowlist yet; the function check is a denylist.
+- The master-data ID check covers product IDs only and looks at literal comparisons, so a subquery or a join on the product name is not checked against the candidate list.
+- Unqualified column checks are partial (see above).
+
+The `SELECT`-only query user is what stops anything the validator misses from writing data or reading outside the demo databases.
 
 ## What The Scripts Do
 
