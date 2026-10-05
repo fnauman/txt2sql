@@ -1286,11 +1286,16 @@ function parseEqualityOperand(walker, range) {
 }
 
 // Top-level `a = b` AND-conjuncts of [start, end) as [left, right] operand
-// pairs (none when an OR sits at the top level).
+// pairs (none when an OR sits at the top level). A parenthesized conjunct is
+// split again: `ON (l.a = d.a AND l.k = 1)` holds both equalities.
 function collectEqualities(walker, start, end) {
   const pairs = [];
   for (const conjunct of walker.splitConjuncts(start, end) || []) {
     const [from, to] = walker.unwrapParens(conjunct);
+    if (from !== conjunct[0]) {
+      pairs.push(...collectEqualities(walker, from, to));
+      continue;
+    }
     const equals = [];
     for (let index = from; index < to; index = walker.nextAtom(index, to)) {
       if (isOperatorToken(walker.tokens[index], '=')) {

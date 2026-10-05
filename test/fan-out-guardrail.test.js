@@ -180,6 +180,9 @@ test('a child joined on its whole primary key pinned to constants keeps one row 
     "SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND (l.SalesDocumentLineId = '1')",
     `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} WHERE l.SalesDocumentLineId = 3`,
     `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} AND 3 = SalesDocumentLineId`,
+    // Conjuncts grouped in parentheses still pin the key.
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN SalesDocumentLine l ON (l.SalesDocumentId = d.SalesDocumentId AND l.SalesDocumentLineId = 1)',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT DISTINCT SalesDocumentId FROM SalesDocumentLine) x ON (x.SalesDocumentId = d.SalesDocumentId AND (d.IsCanceled = 0))',
   ]) {
     assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
   }
@@ -187,6 +190,7 @@ test('a child joined on its whole primary key pinned to constants keeps one row 
   for (const sql of [
     // Under OR the key is not pinned to one value (6500 instead of 5500).
     'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND (l.SalesDocumentLineId = 1 OR l.SalesDocumentLineId = 2)',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON (l.SalesDocumentId = d.SalesDocumentId AND (l.SalesDocumentLineId = 1 OR l.SalesDocumentLineId = 2))',
     // A later LEFT JOIN's condition does not restrict the rows on its left (6500).
     `SELECT SUM(d.NetAmount) AS n ${HEADER_LINES} LEFT JOIN Product p ON p.ProductId = l.ProductId AND l.SalesDocumentLineId = 1`,
     // Two copies of the child pinned to each other still repeat the document (6500).
