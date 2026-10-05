@@ -13,11 +13,19 @@
 // (master-data candidates re-resolved from the primary fixture, the response's
 // recorded tables_used), and the first accepted attempt is re-executed and
 // re-scored on every fixture (scoreAgainstGold); its primary-fixture run
-// stands for the product loop's execution. Attempts after it are dropped (the
-// product loop would have stopped). If no recorded attempt is accepted now
-// although the original run ended in an executed answer, the product loop
-// would have asked the model again; that retry cannot be replayed, so the
-// repetition is flagged `rescore.replayTruncated`.
+// stands for the product loop's execution. Attempts after it are not part of
+// the replay (the product loop would have stopped), but their SQL is still
+// re-validated and, when accepted, re-scored, and recorded in
+// `rescore.laterAttempts`, so a validator or oracle change is visible on every
+// recorded SQL. If no recorded attempt is accepted now although the original
+// run ended in an executed answer, the product loop would have asked the model
+// again; that retry cannot be replayed, so the repetition is flagged
+// `rescore.replayTruncated`.
+//
+// Recorded verdicts are never carried over: a replayed attempt loses its
+// recorded `guardrailCheck`, and attribution re-checks every attempt that a
+// guardrail rejects TODAY (attribution.js). Otherwise a rejection that today's
+// validator no longer makes would still count as a false rejection.
 //
 // Kept as recorded: LLM usage, cost and timings (nothing is re-generated),
 // and repetitions that never reached the model (skipped_budget, harness
@@ -84,6 +92,13 @@ function stripAttribution(repetition) {
   return rest;
 }
 
+// A recorded attempt without the verdicts attribution added to it.
+function withoutRecordedVerdicts(attempt) {
+  const { guardrailCheck: _stale, ...rest } = attempt;
+  void _stale;
+  return rest;
+}
+
 function goldErrorRepetition(repetition, error) {
   return {
     ...stripAttribution(repetition),
@@ -95,6 +110,33 @@ function goldErrorRepetition(repetition, error) {
     oracle: null,
     rescore: { replayed: false, reason: 'gold failed', originalStatus: repetition.status },
   };
+}
+
+/**
+ * Today's verdict on a recorded attempt that the replay did not reach:
+ * { attempt, validation: { ok, code?, layer? }, oracle: { match, matchedGold,
+ * reason } | null, error? }. Never part of the repetition's outcome.
+ */
+async function judgeLaterAttempt(attempt, { testCase, prompt, validate, score, connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs }) {
+  const sql = attempt.generatedSql;
+  if (!sql) {
+    return { attempt: attempt.attempt, validation: null, oracle: null };
+  }
+  const rejection = await validate(testCase.question, sql, { tablesUsed: attempt.llm?.tablesUsed ?? null });
+  if (rejection) {
+    return { attempt: attempt.attempt, validation: { ok: false, code: rejection.code, layer: rejection.layer }, oracle: null };
+  }
+  try {
+    const safety = validateSqlSafety(sql, prompt.allowedTables);
+    const result = await score({ testCase, predictedSql: safety.sql, connections, goldCache, timeoutMs: statementTimeoutMs, goldTimeoutMs, schema });
+    return {
+      attempt: attempt.attempt,
+      validation: { ok: true },
+      oracle: { match: result.match, matchedGold: result.matchedGold, reason: result.reason },
+    };
+  } catch (error) {
+    return { attempt: attempt.attempt, validation: { ok: true }, oracle: null, error: error.message };
+  }
 }
 
 async function checkGold(testCase, { connections, goldCache, goldTimeoutMs }) {
@@ -133,7 +175,9 @@ export async function rescoreRepetition(repetition, {
   let lastFailure = null;
   let stoppedOnInfra = false;
 
-  for (const attempt of attempts) {
+  let finalIndex = -1;
+  for (const [index, recordedAttempt] of attempts.entries()) {
+    const attempt = withoutRecordedVerdicts(recordedAttempt);
     const sql = attempt.generatedSql;
     if (!sql) {
       replayed.push(attempt);
@@ -190,7 +234,28 @@ export async function rescoreRepetition(repetition, {
       execution: { ok: true, durationMs: null, rowCount: primary.actualRowCount, truncated: primary.truncated },
     });
     final = { sql: safety.sql, score: result };
+    finalIndex = index;
     break;
+  }
+
+  // Recorded attempts after the replay's final one: judged, not replayed.
+  const laterAttempts = [];
+  if (finalIndex >= 0) {
+    for (const attempt of attempts.slice(finalIndex + 1)) {
+      laterAttempts.push(
+        await judgeLaterAttempt(attempt, {
+          testCase,
+          prompt,
+          validate,
+          score,
+          connections,
+          goldCache,
+          schema,
+          statementTimeoutMs,
+          goldTimeoutMs,
+        })
+      );
+    }
   }
 
   const base = {
@@ -213,6 +278,7 @@ export async function rescoreRepetition(repetition, {
     // True when the outcome is the recording's (a run cut short, a provider
     // outage), not something the replay found today.
     inherited: false,
+    ...(laterAttempts.length ? { laterAttempts } : {}),
   };
 
   if (final) {

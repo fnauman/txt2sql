@@ -114,7 +114,13 @@ test('rescore replays recorded attempts through today\'s validator and oracle', 
   assert.equal(oldRule.attempt_count, 1, 'the replay stops at the first accepted attempt');
   assert.equal(oldRule.attempts[0].validation.ok, true);
   assert.equal(oldRule.attempts[0].validation.durationMs, null, 'durations are not re-measured');
-  assert.deepEqual(oldRule.rescore, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayTruncated: false, inherited: false });
+  const { laterAttempts, ...rescoreInfo } = oldRule.rescore;
+  assert.deepEqual(rescoreInfo, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayTruncated: false, inherited: false });
+  // The attempt the replay did not reach is still judged today (not replayed).
+  assert.deepEqual(
+    laterAttempts.map((entry) => [entry.attempt, entry.validation.ok, entry.oracle.match, entry.oracle.reason]),
+    [[2, true, false, 'values']]
+  );
   // Recorded cost and usage are kept: nothing was re-generated.
   assert.equal(oldRule.llm_cost.totalCost, 0.000574);
 
@@ -215,4 +221,53 @@ test('runs cut short keep their status unless a recorded attempt now completes; 
   const lost = byId(down).legacy_pass.repetitions[0];
   // The gold check runs first and fails on the dead fixture: an infrastructure failure, not a broken gold.
   assert.deepEqual([lost.status, lost.error_code, lost.outcome, lost.counted], ['expected_sql_error', 'PROTOCOL_CONNECTION_LOST', 'infra_error', false]);
+});
+
+test('a recorded guardrail verdict never survives a rescore: today\'s rejections are re-checked, others lose it', async () => {
+  const source = await loadSource();
+  const record = source.results.find((entry) => entry.id === 'rec_customers_old_rule');
+  // As a live run would have recorded it: attempt 1 (the then-correct SQL) was a
+  // guardrail FALSE rejection, attempt 2 was wrong.
+  const falselyRejected = (sql) => ({
+    ...source,
+    results: [
+      {
+        ...record,
+        repetitions: [
+          {
+            ...record.repetitions[0],
+            outcome: 'guardrail_false_rejection',
+            bucket: 'system',
+            attempts: record.repetitions[0].attempts.map((attempt, index) =>
+              index === 0 ? { ...attempt, generatedSql: sql, guardrailCheck: { verdict: 'false_rejection', matchedGold: 'expected_sql', reason: 'match' } } : attempt
+            ),
+          },
+        ],
+      },
+    ],
+  });
+
+  // 1. Today the validator accepts attempt 1, but the gold changed so it is wrong:
+  //    the model's error, not a guardrail's.
+  const recorded = testCaseFromRecord(record);
+  const changedGold = normalizeBenchmarkCase({ ...recorded, expected_sql: 'SELECT COUNT(*) AS customer_count FROM Customer WHERE IsActive = 1' });
+  const { report: accepted } = await rescoreToReport(falselyRejected(record.repetitions[0].attempts[0].generatedSql), {
+    currentCases: new Map([[changedGold.id, changedGold]]),
+  });
+  const acceptedRep = accepted.results[0].repetitions[0];
+  assert.deepEqual([acceptedRep.attempts.length, acceptedRep.attempts[0].validation.ok], [1, true]);
+  assert.equal('guardrailCheck' in acceptedRep.attempts[0], false);
+  assert.deepEqual([acceptedRep.status, acceptedRep.outcome, acceptedRep.bucket], ['result_mismatch', 'wrong_result', 'model']);
+  assert.equal(accepted.attribution.system.guardrailFalseRejections, 0);
+  assert.equal(accepted.attribution.guardrailConfusion.fp, 0);
+
+  // 2. Today the SAFETY layer rejects attempt 1 (never executed); attempt 2 is wrong.
+  const { report: unsafe, sent } = await rescoreToReport(falselyRejected('SELECT COUNT(*) AS customer_count FROM Customer -- all'));
+  const unsafeRep = unsafe.results[0].repetitions[0];
+  assert.deepEqual(unsafeRep.attempts.map((attempt) => [attempt.validation.layer ?? 'accepted', 'guardrailCheck' in attempt]), [
+    ['safety', false],
+    ['accepted', false],
+  ]);
+  assert.deepEqual([unsafeRep.outcome, unsafeRep.bucket], ['wrong_result', 'model']);
+  assert.ok(!sent.some((line) => line.includes('-- all')), 'a safety rejection is never executed');
 });

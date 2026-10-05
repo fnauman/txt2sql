@@ -88,6 +88,13 @@ function finalAttempt(repetition) {
   return attempts.length ? attempts[attempts.length - 1] : null;
 }
 
+// An attempt that a guardrail rejected, as recorded in its CURRENT validation
+// (a rescore re-validates attempts; a verdict only counts while the rejection
+// it judged still stands).
+function isGuardrailRejected(attempt) {
+  return attempt?.validation?.ok === false && attempt.validation.layer === 'guardrail';
+}
+
 /**
  * Attribution of one repetition (an evaluateQuestion result, possibly with
  * attempts annotated by checkGuardrailRejections). Returns
@@ -152,7 +159,7 @@ export function classifyRepetition(repetition, testCase = {}) {
   if (
     outcome !== 'pass' &&
     OUTCOME_BUCKETS[outcome] === 'model' &&
-    (repetition.attempts || []).some((attempt) => attempt.guardrailCheck?.verdict === 'false_rejection')
+    (repetition.attempts || []).some((attempt) => isGuardrailRejected(attempt) && attempt.guardrailCheck?.verdict === 'false_rejection')
   ) {
     outcome = 'guardrail_false_rejection';
   }
@@ -240,8 +247,18 @@ export async function checkGuardrailRejections(repetition, {
   score = scoreAgainstGold,
 } = {}) {
   const attempts = repetition?.attempts || [];
-  if (!attempts.some((attempt) => attempt.validation?.ok === false && attempt.validation.layer === 'guardrail')) {
-    return repetition;
+  // A verdict belongs to the rejection it judged: drop any carried over on an
+  // attempt that no guardrail rejects now.
+  const withoutStaleChecks = (attempt) => {
+    if (isGuardrailRejected(attempt) || !('guardrailCheck' in attempt)) {
+      return attempt;
+    }
+    const { guardrailCheck: _stale, ...rest } = attempt;
+    void _stale;
+    return rest;
+  };
+  if (!attempts.some(isGuardrailRejected)) {
+    return attempts.some((attempt) => 'guardrailCheck' in attempt) ? { ...repetition, attempts: attempts.map(withoutStaleChecks) } : repetition;
   }
   const allowedTables = (repetition.retrieved_tables || []).length > 0
     ? repetition.retrieved_tables
@@ -271,7 +288,7 @@ export async function checkGuardrailRejections(repetition, {
 
   const annotated = [];
   for (const attempt of attempts) {
-    if (attempt.validation?.ok === false && attempt.validation.layer === 'guardrail' && attempt.generatedSql) {
+    if (isGuardrailRejected(attempt) && attempt.generatedSql) {
       const key = `${testCase?.id}\u0000${attempt.generatedSql}`;
       let pending = cache?.get(key);
       if (!pending) {
@@ -280,7 +297,7 @@ export async function checkGuardrailRejections(repetition, {
       }
       annotated.push({ ...attempt, guardrailCheck: await pending });
     } else {
-      annotated.push(attempt);
+      annotated.push(withoutStaleChecks(attempt));
     }
   }
   return { ...repetition, attempts: annotated };

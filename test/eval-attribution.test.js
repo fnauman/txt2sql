@@ -198,3 +198,23 @@ test('attribution summary separates model, system, infra, skipped and harness', 
   assert.equal(summary.cases.byOutcome.guardrail_false_rejection, 1);
   assert.equal(summary.guardrailConfusion.fp, 1);
 });
+
+test('a false-rejection verdict only counts on an attempt a guardrail rejects now', () => {
+  // A stale verdict on an attempt that is now accepted, or now a safety rejection.
+  for (const attempt of [
+    accepted('SELECT once_rejected', { ok: true, durationMs: 1, rowCount: 1, truncated: false }),
+    rejected('SELECT once_rejected', 'safety', 'SQL_COMMENT'),
+  ]) {
+    const input = repetition('result_mismatch', [{ ...attempt, guardrailCheck: { verdict: 'false_rejection' } }, accepted('SELECT wrong')]);
+    assert.deepEqual([classifyRepetition(input, testCase).outcome, classifyRepetition(input, testCase).bucket], ['wrong_result', 'model']);
+  }
+});
+
+test('checkGuardrailRejections drops a carried-over verdict from attempts no guardrail rejects', async () => {
+  const stale = repetition('result_mismatch', [
+    { ...accepted('SELECT a'), guardrailCheck: { verdict: 'false_rejection' } },
+    accepted('SELECT b'),
+  ]);
+  const checked = await checkGuardrailRejections(stale, { testCase, connections: [], schema: { tables: [] }, score: async () => assert.fail('nothing to re-run') });
+  assert.deepEqual(checked.attempts.map((attempt) => 'guardrailCheck' in attempt), [false, false]);
+});

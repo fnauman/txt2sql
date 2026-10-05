@@ -593,10 +593,16 @@ validator, fixtures and oracle. Per repetition it replays the recorded
 attempts: each SQL is re-validated in the real prompt context (master-data
 candidates re-resolved from the primary fixture, the response's recorded
 `tables_used`), and the first accepted one is re-executed and re-scored on
-every fixture; later attempts are dropped, as the product loop would have
-stopped. If no recorded attempt is accepted any more although the original run
-ended with an executed answer, the retry the product would have made cannot be
-replayed; that repetition is tagged `replay_truncated`. The case definition is
+every fixture. Attempts after it are not part of the replay, as the product
+loop would have stopped there, but their SQL is still re-validated and, when
+accepted, re-scored; those verdicts are recorded in `rescore.laterAttempts`
+and do not change the outcome. If no recorded attempt is accepted any more
+although the original run ended with an executed answer, the retry the
+product would have made cannot be replayed; that repetition is tagged
+`replay_truncated`. Recorded verdicts are not reused: every attempt that a
+guardrail rejects today is re-checked against the fixtures, and an attempt
+that is now accepted, or now rejected by the safety layer, loses the old
+false-rejection verdict. The case definition is
 today's dataset case with the same id (so a fixed gold is rescored with the
 fix), else the recorded one. Cost, latency and tokens stay the original run's.
 Rescoring the same report twice gives identical results (durations are not
