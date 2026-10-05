@@ -95,6 +95,16 @@ test('toClientError adds the failure stage only when one is known', () => {
   assert.ok(!('stage' in toClientError({ message: 'x' })));
 });
 
+test('toClientError keeps a known validation layer and drops anything else', () => {
+  assert.deepEqual(
+    toClientError({ name: 'SqlValidationError', message: 'x', code: 'FAN_OUT', layer: 'guardrail', stack: 's' }, { stage: 'validation' }),
+    { name: 'SqlValidationError', message: 'x', code: 'FAN_OUT', stage: 'validation', layer: 'guardrail' }
+  );
+  assert.equal(toClientError({ message: 'x', layer: 'safety' }).layer, 'safety');
+  assert.ok(!('layer' in toClientError({ message: 'x', layer: 'internal' })));
+  assert.ok(!('layer' in toClientError({ message: 'x' })));
+});
+
 test('normalizeHostname strips ports and IPv6 brackets', () => {
   assert.equal(normalizeHostname('LocalHost:8787'), 'localhost');
   assert.equal(normalizeHostname('[::1]:8787'), '::1');

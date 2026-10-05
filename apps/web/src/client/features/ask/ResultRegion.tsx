@@ -64,7 +64,12 @@ export function ResultRegion({
         )}
 
         {errored && state.error && (
-          <ErrorBanner error={state.error} stage={state.errorStage} code={result.errorCode ?? result.error?.code ?? null} />
+          <ErrorBanner
+            error={state.error}
+            stage={state.errorStage}
+            code={result.errorCode ?? result.error?.code ?? null}
+            layer={result.error?.layer ?? null}
+          />
         )}
 
         {!errored && (hasColumns || streaming) && (hasColumns ? <MetricStrip result={result} /> : <MetricSkeleton />)}

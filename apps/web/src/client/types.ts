@@ -62,11 +62,17 @@ export interface DebugEvent {
 // Where a failed question stopped (server contract; see src/query-service.js).
 export type ErrorStage = 'llm' | 'validation' | 'execution' | 'aborted' | 'infra';
 
+// Which SQL validator layer rejected a query (src/sql-guardrails.js
+// SqlValidationError.layer): 'safety' is the read-only/table-scope check,
+// 'guardrail' the schema-aware check against the prompt context.
+export type ValidationLayer = 'safety' | 'guardrail';
+
 export interface QueryError {
   name?: string;
   message: string;
   code?: string | null;
   stage?: ErrorStage | null;
+  layer?: ValidationLayer | null;
 }
 
 export interface QueryResponse {

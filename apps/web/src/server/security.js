@@ -17,7 +17,13 @@ export function toClientError(error, { stage = null } = {}) {
   const message =
     typeof error.message === 'string' && error.message ? error.message : 'The request could not be completed.';
   const code = error.code === undefined ? null : error.code;
-  return stage ? { name, message, code, stage } : { name, message, code };
+  const clientError = stage ? { name, message, code, stage } : { name, message, code };
+  // Which validator layer rejected the SQL ('safety' or 'guardrail'); the
+  // client classifies its message on this instead of on the message text.
+  if (error.layer === 'safety' || error.layer === 'guardrail') {
+    clientError.layer = error.layer;
+  }
+  return clientError;
 }
 
 // Fixed-window in-memory rate limiter. `now` is injected so it is deterministic

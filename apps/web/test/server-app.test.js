@@ -6,6 +6,9 @@ import test from 'node:test';
 
 import { APIUserAbortError } from 'openai';
 
+import { validateReadOnlySql } from '../../../src/pipeline.js';
+import { serializeError } from '../../../src/trace.js';
+
 import {
   READONLY_GRANTS,
   createFakeRuntime,
@@ -495,6 +498,32 @@ test('failed questions expose errorStage/errorCode in JSON and SSE error payload
       assert.deepEqual(errorFrame.data, { name: 'Error', message: expected.message, code: expected.code, stage: expected.stage });
       assert.equal(frames.at(-1).event, 'done');
     }
+  });
+});
+
+test('a rejected query reports the validator layer in JSON and SSE error payloads', async () => {
+  const { factory } = createRuntimeFactory();
+  let rejection;
+  try {
+    validateReadOnlySql('SELECT 1 -- hidden', []);
+  } catch (error) {
+    rejection = error;
+  }
+  const { runQuestion } = recordingRunner((args) => ({
+    ...failureResult(args.question, { stage: 'validation', code: rejection.code, message: rejection.message, name: rejection.name }),
+    serializedError: serializeError(rejection),
+  }));
+  await withApp({ config: testConfig(), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'q' } });
+    assert.equal(json.status, 422);
+    assert.equal(json.json.errorCode, 'SQL_COMMENT');
+    assert.equal(json.json.error.layer, 'safety');
+    assert.ok(!('stack' in json.json.error));
+
+    const frames = parseSse((await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'q' } })).text);
+    const errorFrame = frames.find((frame) => frame.event === 'error');
+    assert.equal(errorFrame.data.layer, 'safety');
+    assert.equal(errorFrame.data.stage, 'validation');
   });
 });
 

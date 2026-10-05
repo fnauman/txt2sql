@@ -1,8 +1,18 @@
 import { errorStageLabel, friendlyError } from '../../format';
-import type { ErrorStage } from '../../types';
+import type { ErrorStage, ValidationLayer } from '../../types';
 
-export function ErrorBanner({ error, stage = null, code = null }: { error: string; stage?: ErrorStage | null; code?: string | null }) {
-  const friendly = friendlyError(error);
+export function ErrorBanner({
+  error,
+  stage = null,
+  code = null,
+  layer = null,
+}: {
+  error: string;
+  stage?: ErrorStage | null;
+  code?: string | null;
+  layer?: ValidationLayer | null;
+}) {
+  const friendly = friendlyError(error, { code, stage, layer });
   const stageLabel = errorStageLabel(stage);
   return (
     <div className="error-banner" role="alert">
