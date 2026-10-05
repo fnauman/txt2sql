@@ -88,6 +88,148 @@ test('IS NULL on an inner-joined child is not an anti-join', () => {
   assertFanOut(BRAND_QUESTION, `SELECT SUM(d.NetAmount) AS net ${HEADER_LINES} WHERE l.ProductId IS NULL`);
 });
 
+test('a LEFT JOIN is an anti-join only for a top-level WHERE ... IS NULL on a never-null-when-matched column', () => {
+  const LEFT_LINES = 'FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId';
+  // Each of these returned 6500 instead of 5500 (or kept one row per matching
+  // line) on the seeded demo DB, yet the old exemption accepted them because an
+  // `alias.col IS NULL` appeared somewhere in the block.
+  for (const sql of [
+    // IS NULL inside the ON clause keeps every null-product line.
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId AND l.ProductId IS NULL',
+    // ProductId is nullable: a document with several such lines is multiplied.
+    `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE l.ProductId IS NULL`,
+    // Under OR the IS NULL test does not hold for every row.
+    `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE l.SalesDocumentLineId IS NULL OR l.Quantity > 0`,
+    `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE l.ProductId IS NULL OR 1 = 1`,
+    `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE l.SalesDocumentLineId IS NULL || 1 = 1`,
+    // The AND belongs to BETWEEN: this is d.SalesDocumentId BETWEEN 1 AND (l.SalesDocumentLineId IS NULL).
+    `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE d.SalesDocumentId BETWEEN 1 AND l.SalesDocumentLineId IS NULL`,
+    // IS NULL in the SELECT list / a CASE is not a filter at all.
+    `SELECT SUM(d.NetAmount) AS n, MAX(CASE WHEN l.ProductId IS NULL THEN 1 ELSE 0 END) AS f ${LEFT_LINES}`,
+    `SELECT SUM(d.NetAmount) AS net, SUM(CASE WHEN l.SalesDocumentLineId IS NULL THEN 1 ELSE 0 END) AS empty_docs ${LEFT_LINES}`,
+  ]) {
+    assertFanOut(BRAND_QUESTION, sql);
+  }
+
+  // A nullable non-key posting column, and a join key compared under OR in ON.
+  for (const sql of [
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN AccountingPosting p ON p.SalesDocumentId = d.SalesDocumentId WHERE p.LedgerAccountId IS NULL',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN AccountingPosting p ON p.SalesDocumentId = d.SalesDocumentId OR p.LedgerAccountId = 1 WHERE p.SalesDocumentId IS NULL',
+  ]) {
+    assertFanOut(POSTINGS_QUESTION, sql, { child: 'AccountingPosting' });
+  }
+
+  // Genuine anti-joins: primary key, NOT NULL foreign key, a nullable key that
+  // the join condition equates (ON ... = ... or USING), parenthesized.
+  for (const [question, sql] of [
+    [BRAND_QUESTION, `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE l.SalesDocumentLineId IS NULL`],
+    [BRAND_QUESTION, `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE d.IsCanceled = 0 AND l.SalesDocumentId IS NULL`],
+    [BRAND_QUESTION, `SELECT SUM(d.NetAmount) AS n ${LEFT_LINES} WHERE (l.SalesDocumentLineId IS NULL) AND d.DocumentDate BETWEEN '2026-03-01' AND '2026-03-31'`],
+    [
+      POSTINGS_QUESTION,
+      'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN AccountingPosting p ON p.SalesDocumentId = d.SalesDocumentId WHERE p.SalesDocumentId IS NULL',
+    ],
+    [
+      POSTINGS_QUESTION,
+      'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d LEFT JOIN AccountingPosting p USING (SalesDocumentId) WHERE p.SalesDocumentId IS NULL',
+    ],
+  ]) {
+    assert.doesNotThrow(() => validateFor(question, sql), sql);
+  }
+});
+
+test('an aggregate that can yield a header value is at header grain, even if it also touches a line column', () => {
+  // COALESCE/IF/CASE arms and additive terms carry the header value through;
+  // both of these returned 6500 instead of 5500 on the seeded demo DB.
+  for (const sql of [
+    `SELECT SUM(COALESCE(d.NetAmount, l.NetAmount)) AS n ${HEADER_LINES}`,
+    `SELECT SUM(d.NetAmount + 0 * l.Quantity) AS n ${HEADER_LINES}`,
+    `SELECT SUM(-d.NetAmount - -l.NetAmount) AS n ${HEADER_LINES}`,
+    `SELECT SUM(IF(l.ProductId IS NULL, d.NetAmount, l.NetAmount)) AS n ${HEADER_LINES}`,
+    `SELECT SUM(CASE WHEN l.Quantity > 0 THEN l.NetAmount ELSE d.NetAmount END) AS n ${HEADER_LINES}`,
+  ]) {
+    assertFanOut(BRAND_QUESTION, sql);
+  }
+
+  // A header value multiplied by a line value is a per-line value; a header
+  // column used only in a condition does not set the grain.
+  for (const sql of [
+    `SELECT SUM(l.NetAmount * d.NetAmount / NULLIF(d.GrossAmount, 0)) AS n ${HEADER_LINES}`,
+    `SELECT SUM(IF(d.IsCanceled = 1, 0, l.NetAmount)) AS n ${HEADER_LINES}`,
+    `SELECT SUM(l.NetAmount * -d.IsCanceled) AS n ${HEADER_LINES}`,
+    `SELECT SUM(CASE WHEN d.IsCanceled = 0 THEN l.NetAmount ELSE 0 END) AS n ${HEADER_LINES}`,
+    `SELECT ROUND(SUM(CAST(l.NetAmount AS DECIMAL(18, 2)) * d.IsCanceled), 2) AS n ${HEADER_LINES}`,
+  ]) {
+    assert.doesNotThrow(() => validateFor(BRAND_QUESTION, sql), sql);
+  }
+});
+
+test('a derived table or CTE that only projects a child table counts as that child', () => {
+  for (const sql of [
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT l.SalesDocumentId, l.ProductId FROM SalesDocumentLine l) x ON x.SalesDocumentId = d.SalesDocumentId',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT * FROM SalesDocumentLine) x ON x.SalesDocumentId = d.SalesDocumentId',
+    'WITH line_rows AS (SELECT l.SalesDocumentId FROM SalesDocumentLine l) SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN line_rows x ON x.SalesDocumentId = d.SalesDocumentId',
+    'WITH line_rows AS (SELECT * FROM SalesDocumentLine) SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN line_rows ON line_rows.SalesDocumentId = d.SalesDocumentId',
+    'WITH a AS (SELECT * FROM SalesDocumentLine), b AS (SELECT * FROM a WHERE a.Quantity > 0) SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN b ON b.SalesDocumentId = d.SalesDocumentId',
+  ]) {
+    assertFanOut(BRAND_QUESTION, sql);
+  }
+  // ...and a projection of the header joined to its lines is the header.
+  assertFanOut(
+    BRAND_QUESTION,
+    'SELECT SUM(x.NetAmount) AS n FROM (SELECT * FROM SalesDocument) x JOIN SalesDocumentLine l ON l.SalesDocumentId = x.SalesDocumentId'
+  );
+
+  // DISTINCT / GROUP BY collapse the child rows first, so they do not fan out.
+  for (const sql of [
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT DISTINCT l.SalesDocumentId FROM SalesDocumentLine l) x ON x.SalesDocumentId = d.SalesDocumentId',
+    'SELECT SUM(d.NetAmount) AS n FROM SalesDocument d JOIN (SELECT l.SalesDocumentId, COUNT(*) AS c FROM SalesDocumentLine l GROUP BY l.SalesDocumentId) x ON x.SalesDocumentId = d.SalesDocumentId',
+  ]) {
+    assert.doesNotThrow(() => validateFor(BRAND_QUESTION, sql), sql);
+  }
+});
+
+test('one-to-one keys are skipped only when the FK is the sole primary-key column', () => {
+  const column = (name, extra = {}) => ({ name, type: 'INTEGER', primaryKey: false, allowNull: true, ...extra });
+  const promptContext = {
+    tables: [
+      { tableName: 'Invoice', includedColumns: [column('InvoiceId', { primaryKey: true, allowNull: false }), column('Total')], omittedColumnNames: [] },
+      // Composite key (InvoiceId, LineNo): one invoice has many lines.
+      {
+        tableName: 'InvoiceLine',
+        includedColumns: [
+          column('InvoiceId', { primaryKey: true, allowNull: false }),
+          column('LineNo', { primaryKey: true, allowNull: false }),
+          column('Amount'),
+        ],
+        omittedColumnNames: [],
+      },
+      // Sole primary key that is also the FK: one extension row per invoice.
+      { tableName: 'InvoiceExtra', includedColumns: [column('InvoiceId', { primaryKey: true, allowNull: false }), column('Note')], omittedColumnNames: [] },
+    ],
+    relationships: [
+      { fromTable: 'InvoiceLine', fromColumn: 'InvoiceId', toTable: 'Invoice', toColumn: 'InvoiceId' },
+      { fromTable: 'InvoiceExtra', fromColumn: 'InvoiceId', toTable: 'Invoice', toColumn: 'InvoiceId' },
+    ],
+  };
+  const allowedTables = ['Invoice', 'InvoiceLine', 'InvoiceExtra'];
+
+  assert.throws(
+    () =>
+      validateReadOnlySql(
+        'SELECT SUM(i.Total) AS total FROM Invoice i JOIN InvoiceLine l ON l.InvoiceId = i.InvoiceId',
+        allowedTables,
+        { promptContext }
+      ),
+    (error) => error.code === 'FAN_OUT' && error.details.childTable === 'InvoiceLine'
+  );
+  assert.doesNotThrow(() =>
+    validateReadOnlySql('SELECT SUM(i.Total) AS total FROM Invoice i JOIN InvoiceExtra x ON x.InvoiceId = i.InvoiceId', allowedTables, {
+      promptContext,
+    })
+  );
+});
+
 test('accounting postings are a one-to-many child of the document too', () => {
   assertFanOut(
     POSTINGS_QUESTION,

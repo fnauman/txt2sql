@@ -689,8 +689,59 @@ function validateMetricGuardrails(sql, promptContext = {}) {
 
 const FAN_OUT_AGGREGATES = ['SUM', 'AVG'];
 
+// Aggregates that collapse rows. A derived table or CTE that uses one (without
+// OVER) is not a row-level pass-through of its source table.
+const ROW_COLLAPSING_AGGREGATES = new Set([
+  'SUM',
+  'COUNT',
+  'AVG',
+  'MIN',
+  'MAX',
+  'GROUP_CONCAT',
+  'STD',
+  'STDDEV',
+  'STDDEV_POP',
+  'STDDEV_SAMP',
+  'VARIANCE',
+  'VAR_POP',
+  'VAR_SAMP',
+  'BIT_AND',
+  'BIT_OR',
+  'BIT_XOR',
+  'JSON_ARRAYAGG',
+  'JSON_OBJECTAGG',
+]);
+
+// Words that end a WHERE clause at its own depth.
+const WHERE_CLAUSE_TERMINATORS = new Set(['GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'WINDOW', 'INTO', 'FOR', 'LOCK', 'PROCEDURE']);
+
+// Words that end a join's ON condition at its own depth.
+const ON_CLAUSE_TERMINATORS = new Set([
+  ...WHERE_CLAUSE_TERMINATORS,
+  'WHERE',
+  'JOIN',
+  'STRAIGHT_JOIN',
+  'INNER',
+  'LEFT',
+  'RIGHT',
+  'FULL',
+  'CROSS',
+  'NATURAL',
+]);
+
+// Operators that combine values multiplicatively (higher precedence than + and
+// every comparison/logical operator).
+const MULTIPLICATIVE_OPERATORS = new Set(['*', '/', '%']);
+const MULTIPLICATIVE_KEYWORDS = ['DIV', 'MOD'];
+// Logical/comparison keywords that separate operands like an operator does.
+const OPERAND_SEPARATOR_KEYWORDS = ['AND', 'OR', 'XOR', 'NOT', 'IS', 'LIKE', 'IN', 'BETWEEN', 'REGEXP', 'RLIKE', 'SOUNDS'];
+
 function isPunctToken(token, value) {
   return Boolean(token) && token.type === 'punct' && token.value === value;
+}
+
+function isOperatorToken(token, ...values) {
+  return Boolean(token) && token.type === 'operator' && (values.length === 0 || values.includes(token.value));
 }
 
 function tokenIdentifierName(token) {
@@ -703,27 +754,40 @@ function tokenIdentifierName(token) {
   return token.type === 'word' ? token.value : null;
 }
 
-// Child -> parent foreign keys among the prompt tables. A one-to-one key (the
-// child's FK column is also its primary key) cannot fan out and is skipped.
-function collectForeignKeyEdges(promptContext = {}) {
-  const primaryKeys = new Set();
+// tableName -> Map(columnName -> { primaryKey, allowNull }) for the prompt tables.
+function collectColumnMetadata(promptContext = {}) {
+  const metadata = new Map();
   for (const table of Array.isArray(promptContext.tables) ? promptContext.tables : []) {
     const tableName = table.tableName || table.name;
-    for (const column of table.includedColumns || []) {
-      if (column.primaryKey) {
-        primaryKeys.add(`${tableName}.${column.name}`);
-      }
+    if (!tableName) {
+      continue;
     }
+    const columns = new Map();
+    for (const column of table.includedColumns || []) {
+      columns.set(column.name, { primaryKey: Boolean(column.primaryKey), allowNull: column.allowNull !== false });
+    }
+    metadata.set(tableName, columns);
   }
+  return metadata;
+}
+
+// Child -> parent foreign keys among the prompt tables. A one-to-one key (the
+// child's FK column is its table's ONLY primary-key column) cannot fan out and
+// is skipped; an FK that is just one part of a composite key is one-to-many.
+function collectForeignKeyEdges(promptContext = {}, columnMetadata = collectColumnMetadata(promptContext)) {
+  const primaryKeyColumns = (tableName) =>
+    [...(columnMetadata.get(tableName) || new Map()).entries()]
+      .filter(([, column]) => column.primaryKey)
+      .map(([columnName]) => columnName);
 
   return (Array.isArray(promptContext.relationships) ? promptContext.relationships : [])
-    .filter(
-      (relationship) =>
-        relationship.fromTable &&
-        relationship.toTable &&
-        relationship.fromTable !== relationship.toTable &&
-        !primaryKeys.has(`${relationship.fromTable}.${relationship.fromColumn}`)
-    )
+    .filter((relationship) => {
+      if (!relationship.fromTable || !relationship.toTable || relationship.fromTable === relationship.toTable) {
+        return false;
+      }
+      const keyColumns = primaryKeyColumns(relationship.fromTable);
+      return !(keyColumns.length === 1 && keyColumns[0] === relationship.fromColumn);
+    })
     .map((relationship) => ({
       childTable: relationship.fromTable,
       childColumn: relationship.fromColumn,
@@ -732,83 +796,431 @@ function collectForeignKeyEdges(promptContext = {}) {
     }));
 }
 
-// Column references inside one aggregate call, limited to the aggregate's own
-// SELECT block (a nested subquery is a different scope) and excluding CASE WHEN
-// conditions, which filter rows but do not decide the grain of the summed value.
-function collectAggregateColumnRefs(tokens, group, blockId, aliasMap, blockTableNames, knownTables) {
-  const refs = [];
-  let whenDepth = 0;
+/**
+ * Token-level helpers over one analyzed statement: skipping atoms (paren groups,
+ * CASE ... END, function calls, qualified names) and splitting a token range
+ * into top-level AND conjuncts.
+ */
+function createTokenWalker(analysis) {
+  const { tokens, groups } = analysis;
 
-  for (let index = group.open + 1; index < group.close; index += 1) {
+  const closeOf = (index) => groups[tokens[index].groupId].close;
+
+  // Index of the END that closes the CASE at `caseIndex` (same paren depth).
+  const matchingCaseEnd = (caseIndex, end) => {
+    let depth = 0;
+    for (let index = caseIndex; index < end; index += 1) {
+      const token = tokens[index];
+      if (isPunctToken(token, '(')) {
+        index = closeOf(index);
+        continue;
+      }
+      if (isKeywordToken(token, 'CASE')) {
+        depth += 1;
+      } else if (isKeywordToken(token, 'END')) {
+        depth -= 1;
+        if (depth === 0) {
+          return index;
+        }
+      }
+    }
+    return end - 1;
+  };
+
+  // Index just past the atom that starts at `index`.
+  const nextAtom = (index, end) => {
     const token = tokens[index];
-    if (token.blockId !== blockId) {
-      continue;
+    if (isPunctToken(token, '(')) {
+      return Math.min(end, closeOf(index) + 1);
     }
-    if (isKeywordToken(token, 'WHEN')) {
-      whenDepth += 1;
-      continue;
+    if (isKeywordToken(token, 'CASE')) {
+      return Math.min(end, matchingCaseEnd(index, end) + 1);
     }
-    if (isKeywordToken(token, 'THEN')) {
-      whenDepth = Math.max(0, whenDepth - 1);
-      continue;
+    if (tokenIdentifierName(token) && isPunctToken(tokens[index + 1], '(')) {
+      return Math.min(end, closeOf(index + 1) + 1);
     }
-    if (whenDepth > 0) {
-      continue;
-    }
+    return index + 1;
+  };
 
-    const qualifier = tokenIdentifierName(token);
-    if (qualifier && isPunctToken(tokens[index + 1], '.') && tokenIdentifierName(tokens[index + 2])) {
-      const columnName = tokenIdentifierName(tokens[index + 2]);
-      const tableName = aliasMap.get(qualifier);
-      if (tableName && knownTables.get(tableName)?.has(columnName)) {
-        refs.push({ tableName, columnName });
+  // Top-level AND conjuncts of [start, end) as [from, to) ranges, or null when
+  // an OR / XOR / || sits at the top level (no conjunct is then guaranteed to
+  // hold for every row). The AND of `x BETWEEN a AND b` is not a separator.
+  const splitConjuncts = (start, end) => {
+    const conjuncts = [];
+    let conjunctStart = start;
+    let pendingBetween = false;
+    for (let index = start; index < end; ) {
+      const token = tokens[index];
+      if (isKeywordToken(token, 'OR', 'XOR') || isOperatorToken(token, '||')) {
+        return null;
       }
-      index += 2;
-      continue;
-    }
-
-    if (
-      token.type === 'word' &&
-      !token.afterDot &&
-      !isPunctToken(tokens[index + 1], '(') &&
-      !isPunctToken(tokens[index - 1], '.')
-    ) {
-      const owners = blockTableNames.filter((tableName) => knownTables.get(tableName)?.has(token.value));
-      if (owners.length === 1) {
-        refs.push({ tableName: owners[0], columnName: token.value });
+      if (isKeywordToken(token, 'BETWEEN')) {
+        pendingBetween = true;
+      } else if (isKeywordToken(token, 'AND') || isOperatorToken(token, '&&')) {
+        if (pendingBetween && isKeywordToken(token, 'AND')) {
+          pendingBetween = false;
+        } else {
+          conjuncts.push([conjunctStart, index]);
+          conjunctStart = index + 1;
+        }
+        index += 1;
+        continue;
       }
+      index = nextAtom(index, end);
     }
-  }
+    conjuncts.push([conjunctStart, end]);
+    return conjuncts;
+  };
 
-  return refs;
+  // Strip parentheses that wrap the whole range: `((a.b IS NULL))` -> `a.b IS NULL`.
+  const unwrapParens = ([start, end]) => {
+    let from = start;
+    let to = end;
+    while (to - from >= 2 && isPunctToken(tokens[from], '(') && closeOf(from) === to - 1) {
+      from += 1;
+      to -= 1;
+    }
+    return [from, to];
+  };
+
+  // `q . col` at `index` -> { qualifier, column }.
+  const qualifiedColumnAt = (index) => {
+    const qualifier = tokenIdentifierName(tokens[index]);
+    const column = tokenIdentifierName(tokens[index + 2]);
+    if (qualifier && column && isPunctToken(tokens[index + 1], '.') && !tokens[index].afterDot) {
+      return { qualifier, column };
+    }
+    return null;
+  };
+
+  return { tokens, groups, closeOf, nextAtom, splitConjuncts, unwrapParens, qualifiedColumnAt };
 }
 
-// `LEFT JOIN child c ... WHERE c.col IS NULL` keeps only parents without child
-// rows, so that child cannot multiply parent rows.
-function collectAntiJoinedTables(tokens, blockTokenIndexes, blockId, refs) {
-  const leftJoinedByQualifier = new Map();
-  for (const ref of refs) {
-    if (ref.joinType === 'LEFT') {
-      leftJoinedByQualifier.set(ref.alias || ref.name, ref.name);
+// The block's base paren group (null for the top-level statement).
+function blockBaseGroup(block) {
+  return block.scopeId === 'top' ? null : block.scopeId;
+}
+
+// [start, end) of the block's WHERE condition, or null.
+function findWhereRange(walker, block) {
+  const { tokens } = walker;
+  const baseGroup = blockBaseGroup(block);
+  const indexes = block.tokenIndexes;
+  const whereAt = indexes.findIndex(
+    (index) => isKeywordToken(tokens[index], 'WHERE') && tokens[index].parentGroupId === baseGroup
+  );
+  if (whereAt < 0) {
+    return null;
+  }
+  const start = indexes[whereAt] + 1;
+  let end = indexes[indexes.length - 1] + 1;
+  for (const index of indexes.slice(whereAt + 1)) {
+    const token = tokens[index];
+    if (token.parentGroupId === baseGroup && isKeywordToken(token, ...WHERE_CLAUSE_TERMINATORS)) {
+      end = index;
+      break;
     }
   }
+  return [start, end];
+}
 
+// Columns of a joined reference that are equated in its own join condition
+// (`ON q.col = x.y` as a top-level conjunct, or `USING (col)`): for every
+// matched row they are non-NULL.
+function collectJoinKeyColumns(walker, ref, alias) {
+  const { tokens } = walker;
+  const baseGroup = tokens[ref.index].parentGroupId;
+  const columns = new Set();
+
+  let cursor = ref.index + 1;
+  while (cursor < tokens.length && tokens[cursor].parentGroupId === baseGroup && !isKeywordToken(tokens[cursor], 'ON', 'USING')) {
+    if (isPunctToken(tokens[cursor], ',') || isKeywordToken(tokens[cursor], ...ON_CLAUSE_TERMINATORS)) {
+      return columns;
+    }
+    cursor = walker.nextAtom(cursor, tokens.length);
+  }
+
+  if (isKeywordToken(tokens[cursor], 'USING') && isPunctToken(tokens[cursor + 1], '(')) {
+    for (let index = cursor + 2; index < walker.closeOf(cursor + 1); index += 1) {
+      const name = tokenIdentifierName(tokens[index]);
+      if (name) {
+        columns.add(name);
+      }
+    }
+    return columns;
+  }
+  if (!isKeywordToken(tokens[cursor], 'ON')) {
+    return columns;
+  }
+
+  // The condition runs to the next join / FROM-list comma / clause keyword at
+  // the same depth (nextAtom skips nested groups, so a ')' here closes ours).
+  const start = cursor + 1;
+  let end = start;
+  while (end < tokens.length) {
+    const token = tokens[end];
+    if (isPunctToken(token, ')') || isPunctToken(token, ',') || isPunctToken(token, ';') || isKeywordToken(token, ...ON_CLAUSE_TERMINATORS)) {
+      break;
+    }
+    end = walker.nextAtom(end, tokens.length);
+  }
+
+  for (const conjunct of walker.splitConjuncts(start, end) || []) {
+    const [from, to] = walker.unwrapParens(conjunct);
+    if (to - from !== 7 || !isOperatorToken(tokens[from + 3], '=')) {
+      continue;
+    }
+    for (const side of [from, from + 4]) {
+      const reference = walker.qualifiedColumnAt(side);
+      if (reference && reference.qualifier === alias) {
+        columns.add(reference.column);
+      }
+    }
+  }
+  return columns;
+}
+
+/**
+ * LEFT-joined references that are anti-joins: `LEFT JOIN child c ... WHERE
+ * c.col IS NULL`, where the IS NULL test is a top-level AND conjunct of the
+ * block's WHERE clause (not under OR, not in ON/SELECT/CASE) and `col` can only
+ * be NULL for unmatched rows: the child's primary key, a NOT NULL column, or a
+ * column equated in the join condition. Such a child keeps one row per parent.
+ */
+function collectAntiJoinedRefs(walker, block, entries, columnMetadata) {
   const antiJoined = new Set();
-  for (const index of blockTokenIndexes) {
-    const qualifier = tokenIdentifierName(tokens[index]);
-    if (
-      qualifier &&
-      leftJoinedByQualifier.has(qualifier) &&
-      isPunctToken(tokens[index + 1], '.') &&
-      tokenIdentifierName(tokens[index + 2]) &&
-      isKeywordToken(tokens[index + 3], 'IS') &&
-      isKeywordToken(tokens[index + 4], 'NULL') &&
-      tokens[index + 3].blockId === blockId
-    ) {
-      antiJoined.add(leftJoinedByQualifier.get(qualifier));
+  const whereRange = findWhereRange(walker, block);
+  if (!whereRange) {
+    return antiJoined;
+  }
+  const conjuncts = walker.splitConjuncts(whereRange[0], whereRange[1]);
+  if (!conjuncts) {
+    return antiJoined;
+  }
+
+  const { tokens } = walker;
+  for (const conjunct of conjuncts) {
+    const [from, to] = walker.unwrapParens(conjunct);
+    if (to - from !== 5 || !isKeywordToken(tokens[from + 3], 'IS') || !isKeywordToken(tokens[from + 4], 'NULL')) {
+      continue;
+    }
+    const reference = walker.qualifiedColumnAt(from);
+    const entry = reference && entries.find((candidate) => candidate.qualifier === reference.qualifier);
+    if (!entry || entry.viaDerived || entry.ref.joinType !== 'LEFT') {
+      continue;
+    }
+    const column = columnMetadata.get(entry.tableName)?.get(reference.column);
+    const neverNullWhenMatched =
+      Boolean(column && (column.primaryKey || !column.allowNull)) ||
+      collectJoinKeyColumns(walker, entry.ref, entry.qualifier).has(reference.column);
+    if (neverNullWhenMatched) {
+      antiJoined.add(entry);
     }
   }
   return antiJoined;
+}
+
+/**
+ * A derived table or CTE whose body is a plain row-level projection of exactly
+ * one table (no GROUP BY, DISTINCT, row-collapsing aggregate, LIMIT or set
+ * operator) has one row per source row, so for fan-out purposes it IS that
+ * table: `JOIN (SELECT * FROM SalesDocumentLine) x` multiplies like the table.
+ * Returns the source table name or null.
+ */
+function resolvePassThroughTable(walker, analysis, ref, knownTables, depth = 0) {
+  if (depth > 5) {
+    return null;
+  }
+  const { tokens } = walker;
+  let openIndex = null;
+  if (ref.kind === 'derived') {
+    openIndex = ref.open;
+  } else if (ref.kind === 'cte') {
+    const cte = analysis.ctes.find(
+      (candidate) =>
+        candidate.name.toLowerCase() === String(ref.cteName || ref.name).toLowerCase() &&
+        ref.index >= candidate.visibleFrom &&
+        ref.index < candidate.visibleTo
+    );
+    openIndex = cte ? cte.bodyOpen : null;
+  }
+  if (openIndex === null || !isPunctToken(tokens[openIndex], '(')) {
+    return null;
+  }
+
+  const scopeId = tokens[openIndex].groupId;
+  const bodyBlocks = analysis.blocks.filter((block) => block.scopeId === scopeId);
+  if (bodyBlocks.length !== 1) {
+    return null;
+  }
+  const [block] = bodyBlocks;
+  for (const index of block.tokenIndexes) {
+    const token = tokens[index];
+    if (token.parentGroupId !== scopeId) {
+      continue;
+    }
+    if (isKeywordToken(token, 'DISTINCT', 'DISTINCTROW', 'LIMIT', 'HAVING')) {
+      return null;
+    }
+    if (isKeywordToken(token, 'GROUP') && isKeywordToken(tokens[index + 1], 'BY')) {
+      return null;
+    }
+    if (
+      token.type === 'word' &&
+      ROW_COLLAPSING_AGGREGATES.has(token.upper) &&
+      isPunctToken(tokens[index + 1], '(') &&
+      !isKeywordToken(tokens[walker.closeOf(index + 1) + 1], 'OVER')
+    ) {
+      return null;
+    }
+  }
+
+  const bodyRefs = analysis.tableRefs.filter((candidate) => candidate.blockId === block.id);
+  if (bodyRefs.length !== 1) {
+    return null;
+  }
+  const [source] = bodyRefs;
+  if (source.kind === 'table') {
+    return !source.schema && knownTables.has(source.name) ? source.name : null;
+  }
+  return resolvePassThroughTable(walker, analysis, source, knownTables, depth + 1);
+}
+
+/**
+ * Grain analysis of one aggregate argument. Each value is classified as:
+ * - 'const': no column of this block (literals, other-scope subqueries),
+ * - 'fine': at the grain of a table with no one-to-many child joined here,
+ * - { coarse }: a column of a parent table whose child is joined here.
+ * Additive combinations (+, -, comparisons, COALESCE/IFNULL/CASE arms, ...)
+ * are coarse when any part is coarse: SUM(COALESCE(d.NetAmount, l.NetAmount))
+ * still repeats d.NetAmount per line. A multiplicative term is fine when any
+ * factor is fine: SUM(l.Quantity * p.Price) is a per-line value. WHEN/IF
+ * conditions only filter rows and do not set the grain.
+ */
+function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNames, knownTables, isCoarse }) {
+  const { tokens } = walker;
+  const references = [];
+
+  const combineAdditive = (grains) => grains.find((grain) => grain.coarse) || (grains.includes('fine') ? 'fine' : 'const');
+  const combineMultiplicative = (grains) =>
+    grains.includes('fine') ? 'fine' : grains.find((grain) => grain.coarse) || 'const';
+
+  const columnGrain = (tableName, columnName) => {
+    references.push({ tableName, columnName });
+    return isCoarse(tableName) ? { coarse: { tableName, columnName } } : 'fine';
+  };
+
+  const splitAt = (start, end, isSeparator) => {
+    const parts = [];
+    let partStart = start;
+    for (let index = start; index < end; ) {
+      if (isSeparator(tokens[index], index === start ? null : tokens[index - 1])) {
+        parts.push([partStart, index]);
+        partStart = index + 1;
+        index += 1;
+        continue;
+      }
+      index = walker.nextAtom(index, end);
+    }
+    parts.push([partStart, end]);
+    return parts;
+  };
+
+  const isMultiplicativeSeparator = (token) =>
+    (token.type === 'operator' && MULTIPLICATIVE_OPERATORS.has(token.value)) || isKeywordToken(token, ...MULTIPLICATIVE_KEYWORDS);
+  // A sign right after another operator (or at the start) is unary and binds
+  // to its operand: `l.Quantity * -d.Rate` is one multiplicative term.
+  const isAdditiveSeparator = (token, previous) => {
+    if (isOperatorToken(token, '-', '+') && (!previous || previous.type === 'operator' || isPunctToken(previous, ',') || isKeywordToken(previous, ...OPERAND_SEPARATOR_KEYWORDS, ...MULTIPLICATIVE_KEYWORDS))) {
+      return false;
+    }
+    return (
+      (token.type === 'operator' && !MULTIPLICATIVE_OPERATORS.has(token.value)) ||
+      isPunctToken(token, ',') ||
+      isKeywordToken(token, ...OPERAND_SEPARATOR_KEYWORDS)
+    );
+  };
+
+  let evaluateExpression;
+
+  const evaluateCase = (caseIndex, endIndex) => {
+    // Arms are the THEN and ELSE expressions; the CASE operand and the WHEN
+    // conditions are skipped.
+    const arms = [];
+    let armStart = null;
+    for (let index = caseIndex + 1; index < endIndex; ) {
+      const token = tokens[index];
+      if (isKeywordToken(token, 'WHEN', 'ELSE')) {
+        if (armStart !== null) {
+          arms.push([armStart, index]);
+        }
+        armStart = isKeywordToken(token, 'ELSE') ? index + 1 : null;
+        index += 1;
+        continue;
+      }
+      if (isKeywordToken(token, 'THEN')) {
+        armStart = index + 1;
+        index += 1;
+        continue;
+      }
+      index = walker.nextAtom(index, endIndex);
+    }
+    if (armStart !== null) {
+      arms.push([armStart, endIndex]);
+    }
+    return combineAdditive(arms.map(([from, to]) => evaluateExpression(from, to)));
+  };
+
+  const evaluateCall = (nameToken, openIndex) => {
+    const closeIndex = walker.closeOf(openIndex);
+    let args = splitAt(openIndex + 1, closeIndex, (token) => isPunctToken(token, ','));
+    if (nameToken.type === 'word' && nameToken.upper === 'IF' && args.length === 3) {
+      args = args.slice(1);
+    }
+    return combineAdditive(args.map(([from, to]) => evaluateExpression(from, to)));
+  };
+
+  const evaluateFactor = (start, end) => {
+    const grains = [];
+    for (let index = start; index < end; ) {
+      const token = tokens[index];
+      const next = walker.nextAtom(index, end);
+      if (token.blockId !== blockId) {
+        index = next;
+        continue;
+      }
+      if (isPunctToken(token, '(')) {
+        grains.push(evaluateExpression(index + 1, walker.closeOf(index)));
+      } else if (isKeywordToken(token, 'CASE')) {
+        grains.push(evaluateCase(index, next - 1));
+      } else if (tokenIdentifierName(token) && isPunctToken(tokens[index + 1], '(')) {
+        grains.push(evaluateCall(token, index + 1));
+      } else if (walker.qualifiedColumnAt(index)) {
+        const { qualifier, column } = walker.qualifiedColumnAt(index);
+        const entry = qualifierEntries.get(qualifier);
+        if (entry && (entry.viaDerived || knownTables.get(entry.tableName)?.has(column))) {
+          grains.push(columnGrain(entry.tableName, column));
+        }
+        index += 3;
+        continue;
+      } else if (token.type === 'word' && !token.afterDot) {
+        const owners = blockTableNames.filter((tableName) => knownTables.get(tableName)?.has(token.value));
+        if (owners.length === 1) {
+          grains.push(columnGrain(owners[0], token.value));
+        }
+      }
+      index = next;
+    }
+    return combineAdditive(grains);
+  };
+
+  const evaluateTerm = (start, end) =>
+    combineMultiplicative(splitAt(start, end, isMultiplicativeSeparator).map(([from, to]) => evaluateFactor(from, to)));
+
+  evaluateExpression = (start, end) =>
+    combineAdditive(splitAt(start, end, isAdditiveSeparator).map(([from, to]) => evaluateTerm(from, to)));
+
+  return { evaluateExpression, references };
 }
 
 function describeFanOut({ aggregate, tableName, columnName, edge, knownTables }) {
@@ -825,58 +1237,55 @@ function describeFanOut({ aggregate, tableName, columnName, edge, knownTables })
 }
 
 /**
- * Reject SUM/AVG over a parent-grain column when the same SELECT block also
- * joins a one-to-many child of that parent (child has a foreign key to it):
- * every parent value is repeated once per child row. COUNT/MIN/MAX are not
- * affected, and children referenced only inside EXISTS/IN subqueries live in a
- * different block. An aggregate that also references a column of the finest
- * joined table (e.g. SUM(line.Quantity * product.Price)) is at child grain and
- * is accepted.
+ * Reject SUM/AVG whose value is at a parent table's grain when the same SELECT
+ * block also joins a one-to-many child of that parent (the child has a foreign
+ * key to it): every parent value is repeated once per child row. COUNT/MIN/MAX
+ * are not affected, children referenced only inside EXISTS/IN subqueries live
+ * in a different block, an anti-joined child (LEFT JOIN ... WHERE key IS NULL)
+ * keeps one row per parent, and a derived table or CTE that merely projects a
+ * child table counts as that child.
  */
 function validateFanOut(analysis, knownTables, promptContext) {
-  const edges = collectForeignKeyEdges(promptContext);
+  const columnMetadata = collectColumnMetadata(promptContext);
+  const edges = collectForeignKeyEdges(promptContext, columnMetadata);
   const checks = [];
   if (edges.length === 0) {
     return checks;
   }
 
+  const walker = createTokenWalker(analysis);
   const { tokens } = analysis;
-  const blockTables = new Map();
-  for (const ref of analysis.tableRefs) {
-    if (ref.kind !== 'table' || ref.schema || !knownTables.has(ref.name)) {
-      continue;
-    }
-    if (!blockTables.has(ref.blockId)) {
-      blockTables.set(ref.blockId, []);
-    }
-    blockTables.get(ref.blockId).push(ref);
-  }
 
   for (const block of analysis.blocks) {
-    const refs = blockTables.get(block.id) || [];
-    if (refs.length < 2) {
+    const entries = [];
+    for (const ref of analysis.tableRefs.filter((candidate) => candidate.blockId === block.id)) {
+      if (ref.kind === 'table' && !ref.schema && knownTables.has(ref.name)) {
+        entries.push({ ref, tableName: ref.name, qualifier: ref.alias || ref.name, viaDerived: false });
+      } else if (ref.kind === 'derived' || ref.kind === 'cte') {
+        const tableName = resolvePassThroughTable(walker, analysis, ref, knownTables);
+        const qualifier = ref.alias || (ref.kind === 'cte' ? ref.name : null);
+        if (tableName && qualifier) {
+          entries.push({ ref, tableName, qualifier, viaDerived: true });
+        }
+      }
+    }
+    if (entries.length < 2) {
       continue;
     }
 
-    const aliasMap = new Map();
-    for (const ref of refs) {
-      aliasMap.set(ref.name, ref.name);
-    }
-    for (const ref of refs) {
-      if (ref.alias) {
-        aliasMap.set(ref.alias, ref.name);
+    const antiJoined = collectAntiJoinedRefs(walker, block, entries, columnMetadata);
+    const presentTables = new Set(entries.filter((entry) => !antiJoined.has(entry)).map((entry) => entry.tableName));
+    const childEdgesOf = (tableName) =>
+      edges.filter((edge) => edge.parentTable === tableName && edge.childTable !== tableName && presentTables.has(edge.childTable));
+
+    const qualifierEntries = new Map();
+    for (const entry of entries) {
+      qualifierEntries.set(entry.qualifier, entry);
+      if (!entry.viaDerived && !qualifierEntries.has(entry.tableName)) {
+        qualifierEntries.set(entry.tableName, entry);
       }
     }
-    const blockTableNames = [...new Set(refs.map((ref) => ref.name))];
-    const antiJoined = collectAntiJoinedTables(tokens, block.tokenIndexes, block.id, refs);
-    const childEdgesOf = (tableName) =>
-      edges.filter(
-        (edge) =>
-          edge.parentTable === tableName &&
-          edge.childTable !== tableName &&
-          blockTableNames.includes(edge.childTable) &&
-          !antiJoined.has(edge.childTable)
-      );
+    const blockTableNames = [...new Set(entries.filter((entry) => !entry.viaDerived).map((entry) => entry.tableName))];
 
     for (const index of block.tokenIndexes) {
       const token = tokens[index];
@@ -885,22 +1294,26 @@ function validateFanOut(analysis, knownTables, promptContext) {
       }
 
       const group = analysis.groups[tokens[index + 1].groupId];
-      const columnRefs = collectAggregateColumnRefs(tokens, group, block.id, aliasMap, blockTableNames, knownTables);
-      if (columnRefs.length === 0) {
+      const evaluator = createGrainEvaluator(walker, {
+        blockId: block.id,
+        qualifierEntries,
+        blockTableNames,
+        knownTables,
+        isCoarse: (tableName) => childEdgesOf(tableName).length > 0,
+      });
+      const grain = evaluator.evaluateExpression(group.open + 1, group.close);
+      if (evaluator.references.length === 0) {
         continue;
       }
 
-      const referencedTables = [...new Set(columnRefs.map((ref) => ref.tableName))];
-      // The aggregate is at the grain of its finest referenced table; it is
-      // safe when at least one referenced table has no joined child.
-      if (referencedTables.some((tableName) => childEdgesOf(tableName).length === 0)) {
+      const referencedTables = [...new Set(evaluator.references.map((reference) => reference.tableName))];
+      if (!grain.coarse) {
         checks.push({ aggregate: token.upper, tables: referencedTables, fanOut: false });
         continue;
       }
 
-      const tableName = referencedTables[0];
+      const { tableName, columnName } = grain.coarse;
       const [edge] = childEdgesOf(tableName);
-      const { columnName } = columnRefs.find((ref) => ref.tableName === tableName);
       throw guardrailError(
         'FAN_OUT',
         describeFanOut({ aggregate: token.upper, tableName, columnName, edge, knownTables }),
