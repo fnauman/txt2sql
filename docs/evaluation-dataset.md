@@ -651,7 +651,12 @@ candidates re-resolved from the primary fixture, the response's recorded
 every fixture. Attempts after it are not part of the replay, as the product
 loop would have stopped there, but their SQL is still re-validated and, when
 accepted, re-scored; those verdicts are recorded in `rescore.laterAttempts`
-and do not change the outcome. If no recorded attempt is accepted any more
+and do not change the outcome. Every recorded attempt stays in `attempts`:
+the replayed ones are marked `replay: "reached"`, the others
+`replay: "not_reached"` with their SQL and LLM details as recorded (their
+recorded validation and execution under `recorded`), so a later rescore can
+still replay them, and `attempt_count`, the retry rate and the LLM-call
+latencies stay those of the original run, like its cost and tokens. If no recorded attempt is accepted any more
 although the original run ended with an executed answer, the retry the
 product would have made cannot be replayed; that repetition is tagged
 `replay_truncated`. Recorded verdicts are not reused: every attempt that a

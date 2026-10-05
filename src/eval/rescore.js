@@ -17,7 +17,14 @@
 // the replay (the product loop would have stopped), but their SQL is still
 // re-validated and, when accepted, re-scored, and recorded in
 // `rescore.laterAttempts`, so a validator or oracle change is visible on every
-// recorded SQL. If no recorded attempt is accepted now although the original
+// recorded SQL. Every recorded attempt stays in `attempts`: the replayed ones
+// are marked `replay: 'reached'` (with today's validation and execution), the
+// others `replay: 'not_reached'` with their SQL and LLM details as recorded,
+// no validation or execution of today, and the recorded verdicts kept apart
+// in `recorded: { validation, execution }`. So a rescore of a rescore can
+// still replay a retry the first replay did not reach, and `attempt_count`
+// and the LLM-call statistics stay those of the original run (the cost and
+// tokens are). If no recorded attempt is accepted now although the original
 // run ended in an executed answer, the product loop would have asked the model
 // again; that retry cannot be replayed, so the repetition is flagged
 // `rescore.replayTruncated`.
@@ -100,6 +107,24 @@ function withoutRecordedVerdicts(attempt) {
   return rest;
 }
 
+// An attempt as the report being rescored recorded it: a previous rescore's
+// replay mark is dropped, and an attempt that replay did not reach gets its
+// recorded validation and execution back.
+function asRecordedAttempt(attempt) {
+  const { replay, recorded, ...rest } = attempt;
+  if (replay === 'not_reached' && recorded) {
+    return { ...rest, validation: recorded.validation ?? null, execution: recorded.execution ?? null };
+  }
+  return rest;
+}
+
+// A recorded attempt the replay did not reach: kept whole, without a verdict
+// of today; what was recorded about it is under `recorded`.
+function notReachedAttempt(attempt) {
+  const { validation = null, execution = null, ...rest } = withoutRecordedVerdicts(attempt);
+  return { ...rest, replay: 'not_reached', validation: null, execution: null, recorded: { validation, execution } };
+}
+
 function goldErrorRepetition(repetition, error) {
   return {
     ...stripAttribution(repetition),
@@ -166,7 +191,7 @@ export async function rescoreRepetition(repetition, {
 }) {
   const recorded = stripAttribution(repetition);
   const originalStatus = recorded.status;
-  const attempts = [...(recorded.attempts || [])].sort((left, right) => left.attempt - right.attempt);
+  const attempts = (recorded.attempts || []).map(asRecordedAttempt).sort((left, right) => left.attempt - right.attempt);
   if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
     // A recorded gold failure whose gold passes today (this function only runs
     // after the gold check) was never sent to the model: nothing to replay,
@@ -293,12 +318,17 @@ export async function rescoreRepetition(repetition, {
     }
   }
 
+  // Every loop step above replays exactly one attempt, so the rest were not
+  // reached (after the final one, or after an infrastructure stop).
+  const notReached = attempts.slice(replayed.length).map(notReachedAttempt);
   const base = {
     ...recorded,
     retrieved_tables: prompt.allowedTables,
     master_data_candidates: prompt.masterDataCandidates || [],
-    attempts: replayed,
-    attempt_count: replayed.length,
+    attempts: [...replayed.map((attempt) => ({ ...attempt, replay: 'reached' })), ...notReached],
+    // The original run's attempts (and LLM calls); the replay's are counted in
+    // rescore.replayedAttemptCount.
+    attempt_count: recorded.attempt_count ?? attempts.length,
   };
   delete base.error;
   delete base.error_stage;
@@ -310,6 +340,7 @@ export async function rescoreRepetition(repetition, {
     replayed: true,
     originalStatus,
     originalAttemptCount: recorded.attempt_count ?? attempts.length,
+    replayedAttemptCount: replayed.length,
     replayTruncated: false,
     // True when the outcome is the recording's (a run cut short, a provider
     // outage), not something the replay found today.

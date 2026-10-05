@@ -8,7 +8,7 @@ import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
-import { recordedRepetitions, rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
+import { recordedRepetitions, rescoreReportCases, rescoreRepetition, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 import { createValidatorProbe } from '../src/eval/verify.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -111,11 +111,10 @@ test('rescore replays recorded attempts through today\'s validator and oracle', 
 
   const oldRule = records.rec_customers_old_rule.repetitions[0];
   assert.equal(oldRule.status, 'pass');
-  assert.equal(oldRule.attempt_count, 1, 'the replay stops at the first accepted attempt');
   assert.equal(oldRule.attempts[0].validation.ok, true);
   assert.equal(oldRule.attempts[0].validation.durationMs, null, 'durations are not re-measured');
   const { laterAttempts, ...rescoreInfo } = oldRule.rescore;
-  assert.deepEqual(rescoreInfo, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayTruncated: false, inherited: false });
+  assert.deepEqual(rescoreInfo, { replayed: true, originalStatus: 'result_mismatch', originalAttemptCount: 2, replayedAttemptCount: 1, replayTruncated: false, inherited: false });
   // The attempt the replay did not reach is still judged today (not replayed).
   assert.deepEqual(
     laterAttempts.map((entry) => [entry.attempt, entry.validation.ok, entry.oracle.match, entry.oracle.reason]),
@@ -141,6 +140,54 @@ test('rescore replays recorded attempts through today\'s validator and oracle', 
   // Against the recorded report: one improvement (old rule), one regression (comment).
   assert.deepEqual(report.comparison.flips.improvements.map((entry) => entry.id), ['rec_customers_old_rule']);
   assert.deepEqual(report.comparison.flips.regressions.map((entry) => entry.id), ['rec_commented_pass']);
+});
+
+test('a rescore keeps every recorded attempt: the ones its replay did not reach keep their SQL and LLM details', async () => {
+  const source = await loadSource();
+  const recordedAttempts = source.results.find((record) => record.id === 'rec_customers_old_rule').repetitions[0].attempts;
+  const { report } = await rescoreToReport(source);
+  const oldRule = byId(report).rec_customers_old_rule.repetitions[0];
+  // The replay stops at attempt 1 (accepted today); attempt 2 is kept, marked.
+  assert.deepEqual(oldRule.attempts.map((attempt) => [attempt.attempt, attempt.replay]), [
+    [1, 'reached'],
+    [2, 'not_reached'],
+  ]);
+  const later = oldRule.attempts[1];
+  assert.equal(later.generatedSql, recordedAttempts[1].generatedSql);
+  assert.deepEqual(later.llm, recordedAttempts[1].llm);
+  assert.equal(later.retry, true);
+  // Not reached: no verdict of today's replay, the recorded one kept apart.
+  assert.deepEqual([later.validation, later.execution], [null, null]);
+  assert.deepEqual(later.recorded, { validation: recordedAttempts[1].validation, execution: recordedAttempts[1].execution });
+  // Original-run statistics: both LLM calls and the retry are still there.
+  assert.equal(oldRule.attempt_count, 2);
+  assert.equal(oldRule.rescore.replayedAttemptCount, 1);
+  assert.equal(report.stats.retries.retryCalls, 1);
+  // The final reached attempt is still the final one for the confusion matrix.
+  assert.equal(report.attribution.guardrailConfusion.unknownBy.notFinal, 0);
+
+  // A later validator change rejects attempt 1 again: the rescore of the
+  // rescore can still replay the recorded retry instead of truncating.
+  const { connections } = fakeFixtures();
+  const probe = createValidatorProbe({ schema, connection: connections[0].connection });
+  const stricter = Object.assign(
+    async (question, sql, options) => (sql === recordedAttempts[0].generatedSql ? { code: 'NEW_RULE', layer: 'guardrail', message: 'NEW_RULE: rejected' } : probe(question, sql, options)),
+    { promptFor: probe.promptFor }
+  );
+  const again = await rescoreRepetition(oldRule, {
+    testCase: testCaseFromRecord(byId(report).rec_customers_old_rule),
+    connections,
+    goldCache: createGoldCache(),
+    schema,
+    validate: stricter,
+    statementTimeoutMs: 8000,
+  });
+  assert.deepEqual([again.status, again.rescore.replayTruncated], ['result_mismatch', false]);
+  assert.deepEqual(again.attempts.map((attempt) => [attempt.attempt, attempt.replay, attempt.validation?.ok]), [
+    [1, 'reached', false],
+    [2, 'reached', true],
+  ]);
+  assert.equal(again.generated_sql, recordedAttempts[1].generatedSql);
 });
 
 test('rescoring the same report twice gives identical reports (modulo timestamps)', async () => {
@@ -261,8 +308,11 @@ test('a recorded guardrail verdict never survives a rescore: today\'s rejections
     currentCases: new Map([[changedGold.id, changedGold]]),
   });
   const acceptedRep = accepted.results[0].repetitions[0];
-  assert.deepEqual([acceptedRep.attempts.length, acceptedRep.attempts[0].validation.ok], [1, true]);
-  assert.equal('guardrailCheck' in acceptedRep.attempts[0], false);
+  // The replay stops at attempt 1; attempt 2 is kept, not reached.
+  assert.deepEqual(acceptedRep.attempts.map((attempt) => [attempt.replay, attempt.validation?.ok ?? null, 'guardrailCheck' in attempt]), [
+    ['reached', true, false],
+    ['not_reached', null, false],
+  ]);
   assert.deepEqual([acceptedRep.status, acceptedRep.outcome, acceptedRep.bucket], ['result_mismatch', 'wrong_result', 'model']);
   assert.equal(accepted.attribution.system.guardrailFalseRejections, 0);
   assert.equal(accepted.attribution.guardrailConfusion.fp, 0);

@@ -101,8 +101,15 @@ export const BUCKET_ORDER = Object.freeze(['pass', 'model', 'system', 'infra', '
 // Failures a missing retrieved table can explain.
 const RETRIEVAL_SENSITIVE = new Set(['wrong_result', 'guardrail_true_rejection', 'safety_rejection', 'execution_error']);
 
+// A rescore keeps the recorded attempts its replay did not reach, marked
+// replay: 'not_reached' (no validation or execution of today); the
+// repetition's outcome comes from the attempts it reached.
+function isReached(attempt) {
+  return attempt?.replay !== 'not_reached';
+}
+
 function finalAttempt(repetition) {
-  const attempts = repetition.attempts || [];
+  const attempts = (repetition.attempts || []).filter(isReached);
   return attempts.length ? attempts[attempts.length - 1] : null;
 }
 
@@ -374,7 +381,7 @@ export function guardrailConfusion(caseRecords) {
       if (['skipped_budget', 'cancelled', 'expected_sql_error', 'evaluation_error'].includes(repetition.status)) {
         continue;
       }
-      const attempts = repetition.attempts || [];
+      const attempts = (repetition.attempts || []).filter(isReached);
       attempts.forEach((attempt, index) => {
         const validation = attempt.validation;
         if (!validation) {
