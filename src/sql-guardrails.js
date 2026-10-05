@@ -1,5 +1,6 @@
 import {
   analyzeSqlStructure,
+  isKeywordToken,
   stripSqlTokens,
   tokenizeSql,
   tokensToText,
@@ -681,6 +682,241 @@ function validateMetricGuardrails(sql, promptContext = {}) {
   return { checkedMetrics, warnings };
 }
 
+// ---------------------------------------------------------------------------
+// Fan-out detection
+// ---------------------------------------------------------------------------
+
+const FAN_OUT_AGGREGATES = ['SUM', 'AVG'];
+
+function isPunctToken(token, value) {
+  return Boolean(token) && token.type === 'punct' && token.value === value;
+}
+
+function tokenIdentifierName(token) {
+  if (!token) {
+    return null;
+  }
+  if (token.type === 'quoted_identifier') {
+    return token.name;
+  }
+  return token.type === 'word' ? token.value : null;
+}
+
+// Child -> parent foreign keys among the prompt tables. A one-to-one key (the
+// child's FK column is also its primary key) cannot fan out and is skipped.
+function collectForeignKeyEdges(promptContext = {}) {
+  const primaryKeys = new Set();
+  for (const table of Array.isArray(promptContext.tables) ? promptContext.tables : []) {
+    const tableName = table.tableName || table.name;
+    for (const column of table.includedColumns || []) {
+      if (column.primaryKey) {
+        primaryKeys.add(`${tableName}.${column.name}`);
+      }
+    }
+  }
+
+  return (Array.isArray(promptContext.relationships) ? promptContext.relationships : [])
+    .filter(
+      (relationship) =>
+        relationship.fromTable &&
+        relationship.toTable &&
+        relationship.fromTable !== relationship.toTable &&
+        !primaryKeys.has(`${relationship.fromTable}.${relationship.fromColumn}`)
+    )
+    .map((relationship) => ({
+      childTable: relationship.fromTable,
+      childColumn: relationship.fromColumn,
+      parentTable: relationship.toTable,
+      parentColumn: relationship.toColumn,
+    }));
+}
+
+// Column references inside one aggregate call, limited to the aggregate's own
+// SELECT block (a nested subquery is a different scope) and excluding CASE WHEN
+// conditions, which filter rows but do not decide the grain of the summed value.
+function collectAggregateColumnRefs(tokens, group, blockId, aliasMap, blockTableNames, knownTables) {
+  const refs = [];
+  let whenDepth = 0;
+
+  for (let index = group.open + 1; index < group.close; index += 1) {
+    const token = tokens[index];
+    if (token.blockId !== blockId) {
+      continue;
+    }
+    if (isKeywordToken(token, 'WHEN')) {
+      whenDepth += 1;
+      continue;
+    }
+    if (isKeywordToken(token, 'THEN')) {
+      whenDepth = Math.max(0, whenDepth - 1);
+      continue;
+    }
+    if (whenDepth > 0) {
+      continue;
+    }
+
+    const qualifier = tokenIdentifierName(token);
+    if (qualifier && isPunctToken(tokens[index + 1], '.') && tokenIdentifierName(tokens[index + 2])) {
+      const columnName = tokenIdentifierName(tokens[index + 2]);
+      const tableName = aliasMap.get(qualifier);
+      if (tableName && knownTables.get(tableName)?.has(columnName)) {
+        refs.push({ tableName, columnName });
+      }
+      index += 2;
+      continue;
+    }
+
+    if (
+      token.type === 'word' &&
+      !token.afterDot &&
+      !isPunctToken(tokens[index + 1], '(') &&
+      !isPunctToken(tokens[index - 1], '.')
+    ) {
+      const owners = blockTableNames.filter((tableName) => knownTables.get(tableName)?.has(token.value));
+      if (owners.length === 1) {
+        refs.push({ tableName: owners[0], columnName: token.value });
+      }
+    }
+  }
+
+  return refs;
+}
+
+// `LEFT JOIN child c ... WHERE c.col IS NULL` keeps only parents without child
+// rows, so that child cannot multiply parent rows.
+function collectAntiJoinedTables(tokens, blockTokenIndexes, blockId, refs) {
+  const leftJoinedByQualifier = new Map();
+  for (const ref of refs) {
+    if (ref.joinType === 'LEFT') {
+      leftJoinedByQualifier.set(ref.alias || ref.name, ref.name);
+    }
+  }
+
+  const antiJoined = new Set();
+  for (const index of blockTokenIndexes) {
+    const qualifier = tokenIdentifierName(tokens[index]);
+    if (
+      qualifier &&
+      leftJoinedByQualifier.has(qualifier) &&
+      isPunctToken(tokens[index + 1], '.') &&
+      tokenIdentifierName(tokens[index + 2]) &&
+      isKeywordToken(tokens[index + 3], 'IS') &&
+      isKeywordToken(tokens[index + 4], 'NULL') &&
+      tokens[index + 3].blockId === blockId
+    ) {
+      antiJoined.add(leftJoinedByQualifier.get(qualifier));
+    }
+  }
+  return antiJoined;
+}
+
+function describeFanOut({ aggregate, tableName, columnName, edge, knownTables }) {
+  const child = edge.childTable;
+  const childHasSameColumn = knownTables.get(child)?.has(columnName);
+  const fix = childHasSameColumn
+    ? `Use ${child}.${columnName} for ${child}-level (e.g. product, brand or category) breakdowns, or aggregate the ${child} rows in a subquery first.`
+    : `Aggregate ${tableName} before joining ${child}, aggregate the ${child} rows in a subquery first, or use EXISTS/IN instead of a join when ${child} is only needed as a filter.`;
+  return (
+    `Fan-out: ${aggregate} over ${tableName}.${columnName} while joining ${child} ` +
+    `(one row per ${child} row via ${child}.${edge.childColumn} -> ${tableName}.${edge.parentColumn}) ` +
+    `double-counts ${tableName} values. ${fix}`
+  );
+}
+
+/**
+ * Reject SUM/AVG over a parent-grain column when the same SELECT block also
+ * joins a one-to-many child of that parent (child has a foreign key to it):
+ * every parent value is repeated once per child row. COUNT/MIN/MAX are not
+ * affected, and children referenced only inside EXISTS/IN subqueries live in a
+ * different block. An aggregate that also references a column of the finest
+ * joined table (e.g. SUM(line.Quantity * product.Price)) is at child grain and
+ * is accepted.
+ */
+function validateFanOut(analysis, knownTables, promptContext) {
+  const edges = collectForeignKeyEdges(promptContext);
+  const checks = [];
+  if (edges.length === 0) {
+    return checks;
+  }
+
+  const { tokens } = analysis;
+  const blockTables = new Map();
+  for (const ref of analysis.tableRefs) {
+    if (ref.kind !== 'table' || ref.schema || !knownTables.has(ref.name)) {
+      continue;
+    }
+    if (!blockTables.has(ref.blockId)) {
+      blockTables.set(ref.blockId, []);
+    }
+    blockTables.get(ref.blockId).push(ref);
+  }
+
+  for (const block of analysis.blocks) {
+    const refs = blockTables.get(block.id) || [];
+    if (refs.length < 2) {
+      continue;
+    }
+
+    const aliasMap = new Map();
+    for (const ref of refs) {
+      aliasMap.set(ref.name, ref.name);
+    }
+    for (const ref of refs) {
+      if (ref.alias) {
+        aliasMap.set(ref.alias, ref.name);
+      }
+    }
+    const blockTableNames = [...new Set(refs.map((ref) => ref.name))];
+    const antiJoined = collectAntiJoinedTables(tokens, block.tokenIndexes, block.id, refs);
+    const childEdgesOf = (tableName) =>
+      edges.filter(
+        (edge) =>
+          edge.parentTable === tableName &&
+          edge.childTable !== tableName &&
+          blockTableNames.includes(edge.childTable) &&
+          !antiJoined.has(edge.childTable)
+      );
+
+    for (const index of block.tokenIndexes) {
+      const token = tokens[index];
+      if (!isKeywordToken(token, ...FAN_OUT_AGGREGATES) || !isPunctToken(tokens[index + 1], '(')) {
+        continue;
+      }
+
+      const group = analysis.groups[tokens[index + 1].groupId];
+      const columnRefs = collectAggregateColumnRefs(tokens, group, block.id, aliasMap, blockTableNames, knownTables);
+      if (columnRefs.length === 0) {
+        continue;
+      }
+
+      const referencedTables = [...new Set(columnRefs.map((ref) => ref.tableName))];
+      // The aggregate is at the grain of its finest referenced table; it is
+      // safe when at least one referenced table has no joined child.
+      if (referencedTables.some((tableName) => childEdgesOf(tableName).length === 0)) {
+        checks.push({ aggregate: token.upper, tables: referencedTables, fanOut: false });
+        continue;
+      }
+
+      const tableName = referencedTables[0];
+      const [edge] = childEdgesOf(tableName);
+      const { columnName } = columnRefs.find((ref) => ref.tableName === tableName);
+      throw guardrailError(
+        'FAN_OUT',
+        describeFanOut({ aggregate: token.upper, tableName, columnName, edge, knownTables }),
+        {
+          aggregate: token.upper,
+          table: tableName,
+          column: columnName,
+          childTable: edge.childTable,
+          childColumn: edge.childColumn,
+        }
+      );
+    }
+  }
+
+  return checks;
+}
+
 /**
  * Candidate ID validation is scoped to product master-data groups
  * represented by candidate.ProductId. Other entity IDs need their own column set.
@@ -828,6 +1064,7 @@ export function validateSqlGuardrails(
   const qualifiedColumns = validateQualifiedColumns(sql, knownTables, aliases, derivedTables);
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, aliases, derivedTables);
   const joinChecks = validateJoinGuardrails(sql, knownTables, aliases, derivedTables, promptContext);
+  const fanOutChecks = validateFanOut(analysis, knownTables, promptContext);
   const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);
 
@@ -836,6 +1073,7 @@ export function validateSqlGuardrails(
       qualifiedColumns,
     },
     joinChecks,
+    fanOutChecks,
     metricChecks,
     masterDataChecks,
     responseTableChecks: validateResponseTableContract(response, tablesUsed, allowedTables, cteNames),

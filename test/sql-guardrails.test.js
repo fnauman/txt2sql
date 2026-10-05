@@ -429,3 +429,21 @@ test('the ProductId candidate check ignores numbers inside IN (SELECT ...) subqu
   );
   assert.deepEqual(validated.guardrails.masterDataChecks.referencedIds, [101]);
 });
+
+test('validateSqlGuardrails rejects header amounts summed across a line join (fan-out)', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'product sales by brand');
+
+  assert.throws(
+    () =>
+      validateReadOnlySql(
+        `SELECT i.ProductName, SUM(v.NetAmount) AS total_net_amount
+         FROM SalesDocument v
+         JOIN SalesDocumentLine d ON d.SalesDocumentId = v.SalesDocumentId
+         JOIN Product i ON d.ProductId = i.ProductId
+         GROUP BY i.ProductName`,
+        allowedTables(prompt),
+        { promptContext: prompt.context }
+      ),
+    (error) => error.code === 'FAN_OUT' && /Use SalesDocumentLine\.NetAmount/.test(error.message)
+  );
+});

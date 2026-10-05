@@ -722,9 +722,25 @@ export function analyzeSqlStructure(sqlOrTokens, { tolerant = false } = {}) {
     return { alias: null, end: index - 1 };
   };
 
+  // LEFT/RIGHT/INNER/CROSS/NATURAL before JOIN (skipping OUTER), or null.
+  const joinTypeBefore = (keywordIndex) => {
+    let cursor = keywordIndex - 1;
+    if (isKeywordToken(tokens[cursor], 'OUTER')) {
+      cursor -= 1;
+    }
+    const token = tokens[cursor];
+    return isKeywordToken(token, 'LEFT', 'RIGHT', 'INNER', 'CROSS', 'NATURAL', 'FULL') ? token.upper : null;
+  };
+
   const parseTableRef = (index, keywordIndex, via) => {
     const token = tokens[index];
-    const base = { index, keywordIndex, via, blockId: tokens[keywordIndex]?.blockId ?? null };
+    const base = {
+      index,
+      keywordIndex,
+      via,
+      joinType: via === 'JOIN' ? joinTypeBefore(keywordIndex) || 'INNER' : null,
+      blockId: tokens[keywordIndex]?.blockId ?? null,
+    };
 
     if (!token || isPunct(token, ';')) {
       addIssue('INVALID_TABLE_REFERENCE', `${via} is not followed by a table name.`, index);
