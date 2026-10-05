@@ -491,6 +491,11 @@ npm run verify-dataset -- --write-pins            # rewrite expected_row_counts
 npm run evaluate-retrieval -- --dataset edge-cases-public
 ```
 
+The controls come from `datasets/controls` or `--controls-dir <dir>`. A
+missing directory, or one without any `*.json` controls file, stops the run
+with an error instead of silently skipping the kill-rate gate;
+`--skip-controls` is the explicit way to verify without the controls.
+
 The opt-in database tests re-seed the fixture databases and check the master
 data is identical across them (read as the query user), that edited rows are
 detected as drift and repaired, the verify logic, and the benchmark CLI end to

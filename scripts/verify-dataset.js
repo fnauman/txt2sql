@@ -256,6 +256,8 @@ export async function main(argv = process.argv.slice(2)) {
       if (summary && summary.design.total + summary.heldout.total + summary.positive.total > 0) {
         printControlsSummary(summary, fixtureNames);
         gateFailures.push(...killRateGateFailures(summary, { datasetName: info.datasetName, minKillRate, minHeldoutKillRate }));
+      } else if (summary) {
+        console.log(`  oracle controls: none apply to ${info.datasetName} (no kill-rate gate for it)`);
       }
       report.datasets.push({ name: info.datasetName, path: info.datasetPath, cases: caseResults, controls: summary });
     }

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { loadBenchmarkDataset } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
@@ -70,8 +72,45 @@ test('controls files are validated', async () => {
     /missing id or sql/
   );
   await assert.rejects(loadControlsIndex({ controlsDir: await tempControls({ 'a.json': [] }) }), /keyed by case id/);
-  const empty = await loadControlsIndex({ controlsDir: path.join(os.tmpdir(), 'txt2sql-no-such-controls-dir') });
-  assert.equal(empty.byCaseId.size, 0);
+});
+
+test('a missing or empty controls directory is an error, never an empty index', async () => {
+  const missing = path.join(os.tmpdir(), 'txt2sql-no-such-controls-dir');
+  await assert.rejects(loadControlsIndex({ controlsDir: missing }), (error) => {
+    assert.equal(error.code, 'CONTROLS_NOT_FOUND');
+    assert.match(error.message, /^Controls directory .*txt2sql-no-such-controls-dir does not exist\./);
+    assert.match(error.message, /--skip-controls/);
+    return true;
+  });
+  // A directory holding no *.json controls file (e.g. a typo for a sibling).
+  const empty = await tempControls({ 'README.txt': 'not controls' });
+  await assert.rejects(loadControlsIndex({ controlsDir: empty }), (error) => {
+    assert.equal(error.code, 'CONTROLS_NOT_FOUND');
+    assert.match(error.message, /has no controls files \(\*\.json\)/);
+    return true;
+  });
+});
+
+test('verify-dataset stops on a mistyped --controls-dir before touching any database', async () => {
+  // No database settings at all: the run must fail on the controls directory
+  // itself (before this fix it went on, and with a database it would have
+  // skipped the kill-rate gate).
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, ENV_FILE: path.join(os.tmpdir(), 'txt2sql-no-such-env-file.env') };
+  const run = (controlsDir) =>
+    promisify(execFile)(process.execPath, [path.join(REPO_ROOT, 'scripts/verify-dataset.js'), '--dataset', 'core-public', '--controls-dir', controlsDir], {
+      env,
+      cwd: REPO_ROOT,
+    });
+  await assert.rejects(run(path.join(DATASETS_DIR, 'contrls')), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /Dataset verification failed: Controls directory .*contrls does not exist\. .*--skip-controls/);
+    return true;
+  });
+  await assert.rejects(run(await tempControls({})), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /has no controls files/);
+    return true;
+  });
 });
 
 // --- the committed controls -------------------------------------------------

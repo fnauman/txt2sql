@@ -57,16 +57,31 @@ function normalizeControl(control, { kind, caseId, file }) {
   };
 }
 
-/** Reads every controls file of a directory into one index. */
+function controlsNotFound(message) {
+  return Object.assign(
+    new Error(`${message} Pass --controls-dir <dir> with the controls files, or --skip-controls to verify without measuring the oracle.`),
+    { code: 'CONTROLS_NOT_FOUND' }
+  );
+}
+
+/**
+ * Reads every controls file of a directory into one index. A missing
+ * directory, or one without any controls file, is an error (code
+ * CONTROLS_NOT_FOUND), never an empty index: a typo in --controls-dir must not
+ * silently skip the kill-rate gate (--skip-controls is the way to skip it).
+ */
 export async function loadControlsIndex({ controlsDir = DEFAULT_CONTROLS_DIR } = {}) {
   let names = [];
   try {
     names = (await fs.readdir(controlsDir)).filter((name) => name.endsWith('.json')).sort();
   } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return { byCaseId: new Map(), byIntentId: new Map(), files: [] };
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+      throw controlsNotFound(`Controls directory ${controlsDir} does not exist.`);
     }
     throw error;
+  }
+  if (names.length === 0) {
+    throw controlsNotFound(`Controls directory ${controlsDir} has no controls files (*.json).`);
   }
 
   const byCaseId = new Map();
