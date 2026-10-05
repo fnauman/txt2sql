@@ -41,11 +41,11 @@
     "evaluate-retrieval": "node scripts/evaluate-retrieval.js",
     "resolve-master-data": "node scripts/resolve-master-data.js",
     "measure-prompt-cache": "node scripts/measure-prompt-cache.js",
-    "web:dev": "npm --workspace @text-to-sql/web run dev",
+    "web:dev": "npm --workspace @text-to-sql/web run dev --",
     "web:build": "npm --workspace @text-to-sql/web run build",
     "web:typecheck": "npm --workspace @text-to-sql/web run typecheck",
     "web:test": "npm --workspace @text-to-sql/web run test",
-    "web:start": "npm --workspace @text-to-sql/web run server",
+    "web:start": "npm --workspace @text-to-sql/web run server --",
     "seed-demo": "node scripts/seed-public-db.js"
   },
   "dependencies": {

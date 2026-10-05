@@ -58,7 +58,7 @@ function getPathOption(argv, name) {
   return value;
 }
 
-function resolvePathLike(value) {
+function resolvePathLike(value, baseDir) {
   if (!value) {
     return null;
   }
@@ -71,7 +71,7 @@ function resolvePathLike(value) {
     return path.join(os.homedir(), value.slice(2));
   }
 
-  return path.resolve(value);
+  return path.resolve(baseDir, value);
 }
 
 function assertNoReservedNodeFlag(argv) {
@@ -87,8 +87,9 @@ function assertNoReservedNodeFlag(argv) {
 // Exactly one env source is used. Precedence: CLI flags (--dotenv, --env-dir,
 // --use-home-env), then env vars (ENV_FILE, ENV_DIR, USE_HOME_ENV=1), then the
 // caller's `defaultPath` (the web server uses the repo-root .env), then ./.env.
-// `explicit` marks a path named on the command line.
-function resolveEnvSource(argv, { env, defaultPath }) {
+// `explicit` marks a path named on the command line. Relative paths resolve
+// against `baseDir` (default: the current directory).
+function resolveEnvSource(argv, { env, defaultPath, baseDir = process.cwd() }) {
   assertNoReservedNodeFlag(argv);
 
   const cliEnvFile = getPathOption(argv, DOTENV_FLAG);
@@ -99,11 +100,11 @@ function resolveEnvSource(argv, { env, defaultPath }) {
   const useHomeEnv = env.USE_HOME_ENV === '1';
 
   if (cliEnvFile) {
-    return { filePath: resolvePathLike(cliEnvFile), explicit: DOTENV_FLAG };
+    return { filePath: resolvePathLike(cliEnvFile, baseDir), explicit: DOTENV_FLAG };
   }
 
   if (cliEnvDir) {
-    return { filePath: path.join(resolvePathLike(cliEnvDir), '.env'), explicit: '--env-dir' };
+    return { filePath: path.join(resolvePathLike(cliEnvDir, baseDir), '.env'), explicit: '--env-dir' };
   }
 
   if (cliUseHomeEnv) {
@@ -111,11 +112,11 @@ function resolveEnvSource(argv, { env, defaultPath }) {
   }
 
   if (envFile) {
-    return { filePath: resolvePathLike(envFile), explicit: null };
+    return { filePath: resolvePathLike(envFile, baseDir), explicit: null };
   }
 
   if (envDir) {
-    return { filePath: path.join(resolvePathLike(envDir), '.env'), explicit: null };
+    return { filePath: path.join(resolvePathLike(envDir, baseDir), '.env'), explicit: null };
   }
 
   if (useHomeEnv) {
@@ -129,8 +130,14 @@ function resolveEnvSource(argv, { env, defaultPath }) {
   return { filePath: path.join(process.cwd(), '.env'), explicit: null };
 }
 
-export function resolveEnvPath(argv = process.argv.slice(2), { env = process.env, defaultPath = null } = {}) {
-  return resolveEnvSource(argv, { env, defaultPath }).filePath;
+// The directory npm was invoked from (INIT_CWD), else the current directory.
+// Entry points that npm runs from a workspace folder use it as `baseDir`.
+export function invocationDir(env = process.env) {
+  return env.INIT_CWD || process.cwd();
+}
+
+export function resolveEnvPath(argv = process.argv.slice(2), { env = process.env, defaultPath = null, baseDir } = {}) {
+  return resolveEnvSource(argv, { env, defaultPath, baseDir }).filePath;
 }
 
 // Loads the selected env file into `env` (process.env by default) without
@@ -141,8 +148,12 @@ export function resolveEnvPath(argv = process.argv.slice(2), { env = process.env
 // pointing nowhere is a documented way to load nothing), but a path named with
 // --dotenv / --env-dir must exist: a typo would otherwise run with no settings,
 // e.g. start the web server with auth off.
-export async function loadEnvironment(argv = process.argv.slice(2), { env = process.env, defaultPath = null } = {}) {
-  const { filePath, explicit } = resolveEnvSource(argv, { env, defaultPath });
+//
+// `baseDir` is where relative --dotenv / --env-dir / ENV_FILE / ENV_DIR paths
+// resolve. npm runs workspace scripts from the workspace folder (apps/web), so
+// the web entry points pass the directory npm was invoked from (INIT_CWD).
+export async function loadEnvironment(argv = process.argv.slice(2), { env = process.env, defaultPath = null, baseDir } = {}) {
+  const { filePath, explicit } = resolveEnvSource(argv, { env, defaultPath, baseDir });
   if (!fs.existsSync(filePath)) {
     if (explicit) {
       throw envError(`${explicit}: env file not found: ${filePath}`, 'ENV_FILE_NOT_FOUND');

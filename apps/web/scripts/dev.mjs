@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadEnvironment } from '../../../src/env.js';
+import { invocationDir, loadEnvironment } from '../../../src/env.js';
 import { loadWebConfig } from '../src/server/config.js';
 import { resolveDevSettings } from '../src/server/dev-settings.js';
 import { resolveViteCommand } from './vite-command.mjs';
@@ -22,7 +22,12 @@ const viteCommand = resolveViteCommand({ appRoot, existsSync: fs.existsSync });
 let envInfo;
 let config;
 try {
-  envInfo = await loadEnvironment(process.argv.slice(2), { defaultPath: path.resolve(repoRoot, '.env') });
+  // Relative --dotenv / ENV_FILE paths resolve against where npm was invoked
+  // (INIT_CWD), not apps/web, where npm runs this script.
+  envInfo = await loadEnvironment(process.argv.slice(2), {
+    defaultPath: path.resolve(repoRoot, '.env'),
+    baseDir: invocationDir(),
+  });
   config = loadWebConfig(process.env);
 } catch (error) {
   console.error(error.message);

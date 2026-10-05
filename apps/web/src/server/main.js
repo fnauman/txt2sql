@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadEnvironment } from '../../../../src/env.js';
+import { invocationDir, loadEnvironment } from '../../../../src/env.js';
 
 // API server entrypoint. Order matters: load the .env file FIRST, then build the
 // validated config from the now-complete environment, then create the app.
@@ -12,12 +12,17 @@ import { loadEnvironment } from '../../../../src/env.js';
 //
 // Env source: --dotenv <path> | --env-dir <dir> | --use-home-env, or
 // ENV_FILE / ENV_DIR / USE_HOME_ENV=1; default is the repository-root .env.
+// Relative paths resolve against the directory npm was invoked from (INIT_CWD),
+// not apps/web, where npm runs workspace scripts.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../../..');
 
 async function main() {
-  const envInfo = await loadEnvironment(process.argv.slice(2), { defaultPath: path.resolve(repoRoot, '.env') });
+  const envInfo = await loadEnvironment(process.argv.slice(2), {
+    defaultPath: path.resolve(repoRoot, '.env'),
+    baseDir: invocationDir(),
+  });
 
   const { describeWebConfig, loadWebConfig } = await import('./config.js');
   const { createApp } = await import('./index.js');

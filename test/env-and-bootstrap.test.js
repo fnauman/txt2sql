@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ENV_OPTIONS_WITH_VALUES,
   getPositionalArgs,
+  invocationDir,
   loadEnvironment,
   resolveEnvPath,
 } from '../src/env.js';
@@ -84,6 +85,17 @@ test('resolveEnvPath falls back to ENV_FILE / ENV_DIR / USE_HOME_ENV, then defau
   assert.equal(resolveEnvPath([], { env: {}, defaultPath: '/srv/app/.env' }), '/srv/app/.env');
   assert.equal(resolveEnvPath([], { env: { ENV_FILE: '/x/y.env' }, defaultPath: '/srv/app/.env' }), '/x/y.env');
   assert.equal(resolveEnvPath([], { env: {} }), path.join(process.cwd(), '.env'));
+});
+
+test('resolveEnvPath resolves relative paths against baseDir (npm INIT_CWD for the web entry points)', () => {
+  const baseDir = '/home/me/project';
+  assert.equal(resolveEnvPath(['--dotenv', './config/dev.env'], { env: {}, baseDir }), '/home/me/project/config/dev.env');
+  assert.equal(resolveEnvPath(['--env-dir=config'], { env: {}, baseDir }), '/home/me/project/config/.env');
+  assert.equal(resolveEnvPath([], { env: { ENV_FILE: 'a.env' }, baseDir }), '/home/me/project/a.env');
+  assert.equal(resolveEnvPath([], { env: { ENV_DIR: 'cfg' }, baseDir }), '/home/me/project/cfg/.env');
+  assert.equal(resolveEnvPath(['--dotenv', '/abs/x.env'], { env: {}, baseDir }), '/abs/x.env');
+  assert.equal(invocationDir({ INIT_CWD: baseDir }), baseDir);
+  assert.equal(invocationDir({}), process.cwd());
 });
 
 test('resolveEnvPath rejects the Node-reserved --env-file flag with a pointer to --dotenv', () => {
@@ -222,4 +234,13 @@ test('mapColumnTypeToMariaDb preserves commas inside SQL-quoted enum values', ()
 
 test('mapColumnTypeToMariaDb keeps INTEGER(1) as INT', () => {
   assert.equal(mapColumnTypeToMariaDb('INTEGER(1)'), 'INT');
+});
+
+test('root web:start / web:dev forward their arguments to the workspace script', () => {
+  // Without the trailing `--`, the nested `npm --workspace ... run` takes
+  // `npm run web:start -- --dotenv x` as its own config ("Unknown cli config")
+  // and the server starts with the repo-root .env instead.
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  assert.match(scripts['web:start'], /run server --$/);
+  assert.match(scripts['web:dev'], /run dev --$/);
 });
