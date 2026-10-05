@@ -137,6 +137,59 @@ export function comparisonLine(comparison) {
   );
 }
 
+// The 2x2 table, also for comparisons recorded before it was stored.
+function contingencyOf(comparison) {
+  if (comparison.contingency) {
+    return comparison.contingency;
+  }
+  const regressions = comparison.mcnemar.regressions;
+  const improvements = comparison.mcnemar.improvements;
+  const bothPass = comparison.majority.baselinePasses - regressions;
+  return { bothPass, regressions, improvements, bothFail: comparison.paired - bothPass - regressions - improvements };
+}
+
+function flipList(entries) {
+  if (entries.length === 0) {
+    return 'none';
+  }
+  const shown = entries.slice(0, 12).map((entry) => `${entry.id} (${entry.baseline.outcome} → ${entry.candidate.outcome})`);
+  return `${shown.join(', ')}${entries.length > shown.length ? `, … ${entries.length - shown.length} more (report.md)` : ''}`;
+}
+
+/**
+ * The comparison as a few plain-text lines for the console: the paired 2x2
+ * table of majority verdicts, the accuracy change, the exact McNemar p and
+ * the flipped cases by id.
+ */
+export function renderComparisonConsole(comparison) {
+  const contingency = contingencyOf(comparison);
+  const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
+  const row = (label, left, right) => `  ${label.padEnd(15)}${String(left).padStart(14 + width - 4)}${String(right).padStart(16 + width - 4)}`;
+  const excluded = comparison.excluded || { goldChanged: [], notCounted: [] };
+  const lines = [
+    `Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${comparison.paired} paired case(s)`,
+    `  ${''.padEnd(15)}${'candidate pass'.padStart(14 + width - 4)}${'candidate fail'.padStart(16 + width - 4)}`,
+    row('baseline pass', contingency.bothPass, contingency.regressions),
+    row('baseline fail', contingency.improvements, contingency.bothFail),
+    `  strict accuracy (paired cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
+      `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
+    `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
+      `${VERDICT_TEXT[comparison.verdict] || comparison.verdict}`,
+    `  regressions: ${flipList(comparison.flips.regressions)}`,
+    `  improvements: ${flipList(comparison.flips.improvements)}`,
+  ];
+  const notes = [
+    excluded.goldChanged.length ? `${excluded.goldChanged.length} gold changed` : null,
+    excluded.notCounted.length ? `${excluded.notCounted.length} not counted or timed out in one report` : null,
+    comparison.newCases?.length ? `${comparison.newCases.length} new` : null,
+    comparison.removedCases?.length ? `${comparison.removedCases.length} not in this run` : null,
+  ].filter(Boolean);
+  if (notes.length) {
+    lines.push(`  not paired: ${notes.join(', ')} (listed in report.md)`);
+  }
+  return lines.join('\n');
+}
+
 function formatSignedInterval(interval) {
   if (!interval || interval.lower == null) {
     return 'n/a';
@@ -325,6 +378,19 @@ function comparisonSection(comparison) {
       ]
     )
   );
+  const contingency = contingencyOf(comparison);
+  lines.push('');
+  lines.push('Paired majority verdicts (the exact McNemar test uses the off-diagonal cells):');
+  lines.push('');
+  lines.push(
+    table(
+      ['', 'Candidate pass', 'Candidate fail'],
+      [
+        ['Baseline pass', contingency.bothPass, `${contingency.regressions} (regressions)`],
+        ['Baseline fail', `${contingency.improvements} (improvements)`, contingency.bothFail],
+      ]
+    )
+  );
   lines.push('');
   lines.push(comparisonLine(comparison));
   for (const [title, entries] of [
@@ -485,7 +551,7 @@ export function renderHeadline(report) {
       `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
   ];
   if (report.comparison) {
-    lines.push(comparisonLine(report.comparison));
+    lines.push(renderComparisonConsole(report.comparison));
   }
   return lines.join('\n');
 }

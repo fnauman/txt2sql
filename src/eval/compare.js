@@ -92,7 +92,9 @@ function describeReport(report, label) {
  * { baseline, candidate, paired, excluded: { goldChanged, notCounted },
  *   newCases, removedCases, flips: { regressions, improvements },
  *   rateChanges, accuracy: { baseline, candidate, delta, deltaCi95 },
- *   majority: { baselinePasses, candidatePasses }, mcnemar: { b, c, p },
+ *   majority: { baselinePasses, candidatePasses },
+ *   contingency: { bothPass, regressions, improvements, bothFail },
+ *   mcnemar: { regressions, improvements, p },
  *   verdict: 'worse' | 'better' | 'no_significant_difference' | 'no_paired_cases' }.
  */
 export function compareReports(baselineReport, candidateReport, {
@@ -175,6 +177,13 @@ export function compareReports(baselineReport, candidateReport, {
     majority: {
       baselinePasses: paired.filter((entry) => entry.baseline.majorityPass).length,
       candidatePasses: paired.filter((entry) => entry.candidate.majorityPass).length,
+    },
+    // The paired 2x2 table of majority verdicts (McNemar uses the off-diagonal).
+    contingency: {
+      bothPass: paired.filter((entry) => entry.baseline.majorityPass && entry.candidate.majorityPass).length,
+      regressions: regressions.length,
+      improvements: improvements.length,
+      bothFail: paired.filter((entry) => !entry.baseline.majorityPass && !entry.candidate.majorityPass).length,
     },
     accuracy: {
       baseline: round(baselineAccuracy),

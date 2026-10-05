@@ -650,7 +650,22 @@ majority over repetitions: regressions (baseline pass, candidate fail) and
 improvements feed an **exact two-sided McNemar test**, and a paired case
 bootstrap gives a 95% CI for the change in strict accuracy. Pass-rate changes
 without a flip are listed separately. Reports written before this runner are
-read too.
+read too. The console prints the paired 2x2 table of majority verdicts, the
+accuracy change with its CI, the McNemar p and verdict, and the regressed and
+improved case ids:
+
+```text
+Paired comparison with eval/baselines/gpt-4o-mini.json: 26 paired case(s)
+                 candidate pass  candidate fail
+  baseline pass              18               6
+  baseline fail               0               2
+  strict accuracy (paired cases) 92.3% → 69.2%: Δ −23.1 pts (95% CI …)
+  exact McNemar p = 0.031 (6 regression(s), 0 improvement(s)) → significantly WORSE than the baseline
+  regressions: paraphrase_public_001 (pass → wrong_result), …
+  improvements: none
+```
+
+report.md has the same table plus the flipped cases with their questions.
 
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`,

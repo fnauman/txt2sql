@@ -235,7 +235,11 @@ test('--compare prints a paired table with McNemar p; --gate fails a significant
   mode = 'regressed';
   const run = await runEval(['--compare', first.reportPath, '--gate'], 'compare');
   assert.equal(run.code, 1, `${run.stdout}\n${run.stderr}`);
-  assert.match(run.stdout, /vs baseline: Δ −23\.1 pts \(95% CI .*\) on 26 paired case\(s\); 6 regression\(s\), 0 improvement\(s\); exact McNemar p = 0\.031 → significantly WORSE than the baseline/);
+  // The console prints the paired 2x2 table, the McNemar p and the flipped cases.
+  assert.match(run.stdout, /Paired comparison with .*report\.json: 26 paired case\(s\)\n {17}candidate pass {2}candidate fail\n {2}baseline pass {14}18 {15}6\n {2}baseline fail {15}0 {15}2\n/);
+  assert.match(run.stdout, /strict accuracy \(paired cases\) 92\.3% → 69\.2%: Δ −23\.1 pts \(95% CI .*\)/);
+  assert.match(run.stdout, /exact McNemar p = 0\.031 \(6 regression\(s\), 0 improvement\(s\)\) → significantly WORSE than the baseline/);
+  assert.match(run.stdout, /regressions: paraphrase_public_001 \(pass → (wrong_result|guardrail_true_rejection)\), /);
   assert.match(run.stdout, /GATE: significantly worse than the baseline/);
   const { report } = await findReport(run.outputDir);
   assert.equal(report.comparison.verdict, 'worse');

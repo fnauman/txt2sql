@@ -125,8 +125,15 @@ test('a comparison section lists flips and the McNemar verdict; a rescore says w
   assert.match(markdown, /1 regression\(s\), 0 improvement\(s\); exact McNemar p = 1\.000 → no significant difference from the baseline/);
   assert.match(markdown, /Excluded from the paired test \(not counted, or a timeout\/infrastructure majority, in one report\): case_skip/);
 
+  // The paired 2x2 table of majority verdicts.
+  assert.match(markdown, /\| Baseline pass \| 1 \| 1 \(regressions\) \|\n\| Baseline fail \| 0 \(improvements\) \| 1 \|/);
+
   const headline = renderHeadline(report);
-  assert.equal(headline.split('\n').length, 5);
+  // Four summary lines, then the paired comparison block.
+  assert.match(headline.split('\n')[4], /^Paired comparison with eval\/baselines\/gpt-4o-mini\.json: 3 paired case\(s\)$/);
+  assert.match(headline, /\n {17}candidate pass {2}candidate fail\n {2}baseline pass {15}1 {15}1\n {2}baseline fail {15}0 {15}1\n/);
+  assert.match(headline, /exact McNemar p = 1\.000 \(1 regression\(s\), 0 improvement\(s\)\) → no significant difference from the baseline/);
+  assert.match(headline, /regressions: case_guard \(pass → guardrail_false_rejection\)\n {2}improvements: none\n {2}not paired: 1 not counted or timed out in one report/);
   assert.match(headline, /^Strict accuracy 50\.0% \(95% CI .*\) over 3 cases \/ 3 intents, 2 repetition\(s\), gpt-4o-mini \[rescore, no LLM calls\]/);
   assert.match(headline, /system 2 \(guardrail false rejections 2, retrieval misses 0\)/);
 });
