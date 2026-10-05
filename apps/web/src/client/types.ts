@@ -136,6 +136,7 @@ export interface HealthResponse {
   debugAllowed?: boolean;
   cacheEnabled?: boolean;
   dataResidency?: DataResidency['engine'];
-  dbReachable?: boolean;
+  // null when the deep check failed before reaching the database.
+  dbReachable?: boolean | null;
   error?: { message: string; code?: string | null };
 }

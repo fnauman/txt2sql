@@ -605,9 +605,16 @@ export function createApp({
     }
 
     let lease = null;
+    // null until the database is actually tried. The runtime builds the OpenAI
+    // client before it opens the pool, so a runtime that fails to load (e.g.
+    // OPENAI_NOT_CONFIGURED) says nothing about the database; error.code names
+    // the failing dependency.
+    let dbReachable = null;
     try {
       lease = await runtimes.acquire();
+      dbReachable = false;
       const [rows] = await lease.runtime.connection.query('SELECT 1 AS ok');
+      dbReachable = rows?.[0]?.ok === 1;
       const dbSchema = await getDatabaseSchema(lease, { refresh: true });
       const privileges = authenticated
         ? await checkQueryUserPrivileges(lease.runtime.connection, { database: config.database.name }).catch((error) => ({
@@ -617,7 +624,7 @@ export function createApp({
       res.json({
         ...payload,
         runtimeReady: true,
-        dbReachable: rows?.[0]?.ok === 1,
+        dbReachable,
         dbSchemaReady: dbSchema.dbSchemaReady,
         missingTables: dbSchema.missingTables,
         actualTableCount: dbSchema.actualTables.length,
@@ -630,7 +637,7 @@ export function createApp({
       res.status(503).json({
         ...payload,
         ok: false,
-        dbReachable: false,
+        dbReachable,
         error: authenticated ? toClientError({ ...serializeError(error), code: errorCodeOf(error) }) : anonymousInfraError(error),
       });
     } finally {

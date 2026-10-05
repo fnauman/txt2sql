@@ -432,6 +432,31 @@ test('deep health requires the token when one is configured; only token holders 
   });
 });
 
+test('deep health reports dbReachable only for the database it actually tried', async () => {
+  // The runtime builds the OpenAI client first: without a key the DB is never tried.
+  const noKey = createRuntimeFactory({ fail: () => true });
+  await withApp({ config: testConfig({ WEB_API_TOKEN: TOKEN }), runtimeFactory: noKey.factory }, async (app) => {
+    const deep = await app.request({ path: '/api/health?deep=1', headers: auth });
+    assert.equal(deep.status, 503);
+    assert.equal(deep.json.dbReachable, null);
+    assert.equal(deep.json.error.code, 'OPENAI_NOT_CONFIGURED');
+  });
+
+  const dbDown = createRuntimeFactory();
+  await withApp({ config: testConfig({ WEB_API_TOKEN: TOKEN }), runtimeFactory: async (options) => {
+    const runtime = await dbDown.factory(options);
+    runtime.connection.query = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    };
+    return runtime;
+  } }, async (app) => {
+    const deep = await app.request({ path: '/api/health?deep=1', headers: auth });
+    assert.equal(deep.status, 503);
+    assert.equal(deep.json.dbReachable, false);
+    assert.equal(deep.json.error.code, 'ECONNREFUSED');
+  });
+});
+
 test('deep health surfaces over-privileged query users to authorized callers', async () => {
   const { factory } = createRuntimeFactory({ grants: ["GRANT ALL PRIVILEGES ON *.* TO `root`@`%` IDENTIFIED BY PASSWORD '*x'"] });
   await withApp({ config: testConfig({ WEB_API_TOKEN: TOKEN }), runtimeFactory: factory }, async (app) => {
