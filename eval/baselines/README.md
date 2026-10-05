@@ -14,8 +14,10 @@ git status                                   # commit first: the report records 
 npm run eval -- --repeat 3 --write-baseline  # writes the run's report.json here as <model>.json
 ```
 
-`--write-baseline` warns when the run used a subset of the suite or a dirty
-working tree. Check the run's `report.md` before committing the file, and
+`--write-baseline` only writes after a clean, complete run (exit 0, no case
+skipped by the budget); otherwise it says why and leaves the existing file
+alone. It warns when the run used a subset of the suite or a dirty working
+tree. Check the run's `report.md` before committing the file, and
 commit it in its own change with a note on what was measured (model, prompt
 version, repetitions).
 
@@ -24,11 +26,13 @@ How it is used (details in
 
 - **Comparison**: cases are paired by id; a case whose gold changed since the
   baseline is excluded and listed. Flips are tested with an exact McNemar test;
-  `--gate` fails a run that is significantly worse.
+  `--gate` fails a run that is significantly worse (and stops with exit 2 when
+  there is no baseline to compare with).
 - **Rescore**: `--offline` re-validates, re-executes and re-scores the
   baseline's recorded SQL with today's validator, fixtures and oracle, so a
   guardrail, comparator or fixture change shows its effect on real generations
-  at no cost.
+  at no cost. Once a baseline is committed, the CI `db` job runs it with
+  `--gate`.
 
 Refresh the baseline when the prompt version, the model or the datasets change
 on purpose; the comparison table in `report.md` shows what moved.

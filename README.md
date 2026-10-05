@@ -361,9 +361,10 @@ deadline, and writes `generated/runs/<timestamp>/all/<model>/`:
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
-`--gate` makes a significantly worse run exit 1. `--rescore <report.json>` and
-`--offline` re-validate, re-execute and re-score recorded SQL with zero LLM
-calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
+`--gate` makes a significantly worse run exit 1. Harness, database and
+provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
+a partial report. `--rescore <report.json>` and `--offline` re-validate,
+re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
 `--case-id`, `--split`. A full run of the 26 unique cases costs a few cents on
 gpt-4o-mini. Setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
