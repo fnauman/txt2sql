@@ -372,6 +372,16 @@ test('an implicit alias before ORDER BY is known there; other names in ORDER BY 
   );
 });
 
+test('an implicit alias after WITHIN GROUP (...) OVER () is known; other names are not', () => {
+  const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
+  const run = (sql) => () => validateReadOnlySql(sql, allowedTables(prompt), { promptContext: prompt.context });
+  const median = 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.NetAmount) OVER ()';
+  assert.throws(
+    run(`SELECT d.SalesDocumentId, ${median} MedianNet FROM SalesDocument d ORDER BY MedianNet, CustomerRank`),
+    (error) => error.code === 'UNKNOWN_IDENTIFIER' && /"CustomerRank"/.test(error.message)
+  );
+});
+
 test('guardrail rejections carry error.code and error.layer', () => {
   const prompt = buildOptimizedPrompt(createGuardrailSchema(), 'Who are our biggest buyers in March 2026?');
   const cases = [

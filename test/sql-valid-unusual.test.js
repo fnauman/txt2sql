@@ -260,6 +260,18 @@ const VALID = [
   // still counts.
   [Q_LIST, 'DISTINCTROW with an implicit alias used in ORDER BY', 'SELECT DISTINCTROW c.CustomerName Nm FROM Customer c ORDER BY Nm'],
   [Q_LIST, 'SQL_NO_CACHE before a bare column', 'SELECT SQL_NO_CACHE CustomerName FROM Customer'],
+  // The GROUP of an ordered-set aggregate's WITHIN GROUP does not end the
+  // SELECT list: the implicit alias after it counts, also in a derived table.
+  [
+    Q_NET,
+    'implicit alias after PERCENTILE_CONT ... WITHIN GROUP (...) OVER (), used in ORDER BY',
+    'SELECT d.SalesDocumentId, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.NetAmount) OVER () MedianNet FROM SalesDocument d ORDER BY MedianNet',
+  ],
+  [
+    Q_NET,
+    'derived columns after a WITHIN GROUP aggregate',
+    'SELECT t.MedianNet, t.Doc FROM (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.NetAmount) OVER () MedianNet, d.SalesDocumentId Doc FROM SalesDocument d) t',
+  ],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,

@@ -684,6 +684,9 @@ function findSelectListRange(walker, block) {
   }
   let end = block.tokenIndexes[block.tokenIndexes.length - 1] + 1;
   for (const index of indexes.slice(selectAt + 1)) {
+    if (isWithinGroup(tokens, index)) {
+      continue;
+    }
     if (index >= start && (isKeywordToken(tokens[index], 'FROM', ...WHERE_CLAUSE_TERMINATORS) || isPunctToken(tokens[index], ';'))) {
       end = index;
       break;
@@ -748,15 +751,34 @@ function endsExpression(token) {
   return false;
 }
 
-// The token after an implicit alias ends its select item: ',', the end of the
-// statement or of a subquery, or a keyword that ends the SELECT list
-// (`... TotalCount ORDER BY TotalCount`, `... x UNION SELECT ...`).
-function closesSelectItem(token) {
-  return (
-    !token ||
-    (token.type === 'punct' && [',', ')', ';'].includes(token.value)) ||
-    (token.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper))
-  );
+// `WITHIN GROUP (ORDER BY ...)` of an ordered-set aggregate
+// (PERCENTILE_CONT(0.5) WITHIN GROUP (...)): that GROUP does not end the
+// SELECT list. `index` points at GROUP in a token list that may hold
+// whitespace and comments.
+function isWithinGroup(tokens, index) {
+  if (!isKeywordToken(tokens[index], 'GROUP') || tokens[index].afterDot) {
+    return false;
+  }
+  let previous = index - 1;
+  while (previous >= 0 && ['whitespace', 'comment', 'executable_comment'].includes(tokens[previous].type)) {
+    previous -= 1;
+  }
+  return isKeywordToken(tokens[previous], 'WITHIN') && !tokens[previous].afterDot;
+}
+
+// Does tokens[index] end the SELECT list at its own depth (FROM, WHERE, GROUP,
+// ORDER, LIMIT, UNION, ...), the GROUP of WITHIN GROUP aside?
+function endsSelectList(tokens, index) {
+  const token = tokens[index];
+  return token?.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper) && !isWithinGroup(tokens, index);
+}
+
+// The token at `index`, right after an implicit alias, ends its select item:
+// ',', the end of the statement or of a subquery, or a keyword that ends the
+// SELECT list (`... TotalCount ORDER BY TotalCount`, `... x UNION SELECT ...`).
+function closesSelectItem(tokens, index) {
+  const token = tokens[index];
+  return !token || (token.type === 'punct' && [',', ')', ';'].includes(token.value)) || endsSelectList(tokens, index);
 }
 
 // Keywords that end a SELECT list at its own parenthesis depth (a SELECT
@@ -800,7 +822,7 @@ function selectListMask(tokens) {
       open[depth] = true;
       continue;
     }
-    if (token.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper)) {
+    if (endsSelectList(tokens, index)) {
       open[depth] = false;
     }
     mask[index] = Boolean(open[depth]);
@@ -836,7 +858,7 @@ export function outputAliasDefinitions(tokens) {
     if (tokens[index].type === 'word' && SQL_KEYWORDS.has(tokens[index].upper)) {
       continue;
     }
-    if (inSelectList[index] && endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens[index + 1])) {
+    if (inSelectList[index] && endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens, index + 1)) {
       definitions.set(index, name);
     }
   }
