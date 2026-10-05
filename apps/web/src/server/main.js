@@ -51,12 +51,21 @@ async function main() {
     if (!config.hostCheck) {
       console.warn(
         `[security] WEB_API_HOST is "${config.host}" and WEB_ALLOWED_HOSTS is empty, so the Host header is not checked ` +
-          '(no DNS-rebinding protection). List the names clients use in WEB_ALLOWED_HOSTS.'
+          '(no DNS-rebinding protection) and browser requests are accepted only from WEB_ALLOWED_ORIGINS ' +
+          '(the same-origin exemption needs a validated Host). List the names clients use in WEB_ALLOWED_HOSTS.'
       );
     }
     if (config.allowDebug) {
       console.warn('[security] WEB_ALLOW_DEBUG is on for a non-loopback bind: prompts, raw model output and stack traces are returned to clients.');
     }
+  } else if (config.allowDebug && config.allowedHosts.length > 0 && !config.authEnabled) {
+    // Extra Host names on a loopback bind usually mean a same-host reverse proxy
+    // that publishes this server under another name.
+    console.warn(
+      `[security] WEB_ALLOWED_HOSTS (${config.allowedHosts.join(', ')}) lets other names reach this loopback server, and debug ` +
+        'output (prompts, raw model output, stack traces) is allowed without a token. Set WEB_ALLOW_DEBUG=0 or WEB_API_TOKEN ' +
+        'if those names are reachable by others.'
+    );
   }
 
   installSignalHandlers({ shutdown: lifecycle.shutdown, logger: console });

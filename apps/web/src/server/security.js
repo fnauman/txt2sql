@@ -106,12 +106,17 @@ export function isAuthorized(req, configuredToken) {
 // loopback, any Host other than localhost / 127.0.0.1 / [::1] (or an explicitly
 // allowed name) is rejected.
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '::1', '::ffff:127.0.0.1']);
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '::1']);
+
+// Characters that never appear in a real host[:port] but change how a URL
+// parser reads it: `evil.com@localhost` would otherwise parse as userinfo +
+// "localhost", and percent-escapes are decoded inside the hostname.
+const NON_HOST_CHARACTERS = /[@/\\?#%\s]/;
 
 // Lowercase hostname without port or IPv6 brackets; null when unparseable.
 export function normalizeHostname(value) {
   const raw = String(value || '').trim().toLowerCase();
-  if (!raw) {
+  if (!raw || NON_HOST_CHARACTERS.test(raw)) {
     return null;
   }
 
@@ -119,8 +124,16 @@ export function normalizeHostname(value) {
     const hostname = new URL(`http://${raw}`).hostname;
     return hostname.replace(/^\[(.*)\]$/, '$1') || null;
   } catch {
-    // A bare IPv6 address (no brackets, no port) is not a valid URL authority.
-    return /^[0-9a-f:.]+$/.test(raw) && raw.includes(':') ? raw : null;
+    // A bare IPv6 address (no brackets, no port) is not a valid URL authority;
+    // bracket it so it is normalized the same way (e.g. ::ffff:127.0.0.1).
+    if (!/^[0-9a-f:.]+$/.test(raw) || !raw.includes(':')) {
+      return null;
+    }
+    try {
+      return new URL(`http://[${raw}]`).hostname.replace(/^\[(.*)\]$/, '$1') || null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -129,7 +142,13 @@ export function isLoopbackHost(host) {
   if (!hostname) {
     return false;
   }
-  return LOOPBACK_HOSTNAMES.has(hostname) || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  return (
+    LOOPBACK_HOSTNAMES.has(hostname) ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname) ||
+    // IPv4-mapped loopback: the URL parser normalizes [::ffff:127.0.0.1] to
+    // ::ffff:7f00:1 (any 127.x.y.z maps to ::ffff:7fxx:xxxx).
+    /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(hostname)
+  );
 }
 
 export function isHostAllowed(hostHeader, allowedHosts = []) {
@@ -147,8 +166,10 @@ export function isHostAllowed(hostHeader, allowedHosts = []) {
 
 // An Origin is accepted when it is listed, or when it is this server's own
 // origin (browsers send Origin on same-origin POSTs). The same-origin case is
-// only safe because the Host header itself is validated first.
-export function isOriginAllowed(origin, { allowedOrigins, hostHeader }) {
+// only safe when the Host header itself has been validated (`trustHostHeader`):
+// otherwise a DNS-rebinding page sends a matching Host and Origin for its own
+// name, and the comparison would wave it through.
+export function isOriginAllowed(origin, { allowedOrigins, hostHeader, trustHostHeader = true }) {
   if (!origin) {
     return true;
   }
@@ -156,6 +177,10 @@ export function isOriginAllowed(origin, { allowedOrigins, hostHeader }) {
   const allowed = allowedOrigins instanceof Set ? allowedOrigins : new Set(allowedOrigins || []);
   if (allowed.has(origin)) {
     return true;
+  }
+
+  if (!trustHostHeader) {
+    return false;
   }
 
   try {
@@ -186,10 +211,17 @@ export function createHostGuard({ enabled, allowedHosts = [] }) {
 
 // Applied to /api routes: a cross-origin browser request from an origin that is
 // not allowed is rejected outright instead of merely missing CORS headers.
-export function createOriginGuard({ allowedOrigins }) {
+// `sameOriginAllowed` must only be true when the host guard is enforced.
+export function createOriginGuard({ allowedOrigins, sameOriginAllowed = true }) {
   const allowed = new Set(allowedOrigins);
   return function originGuard(req, res, next) {
-    if (isOriginAllowed(req.headers.origin, { allowedOrigins: allowed, hostHeader: req.headers.host })) {
+    if (
+      isOriginAllowed(req.headers.origin, {
+        allowedOrigins: allowed,
+        hostHeader: req.headers.host,
+        trustHostHeader: sameOriginAllowed,
+      })
+    ) {
       next();
       return;
     }

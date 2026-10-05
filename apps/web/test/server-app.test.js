@@ -113,9 +113,11 @@ test('loopback binds reject foreign Host headers (DNS rebinding) but accept loop
     assert.equal(rebinding.status, 403);
     assert.equal(rebinding.json.error.code, 'HOST_NOT_ALLOWED');
 
-    for (const host of [`localhost:${app.port}`, `127.0.0.1:${app.port}`, `[::1]:${app.port}`, 'localhost:1']) {
+    for (const host of [`localhost:${app.port}`, `127.0.0.1:${app.port}`, `[::1]:${app.port}`, 'localhost:1', `[::ffff:127.0.0.1]:${app.port}`]) {
       assert.equal((await app.request({ path: '/api/health', headers: { host } })).status, 200, host);
     }
+    // URL parsing would read this as userinfo + "localhost"; it is refused.
+    assert.equal((await app.request({ path: '/api/health', headers: { host: 'evil.com@localhost' } })).status, 403);
   });
 
   await withApp({ config: testConfig({ WEB_ALLOWED_HOSTS: 'demo.test' }), runtimeFactory: factory }, async (app) => {
@@ -156,6 +158,37 @@ test('API requests from a disallowed Origin get 403; allowed and same-origin req
     });
     assert.equal(sameOrigin.status, 200);
   });
+});
+
+test('without a validated Host (non-loopback bind, no WEB_ALLOWED_HOSTS) only listed origins pass', async () => {
+  const { factory } = createRuntimeFactory();
+  const { runQuestion, calls } = recordingRunner();
+  const config = testConfig({ WEB_API_HOST: '0.0.0.0', WEB_ALLOWED_ORIGINS: 'https://app.example.test', WEB_API_TOKEN: TOKEN });
+  assert.equal(config.hostCheck, false);
+  await withApp({ config, runtimeFactory: factory, runQuestion }, async (app) => {
+    // DNS-rebinding shape: Host and Origin both carry the attacker's name.
+    const rebinding = await app.request({
+      method: 'POST',
+      path: '/api/query',
+      headers: { ...auth, host: 'evil.example:8787', origin: 'http://evil.example:8787' },
+      body: { question: 'top customers' },
+    });
+    assert.equal(rebinding.status, 403);
+    assert.equal(rebinding.json.error.code, 'ORIGIN_NOT_ALLOWED');
+
+    const listed = await app.request({
+      method: 'POST',
+      path: '/api/query',
+      headers: { ...auth, host: 'evil.example:8787', origin: 'https://app.example.test' },
+      body: { question: 'top customers' },
+    });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.headers['access-control-allow-origin'], 'https://app.example.test');
+
+    const noOrigin = await app.request({ method: 'POST', path: '/api/query', headers: auth, body: { question: 'top customers 2' } });
+    assert.equal(noOrigin.status, 200, 'non-browser clients send no Origin');
+  });
+  assert.equal(calls.length, 2);
 });
 
 test('security headers are set on API responses and on the built SPA, which still serves', async () => {

@@ -104,11 +104,20 @@ test('normalizeHostname strips ports and IPv6 brackets', () => {
   assert.equal(normalizeHostname('bad host:1'), null);
 });
 
+test('normalizeHostname rejects userinfo, paths and escapes that a URL parser would reinterpret', () => {
+  // `new URL()` reads "evil.com@localhost" as userinfo + localhost; browsers
+  // never send such a Host, so it is refused rather than normalized.
+  for (const host of ['evil.com@localhost', 'evil.com@localhost:8787', 'local%68ost', 'localhost/x', 'localhost#x', 'localhost?x', 'local\\host']) {
+    assert.equal(normalizeHostname(host), null, host);
+    assert.equal(isHostAllowed(host), false, host);
+  }
+});
+
 test('isLoopbackHost recognizes localhost, 127.0.0.0/8 and ::1 only', () => {
-  for (const host of ['localhost', '127.0.0.1', '127.0.0.2', '::1', '[::1]', '::ffff:127.0.0.1']) {
+  for (const host of ['localhost', '127.0.0.1', '127.0.0.2', '::1', '[::1]', '::ffff:127.0.0.1', '[::ffff:127.0.0.1]:8787', '[::ffff:7f00:1]']) {
     assert.equal(isLoopbackHost(host), true, host);
   }
-  for (const host of ['0.0.0.0', '::', '192.168.1.10', 'example.test', 'localhost.example.test', '']) {
+  for (const host of ['0.0.0.0', '::', '192.168.1.10', 'example.test', 'localhost.example.test', '', '[::ffff:10.0.0.1]', 'evil.com@localhost']) {
     assert.equal(isLoopbackHost(host), false, host);
   }
 });
@@ -132,6 +141,15 @@ test('isOriginAllowed accepts listed origins and the server\'s own origin only',
   assert.equal(isOriginAllowed('http://127.0.0.1:8787', { allowedOrigins, hostHeader: '127.0.0.1:8787' }), true, 'same-origin');
   assert.equal(isOriginAllowed('http://evil.example', { allowedOrigins, hostHeader: '127.0.0.1:8787' }), false);
   assert.equal(isOriginAllowed('null', { allowedOrigins, hostHeader: '127.0.0.1:8787' }), false);
+});
+
+test('isOriginAllowed drops the same-origin exemption when the Host header is not validated', () => {
+  const allowedOrigins = new Set(['https://app.example.test']);
+  // DNS-rebinding shape: the attacker controls both names, so they match.
+  const rebinding = { allowedOrigins, hostHeader: 'evil.example:8787', trustHostHeader: false };
+  assert.equal(isOriginAllowed('http://evil.example:8787', rebinding), false);
+  assert.equal(isOriginAllowed('https://app.example.test', rebinding), true, 'listed origins still pass');
+  assert.equal(isOriginAllowed(undefined, rebinding), true, 'non-browser clients send no Origin');
 });
 
 function fakeResponse() {
@@ -179,6 +197,13 @@ test('createOriginGuard rejects disallowed origins with 403 instead of omitting 
   guard({ headers: { host: '127.0.0.1:8787', origin: 'http://evil.example' } }, blocked, () => assert.fail('must not pass'));
   assert.equal(blocked.statusCode, 403);
   assert.equal(blocked.body.error.code, 'ORIGIN_NOT_ALLOWED');
+
+  const untrustedHost = createOriginGuard({ allowedOrigins: ['http://localhost:5173'], sameOriginAllowed: false });
+  const sameNames = fakeResponse();
+  untrustedHost({ headers: { host: 'evil.example:8787', origin: 'http://evil.example:8787' } }, sameNames, () =>
+    assert.fail('a matching Host/Origin pair must not pass when the Host is unchecked')
+  );
+  assert.equal(sameNames.statusCode, 403);
 });
 
 test('securityHeaders sets the baseline hardening headers', () => {

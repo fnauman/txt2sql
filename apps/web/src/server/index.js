@@ -509,13 +509,17 @@ export function createApp({
   app.use(securityHeaders);
   // DNS-rebinding protection for every route (API and SPA).
   app.use(createHostGuard({ enabled: config.hostCheck, allowedHosts: config.allowedHosts }));
-  app.use('/api', createOriginGuard({ allowedOrigins: config.allowedOrigins }));
+  // The same-origin exemption trusts the Host header, so it only applies when
+  // the host guard above validates it (loopback bind or WEB_ALLOWED_HOSTS).
+  app.use('/api', createOriginGuard({ allowedOrigins: config.allowedOrigins, sameOriginAllowed: config.hostCheck }));
   app.use(
     '/api',
     cors((req, callback) => {
       const origin = req.headers.origin;
       callback(null, {
-        origin: Boolean(origin) && isOriginAllowed(origin, { allowedOrigins, hostHeader: req.headers.host }),
+        origin:
+          Boolean(origin) &&
+          isOriginAllowed(origin, { allowedOrigins, hostHeader: req.headers.host, trustHostHeader: config.hostCheck }),
       });
     })
   );
