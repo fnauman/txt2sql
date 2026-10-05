@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { buildBoundedStatement, executeReadOnlySql, resolveStatementTimeoutMs } from '../src/pipeline.js';
 
@@ -195,6 +196,8 @@ test('aborting the signal kills the running query via a separate pool connection
   controller.abort(Object.assign(new Error('deadline'), { code: 'REQUEST_TIMEOUT' }));
 
   await assert.rejects(running, (error) => error.name === 'AbortError' && error.code === 'REQUEST_TIMEOUT');
+  // The caller is answered at once; the thread goes back once the KILL landed.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(
     pool.events.map(([kind]) => kind),
     ['query', 'pool.query', 'release']
@@ -218,10 +221,94 @@ test('a KILL that does not settle never hands the thread back to the pool', asyn
   // The statement itself still finishes (e.g. at max_statement_time).
   pool.finish([{ late: true }]);
 
-  // Completed rows are still returned to the caller, who checks the signal.
-  assert.deepEqual(await running, [{ late: true }]);
+  // Rows that arrive after the abort are never returned as a result.
+  await assert.rejects(running, { name: 'AbortError' });
+  await delay(60);
   assert.equal(pool.connection.destroyed, true);
   assert.equal(pool.connection.released, false);
+});
+
+// A cancelled request settles at once; nothing it acquired is leaked.
+function settlesWithin(promise, ms) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+const deadline = () => Object.assign(new Error('deadline'), { name: 'AbortError', code: 'REQUEST_TIMEOUT' });
+const isDeadlineAbort = (error) => error.name === 'AbortError' && error.code === 'REQUEST_TIMEOUT';
+
+test('the signal bounds the wait for a pool slot; a connection handed out after the abort is released unused', async () => {
+  const events = [];
+  const late = {
+    threadId: 5,
+    query() {
+      events.push('query');
+      return new Promise(() => {});
+    },
+    release() {
+      events.push('release');
+    },
+    destroy() {
+      events.push('destroy');
+    },
+  };
+  let freeSlot;
+  const pool = {
+    getConnection() {
+      events.push('getConnection');
+      // Every slot is busy: the connection only arrives when one frees up.
+      return new Promise((resolve) => {
+        freeSlot = () => resolve(late);
+      });
+    },
+    async query() {
+      assert.fail('no pooled query');
+    },
+  };
+  const controller = new AbortController();
+  const running = executeReadOnlySql(pool, 'SELECT 1', { timeoutMs: 0, signal: controller.signal });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(deadline());
+
+  await assert.rejects(settlesWithin(running, 500), isDeadlineAbort);
+  freeSlot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['getConnection', 'release'], 'the late connection goes straight back, unused');
+});
+
+test('a failed KILL does not hold the cancelled request open; the still-busy thread is dropped', async () => {
+  const pool = createKillablePool({ killBehavior: 'hang' });
+  // The dedicated KILL connection cannot be opened.
+  pool.killQuery = async () => {
+    throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+  };
+  const controller = new AbortController();
+  // No statement timeout: without the signal the read would wait forever.
+  const running = executeReadOnlySql(pool, 'SELECT SLEEP(600)', { timeoutMs: 0, signal: controller.signal, killSettleTimeoutMs: 20 });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(deadline());
+
+  await assert.rejects(settlesWithin(running, 500), isDeadlineAbort);
+  await delay(60);
+  // The statement is still running on that thread: never handed back.
+  assert.equal(pool.connection.destroyed, true);
+  assert.equal(pool.connection.released, false);
+  pool.finish([{ late: true }]);
+});
+
+test('a single connection read is bounded by the signal too', async () => {
+  const connection = {
+    query() {
+      return new Promise(() => {});
+    },
+  };
+  const controller = new AbortController();
+  const running = executeReadOnlySql(connection, 'SELECT SLEEP(600)', { timeoutMs: 0, signal: controller.signal });
+  controller.abort(deadline());
+  await assert.rejects(settlesWithin(running, 500), isDeadlineAbort);
 });
 
 test('a completed query on a pool releases its connection without any KILL', async () => {
@@ -380,6 +467,7 @@ test('KILL QUERY uses the pool\'s dedicated killQuery() so a saturated pool cann
   controller.abort();
 
   await assert.rejects(running, { name: 'AbortError' });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(killed, [42]);
   assert.ok(!pool.events.some(([kind]) => kind === 'pool.query'), 'no pooled KILL');
   assert.equal(pool.connection.released, true);

@@ -2149,13 +2149,57 @@ function createQueryAbortError(signal, cause = null) {
   return error;
 }
 
+// Settles like `promise`, unless `signal` aborts first: then it rejects at once
+// with `abortError()` (default: the signal's reason). A value that still
+// arrives after the abort is handed to `onLate`, so a resource nobody will use
+// (a pool connection, a runtime lease) is released instead of leaked; a late
+// rejection is ignored. Without a signal it simply awaits `promise`.
+export function untilAborted(promise, signal, { onLate = null, abortError = () => signal.reason } = {}) {
+  if (!signal) {
+    return Promise.resolve(promise);
+  }
+  return new Promise((resolve, reject) => {
+    let abandoned = false;
+    const onAbort = () => {
+      abandoned = true;
+      reject(abortError());
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        if (!abandoned) {
+          resolve(value);
+          return;
+        }
+        try {
+          onLate?.(value);
+        } catch {
+          // Best-effort cleanup of a result nobody is waiting for.
+        }
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        if (!abandoned) {
+          reject(error);
+        }
+      }
+    );
+  });
+}
+
 // How long to wait for an in-flight KILL QUERY before giving up on returning the
 // connection to the pool (it is destroyed instead, see below).
 const KILL_SETTLE_TIMEOUT_MS = 2000;
 
 function waitForSettle(promise, timeoutMs) {
   let timer;
-  // Not unref'd: the caller is awaiting this, so it must keep the process alive.
+  // Not unref'd: the connection must be released or destroyed before the
+  // process exits.
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs);
   });
@@ -2235,8 +2279,18 @@ function killQuery(pool, threadId) {
 //   instead of drained; the pool opens a fresh one when needed. (Dropping alone
 //   is not enough: mysql2's destroy() only half-closes the socket, and MariaDB
 //   keeps producing rows into it until the statement ends.)
+//
+// Every wait is bounded by the signal: on a saturated pool the request gives up
+// waiting for a slot when it aborts (a connection handed out later goes
+// straight back), and the read itself is not awaited past the abort, because a
+// KILL that fails or is slow leaves the statement running (indefinitely when
+// the statement timeout is off). Rows are never returned after an abort.
 async function executeOnPoolConnection(pool, statement, params, { signal, maxRows, killSettleTimeoutMs }) {
-  const connection = await pool.getConnection();
+  const abortError = () => createQueryAbortError(signal);
+  const connection = await untilAborted(pool.getConnection(), signal, {
+    onLate: (late) => late.release(),
+    abortError,
+  });
   let killPromise = null;
   let overflowed = false;
 
@@ -2255,13 +2309,20 @@ async function executeOnPoolConnection(pool, statement, params, { signal, maxRow
     throw createQueryAbortError(signal);
   }
 
+  // Registered before the read is raced against the signal, so the KILL is
+  // already on its way when the caller is answered.
   signal?.addEventListener('abort', onAbort, { once: true });
+  const reading = readRows(connection, statement, params, { maxRows });
   try {
-    const result = await readRows(connection, statement, params, { maxRows });
+    const result = await untilAborted(reading, signal, { abortError });
     overflowed = result.overflowed && result.streamed;
+    if (signal?.aborted) {
+      // Finished in the same turn as the abort: the request is cancelled.
+      throw abortError();
+    }
     return result.rows;
   } catch (error) {
-    if (signal?.aborted) {
+    if (signal?.aborted && error?.name !== 'AbortError') {
       throw createQueryAbortError(signal, error);
     }
     throw error;
@@ -2275,17 +2336,20 @@ async function executeOnPoolConnection(pool, statement, params, { signal, maxRow
       startKill();
     } else if (!killPromise) {
       connection.release();
-    } else if ((await waitForSettle(killPromise, killSettleTimeoutMs)) === 'settled') {
-      // The KILL has landed (or failed) while we still own the thread, so it
-      // cannot interrupt another request's query after the connection is reused.
-      connection.release();
     } else {
-      // A KILL that is still queued could hit whatever runs next on this
-      // thread; never hand it back to the pool.
-      connection.destroy();
+      // Cancelled. The caller is answered now; the thread goes back to the pool
+      // only once the KILL has landed (or failed) AND the statement has ended
+      // while we still own it, so neither can hit the next query on it.
+      // Otherwise it is dropped.
+      const ended = Promise.all([killPromise, reading.then(noop, noop)]);
+      void waitForSettle(ended, killSettleTimeoutMs).then((outcome) =>
+        outcome === 'settled' ? connection.release() : connection.destroy()
+      );
     }
   }
 }
+
+function noop() {}
 
 // Executes model-authored, already-validated SQL with server-side bounds.
 // - timeoutMs: per-statement max_statement_time. Omitted/null uses
@@ -2316,7 +2380,9 @@ export async function executeReadOnlySql(
     return executeOnPoolConnection(connection, statement, params, { signal, maxRows, killSettleTimeoutMs });
   }
 
-  const { rows } = await readRows(connection, statement, params, { maxRows });
+  const { rows } = await untilAborted(readRows(connection, statement, params, { maxRows }), signal, {
+    abortError: () => createQueryAbortError(signal),
+  });
   return rows;
 }
 
