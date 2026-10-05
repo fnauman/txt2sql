@@ -1,110 +1,242 @@
-// Verify benchmark datasets against the public demo database WITHOUT calling the LLM.
+// Verify benchmark datasets against every evaluation fixture WITHOUT calling
+// the LLM, and measure the oracle with its controls.
 //
-// For every case it: executes the gold `expected_sql`, confirms the gold result
-// is self-consistent under its own `comparison` spec (gold-vs-gold must match),
-// and confirms the gold result satisfies its `signal_checks`. This is the guard
-// that keeps the datasets rock-solid: schema/data drift that would silently
-// break a gold query is caught here instead of being misread as a model failure
-// during evaluation.
+// Per case (src/eval/verify.js): the gold SQL and every
+// alternative_expected_sql execute on each fixture (demo_retail,
+// demo_retail_v2, demo_retail_v3), match the per-fixture pins in
+// `expected_row_counts`, are self-consistent under the comparison spec, pass
+// their own signal checks, and pass the production validator in the real
+// prompt context. Then the case's controls (datasets/controls) run through the
+// multi-fixture oracle: every positive control must match on every fixture and
+// pass the validator; negative controls must be killed. The kill rate of the
+// non-held-out negatives must reach --min-kill-rate (default 0.95).
+//
+// Schema/data drift that would silently break a gold query is caught here
+// instead of being misread as a model failure during evaluation.
 //
 // Usage:
-//   node scripts/verify-dataset.js                      # all datasets in datasets/
-//   node scripts/verify-dataset.js --dataset edge-cases-public
-//   node scripts/verify-dataset.js --dataset-file path/to/custom.json
+//   npm run verify-dataset                           # all datasets in datasets/
+//   npm run verify-dataset -- --dataset edge-cases-public
+//   npm run verify-dataset -- --dataset-file path/to/custom.json --fixtures seed
+//   npm run verify-dataset -- --write-pins          # rewrite expected_row_counts
+//   options: --fixtures seed,v2,v3  --controls-dir <dir>  --skip-controls
+//            --min-kill-rate 0.95  --min-heldout-kill-rate 0  --report-file <path>
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getOptionValue, loadEnvironment } from '../src/env.js';
-import {
-  DEFAULT_DATASETS_DIR,
-  compareResults,
-  loadBenchmarkDataset,
-  runSignalChecks,
-} from '../src/benchmark.js';
-import { createMariaDbConnection, executeReadOnlySql } from '../src/pipeline.js';
+import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
+import { DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
+import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
+import { checkFixtureMeta } from '../src/eval/fixture-seeder.js';
+import { PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
+import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
+import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
+import { loadNarrowSchema, writeJsonFile } from '../src/pipeline.js';
 
 const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MODELS_DIR = path.resolve(__dirname, '../models');
+const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
-async function resolveDatasetNames(argv) {
+export const DEFAULT_MIN_KILL_RATE = 0.95;
+
+const USAGE = `Usage: npm run verify-dataset -- [--dataset <name> | --dataset-file <path>] [--datasets-dir <dir>]
+  [--fixtures seed,v2,v3] [--controls-dir <dir>] [--skip-controls] [--write-pins]
+  [--min-kill-rate 0.95] [--min-heldout-kill-rate 0] [--report-file <path>]
+${ENV_USAGE}`;
+
+async function resolveDatasetTargets(argv) {
   const datasetFile = getOptionValue(argv, '--dataset-file');
   if (datasetFile) {
-    return [{ datasetPath: path.resolve(datasetFile) }];
-  }
-  const datasetName = getOptionValue(argv, '--dataset');
-  if (datasetName) {
-    return [{ datasetName }];
+    return [{ datasetPath: path.resolve(datasetFile), datasetName: path.basename(datasetFile, '.json') }];
   }
   const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
+  const datasetName = getOptionValue(argv, '--dataset');
+  if (datasetName) {
+    return [{ datasetName, datasetsDir }];
+  }
   const entries = await fs.readdir(datasetsDir);
   return entries
     .filter((name) => name.endsWith('.json'))
     .sort()
-    .map((name) => ({ datasetName: path.basename(name, '.json') }));
+    .map((name) => ({ datasetName: path.basename(name, '.json'), datasetsDir }));
 }
 
-async function verifyCase(connection, testCase) {
-  let rows;
-  try {
-    rows = await executeReadOnlySql(connection, testCase.expected_sql);
-  } catch (error) {
-    return { ok: false, rowCount: 0, problems: [`gold SQL error: ${error.message}`] };
+function parseRate(argv, name, fallback) {
+  const raw = getOptionValue(argv, name);
+  if (raw === null) {
+    return fallback;
   }
-
-  const rowCount = Array.isArray(rows) ? rows.length : 0;
-  const problems = [];
-
-  // Pinned row count catches the drift compareResults cannot: an empty-by-design
-  // case (e.g. April 2026 sales) that starts returning rows after a backfill, or
-  // a fixed-shape case whose population changed. gold-vs-gold is always true, so
-  // without this an "empty" case would silently pass while testing nothing.
-  if (Number.isInteger(testCase.expected_row_count) && rowCount !== testCase.expected_row_count) {
-    problems.push(`expected ${testCase.expected_row_count} row(s) but gold returned ${rowCount}`);
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name} must be a number between 0 and 1; got "${raw}".`);
   }
-
-  if (!compareResults(rows, rows, testCase.comparison)) {
-    problems.push('gold result is not self-consistent under its comparison spec');
-  }
-
-  const signal = runSignalChecks(rows, testCase.signal_checks);
-  if (!signal.passed) {
-    problems.push(`signal_checks failed: ${signal.failures.map((failure) => failure.code).join(', ')}`);
-  }
-
-  return { ok: problems.length === 0, rowCount, problems };
+  return value;
 }
 
-export async function main() {
-  const argv = process.argv.slice(2);
+const percent = (value) => (value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`);
+
+/** Rewrites expected_row_counts (and drops the legacy expected_row_count) in a dataset file. */
+export async function writeRowCountPins(datasetPath, countsByCaseId) {
+  const raw = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
+  let changed = 0;
+  for (const testCase of raw) {
+    const counts = countsByCaseId.get(String(testCase.id));
+    if (!counts) {
+      continue;
+    }
+    const merged = { ...(testCase.expected_row_counts || {}), ...counts };
+    const before = JSON.stringify([testCase.expected_row_counts, testCase.expected_row_count]);
+    // Keep key order stable: insert expected_row_counts where expected_row_count was.
+    const entries = Object.entries(testCase).filter(([key]) => key !== 'expected_row_counts');
+    const index = entries.findIndex(([key]) => key === 'expected_row_count');
+    const pin = ['expected_row_counts', merged];
+    if (index === -1) {
+      entries.push(pin);
+    } else {
+      entries.splice(index, 1, pin);
+    }
+    for (const key of Object.keys(testCase)) {
+      delete testCase[key];
+    }
+    Object.assign(testCase, Object.fromEntries(entries));
+    if (JSON.stringify([testCase.expected_row_counts, testCase.expected_row_count]) !== before) {
+      changed += 1;
+    }
+  }
+  await fs.writeFile(datasetPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  return changed;
+}
+
+function printControlsSummary(summary, fixtureNames) {
+  const { design, heldout } = summary;
+  console.log('  oracle controls:');
+  console.log(
+    `    negative, design:   ${design.killed}/${design.total} killed (${percent(design.rate)})` +
+      `   seed only: ${design.seedOnlyKilled}/${design.total} (${percent(design.seedOnlyRate)})`
+  );
+  console.log(
+    `    negative, held-out: ${heldout.killed}/${heldout.total} killed (${percent(heldout.rate)})` +
+      `   seed only: ${heldout.seedOnlyKilled}/${heldout.total} (${percent(heldout.seedOnlyRate)})`
+  );
+  const types = Object.entries(summary.byType)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([type, counts]) => `${type} ${counts.killed}/${counts.total} (seed ${counts.seedOnlyKilled})`);
+  console.log(`    by type: ${types.join(' | ')}`);
+  console.log(
+    `    by fixture: ${fixtureNames
+      .map((name) => `${name} kills ${summary.byFixture[name].killed} (only ${name}: ${summary.byFixture[name].onlyThisFixture})`)
+      .join(' | ')}${summary.crossFixtureOnly ? ` | cross-fixture rule only: ${summary.crossFixtureOnly}` : ''}`
+  );
+  console.log(
+    `    positive: ${summary.positive.matched}/${summary.positive.total} match on every fixture, ` +
+      `${summary.positive.validatorAccepted}/${summary.positive.total} pass the production validator`
+  );
+  for (const survivor of [...design.survivors, ...heldout.survivors.map((entry) => `${entry} [held-out]`)]) {
+    console.log(`    survivor: ${survivor}`);
+  }
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  if (hasOptionFlag(argv, '--help')) {
+    console.log(USAGE);
+    return;
+  }
   await loadEnvironment(argv);
 
-  const datasets = await resolveDatasetNames(argv);
-  const connection = await createMariaDbConnection();
+  const fixtures = resolveFixtures(getOptionValue(argv, '--fixtures'));
+  const fixtureNames = fixtures.map((fixture) => fixture.name);
+  const writePins = hasOptionFlag(argv, '--write-pins');
+  const checkControls = !hasOptionFlag(argv, '--skip-controls');
+  const minKillRate = parseRate(argv, '--min-kill-rate', DEFAULT_MIN_KILL_RATE);
+  const minHeldoutKillRate = parseRate(argv, '--min-heldout-kill-rate', 0);
+  const reportFile = getOptionValue(argv, '--report-file');
+  const controlsIndex = checkControls
+    ? await loadControlsIndex({ controlsDir: path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR) })
+    : null;
+  const targets = await resolveDatasetTargets(argv);
+  const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH });
+
+  const connections = await openFixtureConnections({ fixtures });
+  const goldCache = createGoldCache();
+  const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
+  const validate = createValidatorProbe({ schema, connection: primary.connection });
 
   let totalCases = 0;
   let totalFailures = 0;
+  const gateFailures = [];
+  const report = { generatedAt: new Date().toISOString(), fixtures: [], minKillRate, minHeldoutKillRate, datasets: [] };
 
   try {
-    for (const target of datasets) {
-      const info = await loadBenchmarkDataset(target);
-      console.log(`\n# ${info.datasetName} (${info.cases.length} cases)`);
-      for (const testCase of info.cases) {
-        totalCases += 1;
-        const result = await verifyCase(connection, testCase);
-        if (result.ok) {
-          console.log(`  ✓ ${testCase.id}  rows=${result.rowCount}`);
-        } else {
-          totalFailures += 1;
-          console.log(`  ✗ ${testCase.id}  rows=${result.rowCount}  -> ${result.problems.join('; ')}`);
-        }
+    console.log('Fixtures:');
+    for (const fixtureConnection of connections) {
+      const check = await checkFixtureMeta(fixtureConnection.connection, fixtureConnection);
+      report.fixtures.push({ name: fixtureConnection.name, database: fixtureConnection.database, status: check.status, contentHash: check.meta?.contentHash || null });
+      console.log(`  ${fixtureConnection.name.padEnd(4)} ${fixtureConnection.database.padEnd(15)} ${check.status}`);
+      if (check.status === 'stale') {
+        gateFailures.push(`fixture ${fixtureConnection.name} holds different content than the generator (run "npm run seed-fixtures")`);
+      } else if (check.status === 'missing') {
+        console.log(`       (no ${'_fixture_meta'} row: content not verified; "npm run seed-fixtures" writes it)`);
       }
     }
+
+    for (const target of targets) {
+      const info = await loadBenchmarkDataset(target);
+      console.log(`\n# ${info.datasetName} (${info.cases.length} cases, fixtures: ${fixtureNames.join(', ')})`);
+      const caseResults = [];
+      for (const testCase of info.cases) {
+        totalCases += 1;
+        const result = await verifyCase(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
+        caseResults.push(result);
+        const counts = fixtureNames.map((name) => `${name}=${result.goldRowCounts[name] ?? '?'}`).join(' ');
+        const controls = result.controls
+          ? ` controls: -${result.controls.negative.filter((control) => control.killed).length}/${result.controls.negative.length} +${result.controls.positive.filter((control) => control.match && !control.rejection).length}/${result.controls.positive.length}`
+          : '';
+        const problems = writePins ? result.problems.filter((problem) => !/: expected \d+ row\(s\) but gold returned/.test(problem)) : result.problems;
+        if (problems.length === 0) {
+          console.log(`  ✓ ${testCase.id}  rows ${counts}${controls}`);
+        } else {
+          totalFailures += 1;
+          console.log(`  ✗ ${testCase.id}  rows ${counts}${controls}\n      -> ${problems.join('\n      -> ')}`);
+        }
+        for (const note of result.notes) {
+          console.log(`      note: ${note}`);
+        }
+      }
+
+      if (writePins) {
+        const counts = new Map(caseResults.map((result) => [result.id, result.goldRowCounts]));
+        const changed = await writeRowCountPins(info.datasetPath, counts);
+        console.log(`  pins: wrote expected_row_counts for ${fixtureNames.join(', ')} to ${info.datasetPath} (${changed} case(s) changed)`);
+      }
+
+      const summary = checkControls ? summarizeControls(caseResults, { fixtureNames }) : null;
+      if (summary && summary.design.total + summary.heldout.total + summary.positive.total > 0) {
+        printControlsSummary(summary, fixtureNames);
+        if (summary.design.total > 0 && summary.design.rate < minKillRate) {
+          gateFailures.push(`${info.datasetName}: design kill rate ${percent(summary.design.rate)} < ${percent(minKillRate)}`);
+        }
+        if (summary.heldout.total > 0 && summary.heldout.rate < minHeldoutKillRate) {
+          gateFailures.push(`${info.datasetName}: held-out kill rate ${percent(summary.heldout.rate)} < ${percent(minHeldoutKillRate)}`);
+        }
+      }
+      report.datasets.push({ name: info.datasetName, path: info.datasetPath, cases: caseResults, controls: summary });
+    }
   } finally {
-    await connection.end();
+    await closeFixtureConnections(connections);
   }
 
-  console.log(`\nVerified ${totalCases} cases across ${datasets.length} dataset(s); ${totalFailures} failure(s).`);
-  if (totalFailures > 0) {
+  if (reportFile) {
+    await writeJsonFile(path.resolve(reportFile), report);
+    console.log(`\nReport: ${path.resolve(reportFile)}`);
+  }
+
+  console.log(`\nVerified ${totalCases} cases across ${targets.length} dataset(s) on ${connections.length} fixture(s); ${totalFailures} failure(s).`);
+  for (const failure of gateFailures) {
+    console.log(`FAIL: ${failure}`);
+  }
+  if (totalFailures > 0 || gateFailures.length > 0) {
     process.exitCode = 1;
   }
 }
