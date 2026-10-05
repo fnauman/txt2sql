@@ -89,13 +89,13 @@ master-data resolution      resolve "sparkling water" → bounded candidate rows
 LLM (structured JSON out)    { sql, explanation, tables_used, assumptions }
    │
    ▼
-deterministic guardrails     re-validate SQL vs the exact schema it saw
+deterministic validation     read-only safety checks + schema guardrails
    │
    ▼
-read-only execution          single SELECT/WITH, table allow-list
+bounded execution            SELECT-only DB user, statement timeout
    │
    ▼
-value-aware result scoring
+value-aware result scoring   (benchmark)
 ```
 
 ---
@@ -104,9 +104,9 @@ value-aware result scoring
 
 | Typical demo | This repo |
 |---|---|
-| Whole schema in every prompt | **Semantic retrieval** selects only the tables a question needs |
-| Model output trusted & executed | **Deterministic guardrails** re-validate every table, column, and join |
-| "Read-only" assumed | **Read-only enforced** by keyword/function denylist + single-statement check |
+| Whole schema in every prompt | **Semantic retrieval** narrows the prompt to the relevant tables |
+| Model output trusted & executed | **Deterministic guardrails** re-validate tables, qualified columns, joins, metrics, and fan-out |
+| "Read-only" assumed | **Read-only checked** on tokens, **enforced** by a `SELECT`-only DB user |
 | Entity names guessed | **Bounded master-data resolution** before generation |
 
 ---
@@ -124,17 +124,20 @@ value-aware result scoring
 
 ## Safety is checked, not assumed
 
-The model's SQL is re-validated locally **before** it ever runs:
+The model's SQL is re-validated locally **before** it ever runs, read through
+**one MariaDB-faithful tokenizer**:
 
-- First keyword must be `SELECT` / `WITH`; **single statement only**
+- **Single `SELECT` / `WITH` statement**; no comments; no `WITH RECURSIVE`
 - Denylist blocks DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@`,
-  `information_schema`/`mysql`/`sys`, and timing/exfiltration functions
-- Every table/column must exist in the **retrieved** schema context
+  and timing/exfiltration functions
+- **Cross-database and metadata-schema references are rejected**
+- Qualified columns must exist in the **retrieved** schema context
 - Joins must match **in-scope foreign keys** or declared join hints
-- Filter IDs must come from the **resolved candidate list**
-- **Cross-database references are rejected** — `FROM otherdb.Table` fails the allow-list
+- `SUM`/`AVG` across a 1:N join is rejected as a **fan-out**
+- Product IDs must come from the **resolved candidate list**
 
-No extra LLM calls — it's plain, testable JavaScript.
+Every rejection has a code and a layer. No extra LLM calls — it's plain,
+testable JavaScript. It is defense in depth, not the boundary.
 
 ---
 
@@ -143,15 +146,19 @@ No extra LLM calls — it's plain, testable JavaScript.
 Guardrails are the first line — **not the only one**.
 
 - Run the demo against its **own database** (`demo_retail`)
-- Connect as a **least-privilege `SELECT`-only user**, never `root`:
+- Query as a **least-privilege `SELECT`-only user**; root is only for
+  schema setup and seeding. Docker Compose creates the user on first start:
 
 ```sql
 CREATE USER 'demo_readonly'@'%' IDENTIFIED BY '<strong-password>';
-GRANT SELECT ON demo_retail.* TO 'demo_readonly'@'%';
+GRANT SELECT ON `demo\_retail%`.* TO 'demo_readonly'@'%';
 ```
 
-Result: even a mistyped `DB_NAME` or a script that bypasses the pipeline
-**physically cannot** read other databases or write anything.
+- Every query runs under a **statement timeout**; the web app also caps rows
+  and sends `KILL QUERY` when a request is cancelled
+
+Result: a query that slips past the validator still **cannot** write, read
+server files, or read other databases on the instance.
 
 ---
 
@@ -167,8 +174,8 @@ Generation is non-deterministic — one passing run is a **sample**, not proof.
 > 6/6 on one run has a true-pass-rate lower bound near **0.6**, not 1.0.
 
 A public **edge-case suite** targets the hard parts: metric/grain confusion,
-join-path traps, temporal parsing, fuzzy matching, and stale-snapshot /
-wrong-date-column pitfalls.
+join-path traps, stale-snapshot / wrong-date-column pitfalls, master-data
+resolution, and aggregation shape (one targeted case per failure class so far).
 
 ---
 
@@ -185,12 +192,15 @@ wrong-date-column pitfalls.
 
 ## Try it in two minutes
 
+Needs Node 22.18+, Docker Compose v2 and an OpenAI key.
+
 ```bash
 npm install
-cp .env.example .env          # set OPENAI_API_KEY + DB creds
-docker compose up -d mariadb  # MariaDB 10.6, bound to 127.0.0.1
-npm run bootstrap-db          # create the 13-table schema
-npm run seed-demo             # load the synthetic retail data
+cp .env.example .env    # OPENAI_API_KEY, DB_PASSWORD (query user),
+                        # MARIADB_ROOT_PASSWORD (admin)
+docker compose up -d --wait mariadb   # MariaDB 10.6 on 127.0.0.1
+npm run bootstrap-db    # create the 13-table schema (admin user)
+npm run seed-demo       # load the synthetic retail data (admin user)
 npm run optimized -- "Show outstanding balance by customer"
 ```
 
@@ -198,6 +208,12 @@ Inspect without spending an LLM call:
 
 ```bash
 npm run debug-retrieval -- "Which SKUs moved the most in March 2026?"
+npm run verify-dataset -- --dataset edge-cases-public
+```
+
+Costs LLM calls (17 cases × up to 2 attempts × 10 runs):
+
+```bash
 npm run benchmark -- --dataset edge-cases-public --repeat 10
 ```
 
