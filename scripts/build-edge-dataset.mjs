@@ -395,7 +395,7 @@ const PUBLIC_EDGE_CASES = [
     "expected_row_counts": {
       "seed": 3,
       "v2": 7,
-      "v3": 7
+      "v3": 8
     }
   }
 ];

@@ -34,7 +34,7 @@ import { createPrng } from './prng.js';
 
 // Bump when the generated content of any fixture changes on purpose; the
 // fixture meta table records it next to the content hash.
-export const FIXTURE_GENERATOR_VERSION = '2';
+export const FIXTURE_GENERATOR_VERSION = '3';
 // Fixed seed for v3. Changing it changes v3's content (and its pins).
 export const V3_PRNG_SEED = 20260331;
 
@@ -249,6 +249,7 @@ export function buildV2Facts() {
   }
 
   addV2cFacts(facts);
+  addV2dFacts(facts);
   return facts;
 }
 
@@ -361,6 +362,151 @@ function addV2cFacts(facts) {
   }
 }
 
+/**
+ * v2d (the templated dataset, datasets/templated-public.json): rows aimed at
+ * the mutant families its controls showed surviving every fixture, each listed
+ * with what it separates. Every non-canceled document has postings, so the
+ * all-time "documents without postings" count (core_public_006) is unchanged;
+ * no product is added to March 2026 (at most nine products sell there, see
+ * v2c), and the February / March product sets of core_public_004 stay as
+ * they were.
+ * - 34: Harbor Kiosk (active, otherwise ordering only in April) has a
+ *   canceled document on 2026-01-01: a dropped cancel filter lists it as a
+ *   Q1 2026 buyer, and a first-day-excluded window drops it from the
+ *   canceled-document counts;
+ * - 35: Harbor Kiosk's only 2025 document, dated 2025-12-31 and posted
+ *   2026-01-02, at Online Fulfillment, with an Urban Refresh product:
+ *   PostingDate read as the sales date moves a buyer between 2025 and Q1 2026;
+ * - 36: Harbor Kiosk buys on 2026-04-01 (the day after Q1);
+ * - 37, 38: first-day documents (2026-01-01) for Valley Corner Shop (a Store
+ *   Receipt at North Warehouse with Kitchen Towels, an Urban Refresh product
+ *   and a Sunvale product; its only January and only 2025-12/2026-01
+ *   boundary purchase) and Metro Online Store (an Online Order, its only
+ *   non-canceled January document);
+ * - 39: Summit Grocers (customer 5) buys on 2026-02-01, its only non-canceled
+ *   February document, so both customers named Summit Grocers buy in
+ *   February and their merged total (325.00) overtakes the third-ranked
+ *   customer (320.00);
+ * - 40, 41: the largest documents around March: 1900.00 dated 2026-02-28 and
+ *   posted 2026-03-02, and 1800.00 on 2026-03-01 at Online Fulfillment (the
+ *   largest dated in March), whose Trail Mix line equals document 3's (500.00,
+ *   same store and month) and whose Cane Sugar quantity equals document 25's;
+ *   its lines are Snacks and Pantry only, so March category totals stay out
+ *   of category-ID order (Snacks above Beverages);
+ * - 42: a canceled, partly paid 2000.00 March document at Online Fulfillment
+ *   (larger than any non-canceled one);
+ * - 43, 44: canceled documents in April (Pantry and Beverages) and in February
+ *   (Household), months that had none with those products;
+ * - 45-49: December 2025 sales (v2 had none): Lakeside 400, North District
+ *   350, both Summit Grocers (300 and 250: merged by name they would rank
+ *   first) and a canceled 900 for the inactive customer (its only 2025
+ *   document);
+ * - manual journals (NULL SalesDocumentId) on 2026-01-01 and 2026-04-20.
+ * Documents keep v2's conventions: NetPayable = Net + 12.50, BillTotal =
+ * Gross + 7.25, line TotalAmount = Net x 1.05.
+ */
+function addV2dFacts(facts) {
+  const document = ([id, date, postingDate, customerId, storeId, typeId, campaignId, canceled, net, gross, paid]) => {
+    const netPayable = round2(net + 12.5);
+    return {
+      SalesDocumentId: id,
+      DocumentNo: `SD-${date.slice(0, 4)}-${String(id).padStart(4, '0')}`,
+      DocumentDate: date,
+      PostingDate: postingDate,
+      DueDate: addDays(date, 30),
+      CustomerId: customerId,
+      StoreLocationId: storeId,
+      DocumentTypeId: typeId,
+      CampaignId: campaignId,
+      IsCanceled: canceled,
+      GrossAmount: gross,
+      NetAmount: net,
+      NetPayableAmount: netPayable,
+      PaidAmount: paid,
+      BalanceAmount: round2(netPayable - paid),
+      SubtotalAmount: round2(net * 1.05),
+      BillTotalAmount: round2(gross + 7.25),
+    };
+  };
+  const v2dDocuments = [
+    [34, '2026-01-01', '2026-01-01', 7, 2, 4, 1, 1, 60.0, 66.0, 0],
+    [35, '2025-12-31', '2026-01-02', 7, 3, 2, 2, 0, 150.0, 165.0, 150.0],
+    [36, '2026-04-01', '2026-04-01', 7, 2, 4, 1, 0, 45.0, 49.5, 45.0],
+    [37, '2026-01-01', '2026-01-01', 4, 1, 4, 1, 0, 260.0, 286.0, 260.0],
+    [38, '2026-01-01', '2026-01-01', 3, 1, 2, 3, 0, 100.0, 110.0, 100.0],
+    [39, '2026-02-01', '2026-02-01', 5, 1, 1, 3, 0, 300.0, 330.0, 300.0],
+    [40, '2026-02-28', '2026-03-02', 1, 2, 1, 1, 0, 1900.0, 2090.0, 1900.0],
+    [41, '2026-03-01', '2026-03-01', 2, 3, 1, 2, 0, 1800.0, 1980.0, 1800.0],
+    [42, '2026-03-22', '2026-03-22', 1, 3, 1, 3, 1, 2000.0, 2200.0, 500.0],
+    [43, '2026-04-14', '2026-04-14', 3, 3, 2, 3, 1, 600.0, 660.0, 0],
+    [44, '2026-02-22', '2026-02-22', 2, 1, 1, 1, 1, 150.0, 165.0, 0],
+    [45, '2025-12-05', '2025-12-05', 2, 1, 1, 1, 0, 400.0, 440.0, 400.0],
+    [46, '2025-12-09', '2025-12-09', 1, 2, 4, 2, 0, 350.0, 385.0, 350.0],
+    [47, '2025-12-12', '2025-12-12', 5, 1, 1, 3, 0, 300.0, 330.0, 0],
+    [48, '2025-12-15', '2025-12-15', 8, 2, 4, 1, 0, 250.0, 275.0, 250.0],
+    [49, '2025-12-18', '2025-12-18', 6, 3, 2, 2, 1, 900.0, 990.0, 0],
+  ];
+  facts.SalesDocument.push(...v2dDocuments.map(document));
+
+  const line = ([id, documentId, productId, quantity, price, net]) => {
+    const { product, categoryName, brandName } = productInfo(productId);
+    return {
+      SalesDocumentLineId: id,
+      SalesDocumentId: documentId,
+      ProductId: productId,
+      ProductNameSnapshot: product.ProductName,
+      Quantity: quantity,
+      SalePrice: price,
+      TotalAmount: round2(net * 1.05),
+      NetAmount: net,
+      CategoryNameSnapshot: categoryName,
+      BrandNameSnapshot: brandName,
+    };
+  };
+  const v2dLines = [
+    [47, 34, 8, 2, 30, 60.0],
+    [48, 35, 9, 15, 10, 150.0],
+    [49, 36, 10, 3, 15, 45.0],
+    [50, 37, 6, 2, 50, 100.0],
+    [51, 37, 3, 2, 40, 80.0],
+    [52, 37, 2, 1, 80, 80.0],
+    [53, 38, 5, 1, 100, 100.0],
+    [54, 39, 12, 24, 12.5, 300.0],
+    [55, 40, 2, 11, 100, 1100.0],
+    [56, 40, 3, 20, 40, 800.0],
+    [57, 41, 2, 12, 100, 1200.0],
+    [58, 41, 4, 12, 41.67, 500.0],
+    [59, 41, 7, 2, 50, 100.0],
+    [60, 42, 4, 20, 50, 1000.0],
+    [61, 42, 7, 20, 50, 1000.0],
+    [62, 43, 5, 4, 100, 400.0],
+    [63, 43, 8, 10, 20, 200.0],
+    [64, 44, 6, 3, 50, 150.0],
+    [65, 45, 5, 4, 100, 400.0],
+    [66, 46, 3, 7, 50, 350.0],
+    [67, 47, 7, 6, 50, 300.0],
+    [68, 48, 8, 10, 25, 250.0],
+    [69, 49, 11, 8, 112.5, 900.0],
+  ];
+  facts.SalesDocumentLine.push(...v2dLines.map(line));
+
+  // AR debit / revenue credit for every non-canceled v2d document, at its
+  // posting date; then the two manual journals.
+  let postingId = 38;
+  for (const values of v2dDocuments.filter((values) => values[7] === 0)) {
+    const [documentId, , postingDate, , , , , , net] = values;
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: documentId, LedgerAccountId: 2, PostingDate: postingDate, DebitAmount: net, CreditAmount: 0 });
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: documentId, LedgerAccountId: 1, PostingDate: postingDate, DebitAmount: 0, CreditAmount: net });
+  }
+  for (const [postingDate, amount] of [
+    ['2026-01-01', 25.0],
+    ['2026-04-20', 40.0],
+  ]) {
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 3, PostingDate: postingDate, DebitAmount: amount, CreditAmount: 0 });
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 4, PostingDate: postingDate, DebitAmount: 0, CreditAmount: amount });
+  }
+}
+
 // --- v3: seeded random facts ---------------------------------------------------
 
 // Months covered and documents per month. March 2026 (the month most cases ask
@@ -403,7 +549,8 @@ const V3_PRODUCTS = {
 // the discontinued Oat Cookies Tin (13) included.
 const V3_FEB_ONLY_PRODUCT = 7;
 
-// Harbor Kiosk (7) never trades. The inactive customer (6) trades too, and
+// Harbor Kiosk (7) never trades in the generated rows (addV3dFacts adds one
+// designed document). The inactive customer (6) trades too, and
 // has a non-canceled document in each of January-March 2026 (forced), so an
 // invented "active customers only" filter changes the customer cases.
 const V3_INACTIVE_CUSTOMER = 6;
@@ -462,7 +609,7 @@ function isMarch2026(date) {
  *   March net sales (ranked comparison must tolerate tie order);
  * - the inactive customer 6 buys in January-March 2026 and the discontinued
  *   product 13 sells in March 2026 (invented IsActive filters);
- * - a same-amount twin document in each of January-March 2026 (addV3Twins:
+ * - a same-amount twin document in every month (addV3Twins:
  *   SUM(DISTINCT ...) loses a value in that document's groups).
  */
 export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
@@ -750,6 +897,7 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
   }
 
   addV3Twins({ documents, lines, postings, tiedCustomers: [second[0], third[0]] });
+  addV3dFacts({ documents, lines, postings });
   return { SalesDocument: documents, SalesDocumentLine: lines, AccountingPosting: postings };
 }
 
@@ -774,17 +922,78 @@ function marchTopTenGapHolds(documents, lines) {
 const isHalfCent = (amount) => Math.round(amount * 1000) % 10 !== 0;
 
 /**
- * Same-amount twins: in each of January, February and March 2026 one
- * document gets a twin (same customer, dates, header amounts, lines and
- * postings; new IDs). SUM(DISTINCT ...) over header Net/Gross, line Net or
- * Quantity, or posting Debit/Credit then drops a value in that customer's,
- * product's, brand's, category's and account's group. The source is the
- * first non-canceled, posted document of the month whose customer is not in
- * the March tie and whose lines are whole-cent product lines, and whose twin
- * keeps the March top-10 cut-off unambiguous.
+ * v3d (the templated dataset): Harbor Kiosk, which otherwise never trades in
+ * v3, buys once: a Spring Water document dated 2026-02-01 and posted
+ * 2026-03-02. It is then the only customer that buys in February 2026 but not
+ * in March (dropped first days and PostingDate read as the sales date both
+ * change that count), and its only February document falls on the first day.
+ */
+function addV3dFacts({ documents, lines, postings }) {
+  const documentId = documents.length + 1;
+  documents.push({
+    SalesDocumentId: documentId,
+    DocumentNo: `SD-2026-${String(documentId).padStart(4, '0')}`,
+    DocumentDate: '2026-02-01',
+    PostingDate: '2026-03-02',
+    DueDate: '2026-03-03',
+    CustomerId: 7,
+    StoreLocationId: 1,
+    DocumentTypeId: 4,
+    CampaignId: 1,
+    IsCanceled: 0,
+    GrossAmount: 33.6,
+    NetAmount: 30,
+    NetPayableAmount: 34.95,
+    PaidAmount: 34.95,
+    BalanceAmount: 0,
+    SubtotalAmount: 30,
+    BillTotalAmount: 40.85,
+  });
+  lines.push({
+    SalesDocumentLineId: lines.length + 1,
+    SalesDocumentId: documentId,
+    ProductId: 10,
+    ProductNameSnapshot: 'Spring Water 24 Pack',
+    Quantity: 2,
+    SalePrice: 15,
+    TotalAmount: 30,
+    NetAmount: 30,
+    CategoryNameSnapshot: 'Beverages',
+    BrandNameSnapshot: 'Clearspring Waters',
+  });
+  for (const [ledgerAccountId, debit, credit] of [
+    [2, 30, 0],
+    [1, 0, 30],
+  ]) {
+    postings.push({
+      AccountingPostingId: postings.length + 1,
+      SalesDocumentId: documentId,
+      LedgerAccountId: ledgerAccountId,
+      PostingDate: '2026-03-02',
+      DebitAmount: debit,
+      CreditAmount: credit,
+    });
+  }
+}
+
+// Months that get a same-amount twin, in the order they are added (the
+// January-March 2026 twins came first and keep their IDs; the other months
+// were added for the templated dataset, whose SUM(DISTINCT ...) controls span
+// every month of v3).
+const V3_TWIN_MONTHS = ['2026-01', '2026-02', '2026-03', '2025-01', '2025-02', '2025-03', '2025-11', '2025-12', '2026-04', '2026-05'];
+
+/**
+ * Same-amount twins: in every month of v3 (V3_TWIN_MONTHS) one document gets
+ * a twin (same customer, dates, header amounts, lines and postings; new IDs).
+ * SUM(DISTINCT ...) over header Net/Gross, line Net or Quantity, or posting
+ * Debit/Credit then drops a value in that customer's, product's, brand's,
+ * category's and account's group. The source is the first non-canceled,
+ * posted document of the month whose customer is not in the March tie and
+ * whose lines are whole-cent product lines, and whose twin keeps the March
+ * top-10 cut-off unambiguous.
  */
 function addV3Twins({ documents, lines, postings, tiedCustomers }) {
-  for (const month of ['2026-01', '2026-02', '2026-03']) {
+  for (const month of V3_TWIN_MONTHS) {
     const candidates = documents.filter(
       (document) =>
         document.IsCanceled === 0 &&
@@ -797,7 +1006,7 @@ function addV3Twins({ documents, lines, postings, tiedCustomers }) {
     let added = false;
     for (const source of candidates) {
       const twinId = documents.length + 1;
-      const twin = { ...source, SalesDocumentId: twinId, DocumentNo: `SD-2026-${String(twinId).padStart(4, '0')}` };
+      const twin = { ...source, SalesDocumentId: twinId, DocumentNo: `SD-${month.slice(0, 4)}-${String(twinId).padStart(4, '0')}` };
       const twinLines = lines
         .filter((line) => line.SalesDocumentId === source.SalesDocumentId)
         .map((line, index) => ({ ...line, SalesDocumentLineId: lines.length + index + 1, SalesDocumentId: twinId }));

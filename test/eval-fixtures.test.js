@@ -27,8 +27,8 @@ import { expandProductSearchTerms, rankProductCandidates } from '../src/master-d
 // FIXTURE_GENERATOR_VERSION when the change is intentional.
 const EXPECTED_CONTENT_HASHES = {
   seed: '094282546fe55afd',
-  v2: 'c629bc562d05cf0b',
-  v3: '92a17806c3746036',
+  v2: '9eb81d9084a0f015',
+  v3: '74d0d295b559986f',
 };
 
 const isMarch2026 = (date) => date >= '2026-03-01' && date < '2026-04-01';
@@ -92,9 +92,9 @@ test('v2 ports the audit fixture: separated metrics, header discounts, boundary 
   const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
   const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
 
-  assert.equal(facts.SalesDocument.length, 33);
-  assert.equal(facts.SalesDocumentLine.length, 46);
-  assert.equal(facts.AccountingPosting.length, 37);
+  assert.equal(facts.SalesDocument.length, 49);
+  assert.equal(facts.SalesDocumentLine.length, 69);
+  assert.equal(facts.AccountingPosting.length, 63);
   for (const document of facts.SalesDocument) {
     assert.ok(Math.abs(document.NetPayableAmount - document.NetAmount - 12.5) < 1e-9, `doc ${document.SalesDocumentId} NetPayable`);
     assert.ok(Math.abs(document.BillTotalAmount - document.GrossAmount - 7.25) < 1e-9, `doc ${document.SalesDocumentId} BillTotal`);
@@ -168,6 +168,68 @@ test('v2c adds prior-year postings, same-amount twins, inactive customer/product
   assert.equal(MASTER_DATA.Customer.filter((customer) => customer.IsActive === 1).length, 7);
 });
 
+test('v2d separates the families the templated controls found surviving', () => {
+  const facts = buildV2Facts();
+  const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
+  const live = (document) => document.IsCanceled === 0;
+  const inMonth = (document, month) => document.DocumentDate.startsWith(month);
+  const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
+  const v2d = facts.SalesDocument.filter((document) => document.SalesDocumentId >= 34);
+  assert.equal(v2d.length, 16);
+
+  // Every non-canceled v2d document is posted (the all-time "documents without
+  // postings" count is unchanged); the canceled ones are not.
+  for (const document of v2d) {
+    const posted = facts.AccountingPosting.some((posting) => posting.SalesDocumentId === document.SalesDocumentId);
+    assert.equal(posted, live(document), `document ${document.SalesDocumentId}`);
+  }
+
+  // Harbor Kiosk: a canceled first-day Q1 document, its only 2025 document
+  // dated 2025-12-31 and posted in 2026, and a document the day after Q1.
+  const harbor = facts.SalesDocument.filter((document) => document.CustomerId === 7);
+  assert.deepEqual(
+    harbor.filter((document) => document.DocumentDate < '2026-04-02').map((document) => [document.DocumentDate, document.PostingDate, document.IsCanceled]),
+    [['2026-01-01', '2026-01-01', 1], ['2025-12-31', '2026-01-02', 0], ['2026-04-01', '2026-04-01', 0]]
+  );
+
+  // Both customers named Summit Grocers buy in February 2026; merged by name
+  // they overtake the third-ranked customer.
+  const februaryNet = new Map();
+  for (const document of facts.SalesDocument.filter((entry) => live(entry) && inMonth(entry, '2026-02'))) {
+    februaryNet.set(document.CustomerId, (februaryNet.get(document.CustomerId) || 0) + document.NetAmount);
+  }
+  const ranked = [...februaryNet.values()].sort((left, right) => right - left);
+  assert.ok(februaryNet.get(5) < ranked[2] && februaryNet.get(5) + februaryNet.get(8) > ranked[2]);
+  assert.deepEqual(facts.SalesDocument.filter((entry) => live(entry) && inMonth(entry, '2026-02') && entry.CustomerId === 5).map((entry) => entry.DocumentDate), ['2026-02-01']);
+
+  // The largest non-canceled March document is on the first day; a larger one
+  // dated in February is posted in March; a larger canceled one exists.
+  const march = facts.SalesDocument.filter((entry) => inMonth(entry, '2026-03'));
+  const largestLive = march.filter(live).sort((left, right) => right.NetAmount - left.NetAmount)[0];
+  assert.deepEqual([largestLive.DocumentDate, largestLive.NetAmount], ['2026-03-01', 1800]);
+  assert.ok(documents.get(40).NetAmount > largestLive.NetAmount && documents.get(40).PostingDate.startsWith('2026-03') && inMonth(documents.get(40), '2026-02'));
+  assert.ok(march.some((entry) => !live(entry) && entry.NetAmount > largestLive.NetAmount && entry.PaidAmount > 0));
+
+  // Canceled documents in April 2026 and December 2025; December 2025 sales.
+  assert.ok(facts.SalesDocument.some((entry) => !live(entry) && inMonth(entry, '2026-04')));
+  assert.ok(facts.SalesDocument.some((entry) => !live(entry) && inMonth(entry, '2025-12')));
+  assert.equal(facts.SalesDocument.filter((entry) => live(entry) && inMonth(entry, '2025-12')).length, 5);
+
+  // Manual journals on 2026-01-01 and in April 2026.
+  const journals = facts.AccountingPosting.filter((posting) => posting.SalesDocumentId === null).map((posting) => posting.PostingDate);
+  assert.ok(journals.includes('2026-01-01') && journals.some((date) => date.startsWith('2026-04')));
+
+  // March 2026 category totals stay out of category-ID order.
+  const marchLines = march.filter(live).flatMap((entry) => linesOf(entry.SalesDocumentId)).filter((line) => line.ProductId !== null);
+  const categoryTotals = new Map();
+  for (const line of marchLines) {
+    const categoryId = MASTER_DATA.Product.find((row) => row.ProductId === line.ProductId).ProductCategoryId;
+    categoryTotals.set(categoryId, (categoryTotals.get(categoryId) || 0) + line.NetAmount);
+  }
+  const byTotal = [...categoryTotals.entries()].sort((left, right) => right[1] - left[1]).map(([id]) => id);
+  assert.notDeepEqual(byTotal, [...byTotal].sort((left, right) => left - right));
+});
+
 test('v3 is a large seeded fact set with the traps the oracle needs', () => {
   const facts = generateV3Facts();
   const documents = facts.SalesDocument;
@@ -199,7 +261,10 @@ test('v3 is a large seeded fact set with the traps the oracle needs', () => {
   assert.ok(lines.some((line) => line.ProductNameSnapshot === 'Basmati Rice 5kg'));
   assert.ok(lines.some((line) => line.BrandNameSnapshot === 'Northstar Beverages Co'));
   assert.ok(documents.some((document) => !facts.AccountingPosting.some((posting) => posting.SalesDocumentId === document.SalesDocumentId) && document.IsCanceled === 0));
-  assert.ok(documents.every((document) => document.CustomerId !== 7), 'Harbor Kiosk never orders');
+  // Harbor Kiosk orders once (addV3dFacts): its only document is dated on the
+  // first day of February 2026 and posted in March.
+  const harbor = documents.filter((document) => document.CustomerId === 7);
+  assert.deepEqual(harbor.map((document) => [document.DocumentDate, document.PostingDate, document.IsCanceled]), [['2026-02-01', '2026-03-02', 0]]);
 
   // Header metrics all differ somewhere; line Total != Net on most lines.
   const lineNet = (id) => lines.filter((line) => line.SalesDocumentId === id).reduce((sum, line) => sum + line.NetAmount, 0);
@@ -231,8 +296,8 @@ test('v3 is a large seeded fact set with the traps the oracle needs', () => {
     assert.ok(own.some((document) => lines.some((line) => line.SalesDocumentId === document.SalesDocumentId && line.ProductId === null)), `${month} fee line`);
   }
 
-  // Same-amount twins in January-March 2026: header, lines and postings.
-  for (const month of ['2026-01', '2026-02', '2026-03']) {
+  // Same-amount twins in every month: header, lines and postings.
+  for (const month of [...months].sort()) {
     const twin = documents.find((document, index) =>
       document.DocumentDate.startsWith(month) &&
       document.IsCanceled === 0 &&
