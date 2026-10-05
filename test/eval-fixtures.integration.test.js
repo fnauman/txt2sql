@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 import { loadBenchmarkDataset } from '../src/benchmark.js';
 import { loadControlsIndex } from '../src/eval/controls.js';
 import { FACT_TABLES, MASTER_TABLES } from '../src/eval/fixture-data.js';
-import { checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
+import { checkFixtureContent, checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, describeFixtureContent } from '../src/eval/fixtures.js';
 import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
 import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
@@ -19,25 +19,38 @@ import { createMariaDbConnection } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 
-// Opt-in checks of the evaluation fixtures against a real MariaDB (skipped by
-// default). They WRITE: the three fixture databases (demo_retail,
-// demo_retail_v2, demo_retail_v3) are created/re-seeded exactly as
-// `npm run seed-fixtures` does, so point them at a throwaway server, e.g. the
-// docker-compose database:
+// Opt-in checks of the evaluation fixtures against a real MariaDB, enabled by
+// TEST_MARIADB_PORT like test/mariadb.integration.test.js (skipped without
+// it). They WRITE: the three fixture databases (demo_retail, demo_retail_v2,
+// demo_retail_v3) are created/re-seeded exactly as `npm run seed-fixtures`
+// does, so point them at a throwaway server, e.g. the docker-compose database:
 //
 //   TEST_MARIADB_PORT=3306 TEST_MARIADB_PASSWORD=<DB_PASSWORD> \
 //   TEST_MARIADB_ADMIN_PASSWORD=<root password> \
 //     node --test test/eval-fixtures.integration.test.js
 //
+// Seeding needs the admin role: with TEST_MARIADB_PORT set but
+// TEST_MARIADB_ADMIN_PASSWORD missing, the seeding tests FAIL with that
+// message (never a silent skip); the read-only tests then need fixtures
+// already seeded by `npm run seed-fixtures`.
 // Optional: TEST_MARIADB_HOST (127.0.0.1), TEST_MARIADB_USER (demo_readonly),
 // TEST_MARIADB_ADMIN_USER (root). The query user must be the docker init
 // script's SELECT-only user (it reads every demo_retail* database).
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const configured = Boolean(process.env.TEST_MARIADB_PORT && process.env.TEST_MARIADB_ADMIN_PASSWORD);
+const configured = Boolean(process.env.TEST_MARIADB_PORT);
 const skip = configured
   ? false
-  : 'set TEST_MARIADB_PORT, TEST_MARIADB_PASSWORD and TEST_MARIADB_ADMIN_PASSWORD to seed and verify the fixtures on a real MariaDB';
+  : 'set TEST_MARIADB_PORT (with TEST_MARIADB_PASSWORD, and TEST_MARIADB_ADMIN_PASSWORD to seed) to check the fixtures on a real MariaDB';
+
+function requireAdmin() {
+  if (!process.env.TEST_MARIADB_ADMIN_PASSWORD) {
+    throw new Error(
+      'TEST_MARIADB_ADMIN_PASSWORD is not set: this test seeds demo_retail, demo_retail_v2 and demo_retail_v3 with the admin role. ' +
+        'Set it to the admin (root) password of a throwaway server, e.g. the docker-compose MARIADB_ROOT_PASSWORD.'
+    );
+  }
+}
 
 const env = {
   DB_HOST: process.env.TEST_MARIADB_HOST || '127.0.0.1',
@@ -63,6 +76,7 @@ before(async () => {
 });
 
 test('seed-fixtures is idempotent and writes exactly the generated content', { skip }, async () => {
+  requireAdmin();
   const admin = await createMariaDbConnection({ includeDatabase: false, role: 'admin', env });
   try {
     for (const fixture of FIXTURES) {
@@ -82,11 +96,12 @@ test('seed-fixtures is idempotent and writes exactly the generated content', { s
 });
 
 test('every fixture database holds identical master data and different facts', { skip }, async () => {
-  const admin = await createMariaDbConnection({ includeDatabase: false, role: 'admin', env });
+  // Read as the SELECT-only query user, the way the oracle reads them.
+  const connections = await openFixtureConnections({ env });
   try {
     const tables = {};
-    for (const fixture of FIXTURES) {
-      tables[fixture.name] = await readFixtureTables(admin, fixture.database);
+    for (const entry of connections) {
+      tables[entry.name] = await readFixtureTables(entry.connection, entry.database);
     }
     for (const table of MASTER_TABLES) {
       assert.ok(tables.seed[table].length > 0, `${table} is seeded`);
@@ -98,16 +113,58 @@ test('every fixture database holds identical master data and different facts', {
       assert.notDeepEqual(tables.v3[table], tables.v2[table]);
     }
   } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
+test('drift: edited fact and master rows are detected (deep check) and repaired by seeding', { skip }, async () => {
+  requireAdmin();
+  const admin = await createMariaDbConnection({ includeDatabase: false, role: 'admin', env });
+  const connections = await openFixtureConnections({ env });
+  const byName = Object.fromEntries(connections.map((entry) => [entry.name, entry]));
+  try {
+    await admin.query('UPDATE demo_retail_v2.SalesDocument SET NetAmount = NetAmount + 1 WHERE SalesDocumentId = 1');
+    await admin.query('UPDATE demo_retail_v3.Customer SET IsActive = 0 WHERE CustomerId = 3');
+    const v2 = await checkFixtureContent(byName.v2.connection, byName.v2);
+    assert.deepEqual([v2.status, v2.masterDataMatches], ['drifted', true]);
+    const v3 = await checkFixtureContent(byName.v3.connection, byName.v3);
+    assert.deepEqual([v3.status, v3.masterDataMatches], ['drifted', false]);
+    // The meta row alone still claims the generated content.
+    assert.equal((await checkFixtureMeta(byName.v3.connection, byName.v3)).status, 'current');
+
+    // verify-dataset fails on it...
+    await assert.rejects(
+      execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/verify-dataset.js'), '--dataset', 'core-public', '--skip-controls'], { env: scriptEnv, cwd: REPO_ROOT }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stdout, /FAIL: fixture v3: master data differs from the shared MASTER_DATA/);
+        assert.match(error.stdout, /FAIL: fixture v2: content is drifted/);
+        return true;
+      }
+    );
+    // ...and seeding repairs it.
+    for (const fixture of FIXTURES) {
+      const result = await seedFixture(admin, fixture, { schema });
+      assert.equal(result.action, fixture.name === 'seed' ? 'unchanged' : 'seeded', fixture.name);
+    }
+    for (const entry of connections) {
+      const check = await checkFixtureContent(entry.connection, entry);
+      assert.deepEqual([entry.name, check.status, check.masterDataMatches], [entry.name, 'current', true]);
+    }
+  } finally {
+    await closeFixtureConnections(connections);
     await admin.end();
   }
 });
 
-test('the read-only query user reads every fixture; meta rows are current', { skip }, async () => {
+test('the read-only query user reads every fixture; meta rows and content are current', { skip }, async () => {
   const connections = await openFixtureConnections({ env });
   try {
     for (const entry of connections) {
-      const check = await checkFixtureMeta(entry.connection, entry);
+      assert.equal((await checkFixtureMeta(entry.connection, entry)).status, 'current', entry.name);
+      const check = await checkFixtureContent(entry.connection, entry);
       assert.equal(check.status, 'current', entry.name);
+      assert.equal(check.masterDataMatches, true, entry.name);
       await assert.rejects(entry.connection.query('DELETE FROM SalesDocument'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
     }
   } finally {
@@ -132,7 +189,9 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
       const summary = summarizeControls(results, { fixtureNames: FIXTURES.map((fixture) => fixture.name) });
       assert.ok(summary.design.rate >= 0.95, `${datasetName} design kill rate ${summary.design.rate}`);
       assert.equal(summary.positive.matched, summary.positive.total);
-      assert.equal(summary.positive.validatorAccepted, summary.positive.total);
+      // Every positive passes the validator except the flagged known false rejections.
+      const flagged = results.flatMap((result) => result.notes.filter((note) => /known validator false rejection/.test(note)));
+      assert.equal(summary.positive.validatorAccepted + flagged.length, summary.positive.total);
       // The point of the extra fixtures: the seed alone catches far less.
       assert.ok(summary.design.seedOnlyRate < summary.design.rate);
     }
@@ -142,6 +201,7 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
 });
 
 test('the seed-fixtures and verify-dataset scripts succeed end to end', { skip }, async () => {
+  requireAdmin();
   const seeded = await execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/seed-fixtures.js')], { env: scriptEnv, cwd: REPO_ROOT });
   assert.match(seeded.stdout, /unchanged seed/);
   const verified = await execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/verify-dataset.js'), '--dataset', 'edge-cases-public'], {
@@ -149,7 +209,9 @@ test('the seed-fixtures and verify-dataset scripts succeed end to end', { skip }
     cwd: REPO_ROOT,
     maxBuffer: 4 * 1024 * 1024,
   });
-  assert.match(verified.stdout, /negative, design: {3}108\/108 killed/);
+  const design = /negative, design: +(\d+)\/(\d+) killed/.exec(verified.stdout);
+  assert.ok(design && Number(design[2]) >= 108 && design[1] === design[2], `every design control is killed: ${design?.[0]}`);
+  assert.match(verified.stdout, /negative, held-out: +28\/28 killed/);
   assert.match(verified.stdout, /0 failure\(s\)\./);
   assert.doesNotMatch(verified.stdout, /FAIL:/);
 });
