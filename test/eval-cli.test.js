@@ -13,6 +13,7 @@ import {
   describeRunnerFlags,
   MIN_GATE_PAIRED_FRACTION,
   parseEvalArgs,
+  providerConfigRejection,
   runEval,
   validateBaselineReport,
   verificationRefusal,
@@ -524,6 +525,16 @@ test('Ctrl-C stops the run once; a repeat within a second (npm forwards it) is i
   other.stop('the LLM provider rejected the request (HTTP_401)');
   assert.equal(other.signal.reason.message, 'the LLM provider rejected the request (HTTP_401)');
   assert.equal(other.interruptedBy, null);
+});
+
+test('a rejected key, a wrong endpoint or an unknown model stops the run; other LLM errors do not', () => {
+  for (const code of ['HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']) {
+    assert.match(providerConfigRejection({ status: 'llm_error', error_code: code }), new RegExp(`the LLM provider rejected the request \\(${code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model\\)`), code);
+  }
+  for (const code of ['HTTP_400', 'HTTP_429', 'HTTP_500', 'LLM_TIMEOUT', 'LLM_TRUNCATED']) {
+    assert.equal(providerConfigRejection({ status: 'llm_error', error_code: code }), null, code);
+  }
+  assert.equal(providerConfigRejection({ status: 'pass', error_code: 'HTTP_404' }), null);
 });
 
 test('a stopped run exits 2 and says why; cancelled repetitions are excluded', () => {

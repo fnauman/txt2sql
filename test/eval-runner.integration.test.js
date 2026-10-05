@@ -25,7 +25,9 @@ import { loadBenchmarkDataset } from '../src/benchmark.js';
 // - in the "regressed" mode six paraphrase cases get `SELECT 1`;
 // - in the "expensive" mode every call reports 1M prompt tokens;
 // - in the "slow" mode it answers after 5 s;
-// - in the "unauthorized" mode it answers HTTP 401 (a wrong API key).
+// - in the "unauthorized" mode it answers HTTP 401 (a wrong API key);
+// - in the "wrong_endpoint" mode a plain HTTP 404, in "unknown_model" an
+//   HTTP 400 with code model_not_found.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configured = Boolean(process.env.TEST_MARIADB_PORT);
@@ -64,6 +66,18 @@ before(async () => {
       if (mode === 'unauthorized') {
         response.writeHead(401, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } }));
+        return;
+      }
+      if (mode === 'wrong_endpoint') {
+        // OPENAI_BASE_URL pointing at a server that has no such path.
+        response.writeHead(404, { 'content-type': 'text/plain' });
+        response.end('404 page not found');
+        return;
+      }
+      if (mode === 'unknown_model') {
+        // An OpenAI-compatible server that answers 400 for a model it does not serve.
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: 'The model `nope` does not exist.', type: 'invalid_request_error', code: 'model_not_found' } }));
         return;
       }
       const payload = JSON.parse(body || '{}');
@@ -300,6 +314,24 @@ test('a rejected API key stops the run after the first answer instead of attempt
   assert.deepEqual(report.attribution.repetitions.byOutcome, { llm_outage: 1, cancelled: 8 });
   assert.equal(report.stopped.cancelledCases.length, 8);
   assert.match(run.stdout, /HARNESS: the run was stopped early: the LLM provider rejected the request/);
+});
+
+test('a wrong endpoint or an unknown model stops the run as a provider outage, not as model failures', { skip }, async () => {
+  for (const [label, code] of [
+    ['wrong_endpoint', 'HTTP_404'],
+    ['unknown_model', 'LLM_MODEL_NOT_FOUND'],
+  ]) {
+    mode = label;
+    const run = await runEval(['--dataset', 'core-public', '--concurrency', '1', '--skip-verify'], label);
+    mode = 'base';
+    assert.equal(run.code, 2, `${label}\n${run.stdout}\n${run.stderr}`);
+    assert.match(run.stdout, new RegExp(`Stopping: the LLM provider rejected the request \\(${code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model\\)`));
+    const { report } = await findReport(run.outputDir);
+    // One repetition is an outage (excluded from accuracy), the rest never ran.
+    assert.deepEqual(report.attribution.repetitions.byOutcome, { llm_outage: 1, cancelled: 8 }, label);
+    assert.equal(report.stats.strictAccuracy.value, null, 'no fabricated 0% model score');
+    assert.match(run.stdout, /HARNESS: /);
+  }
 });
 
 test('Ctrl-C (SIGINT) aborts in-flight cases and still writes a partial report (exit 130)', { skip }, async () => {

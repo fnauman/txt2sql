@@ -510,8 +510,10 @@ npm run eval -- --help                              # every flag
    stops starting new cases once the LLM cost of finished cases reaches X; the
    rest are `skipped_budget`. Cases already started finish their repetitions,
    so the overshoot is at most the cases in flight. A provider answer of HTTP
-   401 or 403 (wrong key, endpoint or model) stops the run at once instead of
-   failing every case: the rest are `cancelled` and the run exits 2. Ctrl-C
+   401 or 403 (wrong key), 404 (wrong `OPENAI_BASE_URL` path or model) or an
+   unknown model (`model_not_found`, also as a 400) stops the run at once
+   instead of failing every case: that repetition is an `llm_outage`
+   (excluded from accuracy), the rest are `cancelled` and the run exits 2. Ctrl-C
    (SIGINT, or SIGTERM as in a cancelled CI job) aborts the cases in flight,
    writes a partial report (`stopped` in report.json, a note in report.md)
    and exits 130; a second Ctrl-C a second later exits at once without a
@@ -567,7 +569,7 @@ there too.
   | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not retrieved, so it was not allowed |
   | `timeout` / `aborted` | infra | counted | the case deadline fired |
   | `infra_error` | infra | excluded | the database failed: in the product loop, in a gold query, or while re-checking a guardrail rejection of an otherwise model-bucket failure (tagged `guardrail_unverified`: it might have been a false rejection) |
-  | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/429/5xx |
+  | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/404/429/5xx, unknown model (`LLM_MODEL_NOT_FOUND`) |
   | `skipped_budget` | skipped | excluded | not run, budget spent |
   | `cancelled` | skipped | excluded | the run was stopped (Ctrl-C, or the provider rejected the key) before this repetition finished |
   | `expected_sql_error` | harness | excluded | the gold failed (no LLM call was made) |

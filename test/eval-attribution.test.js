@@ -58,6 +58,9 @@ test('every outcome class gets its bucket and counted flag', () => {
     [repetition('llm_error', [], { error_code: 'HTTP_429' }), 'llm_outage', 'infra', false],
     [repetition('llm_error', [], { error_code: 'LLM_TIMEOUT' }), 'llm_outage', 'infra', false],
     [repetition('infra_error', [], { error_code: 'ECONNREFUSED' }), 'infra_error', 'infra', false],
+    // A wrong model name or endpoint: an outage of the configuration, not the model's answer.
+    [repetition('llm_error', [], { error_code: 'HTTP_404' }), 'llm_outage', 'infra', false],
+    [repetition('llm_error', [], { error_code: 'LLM_MODEL_NOT_FOUND' }), 'llm_outage', 'infra', false],
     [repetition('aborted', [], { error_code: 'CASE_TIMEOUT' }), 'timeout', 'infra', true],
     [repetition('aborted', [], { timed_out: true }), 'timeout', 'infra', true],
     [repetition('aborted', [], { error_code: 'ABORTED' }), 'aborted', 'infra', true],

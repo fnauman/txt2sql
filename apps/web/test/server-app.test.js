@@ -505,6 +505,9 @@ test('failed questions expose errorStage/errorCode in JSON and SSE error payload
     llm5xx: { stage: 'llm', code: 'HTTP_503', message: 'overloaded', status: 502 },
     llmLimited: { stage: 'llm', code: 'HTTP_429', message: 'rate limited', status: 503 },
     llmKey: { stage: 'llm', code: 'HTTP_401', message: 'bad key', status: 503 },
+    // A wrong endpoint or model name is the server's configuration, not the question.
+    llmEndpoint: { stage: 'llm', code: 'HTTP_404', message: '404 page not found', status: 503 },
+    llmModel: { stage: 'llm', code: 'LLM_MODEL_NOT_FOUND', message: 'no such model', status: 503 },
     llmBadRequest: { stage: 'llm', code: 'HTTP_400', message: 'context too long', status: 422 },
     db: { stage: 'execution', code: 'ER_BAD_FIELD_ERROR', message: 'Unknown column', status: 422 },
     down: { stage: 'infra', code: 'ECONNREFUSED', message: 'refused', status: 503 },

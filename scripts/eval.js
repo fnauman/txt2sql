@@ -718,8 +718,18 @@ async function checkGateBaseline(options, cli) {
 }
 
 // Provider answers that mean the key, endpoint or model is wrong: every
-// further call would fail the same way.
-const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_403']);
+// further call would fail the same way. They are LLM outages in attribution
+// (isLlmUnavailableCode: excluded from accuracy, exit 2), and the first one
+// stops the run.
+const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']);
+
+/** Why a repetition's result must stop the run (a provider configuration rejection), or null. */
+export function providerConfigRejection(result) {
+  if (result?.status !== 'llm_error' || !CONFIG_REJECTION_CODES.has(result.error_code)) {
+    return null;
+  }
+  return `the LLM provider rejected the request (${result.error_code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model); no further case is started`;
+}
 
 // Under `npm run eval` one Ctrl-C arrives twice (the terminal signals the
 // process group and npm forwards it to the script), so a repeat within this
@@ -880,12 +890,11 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
         }),
       onResult: async (info) => {
         cli.log(formatProgress({ ...info, repeat: options.repeat }));
-        // A rejected key or endpoint fails every call the same way: stop
-        // instead of attempting every case.
-        if (info.result.status === 'llm_error' && CONFIG_REJECTION_CODES.has(info.result.error_code)) {
-          stop.stop(
-            `the LLM provider rejected the request (${info.result.error_code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model); no further case is started`
-          );
+        // A rejected key, a wrong endpoint or an unknown model fails every
+        // call the same way: stop instead of attempting every case.
+        const rejection = providerConfigRejection(info.result);
+        if (rejection) {
+          stop.stop(rejection);
         }
         if (['evaluation_error', 'skipped_budget', 'cancelled'].includes(info.result.status) || info.result.timed_out) {
           await trace.emit('case.runner_outcome', {
