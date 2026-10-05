@@ -81,6 +81,9 @@ function sumDurations(attempts, step) {
  *   every event, tagged with the case, to `trace`.
  * - Gold runs first (with its own timeout), so a broken gold costs no LLM call
  *   and is reported as 'expected_sql_error', never as a model failure.
+ * - `signal` (optional AbortSignal, e.g. the runner's per-case deadline) is
+ *   passed to the product loop, which stops the in-flight LLM call or query
+ *   and reports the case as 'aborted'.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  */
@@ -98,6 +101,7 @@ export async function evaluateQuestion({
   maxRetries = undefined,
   statementTimeoutMs = null,
   goldTimeoutMs = GOLD_STATEMENT_TIMEOUT_MS,
+  signal = null,
   dependencies = {},
 }) {
   const { runQuestion = runOptimizedQuestion, scorePrediction = scoreAgainstGold } = dependencies;
@@ -174,6 +178,7 @@ export async function evaluateQuestion({
     rowLimit: EVAL_ROW_LIMIT,
     includeInsights: false,
     statementTimeoutMs,
+    signal,
   });
   const attempts = extractAttempts(caseTrace.events);
   const promptEvent = caseTrace.events.find((entry) => entry.event === 'prompt.built');

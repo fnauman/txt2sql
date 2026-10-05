@@ -1,0 +1,172 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import { normalizeBenchmarkCase } from '../src/benchmark.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { CaseTimeoutError, createDeadline, runCaseRepetitions, runPool } from '../src/eval/pool.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
+import { evaluateQuestion } from '../scripts/evaluate.js';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const cases = (count) => Array.from({ length: count }, (_, index) => ({ id: `case_${index + 1}` }));
+const passResult = (cost = 0.001) => ({ status: 'pass', attempts: [], llm_cost: { totalCost: cost }, timings: { totalMs: 1 } });
+const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('runPool keeps item order and never exceeds the concurrency', async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const results = await runPool(
+    [30, 5, 20, 1, 10, 2],
+    async (ms, index) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await tick(ms);
+      inFlight -= 1;
+      return index;
+    },
+    { concurrency: 2 }
+  );
+  assert.deepEqual(results, [0, 1, 2, 3, 4, 5]);
+  assert.equal(peak, 2);
+  assert.deepEqual(await runPool([], async () => 1), []);
+});
+
+test('every repetition of every case is kept, scheduled case by case', async () => {
+  const order = [];
+  const run = await runCaseRepetitions({
+    cases: cases(3),
+    repeat: 3,
+    concurrency: 1,
+    runRepetition: async ({ testCase, repetition }) => {
+      order.push(`${testCase.id}#${repetition}`);
+      return { ...passResult(), repetitionSeen: repetition };
+    },
+  });
+  assert.deepEqual(order, ['case_1#1', 'case_1#2', 'case_1#3', 'case_2#1', 'case_2#2', 'case_2#3', 'case_3#1', 'case_3#2', 'case_3#3']);
+  assert.deepEqual(run.repetitions.map((list) => list.map((result) => result.repetitionSeen)), [[1, 2, 3], [1, 2, 3], [1, 2, 3]]);
+  assert.equal(run.spentUsd, 0.009);
+  assert.equal(run.budgetExhausted, false);
+});
+
+test('the per-case deadline aborts the signal passed to the case; the case reports a timeout', async () => {
+  const progress = [];
+  const run = await runCaseRepetitions({
+    cases: cases(2),
+    concurrency: 2,
+    caseTimeoutMs: 30,
+    graceMs: 1000,
+    runRepetition: ({ testCase, signal }) =>
+      new Promise((resolve) => {
+        if (testCase.id === 'case_2') {
+          resolve(passResult());
+          return;
+        }
+        // Like runOptimizedQuestion: stop when the signal fires and report 'aborted'.
+        signal.addEventListener('abort', () => {
+          assert.ok(signal.reason instanceof CaseTimeoutError);
+          resolve({ status: 'aborted', error_code: signal.reason.code, attempts: [] });
+        });
+      }),
+    onResult: (info) => {
+      progress.push([info.testCase.id, info.result.status, info.completed, info.total]);
+    },
+  });
+  assert.equal(run.repetitions[0][0].status, 'aborted');
+  assert.equal(run.repetitions[0][0].timed_out, true);
+  assert.equal(run.repetitions[0][0].error_code, 'CASE_TIMEOUT');
+  assert.equal(run.repetitions[1][0].status, 'pass');
+  assert.deepEqual(progress.map((entry) => entry.slice(2)), [[1, 2], [2, 2]]);
+});
+
+test('a case that ignores the signal is abandoned after the grace period', async () => {
+  const started = Date.now();
+  const run = await runCaseRepetitions({
+    cases: cases(1),
+    caseTimeoutMs: 20,
+    graceMs: 20,
+    runRepetition: () => new Promise(() => {}),
+  });
+  assert.deepEqual(
+    [run.repetitions[0][0].status, run.repetitions[0][0].timed_out, run.repetitions[0][0].error_code],
+    ['aborted', true, 'CASE_TIMEOUT']
+  );
+  assert.ok(Date.now() - started < 1000);
+});
+
+test('the budget stops new cases; started cases finish their repetitions', async () => {
+  const ran = [];
+  const run = await runCaseRepetitions({
+    cases: cases(5),
+    repeat: 2,
+    concurrency: 1,
+    budgetUsd: 0.5,
+    runRepetition: async ({ testCase, repetition }) => {
+      ran.push(`${testCase.id}#${repetition}`);
+      return passResult(0.2);
+    },
+  });
+  // case_1: 0.4 spent; case_2 starts (0.4 < 0.5) and finishes both repetitions (0.8); case_3+ are skipped.
+  assert.deepEqual(ran, ['case_1#1', 'case_1#2', 'case_2#1', 'case_2#2']);
+  assert.equal(run.spentUsd, 0.8);
+  assert.equal(run.budgetExhausted, true);
+  assert.deepEqual(run.skippedCaseIds, ['case_3', 'case_4', 'case_5']);
+  for (const list of run.repetitions.slice(2)) {
+    assert.deepEqual(list.map((result) => [result.status, result.error_code]), [
+      ['skipped_budget', 'BUDGET_EXHAUSTED'],
+      ['skipped_budget', 'BUDGET_EXHAUSTED'],
+    ]);
+  }
+});
+
+test('a thrown case becomes evaluation_error and the run goes on', async () => {
+  const run = await runCaseRepetitions({
+    cases: cases(2),
+    runRepetition: async ({ testCase }) => {
+      if (testCase.id === 'case_1') {
+        throw Object.assign(new Error('boom'), { code: 'X' });
+      }
+      return passResult();
+    },
+  });
+  assert.deepEqual([run.repetitions[0][0].status, run.repetitions[0][0].error, run.repetitions[0][0].error_code], ['evaluation_error', 'boom', 'X']);
+  assert.equal(run.repetitions[1][0].status, 'pass');
+});
+
+test('createDeadline: no timer when disabled, aborts with CASE_TIMEOUT otherwise', async () => {
+  const off = createDeadline(0);
+  assert.equal(off.signal.aborted, false);
+  off.clear();
+  const on = createDeadline(5);
+  await on.expired;
+  assert.equal(on.signal.aborted, true);
+  assert.equal(on.timedOut, true);
+  assert.equal(on.signal.reason.code, 'CASE_TIMEOUT');
+});
+
+test('evaluateQuestion passes the deadline signal to the product loop', async () => {
+  const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
+  const testCase = normalizeBenchmarkCase({ id: 'c', question: 'How many customers?', expected_sql: 'SELECT 1 AS n', comparison: { mode: 'scalar' } });
+  const controller = new AbortController();
+  let seen = null;
+  const result = await evaluateQuestion({
+    client: {},
+    connection: { query: async () => [[{ n: 1 }]] },
+    schema,
+    model: 'gpt-4o-mini',
+    testCase,
+    caseIndex: 1,
+    trace: { emit: async () => {} },
+    signal: controller.signal,
+    dependencies: {
+      runQuestion: async (options) => {
+        seen = options.signal;
+        return { success: false, errorStage: 'aborted', errorCode: 'CASE_TIMEOUT', error: new Error('deadline'), promptTables: [] };
+      },
+    },
+  });
+  assert.equal(seen, controller.signal);
+  assert.equal(result.status, 'aborted');
+  assert.equal(result.error_code, 'CASE_TIMEOUT');
+});
