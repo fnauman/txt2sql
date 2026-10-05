@@ -343,11 +343,8 @@ async function writeReport(report, { reportPath, cli }) {
   return markdownPath;
 }
 
-async function loadBaseline(options, model, cli, { fallback = null } = {}) {
+async function loadBaseline(options, model, cli) {
   let baselinePath = options.compare;
-  if (!baselinePath && fallback) {
-    baselinePath = fallback;
-  }
   if (!baselinePath && !options.noBaseline) {
     const candidate = defaultBaselinePath(model);
     if (await fileExists(candidate)) {
@@ -422,6 +419,8 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     runner,
   });
   const suite = describeSuite(selection, { repoRelative });
+  // Read the baseline before spending anything: a broken file fails fast.
+  const baseline = await loadBaseline(options, model, cli);
   const trace = await createTraceLogger({
     enabled: true,
     logToStdout: options.traceToStdout,
@@ -489,7 +488,6 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     { connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS }
   );
   const generatedAt = new Date().toISOString();
-  const baseline = await loadBaseline(options, model, cli);
   const comparison = baseline
     ? compareReports(baseline.report, { results: caseRecords, model, generatedAt, provenance, mode: 'run' }, { baselineLabel: repoRelative(baseline.path) })
     : null;
