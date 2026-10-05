@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
 
-import { checkQueryUserPrivileges, describeMariaDbConnectionTarget, describeSchema } from '../../../../src/pipeline.js';
+import { checkQueryUserPrivileges, describeMariaDbConnectionTarget, describeSchema, untilAborted } from '../../../../src/pipeline.js';
 import { createResultInsights, inferColumns } from '../../../../src/result-intelligence.js';
 import {
   createBufferedTraceLogger,
@@ -173,7 +173,8 @@ function publicResult(result, trace, includeDebug, dataResidency) {
 }
 
 // A failure that happened outside the question pipeline (runtime could not
-// load, database unreachable or not bootstrapped, shutting down).
+// load, database unreachable or not bootstrapped, shutting down), or the
+// request was cancelled before the pipeline ran (stage 'aborted').
 function infraFailurePayload(error, { includeDebug = false, trace = null, name = null, code = null, stage = 'infra' } = {}) {
   const serialized = serializeError(error);
   const errorCode = code || errorCodeOf(error);
@@ -489,11 +490,15 @@ export function createApp({
 
   // The shared question flow behind both query routes. The runtime lease is held
   // for the whole run, so an admin refresh cannot close its pool mid-question.
+  // The setup waits are bounded by the request signal like the pipeline's own:
+  // a stalled runtime load or schema inspection (e.g. waiting for a pool slot)
+  // ends with the abort reason instead of holding the request open, and a lease
+  // that arrives after that is released at once.
   async function answerQuestion({ question, includeDebug, includeInsights, trace, signal }) {
     const cacheGeneration = cache.generation;
-    const lease = await runtimes.acquire();
+    const lease = await untilAborted(runtimes.acquire(), signal, { onLate: (late) => late.release() });
     try {
-      const dbSchema = await getDatabaseSchema(lease);
+      const dbSchema = await untilAborted(getDatabaseSchema(lease), signal);
       if (!dbSchema.dbSchemaReady) {
         return { kind: 'schema-missing', dbSchema };
       }
@@ -537,6 +542,15 @@ export function createApp({
     const code = errorCodeOf(error);
     const detail = code ? `${error?.message || error} [${code}]` : error?.stack || error?.message || error;
     logger.error?.(`[api] ${req.method} ${req.originalUrl || req.url} failed: ${detail}`);
+  }
+
+  // A question that failed before or around the pipeline. When the request was
+  // cancelled (deadline or disconnect during runtime or schema setup) it is the
+  // same 'aborted' stage and status the pipeline reports; otherwise infra (503).
+  function setupFailure(error, signal, options = {}) {
+    const stage = signal.aborted ? 'aborted' : 'infra';
+    const payload = infraFailurePayload(error, { ...options, stage });
+    return { status: stage === 'aborted' ? statusForFailure(stage, payload.errorCode) : 503, payload };
   }
 
   const app = express();
@@ -674,8 +688,8 @@ export function createApp({
       res.status(status).json(forCaller(req, cacheHit ? { ...payload, cacheHit: true } : payload));
     } catch (error) {
       logServerError(req, error);
-      const failure = infraFailurePayload(error, { includeDebug, trace });
-      res.status(503).json(forCaller(req, failure));
+      const failure = setupFailure(error, requestSignal.signal, { includeDebug, trace });
+      res.status(failure.status).json(forCaller(req, failure.payload));
     } finally {
       requestSignal.dispose();
     }
@@ -716,7 +730,7 @@ export function createApp({
       streamResultFrames(res, forCaller(req, outcome.payload), includeDebug, outcome.cacheHit);
     } catch (error) {
       logServerError(req, error);
-      sseFrame(res, 'error', forCaller(req, infraFailurePayload(error)).error);
+      sseFrame(res, 'error', forCaller(req, setupFailure(error, requestSignal.signal).payload).error);
     } finally {
       requestSignal.dispose();
       sseFrame(res, 'done', {});

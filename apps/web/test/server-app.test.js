@@ -643,6 +643,134 @@ test('the request deadline aborts the real pipeline and answers 504 REQUEST_TIME
   });
 });
 
+// --- Every wait in the request path is bounded by the deadline ----------------
+
+const DEADLINE_MS = 25;
+// Generous: the point is that the answer does not wait for the stalled step.
+const PROMPT_MS = 400;
+
+async function timed(promise) {
+  const startedAt = Date.now();
+  const value = await promise;
+  return { ...value, elapsedMs: Date.now() - startedAt };
+}
+
+// A step that stalls until released, or for `fallbackMs` so a regression fails
+// instead of hanging the suite.
+function stall(fallbackMs = 2000) {
+  const gate = deferred();
+  const timer = setTimeout(() => gate.resolve(), fallbackMs);
+  return {
+    promise: gate.promise,
+    release(value) {
+      clearTimeout(timer);
+      gate.resolve(value);
+    },
+  };
+}
+
+function assertDeadlineJson(response) {
+  assert.ok(response.elapsedMs < PROMPT_MS, `answered after ${response.elapsedMs} ms`);
+  assert.equal(response.status, 504);
+  assert.equal(response.json.errorStage, 'aborted');
+  assert.equal(response.json.errorCode, 'REQUEST_TIMEOUT');
+  assert.equal(response.json.error.code, 'REQUEST_TIMEOUT');
+  assert.equal(response.json.error.stage, 'aborted');
+  assert.ok(!('stack' in response.json.error));
+}
+
+function assertDeadlineSse(response) {
+  assert.ok(response.elapsedMs < PROMPT_MS, `answered after ${response.elapsedMs} ms`);
+  const frames = parseSse(response.text);
+  const errorFrame = frames.find((frame) => frame.event === 'error');
+  assert.equal(errorFrame.data.code, 'REQUEST_TIMEOUT');
+  assert.equal(errorFrame.data.stage, 'aborted');
+  assert.equal(frames.at(-1).event, 'done');
+}
+
+test('the request deadline bounds a stalled runtime load; a lease that arrives later is released', async () => {
+  const load = stall();
+  const runtime = createFakeRuntime();
+  const { runQuestion, calls } = recordingRunner();
+  const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+  await withApp({ config, runtimeFactory: () => load.promise.then(() => runtime), runQuestion }, async (app) => {
+    const ask = (route) => timed(app.request({ method: 'POST', path: route, body: { question: 'top customers' } }));
+    assertDeadlineJson(await ask('/api/query'));
+    assertDeadlineSse(await ask('/api/query/stream'));
+
+    load.release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(app.runtimeManager.status().ready, true);
+    assert.equal(app.runtimeManager.status().inFlight, 0, 'both late leases were released');
+    assert.equal(calls.length, 0, 'the pipeline never ran');
+  });
+});
+
+test('the request deadline bounds a stalled database schema inspection', async () => {
+  const inspection = stall();
+  const runtime = createFakeRuntime();
+  const query = runtime.connection.query;
+  runtime.connection.query = async (sql, params) => {
+    if (/information_schema\.TABLES/.test(sql)) {
+      await inspection.promise; // e.g. waiting for a pool slot
+    }
+    return query(sql, params);
+  };
+  const { runQuestion, calls } = recordingRunner();
+  const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+  await withApp({ config, runtimeFactory: async () => runtime, runQuestion }, async (app) => {
+    const ask = (route) => timed(app.request({ method: 'POST', path: route, body: { question: 'top customers' } }));
+    assertDeadlineJson(await ask('/api/query'));
+    assert.equal(app.runtimeManager.status().inFlight, 0, 'the lease is released with the answer');
+    assertDeadlineSse(await ask('/api/query/stream'));
+    assert.equal(calls.length, 0);
+    inspection.release();
+  });
+});
+
+test('the request deadline bounds the wait for a pool slot in the real pipeline; the late connection is released', async () => {
+  // Real runOptimizedQuestion: the product term triggers a master-data lookup,
+  // which needs a dedicated pool connection, and every slot is busy.
+  const runtime = createFakeRuntime();
+  const slot = stall();
+  const events = [];
+  runtime.connection.getConnection = () => {
+    events.push('getConnection');
+    return slot.promise.then(() => ({
+      threadId: 3,
+      async query() {
+        events.push('query');
+        return [[]];
+      },
+      release() {
+        events.push('release');
+      },
+      destroy() {
+        events.push('destroy');
+      },
+    }));
+  };
+  runtime.client = {
+    chat: {
+      completions: {
+        async create() {
+          assert.fail('no LLM call after the deadline');
+        },
+      },
+    },
+  };
+  const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS), WEB_QUERY_STATEMENT_TIMEOUT_MS: '0' });
+  await withApp({ config, runtimeFactory: async () => runtime }, async (app) => {
+    const response = await timed(app.request({ method: 'POST', path: '/api/query', body: { question: 'sparkling water sales' } }));
+    assertDeadlineJson(response);
+    assert.deepEqual(events, ['getConnection']);
+
+    slot.release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['getConnection', 'release'], 'the connection that arrived late went straight back');
+  });
+});
+
 test('WEB_RESULT_CACHE=0 from config disables replay', async () => {
   const { factory } = createRuntimeFactory();
   const { runQuestion, calls } = recordingRunner();
