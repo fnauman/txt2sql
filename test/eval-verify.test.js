@@ -4,7 +4,7 @@ import test from 'node:test';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { goldFingerprint } from '../src/eval/controls.js';
 import { GOLD_STATEMENT_TIMEOUT_MS } from '../src/eval/oracle.js';
-import { fixtureGateFailures, killRateGateFailures, summarizeControls, verifyCase } from '../src/eval/verify.js';
+import { fixtureGateFailures, killRateGateFailures, pinWriteRefusal, summarizeControls, verifyCase } from '../src/eval/verify.js';
 
 // verifyCase is verify-dataset's per-case gate. These tests drive every
 // failure branch with fake fixture connections and a stub validator, so a
@@ -301,4 +301,22 @@ test('fixture gate: every fixture must be current and carry the shared master da
   assert.match(failures[0], /^fixture seed: master data differs from the shared MASTER_DATA/);
   assert.match(failures[1], /^fixture seed: content is drifted/);
   assert.match(failures[2], /^fixture v2: content is stale/);
+});
+
+test('--write-pins is refused unless every fixture is current with the shared master data', () => {
+  const current = [
+    { name: 'seed', status: 'current', masterDataMatches: true },
+    { name: 'v2', status: 'current', masterDataMatches: true },
+  ];
+  assert.equal(pinWriteRefusal(current), null);
+  for (const [broken, reason] of [
+    [{ name: 'v2', status: 'stale', masterDataMatches: true }, 'fixture v2 is stale'],
+    [{ name: 'v2', status: 'drifted', masterDataMatches: true }, 'fixture v2 is drifted'],
+    [{ name: 'v2', status: 'missing', masterDataMatches: false }, 'fixture v2 is missing; fixture v2 has master data that differs'],
+    [{ name: 'v2', status: 'current', masterDataMatches: false }, 'fixture v2 has master data that differs'],
+  ]) {
+    const refusal = pinWriteRefusal([current[0], broken]);
+    assert.ok(refusal?.startsWith(`--write-pins refused, no pins written: ${reason}`), refusal);
+    assert.match(refusal, /Run "npm run seed-fixtures"/);
+  }
 });

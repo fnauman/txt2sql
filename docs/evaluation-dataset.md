@@ -131,7 +131,9 @@ Oracle rules (`scoreAgainstGold`):
 ### Pins and alternative gold
 
 - `expected_row_counts: { seed, v2, v3 }` pins the gold row count per fixture
-  (`npm run verify-dataset -- --write-pins` rewrites them). An external dataset
+  (`npm run verify-dataset -- --write-pins` rewrites them, and refuses to
+  write anything unless every fixture is `current` with the shared master
+  data: run `npm run seed-fixtures` first). An external dataset
   may still carry the older single `expected_row_count`; it is read as the
   seed's pin.
 - `alternative_expected_sql: [sql, ...]` lists other readings a case accepts,

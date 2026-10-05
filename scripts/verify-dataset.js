@@ -23,6 +23,7 @@
 //   npm run verify-dataset -- --dataset edge-cases-public
 //   npm run verify-dataset -- --dataset-file path/to/custom.json --fixtures seed
 //   npm run verify-dataset -- --write-pins          # rewrite expected_row_counts
+//     (refused unless every fixture is current: run npm run seed-fixtures first)
 //   options: --fixtures seed,v2,v3  --controls-dir <dir>  --skip-controls
 //            --min-kill-rate 0.95  --min-heldout-kill-rate 0  --report-file <path>
 import fs from 'node:fs/promises';
@@ -39,6 +40,7 @@ import {
   createValidatorProbe,
   fixtureGateFailures,
   killRateGateFailures,
+  pinWriteRefusal,
   summarizeControls,
   verifyCase,
 } from '../src/eval/verify.js';
@@ -213,6 +215,12 @@ export async function main(argv = process.argv.slice(2)) {
       );
     }
     gateFailures.push(...fixtureGateFailures(fixtureChecks));
+    // Pins come from the generated fixture content only: refuse before any
+    // dataset file is touched.
+    const refusal = writePins ? pinWriteRefusal(fixtureChecks) : null;
+    if (refusal) {
+      throw new Error(refusal);
+    }
 
     for (const target of targets) {
       const info = await loadBenchmarkDataset(target);

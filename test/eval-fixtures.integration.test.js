@@ -132,6 +132,31 @@ test('drift: edited fact and master rows are detected (deep check) and repaired 
     // The meta row alone still claims the generated content.
     assert.equal((await checkFixtureMeta(byName.v3.connection, byName.v3)).status, 'current');
 
+    // --write-pins refuses to record counts from drifted fixtures and leaves
+    // the dataset file untouched (its v2 pin is deliberately wrong here, so
+    // any write would change it)...
+    const pinsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-pins-'));
+    const pinsFile = path.join(pinsDir, 'pins.json');
+    const dataset = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets/core-public.json'), 'utf8')).slice(0, 1);
+    dataset[0].expected_row_counts = { ...dataset[0].expected_row_counts, v2: 999 };
+    const pinsBefore = `${JSON.stringify(dataset, null, 2)}\n`;
+    await fs.writeFile(pinsFile, pinsBefore);
+    await assert.rejects(
+      execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/verify-dataset.js'), '--dataset-file', pinsFile, '--skip-controls', '--write-pins'], {
+        env: scriptEnv,
+        cwd: REPO_ROOT,
+      }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /--write-pins refused, no pins written: fixture v2 is drifted; fixture v3 is drifted; fixture v3 has master data/);
+        assert.match(error.stderr, /npm run seed-fixtures/);
+        assert.doesNotMatch(error.stdout, /pins: wrote/);
+        return true;
+      }
+    );
+    assert.equal(await fs.readFile(pinsFile, 'utf8'), pinsBefore);
+    await fs.rm(pinsDir, { recursive: true, force: true });
+
     // verify-dataset fails on it...
     await assert.rejects(
       execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/verify-dataset.js'), '--dataset', 'core-public', '--skip-controls'], { env: scriptEnv, cwd: REPO_ROOT }),

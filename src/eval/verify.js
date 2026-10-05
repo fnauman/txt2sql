@@ -340,3 +340,29 @@ export function fixtureGateFailures(checks) {
   }
   return failures;
 }
+
+/**
+ * Why `verify-dataset --write-pins` must not write pins from these fixture
+ * checks, or null when it may: pins record the gold's row counts on the
+ * generated fixture content, so every fixture must be current and carry the
+ * shared master data. Counts read from a stale, drifted or missing fixture
+ * would be wrong pins, ready to commit.
+ */
+export function pinWriteRefusal(checks) {
+  const reasons = [];
+  for (const check of checks) {
+    if (check.status !== 'current') {
+      reasons.push(`fixture ${check.name} is ${check.status}`);
+    }
+    if (check.masterDataMatches === false) {
+      reasons.push(`fixture ${check.name} has master data that differs from the shared MASTER_DATA`);
+    }
+  }
+  if (reasons.length === 0) {
+    return null;
+  }
+  return (
+    `--write-pins refused, no pins written: ${reasons.join('; ')}. ` +
+    'Run "npm run seed-fixtures" (admin credentials) so every fixture holds the generated content, then rerun with --write-pins.'
+  );
+}
