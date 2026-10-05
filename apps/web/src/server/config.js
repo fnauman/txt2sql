@@ -195,8 +195,12 @@ export function loadWebConfig(env = process.env) {
 
   // A retired runtime (after an admin schema refresh) is closed once its last
   // request finishes, or after this grace period, which outlasts the request
-  // deadline so a slow request is never cut off by a refresh.
-  const runtimeRetireGraceMs = (requestTimeoutMs > 0 ? requestTimeoutMs : 5 * 60_000) + 30_000;
+  // deadline so a slow request is never cut off by a refresh. Without a
+  // deadline (WEB_REQUEST_TIMEOUT_MS=0) a request may legitimately run for as
+  // long as it needs, so there is no forced close (null): the old runtime waits
+  // for its last request. Shutdown still closes it after the
+  // WEB_SHUTDOWN_TIMEOUT_MS drain.
+  const runtimeRetireGraceMs = requestTimeoutMs > 0 ? requestTimeoutMs + 30_000 : null;
 
   return deepFreeze({
     host,

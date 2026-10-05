@@ -61,7 +61,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 | `WEB_QUERY_ROW_LIMIT` | `1000` | Max rows returned to the browser (the server-side row cap). |
 | `WEB_QUERY_STATEMENT_TIMEOUT_MS` | `QUERY_STATEMENT_TIMEOUT_MS`, else `8000` | MariaDB statement timeout for generated SQL (bounds the tail so a pathological join can't pin the shared instance). `0` disables. |
 | `WEB_QUERY_MAX_RETRIES` | `1` | Extra model attempts after a failed generation, validation or execution (0 to 5). Provider outages and infra failures are not retried. The `optimized` CLI reads it too. |
-| `WEB_REQUEST_TIMEOUT_MS` | `120000` | Per-request deadline; when it passes, the OpenAI call is aborted and the running query killed. `0` disables. |
+| `WEB_REQUEST_TIMEOUT_MS` | `120000` | Per-request deadline; when it passes, the OpenAI call is aborted and the running query killed. `0` disables. It also bounds how long a schema refresh lets in-flight questions keep the old runtime: it is closed when they finish, or at the latest this deadline + 30 s after the refresh; with `0` it waits for them however long they run (only shutdown closes it earlier). |
 | `WEB_DB_CONNECTION_LIMIT` | `5` | MariaDB pool size. |
 | `WEB_RESULT_CACHE` | enabled | Exact-match NL→result cache for the web routes. On by default; set to `0` (or `false`/`no`/`off`) to disable. It only caches results from `demo_retail` read as `demo_readonly`. |
 | `WEB_RESULT_CACHE_TTL_MS` | `900000` | Cache entry TTL (15 min). Bounds staleness from column-level schema drift. |

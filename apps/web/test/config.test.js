@@ -102,6 +102,13 @@ test('the Host check is on for loopback binds or an explicit allowlist, off othe
   assert.equal(loadWebConfig({ WEB_API_HOST: '0.0.0.0', WEB_ALLOWED_HOSTS: 'demo.test' }).hostCheck, true);
 });
 
+test('without a request deadline a retired runtime is never force-closed under a running request', () => {
+  // WEB_REQUEST_TIMEOUT_MS=0: requests may run as long as they need, so a
+  // schema refresh waits for the old runtime's leases (no grace-period close).
+  assert.equal(loadWebConfig({ WEB_REQUEST_TIMEOUT_MS: '0' }).runtimeRetireGraceMs, null);
+  assert.equal(loadWebConfig({ WEB_REQUEST_TIMEOUT_MS: '1000' }).runtimeRetireGraceMs, 31_000);
+});
+
 test('a zero-size result cache is disabled', () => {
   assert.equal(loadWebConfig({ WEB_RESULT_CACHE_SIZE: '0' }).resultCache.enabled, false);
 });

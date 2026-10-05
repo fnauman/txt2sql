@@ -114,6 +114,38 @@ test('a retired runtime is force-closed after the grace period', async () => {
   assert.equal(created[0].closed, 1);
 });
 
+test('without a grace period a retired runtime waits for its last lease; shutdown still closes it', async () => {
+  const { factory, created } = createFactory();
+  const timers = [];
+  const manager = createRuntimeManager({
+    factory,
+    logger: silent,
+    retireGraceMs: null, // the web server's setting when WEB_REQUEST_TIMEOUT_MS=0
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms });
+      return timers.length;
+    },
+    clearTimer: () => {},
+  });
+  const longRunning = await manager.acquire();
+  await manager.refresh();
+  assert.equal(timers.length, 0, 'no forced close is scheduled');
+  await tick();
+  assert.equal(created[0].closed, 0, 'not closed under the running request');
+  longRunning.release();
+  await tick();
+  assert.equal(created[0].closed, 1, 'closed once its last lease was released');
+
+  // Shutdown is the one place a runtime is closed with a lease still held.
+  const held = await manager.acquire();
+  await manager.refresh();
+  assert.equal(timers.length, 0);
+  await manager.close();
+  assert.equal(created[1].closed, 1);
+  assert.equal(created[2].closed, 1);
+  held.release();
+});
+
 test('concurrent refreshes coalesce, and a failed refresh keeps the current runtime', async () => {
   let fail = false;
   const created = [];

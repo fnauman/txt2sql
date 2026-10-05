@@ -6,7 +6,9 @@
 // - refresh() (the admin schema refresh) builds a new runtime and swaps it in;
 //   the old one is retired and its pool closed only when its in-flight count
 //   reaches zero, or after `retireGraceMs` (longer than the request deadline).
-//   A refresh therefore never closes a pool under a running query.
+//   A refresh therefore never closes a pool under a running query. A
+//   non-finite `retireGraceMs` (null: requests have no deadline) means no
+//   forced close at all; only close() (shutdown) closes a runtime still in use.
 // - A runtime that fails to load is not cached: the next acquire() retries.
 //
 // Each runtime also carries a `memo` object for per-runtime caches (e.g. the
@@ -91,6 +93,9 @@ export function createRuntimeManager({
     if (entry.inFlight === 0) {
       closeEntry(entry);
       return;
+    }
+    if (!Number.isFinite(retireGraceMs)) {
+      return; // no grace limit: closed by the last release()
     }
     entry.timer = setTimer(() => {
       entry.timer = null;
