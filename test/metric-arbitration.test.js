@@ -7,19 +7,18 @@ import {
   buildOptimizedPrompt,
   buildSemanticPlan,
   detectCountOrExistenceIntent,
-  loadNarrowSchema,
   validateReadOnlySql,
 } from '../src/pipeline.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 // Metric guardrail arbitration (audit SAFE-6 / EVAL-RET-3): longest-span
 // arbitration across semantic-layer entries, contiguous (negation-preserving)
 // phrase matching, and advisory vs enforced metrics.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const schema = await loadNarrowSchema({
-  modelsDir: path.join(REPO_ROOT, 'models'),
-  schemaPath: path.join(REPO_ROOT, 'generated', 'schema.json'),
-});
+// Compiled in memory from the models, so tests never write generated/schema.json.
+const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
 
 function metricNames(plan) {
   return plan.metrics.map((metric) => metric.name);

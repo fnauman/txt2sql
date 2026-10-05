@@ -3,7 +3,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateReadOnlySql } from '../src/pipeline.js';
+import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql } from '../src/pipeline.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 // Valid, read-only MariaDB SQL that the old regex validators falsely rejected
 // (or that is easy to break again): EXTRACT/TRIM ... FROM, CTE chains, window
@@ -13,10 +15,8 @@ import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateRead
 // optimized path with the real prompt context of a matching question.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const schema = await loadNarrowSchema({
-  modelsDir: path.join(REPO_ROOT, 'models'),
-  schemaPath: path.join(REPO_ROOT, 'generated', 'schema.json'),
-});
+// Compiled in memory from the models, so tests never write generated/schema.json.
+const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
 const ALL_TABLES = schema.tables.map((table) => table.tableName);
 
 const promptCache = new Map();

@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import {
   buildOptimizedPrompt,
   buildSemanticPlan,
-  loadNarrowSchema,
   validateReadOnlySql,
   validateSqlSafety,
 } from '../src/pipeline.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 // Every bypass payload found by the 2026-10-05 audit (SAFE-1, SAFE-2, SAFE-4,
 // SAFE-10 and the verifier's additions) must be rejected on BOTH paths:
@@ -19,10 +20,8 @@ import {
 // no guardrail layer, is protected too.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const schema = await loadNarrowSchema({
-  modelsDir: path.join(REPO_ROOT, 'models'),
-  schemaPath: path.join(REPO_ROOT, 'generated', 'schema.json'),
-});
+// Compiled in memory from the models, so tests never write generated/schema.json.
+const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
 const ALL_TABLES = schema.tables.map((table) => table.tableName);
 
 function buildRealPrompt(question) {

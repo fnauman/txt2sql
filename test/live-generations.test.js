@@ -4,7 +4,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateReadOnlySql } from '../src/pipeline.js';
+import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql } from '../src/pipeline.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 // The guardrails as a classifier over real model output: 96 gpt-4o-mini
 // generations from the audit's paid benchmark run (edge + paraphrase suites,
@@ -19,10 +21,8 @@ import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateRead
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'test', 'fixtures', 'live-generations.json'), 'utf8'));
-const schema = await loadNarrowSchema({
-  modelsDir: path.join(REPO_ROOT, 'models'),
-  schemaPath: path.join(REPO_ROOT, 'generated', 'schema.json'),
-});
+// Compiled in memory from the models, so tests never write generated/schema.json.
+const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
 
 const promptCache = new Map();
 function buildRealPrompt(question) {

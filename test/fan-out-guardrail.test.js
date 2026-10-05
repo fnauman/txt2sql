@@ -3,7 +3,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateReadOnlySql } from '../src/pipeline.js';
+import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql } from '../src/pipeline.js';
+import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 // Fan-out detector: SUM/AVG over a parent-grain column while the same SELECT
 // block joins a one-to-many child (a table with a foreign key to the parent)
@@ -11,10 +13,8 @@ import { buildOptimizedPrompt, buildSemanticPlan, loadNarrowSchema, validateRead
 // model error in the audit's live run (9 of 9 slipped through).
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const schema = await loadNarrowSchema({
-  modelsDir: path.join(REPO_ROOT, 'models'),
-  schemaPath: path.join(REPO_ROOT, 'generated', 'schema.json'),
-});
+// Compiled in memory from the models, so tests never write generated/schema.json.
+const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
 
 const BRAND_QUESTION = 'Show the top brands by net sales in March 2026.';
 const POSTINGS_QUESTION = 'How many non-canceled sales documents do not have any accounting postings?';
