@@ -47,6 +47,22 @@ function waitForOutput(child, pattern, timeoutMs = 20_000) {
   });
 }
 
+// Bounded wait for the child to exit, so a server that does not stop fails the
+// test and still reaches its cleanup (instead of hanging until the test
+// timeout, which skips `finally` and leaks a process holding a port).
+async function waitForExit(child, timeoutMs = 20_000) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return [child.exitCode, child.signalCode];
+  }
+  let timer;
+  return Promise.race([
+    once(child, 'exit'),
+    new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('main.js did not exit in time')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 test('main.js applies WEB_* settings that exist only in the env file', { timeout: 60_000 }, async () => {
   const port = await freePort();
   const token = 'only-in-env-file-token-123';
@@ -114,7 +130,7 @@ test('main.js applies WEB_* settings that exist only in the env file', { timeout
 
     // Graceful shutdown on SIGTERM.
     child.kill('SIGTERM');
-    const [code] = await once(child, 'exit');
+    const [code] = await waitForExit(child);
     assert.equal(code, 0, output);
     assert.match(output, /\[server\] received SIGTERM/);
   } finally {
@@ -129,8 +145,9 @@ test('main.js refuses to start on an invalid setting with a clear one-shot error
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txt2sql-main-bad-'));
   const envFile = path.join(dir, 'bad.env');
   fs.writeFileSync(envFile, 'WEB_API_PORT=eighty\nWEB_RATE_LIMIT_MAX=-5\n');
+  let child = null;
   try {
-    const child = spawn(process.execPath, ['src/server/main.js'], {
+    child = spawn(process.execPath, ['src/server/main.js'], {
       cwd: appRoot,
       env: { PATH: process.env.PATH, HOME: dir, ENV_FILE: envFile },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -140,13 +157,17 @@ test('main.js refuses to start on an invalid setting with a clear one-shot error
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
     });
-    const [code] = await once(child, 'exit');
+    const [code] = await waitForExit(child);
     assert.equal(code, 1);
     assert.match(stderr, /Invalid web server configuration/);
     assert.match(stderr, /WEB_API_PORT/);
     assert.match(stderr, /WEB_RATE_LIMIT_MAX/);
     assert.doesNotMatch(stderr, /\bat .*\.js:\d+/, 'no stack trace for a config error');
   } finally {
+    // If the server wrongly started, never leave it running (it would hold a port).
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
