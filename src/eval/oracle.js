@@ -9,6 +9,9 @@
 //   variant on every fixture; mixing readings across fixtures does not count.
 // - One column mapping: the comparator's gold -> prediction column assignment
 //   must be the same on every fixture (the same SQL means the same columns).
+//   findSharedAssignment searches for one mapping valid on every fixture at
+//   once; a search cut off by its step bound fails closed
+//   ('assignment_search_exhausted'), never a pass.
 // - Gold runs with its own generous timeout (GOLD_STATEMENT_TIMEOUT_MS) so a
 //   slow gold never looks like a model failure, and is cached per fixture.
 // - The prediction runs as the read-only query user with the statement timeout
@@ -19,6 +22,7 @@
 
 import {
   findDisallowedColumnsUsed,
+  findSharedAssignment,
   listGoldVariants,
   matchResultSets,
   runSignalChecksThroughAssignment,
@@ -28,7 +32,6 @@ import { errorCodeOf, isInfraError } from '../query-service.js';
 import { FIXTURES } from './fixtures.js';
 
 export const GOLD_STATEMENT_TIMEOUT_MS = 30_000;
-const ASSIGNMENT_LIMIT = 64;
 
 /**
  * One query-role connection per fixture, as `[{ name, database, connection }]`
@@ -119,32 +122,8 @@ async function executePrediction(fixtureConnection, sql, { timeoutMs, maxRows })
   }
 }
 
-function assignmentKey(assignment) {
-  return JSON.stringify(assignment);
-}
-
-// Assignments valid on every fixture where the gold is non-empty (an empty
-// gold matches an empty prediction under any mapping). When an enumeration
-// hit its cap the intersection is not trustworthy, so it is skipped.
-function consistentAssignments(outcomes) {
-  const informative = outcomes.filter((outcome) => !outcome.empty);
-  if (informative.length === 0) {
-    return { consistent: true, assignments: [] };
-  }
-  if (informative.some((outcome) => outcome.truncated)) {
-    return { consistent: true, assignments: informative[0].assignments };
-  }
-  let keys = new Set(informative[0].assignments.map(assignmentKey));
-  for (const outcome of informative.slice(1)) {
-    const next = new Set(outcome.assignments.map(assignmentKey));
-    keys = new Set([...keys].filter((key) => next.has(key)));
-  }
-  const assignments = informative[0].assignments.filter((assignment) => keys.has(assignmentKey(assignment)));
-  return { consistent: assignments.length > 0, assignments };
-}
-
 function toAssignmentObject(goldColumns, assignment) {
-  return assignment ? Object.fromEntries(goldColumns.map((column, index) => [column, assignment[index]])) : null;
+  return assignment?.length ? Object.fromEntries(goldColumns.map((column, index) => [column, assignment[index]])) : null;
 }
 
 /**
@@ -157,6 +136,10 @@ function toAssignmentObject(goldColumns, assignment) {
  *   for expected_sql); `matchAny` = some variant matches on this fixture alone.
  * - killedOn: fixtures on which no gold variant matches (who caught it).
  * - assignment: gold column -> prediction column of the match (null if none).
+ * - reason: 'match', the first per-fixture mismatch reason, or, when every
+ *   fixture matches alone, 'inconsistent_assignment' (no one mapping fits
+ *   every fixture) or 'assignment_search_exhausted' (the bounded search gave
+ *   up; never a pass).
  * Throws GoldSqlError when a gold variant itself fails.
  */
 export async function scoreAgainstGold({
@@ -200,10 +183,16 @@ export async function scoreAgainstGold({
       if (prediction.error) {
         return { match: false, reason: 'execution_error', assignments: [], goldColumns: [], empty: false, truncated: false };
       }
-      return matchResultSets(gold, prediction.rows, comparison, { limit: ASSIGNMENT_LIMIT });
+      // Per-fixture verdict and reason; the shared mapping is searched below.
+      return matchResultSets(gold, prediction.rows, comparison, { limit: 1 });
     });
     const allMatch = outcomes.every((outcome) => outcome.match);
-    const { consistent, assignments } = allMatch ? consistentAssignments(outcomes) : { consistent: false, assignments: [] };
+    const shared = allMatch
+      ? findSharedAssignment(
+          connections.map((_fixtureConnection, fixtureIndex) => ({ expected: goldRows[variantIndex][fixtureIndex], actual: predictions[fixtureIndex].rows })),
+          comparison
+        )
+      : null;
     const perFixture = connections.map((fixtureConnection, fixtureIndex) => ({
       fixture: fixtureConnection.name,
       match: outcomes[fixtureIndex].match,
@@ -215,10 +204,10 @@ export async function scoreAgainstGold({
     }));
     return {
       label: variant.label,
-      match: allMatch && consistent,
-      reason: allMatch ? (consistent ? 'match' : 'inconsistent_assignment') : outcomes.find((outcome) => !outcome.match).reason,
+      match: Boolean(shared?.match),
+      reason: shared ? shared.reason : outcomes.find((outcome) => !outcome.match).reason,
       outcomes,
-      assignments,
+      assignment: shared?.match ? shared.assignment : null,
       perFixture,
     };
   });
@@ -235,7 +224,7 @@ export async function scoreAgainstGold({
   const goldColumns = reported.outcomes.find((outcome) => outcome.goldColumns?.length)?.goldColumns || [];
   const assignmentFor = (fixtureIndex) => {
     if (matched) {
-      return toAssignmentObject(goldColumns, matched.assignments[0]) || {};
+      return toAssignmentObject(goldColumns, matched.assignment) || {};
     }
     const [first] = reported.outcomes[fixtureIndex].assignments || [];
     return toAssignmentObject(goldColumns, first);
@@ -266,7 +255,7 @@ export async function scoreAgainstGold({
     matchedGold: matched ? matched.label : null,
     reason: matched ? 'match' : reported.reason,
     perFixture,
-    assignment: matched ? toAssignmentObject(goldColumns, matched.assignments[0]) || {} : assignmentFor(0),
+    assignment: matched ? toAssignmentObject(goldColumns, matched.assignment) || {} : assignmentFor(0),
     signalWarnings,
     disallowedWarnings: findDisallowedColumnsUsed(predictedSql, testCase.disallowed_columns, { schema }),
     variants: scored.map(({ label, match, reason, perFixture: variantFixtures }) => ({ label, match, reason, perFixture: variantFixtures })),

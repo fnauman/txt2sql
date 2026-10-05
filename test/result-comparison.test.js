@@ -7,6 +7,7 @@ import {
   collectBenchmarkWarnings,
   compareResults,
   compareResultsDetailed,
+  findSharedAssignment,
   isColumnNamedLike,
   matchResultSets,
 } from '../src/benchmark.js';
@@ -460,4 +461,82 @@ test('matchResultSets enumerates every valid assignment for cross-fixture consis
     ['b', 'a'],
   ]);
   assert.equal(matchResultSets([], [], { mode: 'rowset' }).empty, true);
+});
+
+// Columns p1..pN whose values are given per row.
+const columnsOf = (rowsOfValues) => rowsOfValues.map((values) => Object.fromEntries(values.map((value, index) => [`p${index + 1}`, value])));
+const goldOf = (rowsOfValues) => rowsOfValues.map((values) => Object.fromEntries(values.map((value, index) => [`m${index + 1}`, value])));
+
+test('findSharedAssignment: one mapping must hold on every pair, however many each pair allows', () => {
+  // 5! = 120 mappings on the first pair (more than any enumeration cap); the
+  // second and third each allow exactly one, and they differ.
+  const pairs = [
+    { expected: goldOf([[1, 1, 1, 1, 1]]), actual: columnsOf([[1, 1, 1, 1, 1]]) },
+    { expected: goldOf([[1, 2, 3, 4, 5]]), actual: columnsOf([[1, 2, 3, 4, 5]]) },
+    { expected: goldOf([[1, 2, 3, 4, 5]]), actual: columnsOf([[2, 1, 3, 4, 5]]) },
+  ];
+  assert.equal(matchResultSets(pairs[0].expected, pairs[0].actual, { mode: 'rowset' }).truncated, true);
+  assert.deepEqual(findSharedAssignment(pairs, { mode: 'rowset' }), {
+    match: false,
+    goldColumns: ['m1', 'm2', 'm3', 'm4', 'm5'],
+    assignment: null,
+    reason: 'inconsistent_assignment',
+  });
+
+  // Drop the conflicting pair: the one mapping both remaining pairs allow.
+  const shared = findSharedAssignment(pairs.slice(0, 2), { mode: 'rowset' });
+  assert.deepEqual([shared.match, shared.assignment, shared.reason], [true, ['p1', 'p2', 'p3', 'p4', 'p5'], 'match']);
+
+  // A pair of two empty results does not constrain the mapping.
+  const withEmpty = findSharedAssignment([...pairs.slice(0, 2), { expected: [], actual: [] }], { mode: 'rowset' });
+  assert.deepEqual(withEmpty.assignment, ['p1', 'p2', 'p3', 'p4', 'p5']);
+  assert.deepEqual(findSharedAssignment([{ expected: [], actual: [] }], { mode: 'rowset' }).assignment, []);
+
+  // A pair that cannot match at all reports its own reason.
+  assert.equal(findSharedAssignment([pairs[1], { expected: goldOf([[1, 2, 3, 4, 5]]), actual: [] }], { mode: 'rowset' }).reason, 'row_count');
+});
+
+test('findSharedAssignment checks the whole assignment (column order, ranking) on every pair', () => {
+  // Values allow either carrier on both pairs, but column_order rules out the
+  // swapped one on the second: the shared mapping is the in-order one.
+  const comparison = { mode: 'rowset', column_order: ['m1', 'm2'] };
+  const pairs = [
+    { expected: goldOf([[5, 5]]), actual: columnsOf([[5, 5]]) },
+    { expected: goldOf([[1, 2]]), actual: columnsOf([[1, 2]]) },
+  ];
+  assert.deepEqual(findSharedAssignment(pairs, comparison).assignment, ['p1', 'p2']);
+  const swapped = [pairs[0], { expected: goldOf([[1, 2]]), actual: columnsOf([[2, 1]]) }];
+  assert.equal(findSharedAssignment(swapped, comparison).match, false);
+  assert.equal(findSharedAssignment(swapped, comparison).reason, 'inconsistent_assignment');
+});
+
+test('findSharedAssignment fails closed when its search is cut off', () => {
+  const pairs = [
+    { expected: goldOf([[1, 1, 1, 1, 1]]), actual: columnsOf([[1, 1, 1, 1, 1]]) },
+    { expected: goldOf([[1, 2, 3, 4, 5]]), actual: columnsOf([[5, 4, 3, 2, 1]]) },
+  ];
+  assert.equal(findSharedAssignment(pairs, { mode: 'rowset' }).match, true);
+  const cut = findSharedAssignment(pairs, { mode: 'rowset' }, { maxSteps: 3 });
+  assert.deepEqual([cut.match, cut.assignment, cut.reason], [false, null, 'assignment_search_exhausted']);
+});
+
+test('findSharedAssignment without a comparison spec compares the legacy name mapping', () => {
+  const pairs = [
+    { expected: [{ n: 1 }], actual: [{ N: 1 }] },
+    { expected: [{ n: 2 }], actual: [{ N: 2 }] },
+  ];
+  assert.deepEqual(findSharedAssignment(pairs, null), { match: true, goldColumns: ['n'], assignment: ['N'], reason: 'match' });
+  assert.equal(findSharedAssignment([pairs[0], { expected: [{ n: 2 }], actual: [{ n: 3 }] }], null).reason, 'values');
+});
+
+test('matchResultSets: a search stopped by its step bound before any match says so', () => {
+  // Three rows; every prediction column holds {0, 0, 1} like each gold column,
+  // in one of three row patterns, four columns each. The five gold columns
+  // need five columns with one pattern, which do not exist, and the search
+  // stops at its step bound before it has tried every assignment.
+  const patterns = [[0, 0, 1], [0, 1, 0], [1, 0, 0]];
+  const actual = [0, 1, 2].map((row) => Object.fromEntries(Array.from({ length: 12 }, (_unused, index) => [`p${index + 1}`, patterns[index % 3][row]])));
+  const expected = [0, 1, 2].map((row) => Object.fromEntries(Array.from({ length: 5 }, (_unused, index) => [`m${index + 1}`, patterns[0][row]])));
+  const outcome = matchResultSets(expected, actual, { mode: 'rowset' });
+  assert.deepEqual([outcome.match, outcome.reason, outcome.truncated], [false, 'assignment_search_exhausted', true]);
 });

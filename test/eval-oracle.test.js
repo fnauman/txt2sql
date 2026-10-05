@@ -149,6 +149,59 @@ test('the gold -> prediction column mapping must be the same on every fixture', 
   assert.deepEqual(result.killedOn, []);
 });
 
+// Five equal-valued columns on the seed give 5! = 120 valid mappings there,
+// more than any enumeration cap; v2 and v3 each pin a different one.
+const fiveMonths = (values) => Object.fromEntries(values.map((value, index) => [`m${index + 1}`, value]));
+const fivePredicted = (values) => Object.fromEntries(values.map((value, index) => [`p${index + 1}`, value]));
+
+test('one mapping on every fixture: many equal columns on one fixture do not waive the check', async () => {
+  const testCase = caseWith({ comparison: { mode: 'rowset' } });
+  const conflicting = [
+    fakeFixture('seed', { [GOLD]: [fiveMonths([1, 1, 1, 1, 1])], [PRED]: [fivePredicted([1, 1, 1, 1, 1])] }),
+    fakeFixture('v2', { [GOLD]: [fiveMonths([1, 2, 3, 4, 5])], [PRED]: [fivePredicted([1, 2, 3, 4, 5])] }),
+    // m1 -> p2 and m2 -> p1 here, m1 -> p1 on v2: no single mapping fits both.
+    fakeFixture('v3', { [GOLD]: [fiveMonths([1, 2, 3, 4, 5])], [PRED]: [fivePredicted([2, 1, 3, 4, 5])] }),
+  ];
+  const result = await scoreAgainstGold({ testCase, predictedSql: PRED, connections: conflicting });
+  assert.deepEqual(result.perFixture.map((entry) => entry.match), [true, true, true], 'each fixture alone matches');
+  assert.equal(result.match, false);
+  assert.equal(result.reason, 'inconsistent_assignment');
+  assert.deepEqual(result.killedOn, []);
+
+  // The same shape with one mapping that fits everywhere passes, with that mapping.
+  const shared = [
+    fakeFixture('seed', { [GOLD]: [fiveMonths([1, 1, 1, 1, 1])], [PRED]: [fivePredicted([1, 1, 1, 1, 1])] }),
+    fakeFixture('v2', { [GOLD]: [fiveMonths([1, 2, 3, 4, 5])], [PRED]: [fivePredicted([2, 1, 3, 4, 5])] }),
+    fakeFixture('v3', { [GOLD]: [fiveMonths([5, 4, 3, 2, 1])], [PRED]: [fivePredicted([4, 5, 3, 2, 1])] }),
+  ];
+  const passing = await scoreAgainstGold({ testCase, predictedSql: PRED, connections: shared });
+  assert.equal(passing.match, true);
+  assert.deepEqual(passing.assignment, { m1: 'p2', m2: 'p1', m3: 'p3', m4: 'p4', m5: 'p5' });
+});
+
+test('a mapping search cut off by its bound fails closed', async () => {
+  // Ten columns whose values pair up differently on v2 and v3: every column
+  // is compatible with every gold column, each fixture alone matches, and with
+  // a tolerance (no partial-tuple pruning) the shared search runs out of steps
+  // before it can prove there is no common mapping. That is never a pass.
+  const goldRows = [fiveMonths([0, 0, 0, 0, 0]), fiveMonths([1, 1, 1, 1, 1])];
+  const predicted = (groupA) => [0, 1].map((row) =>
+    Object.fromEntries(Array.from({ length: 10 }, (_unused, index) => [`p${index + 1}`, groupA.includes(index + 1) ? row : 1 - row]))
+  );
+  const testCase = caseWith({ comparison: { mode: 'rowset', tolerance: 0.001 } });
+  const result = await scoreAgainstGold({
+    testCase,
+    predictedSql: PRED,
+    connections: [
+      fakeFixture('v2', { [GOLD]: goldRows, [PRED]: predicted([1, 2, 3, 4, 5]) }),
+      fakeFixture('v3', { [GOLD]: goldRows, [PRED]: predicted([1, 2, 6, 7, 8]) }),
+    ],
+  });
+  assert.deepEqual(result.perFixture.map((entry) => entry.match), [true, true], 'each fixture alone matches');
+  assert.equal(result.match, false);
+  assert.equal(result.reason, 'assignment_search_exhausted');
+});
+
 test('an empty gold on one fixture does not constrain the mapping', async () => {
   const connections = [
     fakeFixture('seed', { [GOLD]: [{ x: 1 }], [PRED]: [{ a: 1 }] }),

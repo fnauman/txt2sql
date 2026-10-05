@@ -114,7 +114,11 @@ Oracle rules (`scoreAgainstGold`):
   must match **one** variant on every fixture (mixing readings across fixtures
   does not count).
 - **One column mapping**: the comparator's gold-column → prediction-column
-  assignment must be the same on every fixture.
+  assignment must be the same on every fixture. `findSharedAssignment`
+  searches for one mapping valid on every fixture at once (candidate carriers
+  intersected across fixtures, partial mappings pruned by their row tuples);
+  no common mapping is `inconsistent_assignment`, and a search cut off by its
+  step bound fails closed as `assignment_search_exhausted`, never a pass.
 - **Gold runs with its own timeout** (`GOLD_STATEMENT_TIMEOUT_MS`, 30 s), cached
   per fixture, so a slow gold never looks like a model failure; a failing gold
   is `expected_sql_error`, never a model error.

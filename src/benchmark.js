@@ -710,6 +710,9 @@ const DEFAULT_DECIMALS = 2;
 // to find them), guarding pathological duplicate-column results.
 const MAX_ASSIGNMENTS = 64;
 const MAX_ASSIGNMENT_STEPS = 20000;
+// Upper bound on the partial assignments findSharedAssignment tries; past it
+// the search fails closed ('assignment_search_exhausted').
+const MAX_SHARED_ASSIGNMENT_STEPS = 20000;
 
 function toComparableNumber(value) {
   if (typeof value === 'number') {
@@ -1091,37 +1094,38 @@ function legacyOutcome(expected, actual) {
   };
 }
 
-/**
- * Every valid gold-column -> prediction-column assignment (up to `limit`) under
- * a case's comparison spec. Returns
- * `{ match, goldColumns, assignments, reason, truncated, empty }` where each
- * assignment is an array of prediction column names aligned with
- * `goldColumns`, and `reason` is 'match' or the first failed requirement:
- * 'row_count', 'missing_columns', 'values', 'column_order', 'scalar_column' or
- * 'ranking' ('values' also covers the legacy exact-row comparison). `empty`
- * marks two empty results, which match under any assignment. The multi-fixture
- * oracle intersects these sets so one column mapping must hold on every
- * fixture.
- */
-export function matchResultSets(expectedRows, actualRows, comparison = null, { limit = MAX_ASSIGNMENTS } = {}) {
-  const expected = Array.isArray(expectedRows) ? expectedRows : [];
-  const actual = Array.isArray(actualRows) ? actualRows : [];
+// Requirements an assignment must meet, in the order they are checked; the
+// first one no assignment met is a mismatch's reason.
+const ASSIGNMENT_REQUIREMENTS = ['values', 'column_order', 'scalar_column', 'ranking'];
 
+// Everything needed to test gold-column -> prediction-column assignments for
+// one (gold, prediction) pair under a comparison spec. Returns `{ outcome }`
+// when the pair is decided without any assignment (legacy exact rows, row
+// count, two empty results, missing columns), else
+// `{ goldColumns, actualColumns, candidates, check, prefixHolds }`:
+// - candidates[g]: prediction columns that may carry gold column g (name
+//   pinning, and a per-column multiset check that every valid assignment meets);
+// - check(assignment): null when the full assignment is valid, else the first
+//   requirement it fails;
+// - prefixHolds(partial): a necessary condition on the first gold columns'
+//   carriers (their row tuples agree as multisets), or always true when a
+//   tolerance makes that check unsound to prune with.
+function prepareResultSetMatch(expected, actual, comparison) {
   if (!comparison || typeof comparison !== 'object') {
-    return legacyOutcome(expected, actual);
+    return { outcome: legacyOutcome(expected, actual) };
   }
 
   const goldColumns =
     Array.isArray(comparison.compare_columns) && comparison.compare_columns.length > 0
       ? comparison.compare_columns
       : Object.keys(expected[0] ?? {});
-  const fail = (reason) => ({ match: false, goldColumns, assignments: [], reason, truncated: false, empty: false });
+  const fail = (reason) => ({ outcome: { match: false, goldColumns, assignments: [], reason, truncated: false, empty: false } });
 
   if (expected.length !== actual.length) {
     return fail('row_count');
   }
   if (expected.length === 0 || goldColumns.length === 0) {
-    return { match: true, goldColumns, assignments: [], reason: 'match', truncated: false, empty: true };
+    return { outcome: { match: true, goldColumns, assignments: [], reason: 'match', truncated: false, empty: true } };
   }
 
   const actualColumns = Object.keys(actual[0] ?? {});
@@ -1170,31 +1174,79 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
     )
   );
 
+  const check = (assignment) => {
+    const actualTuples = actual.map((_row, rowIndex) => assignment.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex]));
+    if (!matchRowsUnordered(goldTuples, actualTuples, tolerance)) {
+      return 'values';
+    }
+    if (columnOrder.length > 0 && !columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns)) {
+      return 'column_order';
+    }
+    if (scalarSingleValue && !scalarRuleHolds(goldColumns[0], assignment[0], actual[0], actualColumns)) {
+      return 'scalar_column';
+    }
+    if (mode === 'ranked' && primaryValueIndex !== -1 && !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance)) {
+      return 'ranking';
+    }
+    return null;
+  };
+
+  // Without a tolerance cell equality is exact, so any valid assignment's
+  // first k carriers hold the gold's first k columns as the same multiset of
+  // row tuples (the full bijection restricted to those columns).
+  const prefixHolds =
+    tolerance > 0
+      ? () => true
+      : (partial) => {
+          const goldKeys = goldTuples.map((tuple) => tupleKey(tuple.slice(0, partial.length))).sort();
+          const actualKeys = actual
+            .map((_row, rowIndex) => tupleKey(partial.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex])))
+            .sort();
+          return sameList(goldKeys, actualKeys);
+        };
+
+  return { goldColumns, actualColumns, candidates, check, prefixHolds };
+}
+
+/**
+ * Every valid gold-column -> prediction-column assignment (up to `limit`) under
+ * a case's comparison spec. Returns
+ * `{ match, goldColumns, assignments, reason, truncated, empty }` where each
+ * assignment is an array of prediction column names aligned with
+ * `goldColumns`, and `reason` is 'match' or the first failed requirement:
+ * 'row_count', 'missing_columns', 'values', 'column_order', 'scalar_column' or
+ * 'ranking' ('values' also covers the legacy exact-row comparison), or
+ * 'assignment_search_exhausted' when the step bound stopped the search before
+ * any valid assignment was found (never a match). `empty` marks two empty
+ * results, which match under any assignment. `truncated` means the list may
+ * be incomplete; the multi-fixture oracle never relies on it and uses
+ * findSharedAssignment for its one-mapping rule.
+ */
+export function matchResultSets(expectedRows, actualRows, comparison = null, { limit = MAX_ASSIGNMENTS } = {}) {
+  const expected = Array.isArray(expectedRows) ? expectedRows : [];
+  const actual = Array.isArray(actualRows) ? actualRows : [];
+  const prepared = prepareResultSetMatch(expected, actual, comparison);
+  if (prepared.outcome) {
+    return prepared.outcome;
+  }
+  const { goldColumns, candidates, check } = prepared;
+
   const assignments = [];
   const failures = { values: true, column_order: true, scalar_column: true, ranking: true };
   let steps = 0;
   let truncated = false;
+  let exhausted = false;
   const used = new Set();
   const current = [];
 
   const accept = (assignment) => {
-    const actualTuples = actual.map((_row, rowIndex) => assignment.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex]));
-    if (!matchRowsUnordered(goldTuples, actualTuples, tolerance)) {
-      return;
+    const failed = check(assignment);
+    for (const requirement of ASSIGNMENT_REQUIREMENTS) {
+      if (requirement === failed) {
+        return;
+      }
+      failures[requirement] = false;
     }
-    failures.values = false;
-    if (columnOrder.length > 0 && !columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns)) {
-      return;
-    }
-    failures.column_order = false;
-    if (scalarSingleValue && !scalarRuleHolds(goldColumns[0], assignment[0], actual[0], actualColumns)) {
-      return;
-    }
-    failures.scalar_column = false;
-    if (mode === 'ranked' && primaryValueIndex !== -1 && !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance)) {
-      return;
-    }
-    failures.ranking = false;
     assignments.push(assignment.slice());
   };
 
@@ -1204,6 +1256,7 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
     }
     if ((steps += 1) > MAX_ASSIGNMENT_STEPS) {
       truncated = true;
+      exhausted = true;
       return;
     }
     if (index === goldColumns.length) {
@@ -1229,14 +1282,94 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
   const match = assignments.length > 0;
   const reason = match
     ? 'match'
-    : failures.values
-      ? 'values'
-      : failures.column_order
-        ? 'column_order'
-        : failures.scalar_column
-          ? 'scalar_column'
-          : 'ranking';
+    : exhausted
+      ? 'assignment_search_exhausted'
+      : ASSIGNMENT_REQUIREMENTS.find((requirement) => failures[requirement]) || 'ranking';
   return { match, goldColumns, assignments, reason, truncated, empty: false };
+}
+
+/**
+ * The multi-fixture one-mapping rule: ONE gold-column -> prediction-column
+ * assignment that is valid on every (gold, prediction) pair at once (one pair
+ * per fixture, all from the same prediction SQL). Pairs of two empty results
+ * match under any assignment and do not constrain it.
+ *
+ * The search intersects each gold column's candidate carriers over the pairs,
+ * then backtracks, pruning a partial assignment as soon as its row tuples
+ * disagree with the gold on some pair, and checks every full assignment on
+ * every pair. It never infers consistency from per-pair results.
+ *
+ * Returns `{ match, goldColumns, assignment, reason }`: `assignment` is an
+ * array aligned with `goldColumns` (empty when no pair constrains it, null
+ * without a match); `reason` is 'match', a pair's own mismatch reason when it
+ * cannot match at all, 'inconsistent_assignment' (no single assignment fits
+ * every pair) or 'assignment_search_exhausted' (the search hit `maxSteps`
+ * before deciding; fails closed, never a match).
+ */
+export function findSharedAssignment(pairs, comparison = null, { maxSteps = MAX_SHARED_ASSIGNMENT_STEPS } = {}) {
+  const prepared = pairs.map(({ expected, actual }) =>
+    prepareResultSetMatch(Array.isArray(expected) ? expected : [], Array.isArray(actual) ? actual : [], comparison)
+  );
+  const goldColumns = prepared.map((entry) => entry.goldColumns ?? entry.outcome.goldColumns).find((columns) => columns.length > 0) ?? [];
+  const decided = prepared.filter((entry) => entry.outcome);
+  const failed = decided.find((entry) => !entry.outcome.match);
+  if (failed) {
+    return { match: false, goldColumns, assignment: null, reason: failed.outcome.reason };
+  }
+
+  // Legacy exact-row pairs carry their one (name-based) assignment.
+  const legacy = decided.filter((entry) => !entry.outcome.empty).map((entry) => entry.outcome.assignments[0]);
+  const searchable = prepared.filter((entry) => !entry.outcome);
+  if (searchable.length === 0) {
+    if (legacy.length === 0) {
+      return { match: true, goldColumns, assignment: [], reason: 'match' };
+    }
+    const consistent = legacy.every((assignment) => sameList(assignment, legacy[0]));
+    return consistent
+      ? { match: true, goldColumns, assignment: legacy[0].slice(), reason: 'match' }
+      : { match: false, goldColumns, assignment: null, reason: 'inconsistent_assignment' };
+  }
+
+  const [first] = searchable;
+  const candidateSets = searchable.map((entry) => entry.candidates.map((columns) => new Set(columns)));
+  const candidates = first.candidates.map((columns, goldIndex) => columns.filter((column) => candidateSets.every((sets) => sets[goldIndex].has(column))));
+
+  let steps = 0;
+  let exhausted = false;
+  const used = new Set();
+  const current = [];
+  const search = (index) => {
+    if (index === first.goldColumns.length) {
+      return searchable.every((entry) => entry.check(current) === null) ? current.slice() : null;
+    }
+    for (const column of candidates[index]) {
+      if (used.has(column)) {
+        continue;
+      }
+      if ((steps += 1) > maxSteps) {
+        exhausted = true;
+        return null;
+      }
+      current.push(column);
+      if (searchable.every((entry) => entry.prefixHolds(current))) {
+        used.add(column);
+        const found = search(index + 1);
+        used.delete(column);
+        if (found || exhausted) {
+          current.pop();
+          return found;
+        }
+      }
+      current.pop();
+    }
+    return null;
+  };
+
+  const assignment = search(0);
+  if (assignment) {
+    return { match: true, goldColumns: first.goldColumns, assignment, reason: 'match' };
+  }
+  return { match: false, goldColumns: first.goldColumns, assignment: null, reason: exhausted ? 'assignment_search_exhausted' : 'inconsistent_assignment' };
 }
 
 /**
