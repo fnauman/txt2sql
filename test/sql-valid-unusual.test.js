@@ -233,6 +233,11 @@ const VALID = [
     "SELECT c.CustomerName CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) TotalGrossAmount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY TotalGrossAmount DESC LIMIT 10",
   ],
   [Q_LIST, 'implicit alias after a quoted expression', 'SELECT c.CustomerName `Display Name`, c.CustomerCode Code FROM Customer c ORDER BY `Display Name`'],
+  [
+    Q_LIST,
+    'implicit aliases after a scalar subquery and a CASE, used in ORDER BY',
+    "SELECT (SELECT COUNT(*) FROM Customer x) TotalCount, CASE WHEN c.IsActive = 1 THEN 'yes' ELSE 'no' END ActiveFlag FROM Customer c ORDER BY ActiveFlag, TotalCount",
+  ],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,

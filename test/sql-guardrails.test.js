@@ -369,6 +369,10 @@ test('guardrail rejections carry error.code and error.layer', () => {
     ['SELECT c.CustomerName FROM Customer c WHERE CustomerDisplayName = 1', 'UNKNOWN_IDENTIFIER'],
     ['SELECT `Customer Display` FROM Customer', 'UNKNOWN_IDENTIFIER'],
     ['SELECT c.CustomerName AS shown FROM Customer c ORDER BY CustomerRank', 'UNKNOWN_IDENTIFIER'],
+    // An implicit alias exists only at the end of a select item: a stray
+    // identifier after a literal in WHERE or after OFFSET is not one.
+    ["SELECT c.CustomerName FROM Customer c WHERE c.CustomerName = 'x' CustomerDisplay", 'UNKNOWN_IDENTIFIER'],
+    ['SELECT c.CustomerName FROM Customer c ORDER BY c.CustomerName LIMIT 5 OFFSET 0 CustomerRank', 'UNKNOWN_IDENTIFIER'],
     [
       'SELECT c.CustomerName, SUM(v.NetAmount) AS total FROM SalesDocument v JOIN Customer c ON v.SalesDocumentId = c.CustomerId GROUP BY c.CustomerName',
       'JOIN_PATH',

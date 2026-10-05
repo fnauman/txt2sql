@@ -738,12 +738,67 @@ function closesSelectItem(token) {
   return !token || (token.type === 'punct' && [',', ')', ';'].includes(token.value)) || isKeywordToken(token, 'FROM');
 }
 
-// Output aliases, read from tokens: `expr AS alias` and the implicit
-// `expr alias` form at the end of a select item (followed by ',' or FROM).
-// Quoted aliases keep their full name, spaces included (`AS \`Total Net\``).
-function extractOutputAliases(sql) {
-  const aliases = new Set();
-  const tokens = significantTokensOf(sql);
+// Keywords that end a SELECT list at its own parenthesis depth (a SELECT
+// without FROM ends at WHERE, ORDER, LIMIT, UNION, ... or the end).
+const SELECT_LIST_END_KEYWORDS = new Set([
+  'FROM',
+  'WHERE',
+  'GROUP',
+  'HAVING',
+  'ORDER',
+  'LIMIT',
+  'UNION',
+  'EXCEPT',
+  'INTERSECT',
+  'INTO',
+  'WINDOW',
+  'FOR',
+  'LOCK',
+]);
+
+// For each significant token: is it inside a SELECT list (after SELECT and
+// before the keyword that ends the list, at the SELECT's own depth)?
+function selectListMask(tokens) {
+  const mask = new Array(tokens.length).fill(false);
+  const open = [false];
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (isPunctToken(token, '(')) {
+      depth += 1;
+      open[depth] = false;
+      continue;
+    }
+    if (isPunctToken(token, ')')) {
+      open[depth] = false;
+      depth = Math.max(0, depth - 1);
+      mask[index] = Boolean(open[depth]);
+      continue;
+    }
+    if (isKeywordToken(token, 'SELECT')) {
+      open[depth] = true;
+      continue;
+    }
+    if (token.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper)) {
+      open[depth] = false;
+    }
+    mask[index] = Boolean(open[depth]);
+  }
+  return mask;
+}
+
+/**
+ * Output alias definitions in significant tokens (no whitespace or comments),
+ * as Map(token index -> alias name): `expr AS alias` anywhere, and the
+ * implicit `expr alias` form at the end of a select item (followed by ',',
+ * ')' or FROM) inside a SELECT list only, so a stray identifier after a
+ * string literal or a number in WHERE / LIMIT is never taken for an alias.
+ * Quoted aliases keep their full name, spaces included (`AS \`Total Net\``).
+ * Also used by the benchmark's disallowed-column lint.
+ */
+export function outputAliasDefinitions(tokens) {
+  const definitions = new Map();
+  const inSelectList = selectListMask(tokens);
 
   for (let index = 0; index < tokens.length; index += 1) {
     const name = identifierTokenName(tokens[index]);
@@ -752,18 +807,22 @@ function extractOutputAliases(sql) {
     }
     const previous = tokens[index - 1];
     if (isKeywordToken(previous, 'AS')) {
-      aliases.add(name);
+      definitions.set(index, name);
       continue;
     }
     if (tokens[index].type === 'word' && SQL_KEYWORDS.has(tokens[index].upper)) {
       continue;
     }
-    if (endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens[index + 1])) {
-      aliases.add(name);
+    if (inSelectList[index] && endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens[index + 1])) {
+      definitions.set(index, name);
     }
   }
 
-  return aliases;
+  return definitions;
+}
+
+function extractOutputAliases(sql) {
+  return new Set(outputAliasDefinitions(significantTokensOf(sql)).values());
 }
 
 export function extractCteNames(sql) {
