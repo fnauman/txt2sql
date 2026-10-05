@@ -387,6 +387,57 @@ test('tolerance keeps working when the prediction has many extra columns', () =>
   assert.equal(compareResults(gold, actual, { mode: 'rowset', tolerance: 0.01 }), true);
 });
 
+// With a tolerance, row matching is a perfect matching in the "within
+// tolerance" graph. It used to be backtracking with a 500000-step cap whose
+// cut-off read as 'values': near-duplicate rows in an unlucky order made a
+// correct prediction fail (and a negative control count as killed).
+test('tolerance row matching finds a valid pairing among near-duplicate rows, with no step cap', () => {
+  const spec = { mode: 'rowset', tolerance: 0.01, compare_columns: ['m'] };
+  const gold = [...Array.from({ length: 9 }, () => ({ m: 1.0 })), { m: 1.016 }];
+  const predicted = [{ m: 1.008 }, ...Array.from({ length: 9 }, () => ({ m: 1.0 }))];
+  assert.deepEqual(
+    (({ match, reason, truncated }) => ({ match, reason, truncated }))(matchResultSets(gold, predicted, spec)),
+    { match: true, reason: 'match', truncated: false }
+  );
+  // Larger: 400 rows, still exact and quick.
+  const bigGold = [...Array.from({ length: 399 }, () => ({ m: 1.0 })), { m: 1.016 }];
+  const bigPredicted = [{ m: 1.008 }, ...Array.from({ length: 399 }, () => ({ m: 1.0 }))];
+  assert.equal(compareResults(bigGold, bigPredicted, spec), true);
+  // A row with no partner within the tolerance still fails.
+  assert.equal(compareResults(gold, [{ m: 1.03 }, ...Array.from({ length: 9 }, () => ({ m: 1.0 }))], spec), false);
+});
+
+test('tolerance row matching agrees with a brute-force search over row pairings', () => {
+  // Deterministic PRNG; small tables so every permutation can be checked.
+  let state = 12345;
+  const random = () => ((state = (state * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const values = [1.0, 1.005, 1.01, 1.016, 1.02];
+  const labels = ['a', 'b'];
+  const row = () => ({ v: values[Math.floor(random() * values.length)], k: labels[Math.floor(random() * labels.length)] });
+  const within = (g, p) => g.k === p.k && Math.abs(g.v - p.v) <= 0.01 + 1e-9;
+  const bruteForce = (gold, predicted, used = new Array(predicted.length).fill(false), index = 0) =>
+    index === gold.length ||
+    predicted.some((candidate, j) => {
+      if (used[j] || !within(gold[index], candidate)) {
+        return false;
+      }
+      used[j] = true;
+      const found = bruteForce(gold, predicted, used, index + 1);
+      used[j] = false;
+      return found;
+    });
+  const outcomes = { true: 0, false: 0 };
+  for (let trial = 0; trial < 400; trial += 1) {
+    const size = 1 + Math.floor(random() * 6);
+    const gold = Array.from({ length: size }, row);
+    const predicted = Array.from({ length: size }, row);
+    const expected = bruteForce(gold, predicted);
+    outcomes[expected] += 1;
+    assert.equal(compareResults(gold, predicted, { mode: 'rowset', tolerance: 0.01 }), expected, JSON.stringify({ gold, predicted }));
+  }
+  assert.ok(outcomes.true > 20 && outcomes.false > 20, JSON.stringify(outcomes));
+});
+
 // (e) Scalar rule: an incidental extra column cannot carry the gold value.
 test('scalar: a multi-column prediction passes only through its only column, only numeric column, or a like-named column', () => {
   const gold = [{ product_count: 1 }];

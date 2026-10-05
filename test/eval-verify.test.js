@@ -296,6 +296,23 @@ test('a negative control whose verdict rests on a cut-off mapping search is unde
   assert.deepEqual(summary.design.survivors, []);
 });
 
+test('a negative control equal to the gold within the tolerance survives, however its near-duplicate rows are ordered', async () => {
+  // The row matcher used to give up after 500000 steps on this order and
+  // report 'values', so the control counted as killed without a verdict.
+  const goldRows = [...Array.from({ length: 9 }, () => ({ m: 1.0 })), { m: 1.016 }];
+  const negativeRows = [{ m: 1.008 }, ...Array.from({ length: 9 }, () => ({ m: 1.0 }))];
+  const testCase = caseWith({ comparison: { mode: 'rowset', tolerance: 0.01, compare_columns: ['m'] }, signal_checks: undefined, expected_row_counts: undefined });
+  const result = await verifyCase(testCase, {
+    connections: [fakeFixture('seed', { [GOLD]: goldRows, [NEGATIVE]: negativeRows }), fakeFixture('v2', { [GOLD]: goldRows, [NEGATIVE]: negativeRows })],
+    validate: accept,
+    controlsIndex: controlsFor(testCase, { negative: [{ id: 'm1', sql: NEGATIVE }] }),
+  });
+  assert.deepEqual(
+    result.controls.negative.map(({ id, status, killed }) => [id, status, killed]),
+    [['m1', 'survived', false]]
+  );
+});
+
 test('controls written for a different gold are reported as stale and not run', async () => {
   const testCase = caseWith();
   const result = await verifyCase(testCase, {

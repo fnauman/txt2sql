@@ -866,10 +866,11 @@ function tupleKey(tuple) {
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
 // matched pair is cell-equal? Without a tolerance cell equality is an
-// equivalence, so comparing sorted tuple keys is exact. With a tolerance a
-// pairwise matcher is needed so the tolerance is a true absolute difference;
-// backtracking is fine for the small result sets these datasets produce, and a
-// step cap guards against pathological duplicate rows.
+// equivalence, so comparing sorted tuple keys is exact. With a tolerance it is
+// not transitive (1.000 ~ 1.008 ~ 1.016), so the question is a perfect
+// matching in the bipartite "within tolerance" graph: Hopcroft-Karp answers it
+// exactly in O(E * sqrt(V)), with no step cap whose cut-off would read as
+// 'values' (backtracking over near-duplicate rows used to hit one).
 function matchRowsUnordered(goldTuples, actualTuples, tolerance) {
   if (goldTuples.length !== actualTuples.length) {
     return false;
@@ -877,32 +878,76 @@ function matchRowsUnordered(goldTuples, actualTuples, tolerance) {
   if (tolerance <= 0) {
     return sameList(goldTuples.map(tupleKey).sort(), actualTuples.map(tupleKey).sort());
   }
-
-  const used = new Array(actualTuples.length).fill(false);
-  let steps = 0;
   const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-
-  function backtrack(index) {
-    if (index === goldTuples.length) {
-      return true;
-    }
-    if ((steps += 1) > 500000) {
-      return false;
-    }
-    for (let j = 0; j < actualTuples.length; j += 1) {
-      if (used[j] || !tuplesEqual(goldTuples[index], actualTuples[j])) {
-        continue;
+  const adjacency = goldTuples.map((gold) => {
+    const neighbours = [];
+    actualTuples.forEach((actual, j) => {
+      if (tuplesEqual(gold, actual)) {
+        neighbours.push(j);
       }
-      used[j] = true;
-      if (backtrack(index + 1)) {
-        return true;
-      }
-      used[j] = false;
-    }
+    });
+    return neighbours;
+  });
+  if (adjacency.some((neighbours) => neighbours.length === 0)) {
     return false;
   }
+  return hasPerfectMatching(adjacency, actualTuples.length);
+}
 
-  return backtrack(0);
+// Hopcroft-Karp: does the bipartite graph (left i -> adjacency[i], right
+// 0..rightCount-1) have a matching that covers every left vertex?
+function hasPerfectMatching(adjacency, rightCount) {
+  const leftCount = adjacency.length;
+  const matchLeft = new Array(leftCount).fill(-1);
+  const matchRight = new Array(rightCount).fill(-1);
+  const layer = new Array(leftCount).fill(0);
+  let matched = 0;
+
+  const buildLayers = () => {
+    const queue = [];
+    for (let i = 0; i < leftCount; i += 1) {
+      layer[i] = matchLeft[i] === -1 ? 0 : Infinity;
+      if (matchLeft[i] === -1) {
+        queue.push(i);
+      }
+    }
+    let reachesFree = false;
+    for (let head = 0; head < queue.length; head += 1) {
+      const i = queue[head];
+      for (const j of adjacency[i]) {
+        const next = matchRight[j];
+        if (next === -1) {
+          reachesFree = true;
+        } else if (layer[next] === Infinity) {
+          layer[next] = layer[i] + 1;
+          queue.push(next);
+        }
+      }
+    }
+    return reachesFree;
+  };
+
+  const augment = (i) => {
+    for (const j of adjacency[i]) {
+      const next = matchRight[j];
+      if (next === -1 || (layer[next] === layer[i] + 1 && augment(next))) {
+        matchLeft[i] = j;
+        matchRight[j] = i;
+        return true;
+      }
+    }
+    layer[i] = Infinity;
+    return false;
+  };
+
+  while (buildLayers()) {
+    for (let i = 0; i < leftCount; i += 1) {
+      if (matchLeft[i] === -1 && augment(i)) {
+        matched += 1;
+      }
+    }
+  }
+  return matched === leftCount;
 }
 
 // Truly numeric column: every non-NULL value is a JS number or bigint. Numeric
