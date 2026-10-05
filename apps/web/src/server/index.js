@@ -10,6 +10,7 @@ import { createResultInsights, inferColumns } from '../../../../src/result-intel
 import {
   createBufferedTraceLogger,
   errorCodeOf,
+  isLlmUnavailableCode,
   loadOptimizedQueryRuntime,
   runOptimizedQuestion,
 } from '../../../../src/query-service.js';
@@ -60,13 +61,26 @@ function abortReason(code, message) {
   return error;
 }
 
-// HTTP status for a failed question, by the stage it failed in.
+// HTTP status for a failed question, by the stage it failed in. A question the
+// pipeline could not answer (guardrail block, SQL error, truncated or refused
+// completion) is 422; an unavailable dependency is a gateway/availability
+// error: the LLM provider timing out (504), unreachable or failing (502), or
+// rejecting the server's key / rate-limiting it (503).
 function statusForFailure(stage, code) {
   if (stage === 'infra') {
     return 503;
   }
   if (stage === 'aborted') {
     return code === 'REQUEST_TIMEOUT' ? 504 : 503;
+  }
+  if (stage === 'llm' && isLlmUnavailableCode(code)) {
+    if (code === 'LLM_TIMEOUT') {
+      return 504;
+    }
+    if (code === 'LLM_CONNECTION_ERROR' || /^HTTP_5\d\d$/.test(code)) {
+      return 502;
+    }
+    return 503;
   }
   return 422;
 }
@@ -290,11 +304,14 @@ function streamResultFrames(res, payload, includeDebug, cacheHit) {
   }
 }
 
-// Messages for anonymous deep-health failures: say WHAT is wrong (by code)
-// without the host:port, paths or driver detail that raw messages carry.
-const ANONYMOUS_HEALTH_MESSAGES = {
+// Messages for infra failures shown to callers that may not see internals
+// (anonymous deep health; query routes when debug is not allowed and no token
+// was presented): say WHAT is wrong (by code) without the host:port, paths or
+// driver detail that raw messages carry. The raw message goes to the server log.
+const ANONYMOUS_INFRA_MESSAGES = {
   OPENAI_NOT_CONFIGURED: 'OPENAI_API_KEY is not configured on the server.',
   DB_NOT_CONFIGURED: 'The database settings are incomplete on the server.',
+  DB_SCHEMA_MISSING: 'The database is missing the expected demo tables.',
   ER_ACCESS_DENIED_ERROR: 'The database rejected the configured credentials.',
   ER_BAD_DB_ERROR: 'The configured database does not exist.',
   ER_DBACCESS_DENIED_ERROR: 'The query user may not access the configured database.',
@@ -302,12 +319,11 @@ const ANONYMOUS_HEALTH_MESSAGES = {
   SHUTTING_DOWN: 'The server is shutting down.',
 };
 
-function anonymousHealthError(error) {
-  const code = errorCodeOf(error);
+function anonymousInfraError(error, code = errorCodeOf(error)) {
   return {
     name: 'Error',
     code,
-    message: ANONYMOUS_HEALTH_MESSAGES[code] || 'The query runtime or database is not reachable.',
+    message: ANONYMOUS_INFRA_MESSAGES[code] || 'The query runtime or database is not reachable.',
   };
 }
 
@@ -360,6 +376,25 @@ export function createApp({
   // such callers see diagnostics (env path, DB host/port, schema, grants).
   function isAuthenticated(req) {
     return config.authEnabled && isAuthorized(req, config.apiToken);
+  }
+
+  // Raw infra messages (driver errors carry the DB host:port, file paths, ...)
+  // are for trusted callers only: debug allowed (loopback binds by default) or
+  // the API token presented. Everyone else gets a message keyed by the code.
+  function canSeeInternals(req) {
+    return config.allowDebug || isAuthenticated(req);
+  }
+
+  function forCaller(req, payload) {
+    if (!payload || payload.success || payload.errorStage !== 'infra') {
+      return payload;
+    }
+    // The server log keeps the raw message whatever the caller sees.
+    logger.warn?.(`[api] ${req.method} ${req.originalUrl || req.url} infra failure: ${payload.error?.message} [${payload.errorCode || 'no code'}]`);
+    if (canSeeInternals(req)) {
+      return payload;
+    }
+    return { ...payload, error: { ...anonymousInfraError(null, payload.errorCode), stage: 'infra' } };
   }
 
   function rateLimit(req, res, next) {
@@ -594,7 +629,7 @@ export function createApp({
         ...payload,
         ok: false,
         dbReachable: false,
-        error: authenticated ? toClientError({ ...serializeError(error), code: errorCodeOf(error) }) : anonymousHealthError(error),
+        error: authenticated ? toClientError({ ...serializeError(error), code: errorCodeOf(error) }) : anonymousInfraError(error),
       });
     } finally {
       lease?.release();
@@ -621,17 +656,17 @@ export function createApp({
         if (failure.debug) {
           failure.debug.database = outcome.dbSchema;
         }
-        res.status(503).json(failure);
+        res.status(503).json(forCaller(req, failure));
         return;
       }
 
       const { payload, cacheHit } = outcome;
       const status = payload.success ? 200 : statusForFailure(payload.errorStage, payload.errorCode);
-      res.status(status).json(cacheHit ? { ...payload, cacheHit: true } : payload);
+      res.status(status).json(forCaller(req, cacheHit ? { ...payload, cacheHit: true } : payload));
     } catch (error) {
       logServerError(req, error);
       const failure = infraFailurePayload(error, { includeDebug, trace });
-      res.status(503).json(failure);
+      res.status(503).json(forCaller(req, failure));
     } finally {
       requestSignal.dispose();
     }
@@ -663,16 +698,16 @@ export function createApp({
     try {
       const outcome = await answerQuestion({ question, includeDebug, includeInsights, trace, signal: requestSignal.signal });
       if (outcome.kind === 'schema-missing') {
-        sseFrame(res, 'error', infraFailurePayload(schemaMissingError(config, outcome.dbSchema)).error);
+        sseFrame(res, 'error', forCaller(req, infraFailurePayload(schemaMissingError(config, outcome.dbSchema))).error);
         return;
       }
 
       // Same serializer as the blocking route. On a cache hit no stage/early-sql
       // frames were emitted (the pipeline never ran) — the result simply lands.
-      streamResultFrames(res, outcome.payload, includeDebug, outcome.cacheHit);
+      streamResultFrames(res, forCaller(req, outcome.payload), includeDebug, outcome.cacheHit);
     } catch (error) {
       logServerError(req, error);
-      sseFrame(res, 'error', infraFailurePayload(error).error);
+      sseFrame(res, 'error', forCaller(req, infraFailurePayload(error)).error);
     } finally {
       requestSignal.dispose();
       sseFrame(res, 'done', {});
@@ -680,9 +715,35 @@ export function createApp({
     }
   });
 
+  function badRequest(res, message) {
+    res.status(400).json({ success: false, error: { name: 'BadRequest', message, code: 'INVALID_REQUEST' } });
+  }
+
   app.post('/api/insights', requireApiToken, rateLimit, (req, res) => {
-    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      badRequest(res, 'The request body must be a JSON object.');
+      return;
+    }
+    const body = req.body;
+    if (body.rows !== undefined && !Array.isArray(body.rows)) {
+      badRequest(res, 'rows must be an array of objects.');
+      return;
+    }
+    // Client-supplied column descriptors drive the insight math, so they must
+    // look like inferColumns() output (objects with a string key).
+    if (
+      body.columns !== undefined &&
+      (!Array.isArray(body.columns) ||
+        !body.columns.every((column) => column && typeof column === 'object' && !Array.isArray(column) && typeof column.key === 'string'))
+    ) {
+      badRequest(res, 'columns must be an array of objects with a string "key".');
+      return;
+    }
+    if (body.question !== undefined && body.question !== null && typeof body.question !== 'string') {
+      badRequest(res, 'question must be a string.');
+      return;
+    }
+    const rows = body.rows || [];
     // Bound the synchronous insight computation to the same row cap as the query
     // pipeline, so a large posted body (up to the 2mb JSON limit) cannot pin the
     // event loop with tens of thousands of rows of work per request.
@@ -694,10 +755,7 @@ export function createApp({
       return;
     }
     if (!rows.every((row) => row && typeof row === 'object' && !Array.isArray(row))) {
-      res.status(400).json({
-        success: false,
-        error: { name: 'BadRequest', message: 'rows must be an array of objects.', code: 'INVALID_REQUEST' },
-      });
+      badRequest(res, 'rows must be an array of objects.');
       return;
     }
     const columns = Array.isArray(body.columns) && body.columns.length > 0 ? body.columns : inferColumns(rows);

@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { APIUserAbortError } from 'openai';
+
 import {
   createFakeRuntime,
   createRuntimeFactory,
@@ -86,8 +88,25 @@ test('bad input is a 4xx with a clean message, never a 500', async () => {
     assert.equal(unknown.status, 404);
     assert.equal(unknown.json.error.code, 'NOT_FOUND');
 
-    const badRows = await app.request({ method: 'POST', path: '/api/insights', body: { rows: [1, 2] } });
-    assert.equal(badRows.status, 400);
+    const insightCases = [
+      { rows: [1, 2] },
+      { rows: 'x' },
+      { rows: { a: 1 } },
+      { rows: [{ a: 1 }], columns: [null, 5, { x: 1 }] },
+      { rows: [{ a: 1 }], columns: 'a' },
+      { rows: [{ a: 1 }], columns: [{ key: 5 }] },
+      { rows: [{ a: 1 }], question: { q: 1 } },
+      ['not', 'an', 'object'],
+    ];
+    for (const body of insightCases) {
+      const response = await app.request({ method: 'POST', path: '/api/insights', body });
+      assert.equal(response.status, 400, JSON.stringify(body));
+      assert.equal(response.json.error.code, 'INVALID_REQUEST');
+      assert.ok(!('stack' in response.json.error));
+    }
+    const insights = await app.request({ method: 'POST', path: '/api/insights', body: { rows: [{ a: 1 }], columns: [{ key: 'a', type: 'number' }] } });
+    assert.equal(insights.status, 200);
+    assert.ok(Array.isArray(insights.json.insights));
   });
   assert.equal(calls.length, 0, 'no rejected request reached the pipeline');
 });
@@ -439,12 +458,20 @@ test('failed questions expose errorStage/errorCode in JSON and SSE error payload
   const byQuestion = {
     blocked: { stage: 'validation', code: null, message: 'SQL references table "Secret" which is outside the allowed table set.', status: 422 },
     cut: { stage: 'llm', code: 'LLM_TRUNCATED', message: 'cut off', status: 422 },
+    refused: { stage: 'llm', code: 'LLM_REFUSED', message: 'declined', status: 422 },
+    // Provider outages are gateway errors, not an unprocessable question.
+    llmSlow: { stage: 'llm', code: 'LLM_TIMEOUT', message: 'Request timed out.', status: 504 },
+    llmDown: { stage: 'llm', code: 'LLM_CONNECTION_ERROR', message: 'Connection error.', status: 502 },
+    llm5xx: { stage: 'llm', code: 'HTTP_503', message: 'overloaded', status: 502 },
+    llmLimited: { stage: 'llm', code: 'HTTP_429', message: 'rate limited', status: 503 },
+    llmKey: { stage: 'llm', code: 'HTTP_401', message: 'bad key', status: 503 },
+    llmBadRequest: { stage: 'llm', code: 'HTTP_400', message: 'context too long', status: 422 },
     db: { stage: 'execution', code: 'ER_BAD_FIELD_ERROR', message: 'Unknown column', status: 422 },
     down: { stage: 'infra', code: 'ECONNREFUSED', message: 'refused', status: 503 },
     slow: { stage: 'aborted', code: 'REQUEST_TIMEOUT', message: 'deadline', status: 504 },
   };
   const { runQuestion } = recordingRunner((args) => failureResult(args.question, byQuestion[args.question]));
-  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0' }), runtimeFactory: factory, runQuestion }, async (app) => {
+  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '1' }), runtimeFactory: factory, runQuestion }, async (app) => {
     for (const [question, expected] of Object.entries(byQuestion)) {
       const json = await app.request({ method: 'POST', path: '/api/query', body: { question } });
       assert.equal(json.status, expected.status, question);
@@ -459,6 +486,49 @@ test('failed questions expose errorStage/errorCode in JSON and SSE error payload
       assert.deepEqual(errorFrame.data, { name: 'Error', message: expected.message, code: expected.code, stage: expected.stage });
       assert.equal(frames.at(-1).event, 'done');
     }
+  });
+});
+
+test('infra failures never show raw driver messages (DB host:port) to callers that may not see internals', async () => {
+  const { factory } = createRuntimeFactory();
+  const raw = 'connect ECONNREFUSED 10.9.8.7:3306';
+  const { runQuestion } = recordingRunner((args) => failureResult(args.question, { stage: 'infra', code: 'ECONNREFUSED', message: raw }));
+
+  // Debug not allowed and no token: a message keyed by the code, never the raw one.
+  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0' }), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.status, 503);
+    assert.equal(json.json.errorStage, 'infra');
+    assert.equal(json.json.errorCode, 'ECONNREFUSED');
+    assert.deepEqual(json.json.error, {
+      name: 'Error',
+      code: 'ECONNREFUSED',
+      message: 'The query runtime or database is not reachable.',
+      stage: 'infra',
+    });
+    assert.doesNotMatch(json.text, /10\.9\.8\.7|3306/);
+
+    const stream = await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'top customers' } });
+    assert.doesNotMatch(stream.text, /10\.9\.8\.7|3306/);
+    assert.equal(parseSse(stream.text).find((frame) => frame.event === 'error').data.code, 'ECONNREFUSED');
+  });
+
+  // A thrown runtime-load failure takes the same path.
+  const failing = createRuntimeFactory({ fail: () => true, error: Object.assign(new Error(raw), { code: 'ECONNREFUSED' }) });
+  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0' }), runtimeFactory: failing.factory }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.status, 503);
+    assert.doesNotMatch(json.text, /10\.9\.8\.7|3306/);
+  });
+
+  // Token holders and loopback/debug setups keep the actionable raw message.
+  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0', WEB_API_TOKEN: TOKEN }), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', headers: auth, body: { question: 'top customers' } });
+    assert.equal(json.json.error.message, raw);
+  });
+  await withApp({ config: testConfig(), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.json.error.message, raw);
   });
 });
 
@@ -494,7 +564,8 @@ test('the request deadline aborts the real pipeline and answers 504 REQUEST_TIME
         create(_request, options) {
           llmCalls += 1;
           return new Promise((_resolve, reject) => {
-            options.signal.addEventListener('abort', () => reject(Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' })));
+            // What the real SDK throws when its request signal aborts.
+            options.signal.addEventListener('abort', () => reject(new APIUserAbortError()));
           });
         },
       },
