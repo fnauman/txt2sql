@@ -64,3 +64,19 @@ for (const testCase of GOLD) {
     assert.doesNotThrow(() => validateReadOnlySql(testCase.expected_sql, ALL_TABLES));
   });
 }
+
+// Alternative gold readings (alternative_expected_sql) are correct answers too,
+// so the validator must admit them in the same prompt context.
+for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_expected_sql))) {
+  testCase.alternative_expected_sql.forEach((sql, index) => {
+    test(`alternative gold SQL passes the production validator: ${testCase.id} [${index}] (${testCase.dataset})`, () => {
+      const semanticPlan = buildSemanticPlan(testCase.question);
+      const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan });
+      const allowedTables = prompt.tables.map((table) => table.tableName);
+      const tablesUsed = validateReadOnlySql(sql, ALL_TABLES).tablesUsed;
+      assert.doesNotThrow(() =>
+        validateReadOnlySql(sql, allowedTables, { promptContext: prompt.context, response: { sql, tables_used: tablesUsed } })
+      );
+    });
+  });
+}

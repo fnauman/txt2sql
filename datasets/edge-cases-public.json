@@ -44,7 +44,11 @@
         "CustomerName": 4
       }
     },
-    "expected_row_count": 4
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 6,
+      "v3": 6
+    }
   },
   {
     "id": "core_public_002",
@@ -89,7 +93,11 @@
         "ProductName": 5
       }
     },
-    "expected_row_count": 5
+    "expected_row_counts": {
+      "seed": 5,
+      "v2": 8,
+      "v3": 10
+    }
   },
   {
     "id": "core_public_003",
@@ -134,7 +142,11 @@
         "DocumentTypeName": 3
       }
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "core_public_004",
@@ -166,7 +178,11 @@
         "product_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_005",
@@ -180,7 +196,11 @@
       "ranking",
       "temporal"
     ],
+    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
+    "alternative_expected_sql": [
+      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.DebitAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
+    ],
     "expected_tables": [
       "AccountingPosting",
       "LedgerAccount",
@@ -210,7 +230,11 @@
         "AccountName"
       ]
     },
-    "expected_row_count": 2
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 4,
+      "v3": 4
+    }
   },
   {
     "id": "core_public_006",
@@ -243,7 +267,11 @@
         "document_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_007",
@@ -271,7 +299,11 @@
         "active_customer_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_008",
@@ -302,7 +334,8 @@
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 5,
@@ -313,7 +346,11 @@
         "ProductName"
       ]
     },
-    "expected_row_count": 5
+    "expected_row_counts": {
+      "seed": 5,
+      "v2": 8,
+      "v3": 10
+    }
   },
   {
     "id": "core_public_009",
@@ -327,7 +364,11 @@
       "ranking",
       "temporal"
     ],
+    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
+    "alternative_expected_sql": [
+      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.CreditAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
+    ],
     "expected_tables": [
       "AccountingPosting",
       "LedgerAccount",
@@ -357,7 +398,11 @@
         "AccountName"
       ]
     },
-    "expected_row_count": 2
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 4,
+      "v3": 4
+    }
   },
   {
     "id": "edge_public_001_brand_net_sales_march_2026",
@@ -394,7 +439,8 @@
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -405,7 +451,11 @@
         "BrandName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 4,
+      "v3": 5
+    }
   },
   {
     "id": "edge_public_002_campaign_net_sales_march_2026",
@@ -437,7 +487,8 @@
     ],
     "comparison": {
       "mode": "scalar",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 1,
@@ -445,7 +496,11 @@
         "total_net_amount"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "edge_public_003_sparkling_water_master_data",
@@ -481,7 +536,11 @@
         "ProductName"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 2,
+      "v3": 3
+    }
   },
   {
     "id": "edge_public_004_posting_date_trap",
@@ -512,7 +571,11 @@
         "document_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "edge_public_005_customer_gross_amount_march_2026",
@@ -561,7 +624,11 @@
         "CustomerName": 4
       }
     },
-    "expected_row_count": 4
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 6,
+      "v3": 6
+    }
   },
   {
     "id": "edge_public_006_category_line_net_sales_march_2026",
@@ -600,7 +667,8 @@
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -611,7 +679,11 @@
         "CategoryName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "edge_public_007_category_quantity_current_join",
@@ -658,7 +730,11 @@
         "CategoryName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "edge_public_008_customer_month_columns_jan_feb_2026",
@@ -672,8 +748,12 @@
       "net_sales"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset.",
+    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Listing customers with 0/0 for January and February is a defensible reading (the audit's live gpt-4o-mini run returned every customer with any non-canceled document), so alternative_expected_sql accepts all customers (LEFT JOIN from Customer) or every customer with a non-canceled document. comparison.column_order keeps the January column before the February column, because values alone cannot tell the two months apart.",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+      "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -690,7 +770,11 @@
         "jan_net_amount",
         "feb_net_amount"
       ],
-      "decimals": 2
+      "decimals": 2,
+      "column_order": [
+        "jan_net_amount",
+        "feb_net_amount"
+      ]
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -698,6 +782,10 @@
         "CustomerName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 6,
+      "v3": 6
+    }
   }
 ]
