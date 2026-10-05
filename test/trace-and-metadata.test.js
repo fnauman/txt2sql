@@ -530,3 +530,38 @@ test('serializeError keeps the validation code, layer and any failure stage for 
   assert.equal('errorStage' in plain, false);
   assert.equal(plain.code, null);
 });
+
+test('evaluateQuestion counts the tokens and cost of failed (truncated or refused) completions', async () => {
+  const { trace, events } = createTraceCollector();
+  const billed = (code) =>
+    new LlmResponseError('the completion was billed but unusable', {
+      code,
+      usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+      cost: { currency: 'USD', inputCost: 0.001, outputCost: 0.002, totalCost: 0.003 },
+    });
+  const failures = [billed('LLM_TRUNCATED'), billed('LLM_REFUSED')];
+
+  const result = await evaluateQuestion({
+    client: null,
+    connection: null,
+    schema: { tables: [{ tableName: 'Customer' }] },
+    model: 'gpt-4o-mini',
+    testCase: { id: 'billed_failures', question: 'List customers', expected_sql: 'SELECT 1' },
+    caseIndex: 1,
+    trace,
+    dependencies: {
+      buildPrompt: () => ({ system: 's', user: 'u', context: {}, tables: [{ tableName: 'Customer' }] }),
+      resolveMasterData: async () => [],
+      executeSql: async () => [{ one: 1 }],
+      generateResponse: async () => {
+        throw failures.shift();
+      },
+    },
+  });
+
+  assert.equal(result.status, 'llm_error');
+  assert.equal(result.llm_usage.total_tokens, 300, 'both billed attempts are counted');
+  assert.equal(result.llm_cost.totalCost, 0.006);
+  const completed = events.find((entry) => entry.event === 'case.completed');
+  assert.equal(completed.llmCost.totalCost, 0.006);
+});
