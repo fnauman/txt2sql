@@ -1477,10 +1477,15 @@ function validateResponseTableContract(response, tablesUsed, allowedTables, cteN
   }
 
   const allowed = new Set(allowedTables || []);
-  // CTE names are query-local, so a model that lists them in tables_used is not
-  // claiming access to another table.
-  const declared = [...new Set(response.tables_used)].filter((tableName) => !cteNames.has(tableName));
   const actual = [...new Set(tablesUsed || [])];
+  // CTE names are query-local (and case-insensitive), so a model that lists them
+  // in tables_used is not claiming access to another table. A name that is also
+  // a physical table the SQL reads (`WITH Customer AS (SELECT ... FROM
+  // Customer)`) stays declared.
+  const lowerCteNames = new Set([...cteNames].map((name) => String(name).toLowerCase()));
+  const declared = [...new Set(response.tables_used)].filter(
+    (tableName) => actual.includes(tableName) || !lowerCteNames.has(String(tableName).toLowerCase())
+  );
 
   for (const tableName of declared) {
     if (!allowed.has(tableName)) {

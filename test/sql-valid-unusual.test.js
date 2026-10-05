@@ -200,4 +200,27 @@ test('CTE names never reach tablesUsed; the tables inside CTE bodies do', () => 
   });
   assert.deepEqual(result.tablesUsed, ['SalesDocument', 'Customer']);
   assert.deepEqual(result.guardrails.responseTableChecks.declaredTables, ['SalesDocument', 'Customer']);
+
+  // CTE names are case-insensitive, so a differently cased CTE name is dropped too.
+  const recased = validateReadOnlySql(VALID.find(([, label]) => label === 'CTE chain selecting FROM CTEs')[2], allowedTables, {
+    promptContext,
+    response: { tables_used: ['SalesDocument', 'Customer', 'MARCH', 'Totals'] },
+  });
+  assert.deepEqual(recased.guardrails.responseTableChecks.declaredTables, ['SalesDocument', 'Customer']);
+});
+
+test('a CTE that shadows the table it reads keeps that table in tables_used', () => {
+  // The CTE body reads the physical Customer table (a CTE is not visible inside
+  // its own definition); the outer query reads the CTE. Runs on MariaDB 10.6.
+  const { allowedTables, promptContext } = buildRealPrompt(Q_LIST);
+  const sql = 'WITH Customer AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM Customer';
+  const result = validateReadOnlySql(sql, allowedTables, { promptContext, response: { tables_used: ['Customer'] } });
+  assert.deepEqual(result.tablesUsed, ['Customer']);
+  assert.deepEqual(result.guardrails.responseTableChecks.declaredTables, ['Customer']);
+
+  // Omitting the physical table is still an incomplete declaration.
+  assert.throws(
+    () => validateReadOnlySql(sql, allowedTables, { promptContext, response: { tables_used: [] } }),
+    (error) => error.code === 'RESPONSE_TABLES' && /omitted SQL table\(s\): Customer/.test(error.message)
+  );
 });
