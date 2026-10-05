@@ -204,7 +204,7 @@ function collectPromptTables(promptContext = {}, allowedTables = []) {
  * Derived tables and CTEs resolve to DERIVED_TABLE_PREFIX + a per-body key, so
  * two derived tables that share an alias in different scopes stay distinct.
  */
-function buildRelationModel(analysis, knownTables) {
+function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } = {}) {
   const { tokens, groups } = analysis;
   const blocksById = new Map(analysis.blocks.map((block) => [block.id, block]));
   const bodies = new Map();
@@ -302,6 +302,7 @@ function buildRelationModel(analysis, knownTables) {
         origins: new Map(),
         orderedColumns: [],
         sourceTables: new Set(),
+        blockId: null,
         uniqueness: null,
       });
       derivedTables.set(key, { label: bodies.get(key).label, ...projectBody(bodies.get(key)) });
@@ -321,14 +322,15 @@ function buildRelationModel(analysis, knownTables) {
   };
   const columnOrigins = (relationName, columnName) => {
     if (isDerivedTableName(relationName)) {
-      return projectRelation(relationName).origins.get(columnName) || [];
+      const relation = projectRelation(relationName);
+      return relation.origins.get(findDerivedColumnName(relation, columnName)) || [];
     }
     const canonical = findColumnName(knownTables, relationName, columnName);
     return canonical ? [{ tableName: relationName, columnName: canonical }] : [];
   };
   const hasColumn = (relationName, columnName) =>
     isDerivedTableName(relationName)
-      ? projectRelation(relationName).columns.has(columnName)
+      ? Boolean(findDerivedColumnName(projectRelation(relationName), columnName))
       : Boolean(findColumnName(knownTables, relationName, columnName));
 
   // What an expression reads, so GROUP BY keys can be matched with select
@@ -374,9 +376,9 @@ function buildRelationModel(analysis, knownTables) {
     if (to - from >= 3 && isKeywordToken(previous, 'AS') && (tokenIdentifierName(last) || last.type === 'string')) {
       alias = last.type === 'string' ? last.value.slice(1, -1) : tokenIdentifierName(last);
       end = to - 2;
-    } else if (to - from >= 2 && isTrailingAlias(last, previous)) {
-      alias = tokenIdentifierName(last);
-      end = to - 1;
+    } else if (to - from >= 2) {
+      alias = trailingAliasName(tokens, from, to);
+      end = alias === null ? to : to - 1;
     }
 
     const key = expressionKey(block, from, end);
@@ -485,19 +487,66 @@ function buildRelationModel(analysis, knownTables) {
   };
 }
 
-// `expr alias` without AS: the alias is an identifier (not a reserved word)
-// that follows a complete operand, not an operator or operator keyword.
-function isTrailingAlias(last, previous) {
-  const name = tokenIdentifierName(last);
-  if (!name || last.afterDot || (last.type === 'word' && SQL_KEYWORDS.has(last.upper))) {
-    return false;
+// Words in SQL_KEYWORDS that MariaDB also takes as a bare alias (`SELECT
+// l.ProductId year`); END is left out, since `CASE ... THEN 1 END` must not
+// read as an alias.
+const ALIASABLE_KEYWORDS = new Set([
+  'ABS',
+  'AVG',
+  'CAST',
+  'COALESCE',
+  'CONCAT',
+  'COUNT',
+  'DATE',
+  'DATE_ADD',
+  'DATE_FORMAT',
+  'DATE_SUB',
+  'DAY',
+  'IFNULL',
+  'LOWER',
+  'MAX',
+  'MIN',
+  'MONTH',
+  'NULLIF',
+  'ROUND',
+  'SUM',
+  'UPPER',
+  'YEAR',
+]);
+
+// The alias of the select item [from, to) written without AS (`expr alias`),
+// or null: an identifier that is not a reserved word, or a string literal (not
+// after another string, which concatenates), following a complete operand
+// rather than an operator or operator keyword. The unit of `INTERVAL 1 DAY`
+// and the literal of `DATE '2026-03-01'` are not aliases.
+function trailingAliasName(tokens, from, to) {
+  const last = tokens[to - 1];
+  const previous = tokens[to - 2];
+  let name;
+  if (last.type === 'string') {
+    if (previous.type === 'string' || isKeywordToken(previous, 'DATE', 'TIME', 'TIMESTAMP')) {
+      return null;
+    }
+    name = last.value.slice(1, -1);
+  } else {
+    name = tokenIdentifierName(last);
+    if (!name || last.afterDot || (last.type === 'word' && SQL_KEYWORDS.has(last.upper) && !ALIASABLE_KEYWORDS.has(last.upper))) {
+      return null;
+    }
+    if (last.type === 'word' && SQL_KEYWORDS.has(last.upper)) {
+      for (let index = from; index < to - 1; index += 1) {
+        if (isKeywordToken(tokens[index], 'INTERVAL') && tokens[index].parentGroupId === last.parentGroupId) {
+          return null;
+        }
+      }
+    }
   }
-  return (
+  const complete =
     !isPunctToken(previous, '.') &&
     !isPunctToken(previous, ',') &&
     previous.type !== 'operator' &&
-    !isKeywordToken(previous, ...OPERAND_SEPARATOR_KEYWORDS, ...MULTIPLICATIVE_KEYWORDS, 'AS', 'BINARY', 'COLLATE', 'DISTINCT', 'ESCAPE', 'INTERVAL', 'SELECT')
-  );
+    !isKeywordToken(previous, ...OPERAND_SEPARATOR_KEYWORDS, ...MULTIPLICATIVE_KEYWORDS, 'AS', 'BINARY', 'COLLATE', 'DISTINCT', 'ESCAPE', 'INTERVAL', 'SELECT');
+  return complete ? name : null;
 }
 
 // { start, end, distinct } of a SELECT block's select list (after SELECT and
@@ -548,14 +597,28 @@ export function extractCteNames(sql) {
   return new Set(analyzeSqlStructure(String(sql || ''), { tolerant: true }).ctes.map((cte) => cte.name));
 }
 
-function columnExists(knownTables, tableName, columnName, derivedTables = new Map()) {
+// A derived table's or CTE's own spelling of `columnName`, or null. Like table
+// columns, derived columns are found case-insensitively.
+function findDerivedColumnName(relation, columnName) {
+  const columns = relation?.columns;
+  if (!columns || !columnName) {
+    return null;
+  }
+  if (columns.has(columnName)) {
+    return columnName;
+  }
+  const lower = String(columnName).toLowerCase();
+  return [...columns].find((candidate) => candidate.toLowerCase() === lower) || null;
+}
+
+// The relation's own spelling of `columnName` (a table, or a derived table or
+// CTE), or null when it has no such column.
+function findRelationColumnName(knownTables, tableName, columnName, derivedTables = new Map()) {
   const derivedKey = derivedAliasFromTableName(tableName);
   if (derivedKey) {
-    return Boolean(derivedTables.get(derivedKey)?.columns?.has(columnName));
+    return findDerivedColumnName(derivedTables.get(derivedKey), columnName);
   }
-
-  const columns = knownTables.get(tableName);
-  return columns instanceof Set && columns.has(columnName);
+  return findColumnName(knownTables, tableName, columnName);
 }
 
 function describeRelation(tableName, derivedTables) {
@@ -582,18 +645,19 @@ function collectQualifiedColumnTokens(analysis) {
 function validateQualifiedColumns(analysis, knownTables, model) {
   const usedColumns = [];
 
-  for (const { blockId, qualifier, columnName } of collectQualifiedColumnTokens(analysis)) {
+  for (const { blockId, qualifier, columnName: written } of collectQualifiedColumnTokens(analysis)) {
     const tableName = model.resolve(blockId, qualifier);
     if (!tableName) {
       throw guardrailError(
         'UNKNOWN_TABLE_ALIAS',
-        `SQL references unknown table or alias "${qualifier}" in qualified column "${qualifier}.${columnName}".`
+        `SQL references unknown table or alias "${qualifier}" in qualified column "${qualifier}.${written}".`
       );
     }
-    if (!columnExists(knownTables, tableName, columnName, model.derivedTables)) {
+    const columnName = findRelationColumnName(knownTables, tableName, written, model.derivedTables);
+    if (!columnName) {
       throw guardrailError(
         'UNKNOWN_COLUMN',
-        `SQL references unknown column "${columnName}" on ${describeRelation(tableName, model.derivedTables)}.`
+        `SQL references unknown column "${written}" on ${describeRelation(tableName, model.derivedTables)}.`
       );
     }
 
@@ -677,17 +741,18 @@ function collectRelationshipKeys(promptContext = {}) {
   return keys;
 }
 
-function resolveJoinColumnReferences(tableName, columnName, derivedTables) {
+function resolveJoinColumnReferences(knownTables, tableName, columnName, derivedTables) {
   const derivedKey = derivedAliasFromTableName(tableName);
   if (!derivedKey) {
-    return [{ tableName, columnName }];
+    return [{ tableName, columnName: findColumnName(knownTables, tableName, columnName) || columnName }];
   }
 
-  return derivedTables.get(derivedKey)?.origins?.get(columnName) || [];
+  const relation = derivedTables.get(derivedKey);
+  return relation?.origins?.get(findDerivedColumnName(relation, columnName)) || [];
 }
 
 // Every `a.x = b.y` comparison, each side resolved in its own SELECT block.
-function validateJoinGuardrails(analysis, model, promptContext) {
+function validateJoinGuardrails(analysis, knownTables, model, promptContext) {
   const relationshipKeys = collectRelationshipKeys(promptContext);
   const { tokens } = analysis;
   const { derivedTables } = model;
@@ -713,8 +778,8 @@ function validateJoinGuardrails(analysis, model, promptContext) {
       continue;
     }
 
-    const leftReferences = resolveJoinColumnReferences(leftTable, leftColumn, derivedTables);
-    const rightReferences = resolveJoinColumnReferences(rightTable, rightColumn, derivedTables);
+    const leftReferences = resolveJoinColumnReferences(knownTables, leftTable, leftColumn, derivedTables);
+    const rightReferences = resolveJoinColumnReferences(knownTables, rightTable, rightColumn, derivedTables);
     if (leftReferences.length === 0 || rightReferences.length === 0) {
       continue;
     }
@@ -1618,14 +1683,14 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOw
           // A derived column that copies one table column is that column (`h.amt`
           // for `d.NetAmount AS amt` is SalesDocument.NetAmount); any other
           // column of a single-table body is at that table's grain.
-          const [origin, ...more] = entry.relation?.origins.get(column) || [];
+          const [origin, ...more] = entry.relation?.origins.get(findDerivedColumnName(entry.relation, column)) || [];
           if (origin && more.length === 0) {
             grains.push(columnGrain(entry, origin.tableName, origin.columnName));
           } else if (entry.tableName) {
             grains.push(columnGrain(entry, entry.tableName, column));
           }
-        } else if (entry && knownTables.get(entry.tableName)?.has(column)) {
-          grains.push(columnGrain(entry, entry.tableName, column));
+        } else if (entry && findColumnName(knownTables, entry.tableName, column)) {
+          grains.push(columnGrain(entry, entry.tableName, findColumnName(knownTables, entry.tableName, column)));
         }
         index += 3;
         continue;
@@ -1743,7 +1808,8 @@ function validateFanOut(analysis, knownTables, promptContext, model) {
         }
         if (operand.qualifier) {
           const owner = qualifierEntries.get(operand.qualifier);
-          const columnName = owner && (owner.viaDerived ? operand.column : findColumnName(knownTables, owner.tableName, operand.column));
+          const columnName =
+            owner && (owner.viaDerived ? findDerivedColumnName(owner.relation, operand.column) : findColumnName(knownTables, owner.tableName, operand.column));
           return columnName ? { entry: owner, columnName } : null;
         }
         const owners = unqualifiedOwners(operand.column);
@@ -1995,7 +2061,7 @@ export function validateSqlGuardrails(
   const cteNames = new Set(analysis.ctes.map((cte) => cte.name));
   const qualifiedColumns = validateQualifiedColumns(analysis, knownTables, model);
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, model.qualifiers, model.derivedTables);
-  const joinChecks = validateJoinGuardrails(analysis, model, promptContext);
+  const joinChecks = validateJoinGuardrails(analysis, knownTables, model, promptContext);
   const fanOutChecks = validateFanOut(analysis, knownTables, promptContext, model);
   const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);

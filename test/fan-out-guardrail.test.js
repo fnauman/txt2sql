@@ -85,6 +85,8 @@ test('unqualified columns resolve to the only joined table that has them', () =>
   assertFanOut(BRAND_QUESTION, `SELECT SUM(\`GrossAmount\`) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
   assertFanOut(BRAND_QUESTION, `SELECT SUM(grossamount) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
   assertFanOut(BRAND_QUESTION, `SELECT AVG(\`GrossAmount\` - 0) AS gross ${HEADER_LINES}`, { column: 'GrossAmount' });
+  // A qualified column in another case is the same column too (6500 instead of 5500).
+  assertFanOut(BRAND_QUESTION, `SELECT SUM(d.netamount) AS net ${HEADER_LINES}`);
 });
 
 test('fan-out inside a CTE body or a derived table is rejected', () => {

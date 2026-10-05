@@ -70,6 +70,11 @@ const VALID = [
     'derived table over a CTE, star and string alias',
     "WITH a AS (SELECT d.CustomerId, SUM(d.NetAmount) AS 'net' FROM SalesDocument d GROUP BY d.CustomerId) SELECT c.CustomerName, x.net FROM (SELECT * FROM a) x JOIN Customer c ON c.CustomerId = x.CustomerId",
   ],
+  // A string alias needs no AS, and column names (of CTEs and tables alike) are case-insensitive.
+  [Q_CUST, 'CTE column with a string alias without AS', "WITH a AS (SELECT CustomerId, SUM(NetAmount) 'net' FROM SalesDocument GROUP BY CustomerId) SELECT a.net FROM a"],
+  [Q_CUST, 'CTE columns referenced in another case', 'WITH a AS (SELECT CustomerId, SUM(NetAmount) AS net FROM SalesDocument GROUP BY CustomerId) SELECT a.NET, a.customerid FROM a'],
+  [Q_NET, 'table columns and join keys in another case', 'SELECT c.customername, SUM(d.NetAmount) AS net FROM SalesDocument d JOIN Customer c ON c.customerid = d.CUSTOMERID GROUP BY c.customername'],
+  [Q_LINES, 'derived column named by a keyword alias without AS', 'SELECT x.year FROM (SELECT YEAR(d.DocumentDate) year FROM SalesDocument d) x'],
   // MariaDB resolves CTE names case-insensitively; qualifiers follow the FROM spelling.
   [Q_LIST, 'CTE referenced in another case', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT COUNT(*) AS n FROM X'],
   [Q_LIST, 'CTE columns qualified by the FROM spelling', 'WITH x AS (SELECT CustomerId FROM Customer) SELECT X.CustomerId FROM X'],
