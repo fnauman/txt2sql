@@ -637,16 +637,22 @@ export function createApp({
     // OPENAI_NOT_CONFIGURED) says nothing about the database; error.code names
     // the failing dependency.
     let dbReachable = null;
+    // The request deadline bounds every wait, so a stalled runtime load or a
+    // saturated pool is reported as unhealthy instead of hanging the probe.
+    const { signal, dispose } = createRequestSignal(res);
     try {
-      lease = await runtimes.acquire();
+      lease = await untilAborted(runtimes.acquire(), signal, { onLate: (late) => late.release() });
       dbReachable = false;
-      const [rows] = await lease.runtime.connection.query('SELECT 1 AS ok');
+      const [rows] = await untilAborted(lease.runtime.connection.query('SELECT 1 AS ok'), signal);
       dbReachable = rows?.[0]?.ok === 1;
-      const dbSchema = await getDatabaseSchema(lease, { refresh: true });
+      const dbSchema = await untilAborted(getDatabaseSchema(lease, { refresh: true }), signal);
       const privileges = authenticated
-        ? await checkQueryUserPrivileges(lease.runtime.connection, { database: config.database.name }).catch((error) => ({
-            error: error.message,
-          }))
+        ? await untilAborted(
+            checkQueryUserPrivileges(lease.runtime.connection, { database: config.database.name }).catch((error) => ({
+              error: error.message,
+            })),
+            signal
+          )
         : null;
       res.json({
         ...payload,
@@ -668,6 +674,7 @@ export function createApp({
         error: authenticated ? toClientError({ ...serializeError(error), code: errorCodeOf(error) }) : anonymousInfraError(error),
       });
     } finally {
+      dispose();
       lease?.release();
     }
   });

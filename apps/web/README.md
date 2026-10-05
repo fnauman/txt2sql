@@ -71,7 +71,7 @@ reports `truncated: true` with `totalRowCount: null`, and the UI shows "N+ rows"
 
 **Endpoints besides the query routes:**
 
-- `GET /api/health` is unauthenticated and cheap (the status bar polls it). `GET /api/health?deep=1` loads the query runtime and touches the database; it requires the token when one is configured. The runtime creates the OpenAI client first, so without `OPENAI_API_KEY` the deep check returns 503 `OPENAI_NOT_CONFIGURED` with `dbReachable: null` (the database was not tried) and no privilege report. Only callers that present the token see the DB host/port, env path, schema and the query-user privilege report; anonymous callers never do.
+- `GET /api/health` is unauthenticated and cheap (the status bar polls it). `GET /api/health?deep=1` loads the query runtime and touches the database; it requires the token when one is configured. The runtime creates the OpenAI client first, so without `OPENAI_API_KEY` the deep check returns 503 `OPENAI_NOT_CONFIGURED` with `dbReachable: null` (the database was not tried) and no privilege report. `WEB_REQUEST_TIMEOUT_MS` bounds the deep check too: a stalled runtime load or a saturated pool answers 503 `REQUEST_TIMEOUT` instead of hanging the probe. Only callers that present the token see the DB host/port, env path, schema and the query-user privilege report; anonymous callers never do.
 - `POST /api/admin/refresh-schema` rebuilds the runtime from a freshly compiled schema and clears the result cache. It requires `WEB_API_TOKEN` (403 `ADMIN_DISABLED` when none is configured). In-flight questions finish on the old runtime, whose pool is closed once they are done. The old `refreshSchema` flag in query bodies is ignored.
 
 **Request hardening:** responses carry `X-Content-Type-Options: nosniff`,

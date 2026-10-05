@@ -852,6 +852,27 @@ test('the request deadline bounds the OpenAI SDK retry backoff (429 with retry-a
   }
 });
 
+test('the request deadline bounds the deep health check on a saturated pool', async () => {
+  const slot = stall();
+  const runtime = createFakeRuntime();
+  const query = runtime.connection.query;
+  runtime.connection.query = async (sql, params) => {
+    await slot.promise; // every pool slot is busy
+    return query(sql, params);
+  };
+  const config = testConfig({ WEB_API_TOKEN: TOKEN, WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+  await withApp({ config, runtimeFactory: async () => runtime }, async (app) => {
+    const deep = await timed(app.request({ path: '/api/health?deep=1', headers: auth }));
+    assert.ok(deep.elapsedMs < PROMPT_MS, `answered after ${deep.elapsedMs} ms`);
+    assert.equal(deep.status, 503);
+    assert.equal(deep.json.ok, false);
+    assert.equal(deep.json.dbReachable, false);
+    assert.equal(deep.json.error.code, 'REQUEST_TIMEOUT');
+    assert.equal(app.runtimeManager.status().inFlight, 0, 'the lease is released with the answer');
+    slot.release();
+  });
+});
+
 test('a success that arrives after the request deadline is neither returned nor cached', async () => {
   const { factory } = createRuntimeFactory();
   // A runner that ignores the signal (e.g. a statement that finished after a
