@@ -268,6 +268,34 @@ test('an infrastructure error leaves a negative control unscored, never killed',
   assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95 }), ['d: design kill rate 0.0% < 95.0%']);
 });
 
+test('a negative control whose verdict rests on a cut-off mapping search is undecided, not killed', async () => {
+  // Ten columns whose values pair up differently on the two fixtures (see the
+  // oracle test): each fixture alone matches and the bounded shared search
+  // gives up. The oracle fails closed (no match), but that is no kill.
+  const goldRows = [0, 1].map((row) => Object.fromEntries(['m1', 'm2', 'm3', 'm4', 'm5'].map((column) => [column, row])));
+  const predicted = (groupA) => [0, 1].map((row) =>
+    Object.fromEntries(Array.from({ length: 10 }, (_unused, index) => [`p${index + 1}`, groupA.includes(index + 1) ? row : 1 - row]))
+  );
+  const testCase = caseWith({ comparison: { mode: 'rowset', tolerance: 0.001 }, signal_checks: undefined });
+  const result = await verifyCase(testCase, {
+    connections: [
+      fakeFixture('seed', { [GOLD]: goldRows, [NEGATIVE]: predicted([1, 2, 3, 4, 5]) }),
+      fakeFixture('v2', { [GOLD]: goldRows, [NEGATIVE]: predicted([1, 2, 6, 7, 8]) }),
+    ],
+    validate: accept,
+    controlsIndex: controlsFor(testCase, { negative: [{ id: 'm1', sql: NEGATIVE, note: 'pathological' }] }),
+  });
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(
+    result.controls.negative.map(({ id, status, killed, reason }) => [id, status, killed, reason]),
+    [['m1', 'undecided', false, 'assignment_search_exhausted']]
+  );
+  const summary = summarizeControls([result], { fixtureNames: ['seed', 'v2'] });
+  assert.deepEqual([summary.design.killed, summary.design.rate, summary.crossFixtureOnly], [0, 0, 0]);
+  assert.deepEqual(summary.design.undecided, ['c1/m1 (metric: pathological)']);
+  assert.deepEqual(summary.design.survivors, []);
+});
+
 test('controls written for a different gold are reported as stale and not run', async () => {
   const testCase = caseWith();
   const result = await verifyCase(testCase, {

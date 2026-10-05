@@ -14,7 +14,10 @@
 //   and an infrastructure error leaves it unscored; both are problems (so
 //   verify-dataset exits non-zero) and both stay in the kill-rate denominator
 //   as not killed, so a broken control or a dropped connection can only
-//   lower the reported rate, never raise it.
+//   lower the reported rate, never raise it. Likewise a verdict that rests on
+//   a column-mapping search cut off by its bound (the oracle fails closed,
+//   which is right for a model's SQL) is undecided, not a kill: it is listed
+//   and counts as not killed, like a survivor.
 
 import {
   compareResults,
@@ -77,11 +80,25 @@ export function createValidatorProbe({ schema, connection = null }) {
 
 /**
  * Verdicts of a negative control: killed (executed on every fixture and did
- * not match), survived (matched), invalid (an SQL error such as a bad column
- * or a timeout on some fixture) or unscored (an infrastructure error such as
- * a dropped connection). Only `killed` counts as a kill.
+ * not match), survived (matched), undecided (the mismatch rests on a
+ * column-mapping search cut off by its bound), invalid (an SQL error such as
+ * a bad column or a timeout on some fixture) or unscored (an infrastructure
+ * error such as a dropped connection). Only `killed` counts as a kill.
  */
-export const NEGATIVE_STATUS = Object.freeze({ killed: 'killed', survived: 'survived', invalid: 'invalid', unscored: 'unscored' });
+export const NEGATIVE_STATUS = Object.freeze({
+  killed: 'killed',
+  survived: 'survived',
+  undecided: 'undecided',
+  invalid: 'invalid',
+  unscored: 'unscored',
+});
+
+const EXHAUSTED = 'assignment_search_exhausted';
+
+// Some part of the oracle's verdict came from a search that gave up.
+function restsOnExhaustedSearch(score) {
+  return score.reason === EXHAUSTED || score.variants.some((variant) => variant.reason === EXHAUSTED || variant.perFixture.some((entry) => entry.reason === EXHAUSTED));
+}
 
 function goldColumnsOf(rows) {
   return Object.keys(rows?.[0] ?? {});
@@ -191,7 +208,9 @@ export async function verifyCase(testCase, {
           ? NEGATIVE_STATUS.invalid
           : score.match
             ? NEGATIVE_STATUS.survived
-            : NEGATIVE_STATUS.killed;
+            : restsOnExhaustedSearch(score)
+              ? NEGATIVE_STATUS.undecided
+              : NEGATIVE_STATUS.killed;
       const killed = status === NEGATIVE_STATUS.killed;
       negative.push({
         id: control.id,
@@ -225,10 +244,12 @@ function rate(killed, total) {
 /**
  * Kill-rate summary over verified cases:
  * { design, heldout, byType, byFixture, positive } where design/heldout are
- * { total, killed, rate, seedOnlyKilled, seedOnlyRate, survivors, invalid,
- * unscored, executionErrors }. `invalid` and `unscored` list the controls that
- * did not execute (SQL error / infrastructure error); they count in `total`
- * as not killed, so they can only lower `rate`.
+ * { total, killed, rate, seedOnlyKilled, seedOnlyRate, survivors, undecided,
+ * invalid, unscored, executionErrors }. `undecided` lists the controls whose
+ * verdict rests on a mapping search cut off by its bound; `invalid` and
+ * `unscored` list the controls that did not execute (SQL error /
+ * infrastructure error). All three count in `total` as not killed, so they
+ * can only lower `rate`.
  */
 export function summarizeControls(caseResults, { fixtureNames = [], primaryFixture = PRIMARY_FIXTURE.name } = {}) {
   const negatives = [];
@@ -256,6 +277,7 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
       seedOnlyKilled,
       seedOnlyRate: rate(seedOnlyKilled, list.length),
       survivors: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.survived).map(describe),
+      undecided: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.undecided).map(describe),
       invalid: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.invalid).map(describeErrors),
       unscored: list.filter((control) => statusOf(control) === NEGATIVE_STATUS.unscored).map(describeErrors),
       executionErrors: list.filter((control) => control.executionError).length,

@@ -148,7 +148,10 @@ function printControlsSummary(summary, fixtureNames) {
   for (const survivor of [...design.survivors, ...heldout.survivors.map((entry) => `${entry} [held-out]`)]) {
     console.log(`    survivor: ${survivor}`);
   }
-  // Controls that did not execute are not kills; they count as not killed.
+  // Undecided controls and controls that did not execute are not kills.
+  for (const entry of [...design.undecided, ...heldout.undecided.map((item) => `${item} [held-out]`)]) {
+    console.log(`    undecided (mapping search cut off, counted as not killed): ${entry}`);
+  }
   for (const entry of [...design.invalid, ...heldout.invalid.map((item) => `${item} [held-out]`)]) {
     console.log(`    invalid (fails to execute, counted as not killed): ${entry}`);
   }

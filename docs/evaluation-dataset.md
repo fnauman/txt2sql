@@ -324,7 +324,10 @@ execute (a bad column, a timeout) is **invalid**, and one hit by an
 infrastructure error (a dropped connection) is **unscored**. Both are
 problems that fail `verify-dataset`, and both stay in the denominator as not
 killed, so a broken control or a lost connection can only lower the reported
-rate, never raise it.
+rate, never raise it. A verdict that rests on a column-mapping search cut off
+by its bound (`assignment_search_exhausted`: the oracle fails closed, which is
+right for a model's SQL) is **undecided** for a control: listed, and counted
+as not killed like a survivor.
 
 **Read these as fitted numbers, not a generalization estimate.** The fixtures
 were extended until the controls died: v2b after the audit's held-out mutants
