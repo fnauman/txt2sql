@@ -27,7 +27,7 @@ import {
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
-import { resolveCaseControls } from './controls.js';
+import { goldFingerprint, resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 
@@ -416,4 +416,63 @@ export function pinWriteRefusal(checks) {
     `--write-pins refused, no pins written: ${reasons.join('; ')}. ` +
     'Run "npm run seed-fixtures" (admin credentials) so every fixture holds the generated content, then rerun with --write-pins.'
   );
+}
+
+/**
+ * In-process verify-dataset for an evaluation run (scripts/eval.js): every
+ * case of every dataset is verified once (a case shared by two datasets, like
+ * the core cases in the edge suite, is checked once and counted in both), and
+ * the same gates apply: no case problem, and each dataset's design (and
+ * held-out) kill rate at or above the floors. `datasets` are
+ * [{ name, cases }] of normalized cases. Returns { cases, problems: [{ id,
+ * datasets, problems }], notes, gateFailures, datasets: [{ name, cases,
+ * failures, controls }] }.
+ */
+export async function verifySuite({
+  datasets,
+  connections,
+  goldCache = createGoldCache(),
+  validate = null,
+  controlsIndex = null,
+  checkControls = true,
+  minKillRate = 0.95,
+  minHeldoutKillRate = 0,
+  fixtureNames = connections.map((entry) => entry.name),
+  verify = verifyCase,
+} = {}) {
+  const verified = new Map();
+  const problems = [];
+  const notes = [];
+  const gateFailures = [];
+  const datasetSummaries = [];
+  for (const dataset of datasets) {
+    const results = [];
+    for (const testCase of dataset.cases) {
+      const key = `${testCase.id}\u0000${goldFingerprint(testCase.expected_sql)}`;
+      let entry = verified.get(key);
+      if (!entry) {
+        const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
+        entry = { result, datasets: [] };
+        verified.set(key, entry);
+        if (result.problems.length > 0) {
+          problems.push({ id: testCase.id, datasets: entry.datasets, problems: result.problems });
+        }
+        notes.push(...result.notes.map((note) => `${testCase.id}: ${note}`));
+      }
+      entry.datasets.push(dataset.name);
+      results.push(entry.result);
+    }
+    const summary = checkControls ? summarizeControls(results, { fixtureNames }) : null;
+    const hasControls = summary && summary.design.total + summary.heldout.total + summary.positive.total > 0;
+    if (hasControls) {
+      gateFailures.push(...killRateGateFailures(summary, { datasetName: dataset.name, minKillRate, minHeldoutKillRate }));
+    }
+    datasetSummaries.push({
+      name: dataset.name,
+      cases: results.length,
+      failures: results.filter((result) => result.problems.length > 0).length,
+      controls: hasControls ? summary : null,
+    });
+  }
+  return { cases: verified.size, problems, notes, gateFailures, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
 }
