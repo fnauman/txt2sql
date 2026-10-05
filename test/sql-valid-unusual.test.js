@@ -174,6 +174,11 @@ const VALID = [
   [Q_LIST, 'an alias named minus', 'SELECT minus.CustomerName FROM Customer minus ORDER BY minus.CustomerName'],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
+    Q_LINES,
+    'window SUM over a per-document MAX with a line join',
+    'SELECT d.SalesDocumentId, MAX(d.NetAmount) AS amount, SUM(MAX(d.NetAmount)) OVER () AS total FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId GROUP BY d.SalesDocumentId',
+  ],
+  [
     Q_QTY,
     'COUNT/MAX over header columns with a line join',
     'SELECT p.ProductName, COUNT(DISTINCT d.SalesDocumentId) AS docs, MAX(d.NetAmount) AS biggest, SUM(l.Quantity) AS qty FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId GROUP BY p.ProductName',

@@ -747,8 +747,15 @@ const ROW_COLLAPSING_AGGREGATES = new Set([
   'JSON_OBJECTAGG',
 ]);
 
+// Aggregates whose result ignores duplicate rows: the MAX of a parent value
+// repeated once per child row is still that value.
+const DUPLICATE_INSENSITIVE_AGGREGATES = new Set(['MIN', 'MAX', 'ANY_VALUE', 'BIT_AND', 'BIT_OR']);
+
 // Words that end a WHERE clause at its own depth.
 const WHERE_CLAUSE_TERMINATORS = new Set(['GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'WINDOW', 'INTO', 'FOR', 'LOCK', 'PROCEDURE']);
+
+// Words that end a GROUP BY list at its own depth (WITH starts WITH ROLLUP).
+const GROUP_BY_TERMINATORS = new Set(['HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'INTO', 'FOR', 'LOCK', 'PROCEDURE', 'WITH']);
 
 // Words that end a join's ON condition at its own depth.
 const ON_CLAUSE_TERMINATORS = new Set([
@@ -921,6 +928,23 @@ function createTokenWalker(analysis) {
     return conjuncts;
   };
 
+  // Top-level comma-separated items of [start, end) as [from, to) ranges.
+  const splitList = (start, end) => {
+    const items = [];
+    let itemStart = start;
+    for (let index = start; index < end; ) {
+      if (isPunctToken(tokens[index], ',')) {
+        items.push([itemStart, index]);
+        itemStart = index + 1;
+        index += 1;
+        continue;
+      }
+      index = nextAtom(index, end);
+    }
+    items.push([itemStart, end]);
+    return items;
+  };
+
   // Strip parentheses that wrap the whole range: `((a.b IS NULL))` -> `a.b IS NULL`.
   const unwrapParens = ([start, end]) => {
     let from = start;
@@ -942,7 +966,7 @@ function createTokenWalker(analysis) {
     return null;
   };
 
-  return { tokens, groups, closeOf, nextAtom, splitConjuncts, unwrapParens, qualifiedColumnAt };
+  return { tokens, groups, closeOf, nextAtom, splitConjuncts, splitList, unwrapParens, qualifiedColumnAt };
 }
 
 // The block's base paren group (null for the top-level statement).
@@ -971,6 +995,77 @@ function findWhereRange(walker, block) {
     }
   }
   return [start, end];
+}
+
+// [start, end) of the block's GROUP BY list (without WITH ROLLUP), or null.
+function findGroupByRange(walker, block) {
+  const { tokens } = walker;
+  const baseGroup = blockBaseGroup(block);
+  const indexes = block.tokenIndexes.filter((index) => tokens[index].parentGroupId === baseGroup);
+  const groupAt = indexes.findIndex((index) => isKeywordToken(tokens[index], 'GROUP') && isKeywordToken(tokens[index + 1], 'BY'));
+  if (groupAt < 0) {
+    return null;
+  }
+  const start = indexes[groupAt] + 2;
+  let end = block.tokenIndexes[block.tokenIndexes.length - 1] + 1;
+  for (const index of indexes.slice(groupAt + 2)) {
+    const token = tokens[index];
+    const windowClause =
+      isKeywordToken(token, 'WINDOW') && tokenIdentifierName(tokens[index + 1]) && isKeywordToken(tokens[index + 2], 'AS');
+    if (isKeywordToken(token, ...GROUP_BY_TERMINATORS) || windowClause || isPunctToken(token, ';')) {
+      end = index;
+      break;
+    }
+  }
+  return [start, end];
+}
+
+/**
+ * The entries whose columns the block's GROUP BY keys read ([] when there is
+ * no GROUP BY), or null when a key cannot be attributed to a joined table: a
+ * positional `GROUP BY 1`, an output alias, an outer-scope column or an
+ * unknown identifier.
+ */
+function collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners }) {
+  const range = findGroupByRange(walker, block);
+  if (!range) {
+    return [];
+  }
+  const { tokens } = walker;
+  const owners = [];
+  for (const item of walker.splitList(range[0], range[1])) {
+    const [start, end] = walker.unwrapParens(item);
+    if (end - start === 1 && tokens[start].type === 'number') {
+      return null;
+    }
+    for (let index = start; index < end; index += 1) {
+      const token = tokens[index];
+      if (token.blockId !== block.id) {
+        continue;
+      }
+      const reference = walker.qualifiedColumnAt(index);
+      if (reference) {
+        const entry = qualifierEntries.get(reference.qualifier);
+        if (!entry) {
+          return null;
+        }
+        owners.push(entry);
+        index += 2;
+        continue;
+      }
+      const name = tokenIdentifierName(token);
+      if (!name || token.afterDot || isPunctToken(tokens[index + 1], '(')) {
+        continue;
+      }
+      const found = unqualifiedOwners(name);
+      if (found.length === 1) {
+        owners.push(found[0].entry);
+      } else if (!(token.type === 'word' && SQL_KEYWORDS.has(token.upper))) {
+        return null;
+      }
+    }
+  }
+  return owners;
 }
 
 // Columns of a joined reference that are equated in its own join condition
@@ -1146,7 +1241,7 @@ function resolvePassThroughTable(walker, analysis, ref, knownTables, depth = 0) 
  * factor is fine: SUM(l.Quantity * p.Price) is a per-line value. WHEN/IF
  * conditions only filter rows and do not set the grain.
  */
-function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNames, knownTables, isCoarse }) {
+function createGrainEvaluator(walker, { blockId, qualifierEntries, unqualifiedOwners, knownTables, isCoarse, isGroupedWithin }) {
   const { tokens } = walker;
   const references = [];
 
@@ -1154,9 +1249,31 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNam
   const combineMultiplicative = (grains) =>
     grains.includes('fine') ? 'fine' : grains.find((grain) => grain.coarse) || 'const';
 
-  const columnGrain = (tableName, columnName) => {
-    references.push({ tableName, columnName });
-    return isCoarse(tableName) ? { coarse: { tableName, columnName } } : 'fine';
+  const columnGrain = (entry, tableName, columnName) => {
+    const coarse = isCoarse(tableName);
+    references.push({ entry, tableName, columnName, coarse });
+    return coarse ? { coarse: { tableName, columnName } } : 'fine';
+  };
+
+  // SUM(MAX(d.NetAmount)) OVER (): the inner, non-window MIN/MAX ignores the
+  // repeated parent rows and yields one value per group. When every GROUP BY
+  // key reads only that parent's columns (or there is no GROUP BY), the groups
+  // are the ones the query has without the child join, so the outer windowed
+  // SUM adds each value once per group, not once per child row. The parent key
+  // itself is not required (GROUP BY d.CustomerId is fine), but a key from
+  // another table (l.ProductId) splits a parent across groups and still fans
+  // out. An inner SUM/AVG is not reduced and stays a fan-out.
+  const isReducedPerParent = (nameToken, closeIndex, innerReferences) => {
+    if (
+      nameToken.type !== 'word' ||
+      nameToken.afterDot ||
+      !DUPLICATE_INSENSITIVE_AGGREGATES.has(nameToken.upper) ||
+      isKeywordToken(tokens[closeIndex + 1], 'OVER')
+    ) {
+      return false;
+    }
+    const coarseEntries = new Set(innerReferences.filter((reference) => reference.coarse).map((reference) => reference.entry));
+    return coarseEntries.size === 1 && isGroupedWithin([...coarseEntries][0]);
   };
 
   const splitAt = (start, end, isSeparator) => {
@@ -1226,7 +1343,12 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNam
     if (nameToken.type === 'word' && nameToken.upper === 'IF' && args.length === 3) {
       args = args.slice(1);
     }
-    return combineAdditive(args.map(([from, to]) => evaluateExpression(from, to)));
+    const firstReference = references.length;
+    const grain = combineAdditive(args.map(([from, to]) => evaluateExpression(from, to)));
+    if (grain.coarse && isReducedPerParent(nameToken, closeIndex, references.slice(firstReference))) {
+      return 'fine';
+    }
+    return grain;
   };
 
   const evaluateFactor = (start, end) => {
@@ -1248,18 +1370,16 @@ function createGrainEvaluator(walker, { blockId, qualifierEntries, blockTableNam
         const { qualifier, column } = walker.qualifiedColumnAt(index);
         const entry = qualifierEntries.get(qualifier);
         if (entry && (entry.viaDerived || knownTables.get(entry.tableName)?.has(column))) {
-          grains.push(columnGrain(entry.tableName, column));
+          grains.push(columnGrain(entry, entry.tableName, column));
         }
         index += 3;
         continue;
       } else if (tokenIdentifierName(token) && !token.afterDot) {
         // Unqualified column, plain or backtick-quoted; MariaDB column names are
         // case-insensitive (`grossamount` is SalesDocument.GrossAmount).
-        const owners = blockTableNames
-          .map((tableName) => [tableName, findColumnName(knownTables, tableName, tokenIdentifierName(token))])
-          .filter(([, columnName]) => columnName);
+        const owners = unqualifiedOwners(tokenIdentifierName(token));
         if (owners.length === 1) {
-          grains.push(columnGrain(...owners[0]));
+          grains.push(columnGrain(owners[0].entry, owners[0].entry.tableName, owners[0].columnName));
         }
       }
       index = next;
@@ -1338,7 +1458,25 @@ function validateFanOut(analysis, knownTables, promptContext) {
         qualifierEntries.set(entry.tableName, entry);
       }
     }
-    const blockTableNames = [...new Set(entries.filter((entry) => !entry.viaDerived).map((entry) => entry.tableName))];
+    // One joined table per name that has an unqualified `name` column, with the
+    // table's spelling of it.
+    const unqualifiedOwners = (name) => {
+      const owners = new Map();
+      for (const entry of entries) {
+        const columnName = entry.viaDerived ? null : findColumnName(knownTables, entry.tableName, name);
+        if (columnName && !owners.has(entry.tableName)) {
+          owners.set(entry.tableName, { entry, columnName });
+        }
+      }
+      return [...owners.values()];
+    };
+    let groupByOwners;
+    const isGroupedWithin = (entry) => {
+      if (groupByOwners === undefined) {
+        groupByOwners = collectGroupByOwners(walker, block, { qualifierEntries, unqualifiedOwners });
+      }
+      return Array.isArray(groupByOwners) && groupByOwners.every((owner) => owner === entry);
+    };
 
     for (const index of block.tokenIndexes) {
       const token = tokens[index];
@@ -1350,9 +1488,10 @@ function validateFanOut(analysis, knownTables, promptContext) {
       const evaluator = createGrainEvaluator(walker, {
         blockId: block.id,
         qualifierEntries,
-        blockTableNames,
+        unqualifiedOwners,
         knownTables,
         isCoarse: (tableName) => childEdgesOf(tableName).length > 0,
+        isGroupedWithin,
       });
       const grain = evaluator.evaluateExpression(group.open + 1, group.close);
       if (evaluator.references.length === 0) {

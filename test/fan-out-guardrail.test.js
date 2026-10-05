@@ -18,6 +18,9 @@ const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT
 
 const BRAND_QUESTION = 'Show the top brands by net sales in March 2026.';
 const POSTINGS_QUESTION = 'How many non-canceled sales documents do not have any accounting postings?';
+// Metric-free question whose prompt context has the document, line and product
+// tables, for shapes that are about the join structure rather than a measure.
+const LINES_QUESTION = 'List sales documents with their product lines.';
 const HEADER_LINES = 'FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId';
 
 function validateFor(question, sql) {
@@ -166,6 +169,36 @@ test('an aggregate that can yield a header value is at header grain, even if it 
     `SELECT ROUND(SUM(CAST(l.NetAmount AS DECIMAL(18, 2)) * d.IsCanceled), 2) AS n ${HEADER_LINES}`,
   ]) {
     assert.doesNotThrow(() => validateFor(BRAND_QUESTION, sql), sql);
+  }
+});
+
+test('a parent value reduced by an inner MIN/MAX per parent-level group is not repeated by an outer window SUM', () => {
+  // MAX ignores the repeated document rows, and grouping only by document
+  // columns keeps the groups the query has without the line join. On the
+  // seeded demo DB these return 5500 (by document) and 3350 (by customer),
+  // exactly what they return without the join.
+  for (const sql of [
+    `SELECT d.SalesDocumentId, MAX(d.NetAmount) AS amount, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.SalesDocumentId`,
+    `SELECT d.CustomerId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.CustomerId`,
+    `SELECT d.SalesDocumentId, AVG(MIN(d.NetAmount)) OVER () AS average ${HEADER_LINES} GROUP BY d.SalesDocumentId, YEAR(d.DocumentDate)`,
+    `SELECT SUM(COALESCE(MAX(d.NetAmount), 0)) OVER () AS total ${HEADER_LINES}`,
+  ]) {
+    assert.doesNotThrow(() => validateFor(LINES_QUESTION, sql), sql);
+  }
+
+  for (const sql of [
+    // An inner SUM is itself repeated per line (6500 instead of 5500).
+    `SELECT d.SalesDocumentId, SUM(SUM(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.SalesDocumentId`,
+    `SELECT d.SalesDocumentId, SUM(AVG(d.NetAmount) + MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.SalesDocumentId`,
+    // A line-level GROUP BY key puts one document in several groups (6500 and 5100).
+    `SELECT d.SalesDocumentId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY d.SalesDocumentId, l.ProductId`,
+    `SELECT l.ProductId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY l.ProductId`,
+    // Positional keys are not attributed to a table.
+    `SELECT l.ProductId, SUM(MAX(d.NetAmount)) OVER () AS total ${HEADER_LINES} GROUP BY 1`,
+    // A windowed MAX is not a per-group reduction.
+    `SELECT SUM(d.NetAmount) OVER () AS total, MAX(d.NetAmount) OVER () AS m ${HEADER_LINES}`,
+  ]) {
+    assertFanOut(LINES_QUESTION, sql);
   }
 });
 
