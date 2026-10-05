@@ -60,8 +60,8 @@ function sumDurations(attempts, step) {
  * - Gold runs first (with its own timeout), so a broken gold costs no LLM call
  *   and is reported as 'expected_sql_error', never as a model failure.
  * - `signal` (optional AbortSignal, e.g. the runner's per-case deadline) is
- *   passed to the product loop, which stops the in-flight LLM call or query
- *   and reports the case as 'aborted'.
+ *   passed to the product loop, which stops the in-flight LLM call (and kills
+ *   a running query on a pool) and reports the case as 'aborted'.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  */

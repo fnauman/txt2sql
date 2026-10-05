@@ -3,8 +3,9 @@
 // Tasks are scheduled case-major (every repetition of case 1, then case 2,
 // ...) on `concurrency` workers. Each task gets an AbortSignal that fires
 // after `caseTimeoutMs`; it is passed down to runOptimizedQuestion, which stops
-// the in-flight LLM call or query. A task that ignores the signal is abandoned
-// `graceMs` later and recorded as a timeout.
+// the in-flight LLM call (a query already running ends at its statement
+// timeout). A task that ignores the signal is abandoned `graceMs` later and
+// recorded as a timeout.
 //
 // Budget: once the cumulative LLM cost of finished tasks reaches `budgetUsd`,
 // no NEW case is started; every repetition of a case that has not started is

@@ -339,7 +339,7 @@ function verificationSection(report) {
   lines.push(`Fixtures: ${fixtures || 'n/a'}.`);
   lines.push('');
   if (!verification || verification.skipped) {
-    lines.push('Gold and controls: not verified in this run (--skip-verify).');
+    lines.push('Gold and controls: not verified in this run (--skip-verify, or the benchmark profile).');
     return lines.join('\n');
   }
   lines.push(

@@ -490,8 +490,8 @@ npm run eval -- --help                              # every flag
    OpenAI-compatible endpoint; `MODEL_NAME` or `--model`). Every selected case
    goes through the product loop (`evaluateQuestion` -> `runOptimizedQuestion`)
    on `--concurrency` workers (default 4), each repetition under a deadline
-   (`--case-timeout-ms`, default 120000; the AbortSignal stops the in-flight
-   LLM call or query). `--repeat N` keeps every repetition. `--budget-usd X`
+   (`--case-timeout-ms`, default 120000; an AbortSignal stops the in-flight
+   LLM call, and a query already running ends at its statement timeout). `--repeat N` keeps every repetition. `--budget-usd X`
    stops starting new cases once the LLM cost of finished cases reaches X; the
    rest are `skipped_budget`. Cases already started finish their repetitions,
    so the overshoot is at most the cases in flight.

@@ -453,7 +453,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     concurrency: options.concurrency,
     caseTimeoutMs: options.caseTimeoutMs,
     budgetUsd: options.budgetUsd,
-    runRepetition: ({ testCase, caseIndex, signal }) =>
+    runRepetition: ({ testCase, caseIndex, repetition, signal }) =>
       evaluateQuestion({
         client,
         connections,
@@ -462,7 +462,8 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
         testCase,
         caseIndex: caseIndex + 1,
         datasetName: entries[caseIndex].datasets[0],
-        trace,
+        // Every trace line of this case carries its repetition number.
+        trace: { enabled: true, emit: (event, payload = {}) => trace.emit(event, { ...payload, repetition }) },
         goldCache,
         maxRetries,
         statementTimeoutMs,
