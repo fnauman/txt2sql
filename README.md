@@ -350,13 +350,26 @@ local and down), seeds the three fixture databases with the admin role when
 they are missing or drifted, verifies every gold query and the oracle controls
 (no LLM call happens if that fails), runs every unique case of every dataset in
 `datasets/` through the product loop with 4 cases in flight and a per-case
-deadline, and writes `generated/runs/<timestamp>/all/<model>/`:
+deadline, and writes `generated/runs/<timestamp>/all/<model>/`.
 
-- `report.md`: strict accuracy with a 95% confidence interval, who caused each
-  failure (model, guardrail false rejection, retrieval miss, infrastructure),
-  the guardrail confusion matrix, a per-case table, cost / latency / retries /
-  tokens, and the provenance (git sha, prompt, semantic-layer, fixture and
-  dataset hashes);
+The suite is 251 unique cases over 139 intents: the original core, paraphrase
+and edge cases, a templated set (`datasets/templated-public.json`, 92 intents
+with 2-3 phrasings each, built by `npm run build-eval-dataset`) and 40
+hand-written hard cases (new vocabulary, Swedish, typos, relative dates with an
+as-of date, named entities, zero-row answers, and 10 unanswerable or ambiguous
+questions where the right behaviour is to abstain or ask, reported apart from
+accuracy). Every case is `dev` or `holdout`: the 46 holdout intents use wording
+the prompt rules and the semantic layer were not tuned on, `--split holdout`
+runs them alone, and the report breaks results down by split. Some cases are
+flagged as known product gaps (the validator rejects a correct answer
+today, e.g. retrieval misses a named store's table); they still count. The
+report contains:
+
+- `report.md`: strict accuracy with a 95% confidence interval, accuracy by
+  split, who caused each failure (model, guardrail false rejection, retrieval
+  miss, infrastructure), the guardrail confusion matrix, the abstain / clarify
+  cases handled, a per-case table, cost / latency / retries / tokens, and the
+  provenance (git sha, prompt, semantic-layer, fixture and dataset hashes);
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
@@ -365,8 +378,9 @@ when committed) it adds a paired comparison with an exact McNemar test;
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
-`--case-id`, `--split`. A full run of the 26 unique cases costs a few cents on
-gpt-4o-mini. Setup, flags, how to read the report, and the CI jobs are in
+`--case-id`, `--split`. One repetition of the whole suite costs roughly 13
+cents on gpt-4o-mini. The dataset composition, the generator, how to add a
+case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 
 ## Web App
