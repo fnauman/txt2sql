@@ -15,14 +15,17 @@
 // - v2 (demo_retail_v2): the audit's hand-designed fixture
 //   (.local/audit-2026-10-05/mutation/v2_fixture.sql + v2b_patch.sql), ported
 //   to code. Each change targets one family of wrong SQL (see buildV2Facts).
-// - v3 (demo_retail_v3): ~200 documents from a seeded PRNG (V3_PRNG_SEED) over
-//   Nov 2025 - May 2026, so top-N LIMITs bind, ties occur, and every cancel /
-//   date-column / grain / measure confusion has many rows to show up on (see
-//   generateV3Facts).
+// - v3 (demo_retail_v3): ~250 documents from a seeded PRNG (V3_PRNG_SEED) over
+//   Jan - Mar 2025 and Nov 2025 - May 2026, so top-N LIMITs bind, ties occur,
+//   and every cancel / date-column / grain / measure confusion has many rows
+//   to show up on (see generateV3Facts).
 //
 // The content is generated from code (no fixture is read from another), so
-// `npm run seed-fixtures` rebuilds all three from scratch and the content hash
-// written to each database's _fixture_meta table proves which content it holds.
+// `npm run seed-fixtures` rebuilds all three from scratch. Each database's
+// _fixture_meta table records the content hash it was seeded with; whether it
+// still HOLDS that content is checked by re-hashing its rows
+// (checkFixtureContent in fixture-seeder.js), which seed-fixtures,
+// verify-dataset and the benchmark do.
 
 import crypto from 'node:crypto';
 
@@ -31,7 +34,7 @@ import { createPrng } from './prng.js';
 
 // Bump when the generated content of any fixture changes on purpose; the
 // fixture meta table records it next to the content hash.
-export const FIXTURE_GENERATOR_VERSION = '1';
+export const FIXTURE_GENERATOR_VERSION = '2';
 // Fixed seed for v3. Changing it changes v3's content (and its pins).
 export const V3_PRNG_SEED = 20260331;
 
@@ -100,8 +103,8 @@ function isoDate(year, month, day) {
 // --- v2: the audit's hand-designed fixture -----------------------------------
 
 /**
- * v2 = the seed facts plus the audit's v2 and v2b changes, each aimed at one
- * family of plausible-wrong SQL:
+ * v2 = the seed facts plus the audit's v2 and v2b changes and this PR's v2c
+ * rows (addV2cFacts), each aimed at one family of plausible-wrong SQL:
  * - header metrics separated: NetPayable = Net + 12.50 and BillTotal = Gross +
  *   7.25 on every document (Net vs NetPayable, Gross vs BillTotal swaps);
  * - line TotalAmount = Net x 1.05 (line Net vs TotalAmount swaps);
@@ -245,14 +248,122 @@ export function buildV2Facts() {
     facts.SalesDocumentLine.push(Object.fromEntries(TABLE_COLUMNS.SalesDocumentLine.map((column, index) => [column, values[index]])));
   }
 
+  addV2cFacts(facts);
   return facts;
+}
+
+/**
+ * v2c (this PR's review): rows aimed at plausible-wrong SQL that v2 + v2b let
+ * through (each listed with the family it separates):
+ * - 24: 2025-03-20, posted, Urban Refresh products incl. the Sparkling Water
+ *   24 Pack, which no non-canceled March 2026 document sells (MONTH() = 3
+ *   without YEAR() on the ledger, campaign and sparkling-water cases);
+ * - 25, 26, 27: twins of documents 21 (March), 17 (January) and 19
+ *   (February): same customer, month, header amounts and line NetAmount, and
+ *   for 21/25 equal AR debits and revenue credits (SUM(DISTINCT ...) over
+ *   header, line and posting amounts). Document 25 sells its Cane Sugar as
+ *   2 x 62.50, so the product's March quantity stays fractional (23.5);
+ * - 28, 29, 30: the inactive customer 6 buys in January, February and March
+ *   2026, in March the discontinued Oat Cookies Tin (an invented IsActive
+ *   filter on Customer or Product) and 5 Sparkling Water 12 Packs, the same
+ *   quantity and line Net as document 16's line (SUM(DISTINCT Quantity));
+ * - 31: a canceled February document for a product with no non-canceled
+ *   February or March sale (a cancel filter applied to only one side of a
+ *   "February but not March" set difference);
+ * - 30 also carries a NULL-ProductId delivery fee in February (a set
+ *   difference that keeps NULL product IDs), and 32 sells 300.00 of Cane
+ *   Sugar in March, so the March category totals are not in category-ID
+ *   order (a ranking without ORDER BY that GROUP BY happens to sort) while
+ *   at most nine products sell in March (a LEFT JOIN's NULL product group
+ *   stays inside a top-10).
+ * Every document keeps v2's separated header metrics (NetPayable = Net +
+ * 12.50, BillTotal = Gross + 7.25) and line TotalAmount = Net x 1.05.
+ */
+function addV2cFacts(facts) {
+  const document = ([id, date, postingDate, customerId, storeId, typeId, campaignId, canceled, net, gross, paid, subtotal]) => {
+    const netPayable = round2(net + 12.5);
+    return Object.fromEntries(
+      TABLE_COLUMNS.SalesDocument.map((column, index) => [
+        column,
+        [
+          id,
+          `SD-${date.slice(0, 4)}-${String(id).padStart(4, '0')}`,
+          date,
+          postingDate,
+          addDays(date, 30),
+          customerId,
+          storeId,
+          typeId,
+          campaignId,
+          canceled,
+          gross,
+          net,
+          netPayable,
+          paid,
+          round2(netPayable - paid),
+          subtotal,
+          round2(gross + 7.25),
+        ][index],
+      ])
+    );
+  };
+  const v2cDocuments = [
+    [24, '2025-03-20', '2025-03-20', 1, 1, 1, 2, 0, 340.0, 374.0, 340.0, 357.0],
+    [25, '2026-03-26', '2026-03-26', 4, 2, 4, null, 0, 125.0, 137.5, 125.0, 131.25],
+    [26, '2026-01-08', '2026-01-08', 2, 1, 1, 1, 0, 100.0, 110.0, 100.0, 105.0],
+    [27, '2026-02-05', '2026-02-05', 3, 3, 2, 2, 0, 160.0, 176.0, 0, 168.0],
+    [28, '2026-03-09', '2026-03-09', 6, 2, 4, 2, 0, 390.0, 429.0, 390.0, 409.5],
+    [29, '2026-01-15', '2026-01-15', 6, 1, 1, 1, 0, 135.0, 148.5, 135.0, 141.75],
+    [30, '2026-02-18', '2026-02-18', 6, 2, 4, 3, 0, 75.0, 82.5, 0, 77.5],
+    [31, '2026-02-10', '2026-02-10', 5, 1, 1, 2, 1, 110.0, 121.0, 0, 115.5],
+    [32, '2026-03-17', '2026-03-18', 1, 2, 4, 1, 0, 300.0, 330.0, 300.0, 315.0],
+  ];
+  facts.SalesDocument.push(...v2cDocuments.map(document));
+
+  const v2cLines = [
+    [34, 24, 11, 'Sparkling Water 24 Pack', 2, 110, 231.0, 220.0, 'Beverages', 'Northstar Goods'],
+    [35, 24, 3, 'Cold Brew Coffee 6 Pack', 3, 40, 126.0, 120.0, 'Beverages', 'Northstar Goods'],
+    [36, 25, 7, 'Cane Sugar 2kg', 2, 62.5, 131.25, 125.0, 'Pantry', 'Riverbend Pantry'],
+    [37, 26, 6, 'Kitchen Towels 4 Roll', 2, 50, 105.0, 100.0, 'Household', 'Homebase Supply'],
+    [38, 27, 3, 'Cold Brew Coffee 6 Pack', 4, 40, 168.0, 160.0, 'Beverages', 'Northstar Goods'],
+    [39, 28, 13, 'Oat Cookies Tin', 6, 15, 94.5, 90.0, 'Snacks', 'Sunvale Foods'],
+    [40, 29, 8, 'Herbal Tea Variety Pack', 5, 27, 141.75, 135.0, 'Beverages', 'Northstar Goods'],
+    [41, 30, 12, 'Northstar Trail Crisps', 4, 12.5, 52.5, 50.0, 'Snacks', 'Northstar Goods'],
+    [42, 31, 11, 'Sparkling Water 24 Pack', 1, 110, 115.5, 110.0, 'Beverages', 'Northstar Goods'],
+    [43, 28, 1, 'Sparkling Water 12 Pack', 5, 60, 315.0, 300.0, 'Beverages', 'Northstar Goods'],
+    [44, 30, null, 'Delivery Fee', 1, 25, 25.0, 25.0, null, null],
+    [45, 32, 7, 'Cane Sugar 2kg', 6, 50, 315.0, 300.0, 'Pantry', 'Riverbend Pantry'],
+  ];
+  for (const values of v2cLines) {
+    facts.SalesDocumentLine.push(Object.fromEntries(TABLE_COLUMNS.SalesDocumentLine.map((column, index) => [column, values[index]])));
+  }
+
+  const v2cPostings = [
+    [28, 24, 2, '2025-03-20', 340.0, 0],
+    [29, 24, 1, '2025-03-20', 0, 340.0],
+    [30, 21, 2, '2026-03-12', 125.0, 0],
+    [31, 21, 1, '2026-03-12', 0, 125.0],
+    [32, 25, 2, '2026-03-26', 125.0, 0],
+    [33, 25, 1, '2026-03-26', 0, 125.0],
+    [34, 28, 2, '2026-03-09', 390.0, 0],
+    [35, 28, 1, '2026-03-09', 0, 390.0],
+    [36, 32, 2, '2026-03-18', 300.0, 0],
+    [37, 32, 1, '2026-03-18', 0, 300.0],
+  ];
+  for (const values of v2cPostings) {
+    facts.AccountingPosting.push(Object.fromEntries(TABLE_COLUMNS.AccountingPosting.map((column, index) => [column, values[index]])));
+  }
 }
 
 // --- v3: seeded random facts ---------------------------------------------------
 
 // Months covered and documents per month. March 2026 (the month most cases ask
-// about) is the busiest.
+// about) is the busiest. January-March 2025 repeat the calendar months the
+// cases ask about, so MONTH() without YEAR() picks up prior-year rows.
 const V3_MONTHS = [
+  [2025, 1, 16],
+  [2025, 2, 16],
+  [2025, 3, 18],
   [2025, 11, 22],
   [2025, 12, 24],
   [2026, 1, 26],
@@ -277,13 +388,19 @@ const V3_PRODUCTS = {
   10: { price: 15, weight: 5 },
   11: { price: 110, weight: 4 },
   12: { price: 12.5, weight: 5 },
+  13: { price: 15, weight: 4 },
 };
 
 // Cane Sugar (7) sells in February 2026 but, in March 2026, only on a canceled
 // document: "products sold in February but not March" is then non-empty, and
-// dropping the cancel filter changes it. Every other product sells in March.
+// dropping the cancel filter changes it. Every other product sells in March,
+// the discontinued Oat Cookies Tin (13) included.
 const V3_FEB_ONLY_PRODUCT = 7;
 
+// Harbor Kiosk (7) never trades. The inactive customer (6) trades too, and
+// has a non-canceled document in each of January-March 2026 (forced), so an
+// invented "active customers only" filter changes the customer cases.
+const V3_INACTIVE_CUSTOMER = 6;
 const V3_CUSTOMER_WEIGHTS = [
   [1, 10],
   [2, 9],
@@ -291,9 +408,8 @@ const V3_CUSTOMER_WEIGHTS = [
   [4, 7],
   [5, 6],
   [8, 4],
+  [V3_INACTIVE_CUSTOMER, 3],
 ];
-// The inactive account only traded before 2026; Harbor Kiosk (7) never trades.
-const V3_DORMANT_CUSTOMER = 6;
 
 const STALE_CATEGORY_NAMES = { Beverages: 'Drinks', Snacks: 'Snack Foods', Pantry: 'Baking', Household: 'Home Care' };
 const STALE_BRAND_NAMES = {
@@ -316,8 +432,10 @@ function isMarch2026(date) {
 }
 
 /**
- * v3: about 200 documents (V3_MONTHS) drawn from createPrng(seed). Properties
+ * v3: about 250 documents (V3_MONTHS) drawn from createPrng(seed). Properties
  * the oracle relies on, each enforced by construction:
+ * - January-March 2025 as well as November 2025 - May 2026 (prior-year rows
+ *   in the calendar months the cases ask about);
  * - two documents on the first and two on the last day of every month, with
  *   last-day documents usually posted in the next month;
  * - ~7% canceled documents, some with postings, plus a canceled March document
@@ -332,10 +450,14 @@ function isMarch2026(date) {
  *   TotalAmount, so every header metric differs;
  * - stale product/category/brand snapshots, NULL CampaignIds, documents
  *   without postings and manual journals with NULL SalesDocumentId;
- * - in March 2026, 11 of the 12 products sell (so a top-10 LIMIT binds) with a
+ * - in March 2026, 12 of the 13 products sell (so a top-10 LIMIT binds) with a
  *   clear gap between ranks 10 and 11 by quantity and by net amount (so the
  *   cut-off is unambiguous whatever the tie-break), and two customers tie on
- *   March net sales (ranked comparison must tolerate tie order).
+ *   March net sales (ranked comparison must tolerate tie order);
+ * - the inactive customer 6 buys in January-March 2026 and the discontinued
+ *   product 13 sells in March 2026 (invented IsActive filters);
+ * - a same-amount twin document in each of January-March 2026 (addV3Twins:
+ *   SUM(DISTINCT ...) loses a value in that document's groups).
  */
 export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
   const random = createPrng(seed);
@@ -357,10 +479,9 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
     }
     days.sort((left, right) => left - right);
 
-    for (const day of days) {
+    for (const [dayIndex, day] of days.entries()) {
       const documentDate = isoDate(year, month, day);
-      const customerWeights =
-        year === 2025 ? [...V3_CUSTOMER_WEIGHTS, [V3_DORMANT_CUSTOMER, 5]] : V3_CUSTOMER_WEIGHTS;
+      const inactiveCustomerBuys = year === 2026 && month <= 3 && dayIndex === 4;
       let delay = random.weighted([
         [0, 50],
         [1, 25],
@@ -371,14 +492,16 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
       if (day === lastDay && delay === 0 && random.chance(0.6)) {
         delay = random.int(1, 3);
       }
-      const canceled = random.chance(0.07) || (isMarch2026(documentDate) && !febOnlyCanceledInMarch && day >= 10);
+      const canceled =
+        !inactiveCustomerBuys && (random.chance(0.07) || (isMarch2026(documentDate) && !febOnlyCanceledInMarch && day >= 10));
+      const customerId = random.weighted(V3_CUSTOMER_WEIGHTS);
       const document = {
         SalesDocumentId: documents.length + 1,
         DocumentNo: `SD-${year}-${String(documents.length + 1).padStart(4, '0')}`,
         DocumentDate: documentDate,
         PostingDate: addDays(documentDate, delay),
         DueDate: addDays(documentDate, 30),
-        CustomerId: random.weighted(customerWeights),
+        CustomerId: inactiveCustomerBuys ? V3_INACTIVE_CUSTOMER : customerId,
         StoreLocationId: random.int(1, 3),
         DocumentTypeId: random.weighted([
           [1, 40],
@@ -461,7 +584,9 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
         });
       }
 
-      if (random.chance(0.06)) {
+      // A delivery fee (NULL ProductId) on some documents, always on the
+      // inactive customer's January-March 2026 ones.
+      if (inactiveCustomerBuys || random.chance(0.06)) {
         lines.push({
           SalesDocumentLineId: lines.length + 1,
           SalesDocumentId: document.SalesDocumentId,
@@ -618,7 +743,74 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
     post(null, 4, postingDate, 0, amount);
   }
 
+  addV3Twins({ documents, lines, postings, tiedCustomers: [second[0], third[0]] });
   return { SalesDocument: documents, SalesDocumentLine: lines, AccountingPosting: postings };
+}
+
+// Top-10 cut-off in March 2026 (ranks 10 and 11 differ by at least 1 in
+// quantity and in net amount), recomputed over the final rows.
+function marchTopTenGapHolds(documents, lines) {
+  const byId = new Map(documents.map((document) => [document.SalesDocumentId, document]));
+  const counted = lines.filter((line) => {
+    const document = byId.get(line.SalesDocumentId);
+    return line.ProductId !== null && document.IsCanceled === 0 && isMarch2026(document.DocumentDate);
+  });
+  return ['Quantity', 'NetAmount'].every((key) => {
+    const totals = new Map();
+    for (const line of counted) {
+      totals.set(line.ProductId, round3((totals.get(line.ProductId) || 0) + line[key]));
+    }
+    const sorted = [...totals.values()].sort((left, right) => right - left);
+    return sorted.length <= 10 || sorted[9] - sorted[10] >= 1;
+  });
+}
+
+const isHalfCent = (amount) => Math.round(amount * 1000) % 10 !== 0;
+
+/**
+ * Same-amount twins: in each of January, February and March 2026 one
+ * document gets a twin (same customer, dates, header amounts, lines and
+ * postings; new IDs). SUM(DISTINCT ...) over header Net/Gross, line Net or
+ * Quantity, or posting Debit/Credit then drops a value in that customer's,
+ * product's, brand's, category's and account's group. The source is the
+ * first non-canceled, posted document of the month whose customer is not in
+ * the March tie and whose lines are whole-cent product lines, and whose twin
+ * keeps the March top-10 cut-off unambiguous.
+ */
+function addV3Twins({ documents, lines, postings, tiedCustomers }) {
+  for (const month of ['2026-01', '2026-02', '2026-03']) {
+    const candidates = documents.filter(
+      (document) =>
+        document.IsCanceled === 0 &&
+        document.DocumentDate.startsWith(month) &&
+        !tiedCustomers.includes(document.CustomerId) &&
+        postings.some((posting) => posting.SalesDocumentId === document.SalesDocumentId) &&
+        lines.some((line) => line.SalesDocumentId === document.SalesDocumentId) &&
+        lines.every((line) => line.SalesDocumentId !== document.SalesDocumentId || (line.ProductId !== null && !isHalfCent(line.NetAmount)))
+    );
+    let added = false;
+    for (const source of candidates) {
+      const twinId = documents.length + 1;
+      const twin = { ...source, SalesDocumentId: twinId, DocumentNo: `SD-2026-${String(twinId).padStart(4, '0')}` };
+      const twinLines = lines
+        .filter((line) => line.SalesDocumentId === source.SalesDocumentId)
+        .map((line, index) => ({ ...line, SalesDocumentLineId: lines.length + index + 1, SalesDocumentId: twinId }));
+      if (!marchTopTenGapHolds([...documents, twin], [...lines, ...twinLines])) {
+        continue;
+      }
+      documents.push(twin);
+      lines.push(...twinLines);
+      const sourcePostings = postings.filter((posting) => posting.SalesDocumentId === source.SalesDocumentId);
+      for (const posting of sourcePostings) {
+        postings.push({ ...posting, AccountingPostingId: postings.length + 1, SalesDocumentId: twinId });
+      }
+      added = true;
+      break;
+    }
+    if (!added) {
+      throw new Error(`v3 generator: no document in ${month} can take a same-amount twin.`);
+    }
+  }
 }
 
 // --- assembly, hashing ---------------------------------------------------------

@@ -22,9 +22,9 @@ import { expandProductSearchTerms, rankProductCandidates } from '../src/master-d
 // `npm run verify-dataset -- --write-pins`, and bumping
 // FIXTURE_GENERATOR_VERSION when the change is intentional.
 const EXPECTED_CONTENT_HASHES = {
-  seed: 'ca59bf9a1a49726c',
-  v2: '622fceca5155e7d5',
-  v3: '5f2b531b13a0c379',
+  seed: '094282546fe55afd',
+  v2: 'ab5bb5fbd8606946',
+  v3: '92a17806c3746036',
 };
 
 const isMarch2026 = (date) => date >= '2026-03-01' && date < '2026-04-01';
@@ -88,9 +88,9 @@ test('v2 ports the audit fixture: separated metrics, header discounts, boundary 
   const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
   const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
 
-  assert.equal(facts.SalesDocument.length, 23);
-  assert.equal(facts.SalesDocumentLine.length, 33);
-  assert.equal(facts.AccountingPosting.length, 27);
+  assert.equal(facts.SalesDocument.length, 32);
+  assert.equal(facts.SalesDocumentLine.length, 45);
+  assert.equal(facts.AccountingPosting.length, 37);
   for (const document of facts.SalesDocument) {
     assert.ok(Math.abs(document.NetPayableAmount - document.NetAmount - 12.5) < 1e-9, `doc ${document.SalesDocumentId} NetPayable`);
     assert.ok(Math.abs(document.BillTotalAmount - document.GrossAmount - 7.25) < 1e-9, `doc ${document.SalesDocumentId} BillTotal`);
@@ -110,6 +110,55 @@ test('v2 ports the audit fixture: separated metrics, header discounts, boundary 
   assert.ok(facts.SalesDocumentLine.some((line) => line.NetAmount === 129.935), 'sub-cent amounts');
 });
 
+test('v2c adds prior-year postings, same-amount twins, inactive customer/product sales and a canceled February sale', () => {
+  const facts = buildV2Facts();
+  const documents = new Map(facts.SalesDocument.map((row) => [row.SalesDocumentId, row]));
+  const live = (document) => document.IsCanceled === 0;
+  const inMonth = (document, month) => document.DocumentDate.startsWith(month);
+  const linesOf = (id) => facts.SalesDocumentLine.filter((line) => line.SalesDocumentId === id);
+  const productOf = (id) => MASTER_DATA.Product.find((row) => row.ProductId === id);
+
+  // Prior-year March: posted, Urban Refresh products, a sparkling SKU no
+  // non-canceled March 2026 document sells.
+  const priorMarch = facts.SalesDocument.filter((document) => live(document) && inMonth(document, '2025-03'));
+  assert.ok(priorMarch.some((document) => facts.AccountingPosting.some((posting) => posting.SalesDocumentId === document.SalesDocumentId)));
+  const priorLines = priorMarch.flatMap((document) => linesOf(document.SalesDocumentId));
+  assert.ok(priorLines.some((line) => productOf(line.ProductId)?.CampaignId === 2), 'an Urban Refresh product');
+  const march2026Products = new Set(
+    facts.SalesDocument.filter((document) => live(document) && inMonth(document, '2026-03')).flatMap((document) => linesOf(document.SalesDocumentId).map((line) => line.ProductId))
+  );
+  assert.ok(priorLines.some((line) => /seltzer/.test(productOf(line.ProductId)?.ProductTags || '') && !march2026Products.has(line.ProductId)));
+
+  // Same customer, month and amounts in January, February and March 2026.
+  for (const month of ['2026-01', '2026-02', '2026-03']) {
+    const seen = new Set();
+    const twin = facts.SalesDocument.filter((document) => live(document) && inMonth(document, month)).some((document) => {
+      const key = `${document.CustomerId}/${document.NetAmount}/${document.GrossAmount}`;
+      const found = seen.has(key);
+      seen.add(key);
+      return found;
+    });
+    assert.ok(twin, `${month} has a same-amount twin`);
+  }
+  assert.equal(linesOf(25)[0].NetAmount, linesOf(21)[0].NetAmount);
+  const marchDebits = facts.AccountingPosting.filter((posting) => posting.LedgerAccountId === 2 && posting.SalesDocumentId && inMonth(documents.get(posting.SalesDocumentId), '2026-03'));
+  assert.ok(new Set(marchDebits.map((posting) => posting.DebitAmount)).size < marchDebits.length, 'equal AR debits in March');
+
+  // The inactive customer and the discontinued product sell in 2026.
+  for (const month of ['2026-01', '2026-02', '2026-03']) {
+    assert.ok(facts.SalesDocument.some((document) => live(document) && inMonth(document, month) && document.CustomerId === 6), `customer 6 buys in ${month}`);
+  }
+  assert.equal(productOf(13).IsActive, 0);
+  assert.ok(march2026Products.has(13), 'the discontinued product sells in March 2026');
+  assert.equal(march2026Products.has(null) ? march2026Products.size - 1 : march2026Products.size, 9, 'at most nine products sell in March');
+
+  // A canceled February sale of a product without a non-canceled Feb/Mar sale.
+  assert.equal(documents.get(31).IsCanceled, 1);
+  assert.equal(linesOf(31)[0].ProductId, 11);
+  assert.ok(!march2026Products.has(11));
+  assert.ok(linesOf(30).some((line) => line.ProductId === null), 'a February delivery fee');
+});
+
 test('v3 is a large seeded fact set with the traps the oracle needs', () => {
   const facts = generateV3Facts();
   const documents = facts.SalesDocument;
@@ -119,7 +168,7 @@ test('v3 is a large seeded fact set with the traps the oracle needs', () => {
   assert.ok(documents.length >= 150 && documents.length <= 300, `${documents.length} documents`);
   assert.ok(lines.length >= 2 * documents.length, 'multiple lines per document on average');
   const months = new Set(documents.map((document) => document.DocumentDate.slice(0, 7)));
-  assert.deepEqual([...months].sort(), ['2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05']);
+  assert.deepEqual([...months].sort(), ['2025-01', '2025-02', '2025-03', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05']);
 
   // Boundary days, and posting dates that fall in the next month.
   for (const month of months) {
@@ -149,7 +198,7 @@ test('v3 is a large seeded fact set with the traps the oracle needs', () => {
   assert.ok(documents.filter((document) => document.NetPayableAmount !== document.NetAmount).length > documents.length / 2);
   assert.ok(lines.filter((line) => line.TotalAmount !== line.NetAmount).length > lines.length / 2);
 
-  // March 2026: 11 products sell (a top-10 LIMIT binds) with a clear 10/11 gap.
+  // March 2026: 12 products sell (a top-10 LIMIT binds) with a clear 10/11 gap.
   const counted = lines.filter((line) => {
     const document = byId.get(line.SalesDocumentId);
     return line.ProductId !== null && document.IsCanceled === 0 && isMarch2026(document.DocumentDate);
@@ -160,10 +209,33 @@ test('v3 is a large seeded fact set with the traps the oracle needs', () => {
       totals.set(line.ProductId, (totals.get(line.ProductId) || 0) + line[key]);
     }
     const sorted = [...totals.values()].sort((left, right) => right - left);
-    assert.equal(sorted.length, 11);
+    assert.equal(sorted.length, 12);
     assert.ok(sorted[9] - sorted[10] >= 1, `${key} cut-off gap`);
   }
   assert.ok(!counted.some((line) => line.ProductId === 7), 'Cane Sugar sells in March only on a canceled document');
+  assert.ok(counted.some((line) => line.ProductId === 13), 'the discontinued product sells in March');
+
+  // The inactive customer buys in January-March 2026, with a delivery fee.
+  for (const month of ['2026-01', '2026-02', '2026-03']) {
+    const own = documents.filter((document) => document.CustomerId === 6 && document.IsCanceled === 0 && document.DocumentDate.startsWith(month));
+    assert.ok(own.length > 0, `customer 6 buys in ${month}`);
+    assert.ok(own.some((document) => lines.some((line) => line.SalesDocumentId === document.SalesDocumentId && line.ProductId === null)), `${month} fee line`);
+  }
+
+  // Same-amount twins in January-March 2026: header, lines and postings.
+  for (const month of ['2026-01', '2026-02', '2026-03']) {
+    const twin = documents.find((document, index) =>
+      document.DocumentDate.startsWith(month) &&
+      document.IsCanceled === 0 &&
+      documents.some((other, otherIndex) => otherIndex < index && other.CustomerId === document.CustomerId && other.DocumentDate === document.DocumentDate && other.NetAmount === document.NetAmount && other.GrossAmount === document.GrossAmount)
+    );
+    assert.ok(twin, `${month} twin`);
+    const original = documents.find((document) => document !== twin && document.CustomerId === twin.CustomerId && document.DocumentDate === twin.DocumentDate && document.NetAmount === twin.NetAmount);
+    const amounts = (id, table, key) => facts[table].filter((row) => row.SalesDocumentId === id).map((row) => row[key]);
+    assert.deepEqual(amounts(twin.SalesDocumentId, 'SalesDocumentLine', 'NetAmount'), amounts(original.SalesDocumentId, 'SalesDocumentLine', 'NetAmount'));
+    assert.deepEqual(amounts(twin.SalesDocumentId, 'AccountingPosting', 'DebitAmount'), amounts(original.SalesDocumentId, 'AccountingPosting', 'DebitAmount'));
+    assert.ok(amounts(twin.SalesDocumentId, 'AccountingPosting', 'DebitAmount').length > 0);
+  }
 
   // At most one half-cent line per product / category / brand / campaign.
   const halfCent = lines.filter((line) => Math.round(line.NetAmount * 1000) % 10 !== 0);

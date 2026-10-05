@@ -47,8 +47,8 @@
     },
     "expected_row_counts": {
       "seed": 4,
-      "v2": 6,
-      "v3": 6
+      "v2": 7,
+      "v3": 7
     }
   },
   {
@@ -97,7 +97,7 @@
     },
     "expected_row_counts": {
       "seed": 5,
-      "v2": 8,
+      "v2": 9,
       "v3": 10
     }
   },
@@ -356,7 +356,7 @@
     },
     "expected_row_counts": {
       "seed": 5,
-      "v2": 8,
+      "v2": 9,
       "v3": 10
     }
   },

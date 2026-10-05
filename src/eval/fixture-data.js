@@ -23,6 +23,10 @@
 // - Product 11 "Sparkling Water 24 Pack": a second sparkling SKU.
 // - Product 12 "Northstar Trail Crisps": a Northstar-brand product in Snacks,
 //   while the Northstar brand's default category is Beverages.
+// - Product 13 "Oat Cookies Tin": discontinued (IsActive = 0) but sold in
+//   March 2026 in v2 and v3, so an invented "active products only" filter
+//   changes product, brand, category and campaign totals. (Customer 6, the
+//   inactive customer, likewise buys in January-March 2026 there.)
 // The semantic layer needs no change for them: "seltzer" is already an alias
 // of "sparkling water", and "trail mix" / "sparkling water" do not match the
 // decoys (product resolution needs every term token).
@@ -151,6 +155,7 @@ export const MASTER_DATA = Object.freeze({
     { ProductId: 10, ProductCode: 'BEV-SPRING-24', ProductName: 'Spring Water 24 Pack', ProductTags: 'still bottled water', ProductCategoryId: 1, BrandId: 5, CampaignId: 1, IsActive: 1 },
     { ProductId: 11, ProductCode: 'BEV-SPARK-24', ProductName: 'Sparkling Water 24 Pack', ProductTags: 'seltzer carbonated water bulk', ProductCategoryId: 1, BrandId: 1, CampaignId: 2, IsActive: 1 },
     { ProductId: 12, ProductCode: 'SNK-NCRISP-1', ProductName: 'Northstar Trail Crisps', ProductTags: 'crisps snack', ProductCategoryId: 2, BrandId: 1, CampaignId: 3, IsActive: 1 },
+    { ProductId: 13, ProductCode: 'SNK-OATCK-1', ProductName: 'Oat Cookies Tin', ProductTags: 'cookies biscuits snack discontinued', ProductCategoryId: 2, BrandId: 2, CampaignId: 2, IsActive: 0 },
   ]),
   ProductBrand: freezeRows([
     { ProductBrandId: 1, ProductId: 1, BrandId: 1 },

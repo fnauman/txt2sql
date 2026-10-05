@@ -233,8 +233,8 @@ const PUBLIC_EDGE_CASES = [
     },
     "expected_row_counts": {
       "seed": 4,
-      "v2": 6,
-      "v3": 6
+      "v2": 7,
+      "v3": 7
     }
   },
   {
@@ -391,8 +391,8 @@ const PUBLIC_EDGE_CASES = [
     },
     "expected_row_counts": {
       "seed": 3,
-      "v2": 6,
-      "v3": 6
+      "v2": 7,
+      "v3": 7
     }
   }
 ];
