@@ -168,6 +168,33 @@ test('only the flagged rejection of a case flagged known_validator_rejection is 
   assert.deepEqual(summary.byOutcomeBucket.guardrail_true_rejection, { system: 2 });
 });
 
+test('a case\'s bucket is the majority among its majority-outcome repetitions, whatever their order', () => {
+  // Both end in a guardrail rejection of a flagged case: kvr with the flagged
+  // code (system), other with a different code on the retry (model).
+  const flagged = { ...testCase, known_validator_rejection: 'METRIC_COLUMN' };
+  const trueRejection = (code) => rejected('SELECT 1', 'guardrail', code, { guardrailCheck: { verdict: 'true_rejection' } });
+  const kvr = attributeRepetition(repetition('validation_error', [trueRejection('METRIC_COLUMN')]), flagged);
+  const other = attributeRepetition(repetition('validation_error', [trueRejection('METRIC_COLUMN'), trueRejection('FAN_OUT')]), flagged);
+  assert.deepEqual([kvr.outcome, kvr.bucket, other.outcome, other.bucket], ['guardrail_true_rejection', 'system', 'guardrail_true_rejection', 'model']);
+
+  const caseBucket = (reps) => {
+    const summary = summarizeCaseRepetitions(reps);
+    const attribution = summarizeAttribution([{ id: 'f', repetitions: reps, summary }]);
+    return [summary.outcome, summary.bucket, summary.tags, attribution.cases.byBucket];
+  };
+  const systemCase = ['guardrail_true_rejection', 'system', ['known_validator_rejection'], { system: 1 }];
+  assert.deepEqual(caseBucket([kvr, kvr, other]), systemCase);
+  assert.deepEqual(caseBucket([other, kvr, kvr]), systemCase);
+  assert.deepEqual(caseBucket([kvr, other, kvr]), systemCase);
+  // A model majority carries no tag of the system repetitions.
+  const modelCase = ['guardrail_true_rejection', 'model', [], { model: 1 }];
+  assert.deepEqual(caseBucket([other, other, kvr]), modelCase);
+  assert.deepEqual(caseBucket([kvr, other, other]), modelCase);
+  // An even split is not charged to the model.
+  assert.deepEqual(caseBucket([other, kvr]), systemCase);
+  assert.deepEqual(caseBucket([kvr, other]), systemCase);
+});
+
 test('case summary: pass rate over counted repetitions, strict majority, failure wins ties', () => {
   const reps = ['pass', 'pass', 'wrong_result'].map((outcome) => attributeRepetition(repetition(outcome === 'pass' ? 'pass' : 'result_mismatch', [accepted('x')]), testCase));
   const summary = summarizeCaseRepetitions(reps);

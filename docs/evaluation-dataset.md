@@ -1260,6 +1260,11 @@ rule).
   the counted repetitions passed, otherwise the most frequent failing outcome
   (ties: the order of the table above), even when `pass` is the most frequent
   single outcome (2 passes against two different failures is a failed case).
+  The case's bucket is the most frequent bucket among the repetitions with
+  that outcome (a retrieval miss or a known validator rejection can put some
+  of them in the system bucket), with ties going to the system, and its tags
+  come from those repetitions only; it never depends on the repetitions'
+  order.
   A behaviour case's outcome agrees with its majority the same way:
   `declined` only when more than half of its scored repetitions declined.
 - **By split, failure class, difficulty and tag**: cases, accuracy, majority
