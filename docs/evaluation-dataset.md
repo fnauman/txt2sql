@@ -939,16 +939,21 @@ top-level model, provenance, runner, suite, oracle, stats, attribution,
 behaviour and verification blocks (without per-case notes); per case its id,
 the case fields a rescore rebuilds it from, `gold_fingerprint`,
 `scoring_fingerprint`, `datasets` and `summary`; per repetition its status,
-outcome, error code, usage and cost, timings and every attempt (SQL, the LLM
-call's usage, total cost, duration, `tables_used` and failure code, the
-validation verdict with its message, the execution verdict). It drops what a
+outcome, error code, token usage and total cost, timings and every attempt
+(SQL, the LLM call's usage, total cost, duration, `tables_used` and failure
+code, the validation verdict with its message, the execution verdict). When a
+repetition made a single LLM call, that call's usage and cost are stored once,
+on the repetition, and `llm_usage_attempt` names the call; a rescore puts the
+call's copy back. It drops what a
 rescore re-derives or nobody reads: row previews, explanations and
 assumptions, master-data candidates and retrieved tables, the oracle's
 per-fixture details, recorded guardrail re-checks, the previous comparison and
 the first repetition's copy at the case's top level. A rescore of the compact
 baseline gives the same outcomes and statistics as a rescore of the full
-report; for 255 cases at `--repeat 3` it is about 1.3 MB instead of about
-6-9 MB, one line per case. A filtered or
+report; for 255 cases at `--repeat 3` it is about 1.4 MB (10^6 bytes, as
+the "Baseline written" line prints it) instead of about 6-9 MB, one line per
+case. A fake-provider run whose wrong answers were long plausible SQL, with
+retries, measured 1,374,116 bytes; a real model's longer SQL can add some. A filtered or
 partial run (filters, fewer fixtures, or a case set that differs from the
 default suite) is refused before it starts; `--baseline-file <path>` saves
 such a subset somewhere else, never inside `eval/baselines/` (every file there

@@ -14,8 +14,10 @@ outcome, usage, cost, timings and every attempt's SQL and verdicts) and drops
 row previews, explanations, master-data candidates, per-fixture oracle details
 and recorded guardrail re-checks; see `src/eval/compact-report.js`. Rescoring
 it gives the same outcomes and statistics as rescoring the full report, at
-about 1.3 MB for 255 cases x 3 repetitions instead of 6-9 MB, one line per
-case. The run's own `report.json` under `generated/runs/` stays complete.
+about 1.4 MB (10^6 bytes) for 255 cases x 3 repetitions instead of 6-9 MB,
+one line per case. A repetition's only LLM call shares its usage and cost
+with the repetition (`llm_usage_attempt`); a rescore restores the call's
+copy. The run's own `report.json` under `generated/runs/` stays complete.
 To make one:
 
 ```bash
