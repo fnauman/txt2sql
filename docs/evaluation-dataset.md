@@ -21,7 +21,8 @@ comparison spec, `npm run eval` and its report, and the known limits.
 | Evaluation runner (one command) | `scripts/eval.js` (`npm run eval`), see [Running evaluations](#running-evaluations) |
 | Per-case scoring through the product loop | `evaluateQuestion` in `scripts/evaluate.js` |
 | Attribution, statistics, comparison, rescore | `src/eval/attribution.js`, `stats.js`, `compare.js`, `rescore.js` |
-| Dataset hygiene tests | `test/dataset-hygiene.test.js` (with the id registry `test/fixtures/case-question-registry.json`), `test/gold-sql-validator.test.js`, `test/few-shot-leakage.test.js` |
+| Dataset hygiene tests | `test/dataset-hygiene.test.js` (with the id registry `test/fixtures/case-question-registry.json`), `test/gold-sql-validator.test.js`, `test/few-shot-leakage.test.js`, `test/holdout-manifest.test.js` |
+| Holdout freeze | `datasets/holdout-manifest.json`, `scripts/holdout-manifest.js` (`npm run holdout-manifest`), `src/eval/holdout.js` |
 | Edge-dataset generator | `scripts/build-edge-dataset.mjs` (the 9 core cases + 8 edge cases) |
 
 These are synthetic regression fixtures over an owned demo schema, not a
@@ -119,6 +120,20 @@ other words).
   Single-word entity synonyms (customer, store, product, units, documents)
   and the advisory words ("sales", "sold") still match the layer: they are
   the only names of those things.
+
+**The holdout freeze.** `datasets/holdout-manifest.json` (not a dataset:
+the suite, verify-dataset and the hygiene tests skip it) lists every holdout
+case of every dataset with the fingerprints of its question, its gold
+(`gold_fingerprint`) and its scoring (`scoring_fingerprint`: gold,
+alternatives and comparison spec), and a dated `history` of notes.
+`test/holdout-manifest.test.js` fails when a holdout case is added, removed
+(or moved to dev) or changed without the manifest being rewritten, when the
+manifest is edited by hand, and when its current state has no note:
+
+```bash
+npm run holdout-manifest                                          # check (exit 1 on a difference)
+npm run holdout-manifest -- --write --note "<what changed and why>"  # record the reviewed change
+```
 
 Limit: a holdout whose wording avoids the semantic layer mixes two effects,
 unseen intents and unseen vocabulary, so a dev / holdout gap does not say

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
+import { readHoldoutManifest } from '../src/eval/holdout.js';
 import { caseSplit, dedupeSuiteCases, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, suiteName } from '../src/eval/suite.js';
 
 const makeCase = (id, question, sql, extra = {}) => normalizeBenchmarkCase({ id, question, expected_sql: sql, ...extra });
@@ -82,11 +83,16 @@ test('the default suite is every committed dataset, de-duplicated to the unique 
   assert.ok(suite.duplicates.every((entry) => entry.reason === 'same case id' && entry.dataset === 'edge-cases-public'));
   assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 140);
   // The retired holdout (81 cases, 45 intents) is dev now, tagged
-  // formerly_holdout; a fresh holdout is authored blind and frozen by
-  // datasets/holdout-manifest.json. Until it lands, --split holdout selects
-  // nothing (an empty selection is a harness error).
-  await assert.rejects(selectSuite({ split: 'holdout' }), (error) => error.code === 'EMPTY_SELECTION');
-  assert.equal((await selectSuite({ split: 'dev' })).entries.length, 255);
+  // formerly_holdout; the holdout is what datasets/holdout-manifest.json
+  // freezes. While it is empty, --split holdout selects nothing (an empty
+  // selection is a harness error).
+  const frozen = (await readHoldoutManifest()).entries.map((entry) => entry.id);
+  if (frozen.length === 0) {
+    await assert.rejects(selectSuite({ split: 'holdout' }), (error) => error.code === 'EMPTY_SELECTION');
+  } else {
+    assert.deepEqual((await selectSuite({ split: 'holdout' })).entries.map((entry) => entry.testCase.id).sort(), frozen);
+  }
+  assert.equal((await selectSuite({ split: 'dev' })).entries.length, suite.entries.length - frozen.length);
   const formerly = await selectSuite({ tags: ['formerly_holdout'] });
   assert.equal(formerly.entries.length, 81);
   assert.equal(new Set(formerly.entries.map((entry) => entry.testCase.intentId)).size, 45);

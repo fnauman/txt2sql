@@ -13,6 +13,17 @@ export const DEFAULT_DATASETS_DIR = path.resolve(__dirname, '../datasets');
 export const DEFAULT_DATASET_NAME = 'core-public';
 export const DEFAULT_RUNS_DIR = path.resolve(__dirname, '../generated/runs');
 
+// JSON files in a datasets directory that are not datasets: the holdout
+// manifest (src/eval/holdout.js) sits next to the datasets it freezes.
+export const HOLDOUT_MANIFEST_FILE = 'holdout-manifest.json';
+export const NON_DATASET_FILES = Object.freeze([HOLDOUT_MANIFEST_FILE]);
+
+/** True for a file name in a datasets directory that holds a dataset (`*.json`, not the holdout manifest). */
+export function isDatasetFileName(name) {
+  const base = path.basename(String(name || ''));
+  return base.endsWith('.json') && !NON_DATASET_FILES.includes(base);
+}
+
 function uniqueStrings(values) {
   return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value).trim()).filter(Boolean))];
 }

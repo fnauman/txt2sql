@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { isDatasetFileName } from '../src/benchmark.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql } from '../src/pipeline.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -37,7 +38,7 @@ const ALL_TABLES = schema.tables.map((table) => table.tableName);
 
 function loadGoldPairs() {
   const pairs = new Map();
-  for (const fileName of fs.readdirSync(DATASETS_DIR).filter((name) => name.endsWith('.json')).sort()) {
+  for (const fileName of fs.readdirSync(DATASETS_DIR).filter(isDatasetFileName).sort()) {
     const raw = JSON.parse(fs.readFileSync(path.join(DATASETS_DIR, fileName), 'utf8'));
     const cases = Array.isArray(raw) ? raw : raw.cases || [];
     for (const testCase of cases) {

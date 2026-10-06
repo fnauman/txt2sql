@@ -16,7 +16,7 @@ import {
   serialize,
   wasHoldoutIntent,
 } from '../scripts/build-eval-dataset.mjs';
-import { CASE_SPLITS, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
+import { CASE_SPLITS, isDatasetFileName, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import { goldFingerprint, loadControlsIndex, normalizeSqlText, resolveCaseControls } from '../src/eval/controls.js';
 import { MASTER_DATA } from '../src/eval/fixture-data.js';
@@ -40,7 +40,7 @@ const DEV_ONLY_DATASETS = [...LEGACY_DATASETS, 'templated-public', 'hard-cases-p
 const datasets = Object.fromEntries(
   fs
     .readdirSync(DATASETS_DIR)
-    .filter((name) => name.endsWith('.json'))
+    .filter(isDatasetFileName)
     .sort()
     .map((name) => [path.basename(name, '.json'), JSON.parse(fs.readFileSync(path.join(DATASETS_DIR, name), 'utf8'))])
 );

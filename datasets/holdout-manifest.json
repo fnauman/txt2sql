@@ -1,0 +1,14 @@
+{
+  "manifestVersion": 1,
+  "policy": "Error analysis and experiment design use dev failures only; holdout results are read in aggregate (report.md and the console show them by split, never per case, unless --reveal-holdout). Any change to the holdout (a case added, removed or changed) requires rewriting this manifest with a dated note (npm run holdout-manifest -- --write --note \"...\").",
+  "fingerprint": "4f53cda18c2baa0c",
+  "entries": [],
+  "history": [
+    {
+      "date": "2026-10-06",
+      "fingerprint": "4f53cda18c2baa0c",
+      "cases": 0,
+      "note": "Holdout retired after the Experiment 1 error analysis inspected it: its 81 cases (45 intents) are dev now, tagged formerly_holdout. Empty until the fresh holdout, authored blind, is added."
+    }
+  ]
+}
