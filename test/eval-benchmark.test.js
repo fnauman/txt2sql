@@ -262,13 +262,28 @@ test('statuses: mismatch, retrieval miss, LLM failure, infra failure', async () 
   assert.equal(mismatch.status, 'result_mismatch');
   assert.equal(mismatch.oracle.reason, 'values');
 
+  // A retrieval miss exists only in the retrieved schema scope (the
+  // allow-list is the retrieved set); the full scope allows every in-scope
+  // table, so the same wrong answer is a plain mismatch there.
   const missing = await evaluateQuestion({
     ...base,
     client: scriptedClient([WRONG]),
     connection: fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [WRONG]: [{ active_customers: 8 }] }),
     testCase: normalizeBenchmarkCase({ ...activeCase, expected_tables: ['Customer', 'LedgerAccount'] }),
+    schemaScope: 'retrieved',
   });
   assert.equal(missing.status, 'retrieval_miss');
+  assert.ok(!missing.retrieved_tables.includes('LedgerAccount'));
+  const notMissing = await evaluateQuestion({
+    ...base,
+    client: scriptedClient([WRONG]),
+    connection: fakeDatabase({ [GOLD]: [{ active_customer_count: 7 }], [WRONG]: [{ active_customers: 8 }] }),
+    testCase: normalizeBenchmarkCase({ ...activeCase, expected_tables: ['Customer', 'LedgerAccount'] }),
+    schemaScope: 'full',
+  });
+  assert.equal(notMissing.status, 'result_mismatch');
+  assert.ok(notMissing.retrieved_tables.includes('LedgerAccount'), 'the full scope allows every in-scope table');
+  assert.deepEqual(notMissing.ranked_tables, missing.retrieved_tables, 'retrieval still ranks the same tables');
 
   const llmDown = await evaluateQuestion({
     ...base,

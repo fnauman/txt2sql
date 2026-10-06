@@ -415,5 +415,8 @@ test('known validator rejections are real and current; every other new gold and 
       }
     }
   }
-  assert.ok(flagged >= 10, `${flagged} known validator rejections`);
+  // The 33 TABLE_SCOPE flags went with the full schema scope (retrieval misses
+  // are no validator gap in the default configuration); the METRIC_COLUMN one
+  // is a guardrail gap and stays.
+  assert.equal(flagged, 1, `${flagged} known validator rejections`);
 });

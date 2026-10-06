@@ -19,10 +19,15 @@ import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler
 //
 // The exception is documented per case: a case flagged
 // `known_validator_rejection: <code>` is a product gap the dataset measures on
-// purpose (retrieval does not pick a table the answer needs, or a guardrail
-// misreads the wording). Its gold must still be rejected with that code, so
-// the flag is removed once the product is fixed. Abstain / clarify cases have
-// no gold.
+// purpose (a guardrail misreads the wording). Its gold must still be rejected
+// with that code, so the flag is removed once the product is fixed. Abstain /
+// clarify cases have no gold.
+//
+// The prompt context is the product default (SCHEMA_SCOPE=auto, which is the
+// full scope at 13 tables: every in-scope table allowed). Under the retrieved
+// scope a gold that needs a table retrieval did not pick is rejected with
+// TABLE_SCOPE; the last test pins how many, the failure class the schema-scope
+// experiment removes (docs/experiments/01-schema-scope.md).
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASETS_DIR = path.join(REPO_ROOT, 'datasets');
@@ -50,9 +55,9 @@ function loadGoldPairs() {
 
 const GOLD = loadGoldPairs();
 
-test('the gold corpus has the expected size (245 unique question/SQL pairs, 34 known validator rejections)', () => {
+test('the gold corpus has the expected size (245 unique question/SQL pairs, 1 known validator rejection)', () => {
   assert.equal(GOLD.length, 245);
-  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 34);
+  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 1);
 });
 
 for (const testCase of GOLD.filter((entry) => entry.known_validator_rejection)) {
@@ -111,3 +116,30 @@ for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_ex
     });
   });
 }
+
+// The schema-scope experiment's premise, pinned: under the retrieved scope 33
+// golds (every one the dataset used to flag TABLE_SCOPE) are rejected only
+// because retrieval did not pick an in-scope table they need; nothing else
+// changes. The default scope admits them (the tests above).
+test('under the retrieved schema scope exactly 33 golds are rejected, each with TABLE_SCOPE for an in-scope table', () => {
+  const rejected = new Set();
+  for (const testCase of GOLD) {
+    const semanticPlan = buildSemanticPlan(testCase.question);
+    const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan, schemaScope: 'retrieved' });
+    const allowedTables = prompt.tables.map((table) => table.tableName);
+    for (const sql of [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])]) {
+      try {
+        validateReadOnlySql(sql, allowedTables, { promptContext: prompt.context, response: { sql, tables_used: validateReadOnlySql(sql, ALL_TABLES).tablesUsed } });
+      } catch (error) {
+        if (error.code === testCase.known_validator_rejection) {
+          continue;
+        }
+        assert.equal(error.code, 'TABLE_SCOPE', `${testCase.id}: ${error.code} ${error.message}`);
+        assert.ok(ALL_TABLES.includes(error.details.table), `${testCase.id}: ${error.details.table} is in scope`);
+        assert.ok(!allowedTables.includes(error.details.table));
+        rejected.add(testCase.id);
+      }
+    }
+  }
+  assert.equal(rejected.size, 33, [...rejected].join(', '));
+});

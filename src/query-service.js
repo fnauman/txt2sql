@@ -12,8 +12,11 @@ import {
   executeReadOnlySql,
   generateOptimizedResponse,
   loadNarrowSchema,
+  resolveEffectiveSchemaScope,
+  tablesToWidenFor,
   validateReadOnlySql,
 } from './pipeline.js';
+import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
 import { clearSemanticLayerCache } from './semantic-layer.js';
@@ -215,7 +218,7 @@ export function createBufferedTraceLogger({ enabled = true, pipeline = 'optimize
   };
 }
 
-function createEmptyResult({ question, questionIndex, error, stage, response = null, sql = '', llmCalls = [], llmUsage = null, llmCost = null, promptTables = [], masterDataCandidates = [], attemptCount = 0 }) {
+function createEmptyResult({ question, questionIndex, error, stage, response = null, sql = '', llmCalls = [], llmUsage = null, llmCost = null, promptTables = [], rankedTables = [], schemaScope = null, masterDataCandidates = [], attemptCount = 0 }) {
   return {
     success: false,
     question,
@@ -234,6 +237,8 @@ function createEmptyResult({ question, questionIndex, error, stage, response = n
     llmUsage,
     llmCost,
     promptTables,
+    rankedTables,
+    schemaScope,
     masterDataCandidates,
     attemptCount,
     rowCount: 0,
@@ -242,7 +247,7 @@ function createEmptyResult({ question, questionIndex, error, stage, response = n
   };
 }
 
-function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, masterDataCandidates, attemptCount, rowLimit, includeInsights }) {
+function createSuccessResult({ question, questionIndex, sql, rawRows, response, llmCalls, llmUsage, llmCost, promptTables, rankedTables = [], schemaScope = null, masterDataCandidates, attemptCount, rowLimit, includeInsights }) {
   const fetchedRowCount = Array.isArray(rawRows) ? rawRows.length : 0;
   const hasRowLimit = Number.isInteger(rowLimit) && rowLimit >= 0;
   const rows = normalizeRows(rawRows, { limit: hasRowLimit ? rowLimit : null });
@@ -274,6 +279,8 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
     llmUsage,
     llmCost,
     promptTables,
+    rankedTables,
+    schemaScope,
     masterDataCandidates,
     attemptCount,
     rowCount: rows.length,
@@ -289,9 +296,14 @@ export async function loadOptimizedQueryRuntime({
   trace = createNoopTraceLogger(),
   connectionLimit = undefined,
   clientOptions = {},
+  schemaScope = undefined,
 } = {}) {
   const model = process.env.MODEL_NAME || 'gpt-4o-mini';
   const effectiveConnectionLimit = connectionLimit ?? resolveDbConnectionLimit();
+  // SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS / SCHEMA_WIDEN_ON_DEMAND unless the
+  // caller (the web server's config) passes its own; a bad value fails here,
+  // before anything is opened.
+  const schemaScopeConfig = schemaScope === undefined ? resolveSchemaScopeConfig() : normalizeSchemaScopeConfig(schemaScope);
 
   // The OpenAI client is cheap and fails fast on missing/invalid settings, so it
   // is created first: a misconfigured server never compiles the schema or opens
@@ -313,10 +325,12 @@ export async function loadOptimizedQueryRuntime({
     schemaPath,
     refreshSchema,
   });
+  const effectiveSchemaScope = resolveEffectiveSchemaScope(schema, schemaScopeConfig);
   await trace.emit('schema.loaded', {
     ...schemaTimer.stop(),
     schemaPath,
     tableCount: schema.tables.length,
+    schemaScope: effectiveSchemaScope,
   });
 
   const connectionTimer = createTimer();
@@ -334,6 +348,10 @@ export async function loadOptimizedQueryRuntime({
     connection,
     modelsDir,
     schemaPath,
+    // The config to pass to runOptimizedQuestion, and what it means for this
+    // schema (requested / effective scope, full-schema token estimate).
+    schemaScope: schemaScopeConfig,
+    effectiveSchemaScope,
     close() {
       closePromise ||= connection.end();
       return closePromise;
@@ -378,6 +396,7 @@ export async function runOptimizedQuestion({
   includeInsights = true,
   statementTimeoutMs = null,
   signal = null,
+  schemaScope = undefined,
 } = {}) {
   const normalizedQuestion = String(question || '').trim();
   if (!normalizedQuestion) {
@@ -398,6 +417,8 @@ export async function runOptimizedQuestion({
 
   const effectiveMaxRetries = maxRetries ?? resolveMaxRetries();
   assertNonNegativeInteger('maxRetries', effectiveMaxRetries);
+  // Like maxRetries: the caller's setting, else SCHEMA_SCOPE & co. from the env.
+  const schemaScopeConfig = schemaScope === undefined ? resolveSchemaScopeConfig() : normalizeSchemaScopeConfig(schemaScope);
   if (rowLimit != null) {
     assertNonNegativeInteger('rowLimit', rowLimit);
   }
@@ -479,10 +500,13 @@ export async function runOptimizedQuestion({
   }
 
   const promptTimer = createTimer();
-  const prompt = buildOptimizedPrompt(schema, normalizedQuestion, { masterDataCandidates, semanticPlan });
+  const buildPrompt = (extraTables = []) =>
+    buildOptimizedPrompt(schema, normalizedQuestion, { masterDataCandidates, semanticPlan, schemaScope: schemaScopeConfig, extraTables });
+  let prompt = buildPrompt();
   await trace.emit('prompt.built', {
     ...questionContext,
     ...promptTimer.stop(),
+    schemaScope: prompt.context.schemaScope,
     prompt: {
       system: prompt.system,
       user: prompt.user,
@@ -490,8 +514,15 @@ export async function runOptimizedQuestion({
     context: prompt.context,
   });
 
-  const allowedTables = (prompt.tables || schema.tables).map((table) => table.tableName);
-  const promptTables = prompt.tables.map((table) => table.tableName);
+  // The allow-list is the prompt's table set: every in-scope table in the
+  // full scope, the retrieved tables (plus any widened ones) otherwise.
+  let allowedTables = (prompt.tables || schema.tables).map((table) => table.tableName);
+  let promptTables = prompt.tables.map((table) => table.tableName);
+  const rankedTables = prompt.context.retrieval?.expandedTableNames || [];
+  let widenedTables = [];
+  // Set when the prompt was widened after a TABLE_SCOPE rejection: the retry
+  // is told the table was added instead of "outside the allowed table set".
+  let pendingRetryNote = null;
   let attempt = 0;
   let lastResponse = null;
   let lastError = null;
@@ -515,6 +546,8 @@ export async function runOptimizedQuestion({
       llmUsage: getLlmUsage(),
       llmCost: getLlmCost(),
       promptTables,
+      rankedTables,
+      schemaScope: prompt.context.schemaScope,
       masterDataCandidates,
       attemptCount,
     });
@@ -545,11 +578,12 @@ export async function runOptimizedQuestion({
         ? null
         : {
             sql: lastResponse?.sql || '',
-            error: lastError?.message || String(lastError || 'Unknown error'),
-            stage: lastErrorStage,
+            error: pendingRetryNote?.error ?? (lastError?.message || String(lastError || 'Unknown error')),
+            stage: pendingRetryNote?.stage ?? lastErrorStage,
             tablesUsed: lastResponse?.tables_used || [],
             assumptions: lastResponse?.assumptions || [],
           };
+    pendingRetryNote = null;
     const attemptContext = {
       ...questionContext,
       attempt: attempt + 1,
@@ -662,6 +696,41 @@ export async function runOptimizedQuestion({
         return completeWithFailure({ error, stage: 'validation', sql: response.sql, response, attemptCount: attempt });
       }
 
+      // Widen-on-demand (retrieved scope): the SQL needs an in-scope table
+      // retrieval did not pick. The retry gets a prompt with that table (and
+      // its join path) in the schema context and the allow-list, within the
+      // same retry budget. Tables outside the in-scope schema stay rejected.
+      const schemaScopeInfo = prompt.context.schemaScope;
+      const toAdd =
+        schemaScopeInfo?.effective === 'retrieved' && schemaScopeInfo.widenOnDemand
+          ? tablesToWidenFor(error, response.sql, { schema, allowedTables })
+          : [];
+      if (toAdd.length > 0) {
+        const previousTables = allowedTables;
+        prompt = buildPrompt([...widenedTables, ...toAdd]);
+        widenedTables = prompt.context.schemaScope.widenedTables;
+        allowedTables = prompt.tables.map((table) => table.tableName);
+        promptTables = allowedTables;
+        const addedTables = allowedTables.filter((tableName) => !previousTables.includes(tableName));
+        pendingRetryNote = {
+          stage: 'schema_widened',
+          error:
+            `Table "${error.details?.table ?? toAdd[0]}" was not in the previous schema context. It is in scope, and the schema context above now ` +
+            `includes ${addedTables.join(', ')}. Use exact column names and join paths from the schema context.`,
+        };
+        await trace.emit('prompt.widened', {
+          ...attemptContext,
+          reason: error.code,
+          rejectedTable: error.details?.table ?? null,
+          addedTables,
+          widenedTables,
+          allowedTables,
+          schemaScope: prompt.context.schemaScope,
+          prompt: { system: prompt.system, user: prompt.user },
+          context: prompt.context,
+        });
+      }
+
       continue;
     }
 
@@ -707,6 +776,8 @@ export async function runOptimizedQuestion({
         llmUsage: getLlmUsage(),
         llmCost: getLlmCost(),
         promptTables,
+        rankedTables,
+        schemaScope: prompt.context.schemaScope,
         masterDataCandidates,
         attemptCount: attempt + 1,
         rowLimit,
