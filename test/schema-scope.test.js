@@ -212,7 +212,7 @@ test('tablesToWidenFor widens only in-scope tables rejected by TABLE_SCOPE', () 
 
 // --- widen-on-demand in the product loop ------------------------------------
 
-function scriptedClient(sqls) {
+function scriptedClient(sqls, allTables = ALL_TABLES) {
   const requests = [];
   const queue = [...sqls];
   return {
@@ -233,7 +233,7 @@ function scriptedClient(sqls) {
             choices: [
               {
                 finish_reason: 'stop',
-                message: { content: JSON.stringify({ sql, explanation: '', tables_used: validateSqlSafety(sql, ALL_TABLES).tablesUsed, assumptions: [] }) },
+                message: { content: JSON.stringify({ sql, explanation: '', tables_used: validateSqlSafety(sql, allTables).tablesUsed, assumptions: [] }) },
               },
             ],
           };
@@ -376,4 +376,123 @@ test('full scope in the product loop: the same SQL is accepted at once, and the 
       process.env.SCHEMA_SCOPE = saved;
     }
   }
+});
+
+// --- widen-on-demand across long foreign-key paths ---------------------------
+
+// A synthetic schema whose only path from the retrieved table to the rejected
+// one is a chain of foreign keys: Shipment -> Depot -> Hub -> Corridor -> Zone
+// -> Territory (Zone is four hops from Shipment, Territory five), plus a
+// short branch (Carrier, one hop) and an unrelated table. Nothing but Shipment
+// matches the question, so the retrieved scope shows Shipment alone.
+function chainColumn(name, extra = {}) {
+  return { name, type: 'INTEGER', allowNull: true, primaryKey: false, references: null, comment: null, ...extra };
+}
+function chainTable(name, columns = [], foreignKeys = []) {
+  return {
+    name,
+    tableName: name,
+    description: `${name} records`,
+    columns: [chainColumn(`${name}Id`, { primaryKey: true }), ...columns, ...foreignKeys.map(([column]) => chainColumn(column))],
+    foreignKeys: foreignKeys.map(([column, model]) => ({ column, references: { model, key: `${model}Id` } })),
+  };
+}
+const CHAIN_SCHEMA = {
+  tables: [
+    chainTable('Shipment', [chainColumn('ShipmentWeight')], [['DepotId', 'Depot'], ['CarrierId', 'Carrier']]),
+    chainTable('Carrier'),
+    chainTable('Depot', [], [['HubId', 'Hub']]),
+    chainTable('Hub', [], [['CorridorId', 'Corridor']]),
+    chainTable('Corridor', [], [['ZoneId', 'Zone']]),
+    chainTable('Zone', [], [['TerritoryId', 'Territory']]),
+    chainTable('Territory', [chainColumn('TerritoryLabel', { type: 'STRING(50)' })]),
+    chainTable('Holiday', [chainColumn('HolidayLabel', { type: 'STRING(50)' })]),
+  ],
+};
+const CHAIN_TABLES = CHAIN_SCHEMA.tables.map((table) => table.tableName);
+const CHAIN_QUESTION = 'Total shipment weight';
+// auto over the budget: the large-schema fallback to retrieved, widening on.
+const CHAIN_AUTO_RETRIEVED = Object.freeze({ schemaScope: 'auto', fullSchemaMaxTokens: 1 });
+const CHAIN_ZONE_SQL =
+  'SELECT z.ZoneId, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Depot d ON s.DepotId = d.DepotId JOIN Hub h ON d.HubId = h.HubId JOIN Corridor c ON h.CorridorId = c.CorridorId JOIN Zone z ON c.ZoneId = z.ZoneId GROUP BY z.ZoneId';
+const CHAIN_TERRITORY_SQL =
+  'SELECT t.TerritoryLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Depot d ON s.DepotId = d.DepotId JOIN Hub h ON d.HubId = h.HubId JOIN Corridor c ON h.CorridorId = c.CorridorId JOIN Zone z ON c.ZoneId = z.ZoneId JOIN Territory t ON z.TerritoryId = t.TerritoryId GROUP BY t.TerritoryLabel';
+
+function chainPrompt(extra = {}) {
+  return buildOptimizedPrompt(CHAIN_SCHEMA, CHAIN_QUESTION, { semanticPlan: buildSemanticPlan(CHAIN_QUESTION), schemaScope: CHAIN_AUTO_RETRIEVED, ...extra });
+}
+
+function validateChain(prompt, sql) {
+  try {
+    validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), {
+      promptContext: prompt.context,
+      response: { sql, tables_used: validateSqlSafety(sql, CHAIN_TABLES).tablesUsed },
+    });
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+test('widening adds the connector tables and relationships of a join path longer than three hops', () => {
+  const retrieved = chainPrompt();
+  assert.equal(retrieved.context.schemaScope.effective, 'retrieved');
+  assert.deepEqual(retrieved.tables.map((table) => table.tableName), ['Shipment']);
+  const rejection = validateChain(retrieved, CHAIN_TERRITORY_SQL);
+  assert.equal(rejection?.code, 'TABLE_SCOPE');
+  assert.deepEqual(tablesToWidenFor(rejection, CHAIN_TERRITORY_SQL, { schema: CHAIN_SCHEMA, allowedTables: ['Shipment'] }), [
+    'Depot',
+    'Hub',
+    'Corridor',
+    'Zone',
+    'Territory',
+  ]);
+
+  // Only the rejected far table is added (as when the model's SQL names it
+  // alone): the widened prompt carries the whole path to it.
+  for (const [extraTable, sql, connectors] of [
+    ['Zone', CHAIN_ZONE_SQL, ['Depot', 'Hub', 'Corridor']],
+    ['Territory', CHAIN_TERRITORY_SQL, ['Depot', 'Hub', 'Corridor', 'Zone']],
+  ]) {
+    const widened = chainPrompt({ extraTables: [extraTable] });
+    assert.deepEqual(widened.context.schemaScope.widenedTables, [extraTable]);
+    assert.deepEqual([...widened.context.schemaScope.widenConnectorTables].sort(), [...connectors].sort());
+    assert.deepEqual(
+      widened.tables.map((table) => table.tableName),
+      CHAIN_TABLES.filter((name) => name === 'Shipment' || name === extraTable || connectors.includes(name))
+    );
+    assert.match(widened.context.relationshipText, /- Corridor\.ZoneId -> Zone\.ZoneId/);
+    assert.equal(validateChain(widened, sql), null, `${extraTable}: ${validateChain(widened, sql)?.message}`);
+    // Tables off the path are not added.
+    assert.ok(!widened.tables.some((table) => table.tableName === 'Carrier' || table.tableName === 'Holiday'));
+  }
+
+  // A table with no foreign-key path to the retrieved ones is added alone.
+  const isolated = chainPrompt({ extraTables: ['Holiday'] });
+  assert.deepEqual(isolated.tables.map((table) => table.tableName), ['Shipment', 'Holiday']);
+  assert.deepEqual(isolated.context.schemaScope.widenConnectorTables, []);
+});
+
+test('widen-on-demand recovers a retrieval miss five foreign-key hops away within one retry', async () => {
+  // The first attempt names Shipment and Territory only (the path is not in
+  // its prompt), so Territory alone is widened; the retry must see the path.
+  const guess = 'SELECT t.TerritoryLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Territory t ON s.ShipmentId = t.TerritoryId GROUP BY t.TerritoryLabel';
+  const client = scriptedClient([guess, CHAIN_TERRITORY_SQL], CHAIN_TABLES);
+  const connection = fakeConnection();
+  const result = await runOptimizedQuestion({
+    client,
+    connection,
+    schema: CHAIN_SCHEMA,
+    question: CHAIN_QUESTION,
+    trace: createBufferedTraceLogger(),
+    maxRetries: 1,
+    schemaScope: CHAIN_AUTO_RETRIEVED,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, result.error?.message);
+  assert.equal(result.attemptCount, 2);
+  assert.equal(result.schemaScope.effective, 'retrieved');
+  assert.deepEqual(result.schemaScope.widenedTables, ['Territory']);
+  assert.deepEqual(result.promptTables, ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone', 'Territory']);
+  assert.match(client.requests[1].messages[1].content, /- Zone\.TerritoryId -> Territory\.TerritoryId/);
 });

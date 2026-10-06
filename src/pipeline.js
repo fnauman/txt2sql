@@ -1609,8 +1609,13 @@ export function resolveEffectiveSchemaScope(schema, option = undefined) {
 
 // Retrieved scope, widen-on-demand: the retrieved tables plus `extraTables`
 // (in-scope table names) and the connector tables on the shortest foreign-key
-// path from each added table to the retrieved ones. Unknown or already
-// retrieved names are ignored. Null when nothing is added.
+// path from each added table to each retrieved one within three hops (the
+// retrieval join-path bound). An added table with no retrieved table that
+// close (common on the large schemas that make auto fall back to retrieved)
+// gets the shortest path to its nearest retrieved table at any length: a
+// simple path has fewer hops than the in-scope schema has tables. Without it
+// the retry could not join the added table without being rejected again.
+// Unknown or already retrieved names are ignored. Null when nothing is added.
 function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
   const current = new Set(retrievedTables.map((table) => table.name));
@@ -1624,13 +1629,35 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const { adjacency } = buildForeignKeyGraph(schema.tables);
   const expanded = new Set([...current, ...added]);
   const connectors = new Set();
+  const addPath = (path) => {
+    for (const pathName of path) {
+      if (!expanded.has(pathName)) {
+        connectors.add(pathName);
+      }
+      expanded.add(pathName);
+    }
+  };
+  const anyLength = schema.tables.length;
   for (const addedName of added) {
+    let connected = false;
     for (const currentName of current) {
-      for (const pathName of findShortestJoinPath(adjacency, addedName, currentName) || []) {
-        if (!expanded.has(pathName)) {
-          connectors.add(pathName);
+      const path = findShortestJoinPath(adjacency, addedName, currentName);
+      if (path) {
+        addPath(path);
+        connected = true;
+      }
+    }
+    if (!connected) {
+      // The nearest retrieved table (fewest hops; ties in retrieval order).
+      let nearest = null;
+      for (const currentName of current) {
+        const path = findShortestJoinPath(adjacency, addedName, currentName, anyLength);
+        if (path && (!nearest || path.length < nearest.length)) {
+          nearest = path;
         }
-        expanded.add(pathName);
+      }
+      if (nearest) {
+        addPath(nearest);
       }
     }
   }
