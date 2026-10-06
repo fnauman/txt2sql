@@ -11,6 +11,7 @@ comparison spec, `npm run eval` and its report, and the known limits.
 | Original benchmarks (dev) | `datasets/core-public.json` (9), `datasets/paraphrase-public.json` (9), `datasets/edge-cases-public.json` (17) |
 | Templated benchmark | `datasets/templated-public.json` (189 cases, 94 intents), built by `scripts/build-eval-dataset.mjs` (`npm run build-eval-dataset`) |
 | Hard cases | `datasets/hard-cases-public.json` (40 cases, hand-written) |
+| Fresh holdout (v2) | `datasets/holdout-public.json` (149 cases, 77 intents, all holdout; authored blind 2026-10-06), built by `scripts/build-holdout-dataset.mjs` (`npm run build-holdout-dataset`), see [Fresh holdout (v2)](#fresh-holdout-v2) |
 | Oracle controls (wrong and correct SQL per case) | `datasets/controls/*.json` |
 | Value-aware comparator | `compareResultsDetailed` / `compareResults` in `src/benchmark.js` |
 | Case schema (splits, behaviours, flags) | `normalizeBenchmarkCase` in `src/benchmark.js` |
@@ -37,11 +38,21 @@ traces, private database dumps, or customer/vendor-specific examples here.
 
 The default suite is every `datasets/*.json` (the holdout manifest
 `datasets/holdout-manifest.json` is not a dataset), de-duplicated (the edge
-suite repeats the 9 core cases, which run once): **255 unique cases over 140
-intents**, all of them dev today. The 81 cases (45 intents) that were holdout
-until the Experiment 1 error analysis looked at them are dev now, tagged
-`formerly_holdout`; a fresh holdout is being authored blind (see
-[Splits and the holdout policy](#splits-and-the-holdout-policy)).
+suite repeats the 9 core cases, which run once): **404 unique cases over 217
+intents**: **dev, 255 cases over 140 intents** (the five datasets below the
+fresh holdout; the 81 cases, 45 intents, that were holdout until the
+Experiment 1 error analysis looked at them are dev now, tagged
+`formerly_holdout`), and **holdout, 149 cases over 77 intents** (the
+[fresh holdout (v2)](#fresh-holdout-v2), authored blind and frozen by the
+manifest; see [Splits and the holdout policy](#splits-and-the-holdout-policy)).
+The rest of this section describes the dev datasets unless it names the fresh
+holdout.
+
+| Split | Datasets | Cases | Intents | Answer cases | Behaviour cases | Known validator rejections |
+|---|---|---|---|---|---|---|
+| dev | the five datasets above `holdout-public` | 255 | 140 | 245 | 10 | 1 |
+| holdout | `holdout-public` | 149 | 77 | 147 | 2 | 4 |
+| **Suite** | | **404** | **217** | **392** | **12** | **5** |
 
 | Dataset | Cases | Intents | Intents of its own | Formerly holdout intents (cases) | Behaviour cases | Known validator rejections | Cases with alternative gold |
 |---|---|---|---|---|---|---|---|
@@ -50,7 +61,8 @@ until the Experiment 1 error analysis looked at them are dev now, tagged
 | `edge-cases-public` | 17 | 17 | 8 (+ the 9 core cases) | 0 | 0 | 0 | 3 |
 | `templated-public` | 189 | 94 | 94 | 35 (70) | 0 | 1 | 36 |
 | `hard-cases-public` | 40 | 37 | 29 (8 rephrase an existing intent) | 10 (11) | 10 (5 abstain, 5 clarify) | 0 | 8 |
-| **Suite (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **1** | |
+| **Dev (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **1** | |
+| `holdout-public` (fresh holdout v2, the holdout) | 149 | 77 | 77 | 0 (all 77 intents are holdout) | 2 | 4 | 28 |
 
 The original three datasets hold 17 intents; the templated and hard-case
 datasets add 123.
@@ -99,27 +111,32 @@ other words).
   paraphrase and edge cases (the prompt rules, the few-shot pool and the
   semantic layer were tuned on their wording), the templated and hard-case
   intents, and the **formerly holdout** cases (tag `formerly_holdout`).
-- **holdout**: none today. Until the measurement-hygiene change a hash rule
-  put 45 of the 123 templated and hard-case intents (81 cases) in the
-  holdout (`wasHoldoutIntent` in `scripts/build-eval-dataset.mjs`: the first
-  32 bits of `sha256(intentId)`, mod 100, below 42). The error analysis of
-  the Experiment 1 failures read every failing case, holdout ones included,
-  and some proposed fixes were designed from holdout failures (15 of the 18
-  "turnover" questions were holdout), so those cases could no longer
-  estimate generalization: they are dev now, tagged `formerly_holdout`
-  (`--tag formerly_holdout` selects them; report.md's tag breakdown shows
-  them as a group). A fresh holdout is being authored blind, on new intents
-  and new wording, and joins the suite with its manifest (below).
-- **Holdout wording** (enforced by `test/dataset-hygiene.test.js` over every
-  holdout case of every dataset): a holdout question contains no multi-word
-  phrase of `metadata/semantic-layer.json` (entity, metric and filter-hint
-  synonyms, value aliases, clarification triggers; whole words, plurals
-  included), and none of the single-word metric synonyms the layer
-  *enforces* (today only "revenue", the net-sales synonym a metric guardrail
-  acts on; master-data names such as the "Sales Revenue" account aside).
-  Single-word entity synonyms (customer, store, product, units, documents)
-  and the advisory words ("sales", "sold") still match the layer: they are
-  the only names of those things.
+- **holdout**: the [fresh holdout (v2)](#fresh-holdout-v2),
+  `datasets/holdout-public.json`, held out as a whole (every case `holdout`,
+  by construction): 149 cases over 77 new intents, authored blind on
+  2026-10-06 and frozen by the manifest (below). Until the
+  measurement-hygiene change a hash rule put 45 of the 123 templated and
+  hard-case intents (81 cases) in the holdout (`wasHoldoutIntent` in
+  `scripts/build-eval-dataset.mjs`: the first 32 bits of `sha256(intentId)`,
+  mod 100, below 42). The error analysis of the Experiment 1 failures read
+  every failing case, holdout ones included, and some proposed fixes were
+  designed from holdout failures (15 of the 18 "turnover" questions were
+  holdout), so those cases could no longer estimate generalization: they are
+  dev now, tagged `formerly_holdout` (`--tag formerly_holdout` selects them;
+  report.md's tag breakdown shows them as a group).
+- **Holdout wording** (enforced by `scripts/build-holdout-dataset.mjs` and by
+  `test/dataset-hygiene.test.js` over every holdout case of every dataset): a
+  holdout question contains no multi-word phrase of
+  `metadata/semantic-layer.json` (entity, metric and filter-hint synonyms,
+  value aliases, clarification triggers; whole words, plurals included), and
+  none of the single-word metric synonyms the layer *enforces* (today only
+  "revenue", the net-sales synonym a metric guardrail acts on; master-data
+  names such as the "Sales Revenue" account aside). Holdout questions
+  therefore say "turnover", "net takings", "net of tax" or "net amount" where
+  dev questions say "net sales" or "net revenue". Single-word entity synonyms
+  (customer, store, product, units, documents) and the advisory words
+  ("sales", "sold") still match the layer: they are the only names of those
+  things.
 
 **The holdout freeze.** `datasets/holdout-manifest.json` (not a dataset:
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
@@ -157,8 +174,9 @@ unseen intents and unseen vocabulary, so a dev / holdout gap does not say
 which one hurts.
 
 Run one split with `npm run eval -- --split dev` (or `holdout`; with no
-holdout case that is an empty selection, exit 2); report.md breaks every run
-down by split.
+holdout case that would be an empty selection, exit 2), or the fresh holdout
+alone with `--dataset holdout-public`; report.md breaks every run down by
+split, the holdout in aggregate.
 
 ## The templated generator
 
@@ -281,6 +299,94 @@ shows. They are reported, not gated (see
 
 Positive controls (29) rewrite the gold of every third intent as a CTE, a
 derived table, or with another alias and no `COALESCE` inside `SUM`.
+
+## Fresh holdout (v2)
+
+**Provenance.** `datasets/holdout-public.json` was authored blind on
+2026-10-06 and is frozen. Its author saw the schema (`models/`), the master
+data (`src/eval/fixture-data.js`), the case format and the existing datasets
+(to avoid their intents), and the semantic layer and the few-shot pool only to
+keep their vocabulary and examples out; no model output, failure analysis, run
+report or baseline was looked at, and nothing in the product (prompt rules,
+few-shot pool, semantic layer) has been tuned on it. It was built after the
+committed baseline, so the baseline has no records for it. Keep it that way:
+never tune on its wording or its failures, and do not edit a question or a gold
+to chase a score (an edited question gets a new id). When it has been looked
+at, retire it to dev and add a new holdout instead.
+
+It was authored on a branch where the inspected hash-split holdout was still
+`holdout`, and integrated onto the measurement-hygiene change afterwards: the
+fresh set is now the only holdout, recorded in `datasets/holdout-manifest.json`
+on 2026-10-06. Two exposures happened during authoring, both of existing cases
+or of the product, not of model answers to the fresh questions: after the set
+was frozen, the required `npm run eval -- --offline` printed the committed
+baseline's per-case outcomes for existing (now dev) cases. Separately, a first
+test run listed which fresh golds the validator would reject under the
+retrieved schema scope; the only
+question edits after that kept two questions under the few-shot similarity
+limit. Its golds predate the [gold conventions](#gold-conventions) write-up
+and its two opt-in scoring relaxations: no fresh case sets
+`ignore_all_zero_rows` or `empty_as_zero` (26 set `null_as_zero`, 14 of them
+scalar), so on those questions the holdout scores a little more strictly
+than dev does.
+
+**How it was built.** `scripts/build-holdout-dataset.mjs` (`npm run
+build-holdout-dataset`, `-- --check` for drift; the hygiene tests check it
+reproduces both files byte for byte) writes the dataset and
+`datasets/controls/holdout-public.json` from 77 hand-written intents
+(75 answer intents and 2 abstain cases), each with 1-3 phrasings: 149 cases,
+147 of them answer cases. Every case is `split: 'holdout'` by construction
+(the whole set is held out; no intent hash applies) and carries the
+tag `holdout_v2`. Ids are `ho2_<intentId>_<first 6 hex of sha256(question)>`.
+Questions follow the holdout wording rule above (the build fails on a
+semantic-layer phrase or "revenue"); gold SQL follows the conventions of the
+templated generator, and `expected_row_counts` were written with
+`verify-dataset --write-pins` on freshly seeded fixtures. No fixture was
+changed for it.
+
+| Intent category | Intents | Examples |
+|---|---|---|
+| New shapes in holdout wording (`standard`, `new_dimension`, `ratio`, `finance`) | 35 | turnover by customer segment; each store's share of Q1 turnover; void rate by store; collection rate; average payment terms and posting lag; trial balance as at a date; running total, month-over-month change, weekday totals, value bands; new customers by first purchase month |
+| Named entities (`named_entity`) | 16 | Valley Corner Shop, customer code C-004, Lakeside Wholesale (days between purchase dates), Dormant Demo Account, Spring Essentials, Northstar Goods split by category, Lime Seltzer 8 Pack, the Sales Revenue account |
+| Ranking with explicit tie-breaks (`ranking_ties`) | 7 | best seller per category (alphabetical on ties), top customer per store, busiest day (earliest on ties), runner-up store (`LIMIT 1 OFFSET 1`), largest open items |
+| Unfamiliar vocabulary (`new_vocabulary`) | 6 | "voided", "AR ageing", "delisted", "range breadth", "credit notes", "lines that carry no product" |
+| Relative dates with an as-of date (`relative_date`) | 5 | overdue as of 2026-04-15, past-due by customer, due through month end, last Monday-to-Sunday week, the last 7 days |
+| Two readings accepted (`ambiguous`) | 5 | "how many products" (distinct or units), "average basket" (value or units), lapsed for 60 days (boundary), year to date (with or without today), average unit price (plain or weighted) |
+| Swedish (`multilingual`) | 1 | "Hur mycket moms bokfördes i mars 2026?" |
+| Abstain (`unanswerable`) | 2 | stock on hand, a salesperson |
+
+Across the cases: 6 Swedish and 2 bilingual phrasings, 7 typo or shorthand
+ones, 19 with an explicit as-of date, 28 with alternative gold, 10 ranked, 32
+scalar and 105 rowset comparisons. Four cases are known validator rejections
+(`METRIC_COLUMN`): "credit notes" makes the credit-amount guardrail demand
+`AccountingPosting.CreditAmount` on a document question, and the "Sales
+Revenue" account name trips the net-sales guardrail (the same gap as
+`tpl_revenue_credits_monthly_q1_2026`).
+
+**Controls.** 398 design negatives (the generator's mutation families: cancel
+filter, `PostingDate`, both off-by-one sides, `MONTH()` without `YEAR()`,
+another amount column, a header amount per line, `SUM(DISTINCT ...)`, the
+duplicate customer name merged, dropped filters and `GROUP BY` keys, join paths
+and snapshots, order and `LIMIT`), 37 held-out negatives (`h*`: `QUARTER()`
+without `YEAR()`, snapshot filters, and mistakes specific to the new shapes: a
+ratio's denominator, LAG before or after the window, an ageing bucket edge,
+band edges) and 11 positive rewrites. On the frozen fixtures the first pass
+killed 87.2% of the design negatives (737/845, counted per case). The
+survivors were triaged the way the generator's are, except that no fixture row
+could be added: eight questions moved to a window or threshold the fixtures
+separate (C-004 in January, the month-end due window, last week as of 8 April,
+the last 7 days as of 7 April, customers above 2,600, repeat customers and the
+two-brand customers in March, Metro Online Store in Q1), and 40 survivors are
+recorded under `not_emitted` (38 fixture limits, each naming what no fixture
+has, and 2 equivalences), next to 15 declared up front (14 windows ending on
+2027-01-01, after the fixtures' last data, and one equivalence). Final design
+kill rate 100% (779/779 per case), held-out 86.5% (64/74), positives 23/23
+(every one passes the validator). The held-out survivors are the snapshot
+filters on Long Grain Rice 5kg and Herbal Tea Variety Pack (their snapshots
+contain the master name), the reversed tie-break of the per-category best
+seller (no category ties in March 2026), the brand snapshot of the two-brand
+customers and the inner join of the price agreements (every agreement has 2026
+sales).
 
 ## Hard cases
 
@@ -821,12 +927,14 @@ each distinct control once ("alone" = the oracle with that single fixture):
 | 150 original (edge suite, audit + review) | 57 (38.0%) | 149 (99.3%) | 137 (91.3%) | **150 (100%)** |
 | 745 templated | 168 (22.6%) | 605 (81.2%) | 651 (87.4%) | **745 (100%)** |
 | 126 resolved by the hard cases (57 hand-written) | 45 (35.7%) | 117 (92.9%) | 111 (88.1%) | **126 (100%)** |
+| 398 fresh holdout (v2), after triage (see [Fresh holdout (v2)](#fresh-holdout-v2)) | 127 (31.9%) | 350 (87.9%) | 341 (85.7%) | **398 (100%)** |
 
 | Held-out negatives | Seed alone | v2 alone | v3 alone | All three fixtures |
 |---|---|---|---|---|
 | 28 original (audit, written after v2 was frozen) | 12 (42.9%) | 27 (96.4%) | 26 (92.9%) | **28 (100%)** |
 | 117 templated (families never designed against) | 14 (12.0%) | 78 (66.7%) | 84 (71.8%) | **92 (78.6%)** |
 | 16 resolved by the hard cases (5 hand-written) | 5 (31.3%) | 11 (68.8%) | 12 (75.0%) | **12 (75.0%)** |
+| 37 fresh holdout (v2), new shapes included | 10 (27.0%) | 24 (64.9%) | 30 (81.1%) | **32 (86.5%)** |
 
 Templated held-out kill rates by family: `QUARTER()` without `YEAR()` 30/31,
 the cancel filter in `HAVING` 52/55, grouping by `ProductNameSnapshot` 4/7,
@@ -1307,13 +1415,13 @@ $0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` ca
   fixtures were designed against; the held-out tiers (about 75-79%) are the
   estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
   and [Known blind spots](#known-blind-spots).
-- **No holdout yet**: the inspected holdout was retired to dev
-  (`formerly_holdout`); until the blind one lands there is no generalization
-  estimate, only dev accuracy. **A holdout mixes two effects**: unseen intents
-  and unseen vocabulary. It avoids the semantic layer's multi-word phrases and
-  its enforced word "revenue", not its single-word entity synonyms, so its
-  wording differs from dev's systematically (the retired one said "turnover"
-  and "net takings" where dev says "net revenue").
+- **A small, unmeasured holdout**: the inspected holdout was retired to dev
+  (`formerly_holdout`); the fresh one (147 answer cases over 75 intents) has
+  no baseline yet, so the committed baseline is a dev-only measurement. **A
+  holdout mixes two effects**: unseen intents and unseen vocabulary. It avoids
+  the semantic layer's multi-word phrases and its enforced word "revenue", not
+  its single-word entity synonyms, so its wording differs from dev's
+  systematically ("turnover" and "net takings" where dev says "net revenue").
 - **Zero-row cases** accept any empty result (or 0 / NULL for a scalar): they
   only test that the product does not invent rows in an empty window.
 - **Every document type is a sale**: Credit Memos carry positive amounts in

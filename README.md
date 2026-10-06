@@ -285,8 +285,8 @@ npm run benchmark -- --dataset edge-cases-public --tag join_path
 
 ### Datasets and the scoring oracle
 
-`datasets/` holds five public datasets, which `npm run eval` de-duplicates into
-one suite of 255 unique cases over 140 intents (see [Evaluation](#evaluation)):
+`datasets/` holds six public datasets, which `npm run eval` de-duplicates into
+one suite of 404 unique cases over 217 intents (see [Evaluation](#evaluation)):
 
 - `core-public` (9 cases) and `paraphrase-public` (9 rephrasings of them): the
   original smoke cases, the wording the prompt rules and the semantic layer
@@ -302,14 +302,22 @@ one suite of 255 unique cases over 140 intents (see [Evaluation](#evaluation)):
 - `hard-cases-public` (40 hand-written cases): new vocabulary, Swedish, typos,
   relative dates with an explicit as-of date, named entities, zero-row
   answers, and 10 unanswerable or ambiguous questions whose right behaviour is
-  to abstain or ask (no gold SQL; reported apart from accuracy).
+  to abstain or ask (no gold SQL; reported apart from accuracy);
+- `holdout-public` (149 cases over 77 intents): a fresh holdout (v2), authored
+  blind on 2026-10-06 and frozen, every case `holdout`: new shapes (shares,
+  ratios, receivables ageing, trial balance, running totals, window
+  functions), named entities, explicit tie-breaks, relative dates with an
+  as-of date, Swedish, typos and two-reading questions, built by
+  `npm run build-holdout-dataset` (see
+  [docs/evaluation-dataset.md](docs/evaluation-dataset.md#fresh-holdout-v2)).
 
 Every answer case is execution-verified on the three fixture databases (seed,
 v2, v3) with its row counts pinned, and resolves oracle controls in
 `datasets/controls/`: plausible wrong SQL the oracle must reject and correct
-alternatives it must accept. Every case in these datasets is `dev`: the
-holdout the error analysis of Experiment 1 inspected was retired to dev
-(tagged `formerly_holdout`), and a fresh holdout, authored blind, is frozen by
+alternatives it must accept. Every case in the five datasets before
+`holdout-public` is `dev`: the holdout the error analysis of Experiment 1
+inspected was retired to dev (tagged `formerly_holdout`). The holdout is
+`holdout-public` alone, authored blind and frozen by
 `datasets/holdout-manifest.json`. With one or two cases per failure class in
 the edge suite, per-class results there are examples, not rates.
 
@@ -355,7 +363,7 @@ confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
 still written for older consumers, labelled as such. A repeated run is a
 measurement and does not fail the process on run-to-run variance.
 
-Even the whole suite (255 cases over 140 intents) is small next to real
+Even the whole suite (404 cases over 217 intents) is small next to real
 usage, and one dataset alone is a smoke test; read a single dataset's numbers
 as smoke signals, and use the whole suite with repetitions (`npm run eval --
 --repeat 3`) for any reliability claim.
@@ -375,18 +383,23 @@ they are missing or drifted, verifies every gold query and the oracle controls
 `datasets/` through the product loop with 4 cases in flight and a per-case
 deadline, and writes `generated/runs/<timestamp>/all/<model>/`.
 
-The suite is 255 unique cases over 140 intents: the original core, paraphrase
+The suite is 404 unique cases over 217 intents: the original core, paraphrase
 and edge cases, a templated set (`datasets/templated-public.json`, 94 intents
-with 2-3 phrasings each, built by `npm run build-eval-dataset`) and 40
+with 2-3 phrasings each, built by `npm run build-eval-dataset`), 40
 hand-written hard cases (new vocabulary, Swedish, typos, relative dates with an
 as-of date, named entities, zero-row answers, and 10 unanswerable or ambiguous
 questions where the right behaviour is to abstain or ask, reported apart from
-accuracy). Every case is `dev` or `holdout`, and today every case is dev: the
-45 intents (81 cases) that were holdout were read during the error analysis
-of Experiment 1, so they are dev now, tagged `formerly_holdout`. A fresh
-holdout (new intents, wording that avoids the semantic layer) is authored
-blind and frozen by `datasets/holdout-manifest.json`: a test fails when a
-holdout case is added, removed or changed without a reviewed manifest update
+accuracy) and a fresh holdout (`datasets/holdout-public.json`, 149 cases over
+77 intents, authored blind on 2026-10-06). Every case is `dev` or `holdout`:
+the 255 cases over 140 intents of the first five datasets are dev, and the
+149 fresh cases are the holdout. The 45 intents (81 cases) that used to be
+holdout were read during the error analysis of Experiment 1, so they are dev
+now, tagged `formerly_holdout`. The fresh holdout is new intents whose
+questions avoid every multi-word phrase of the semantic layer and its tuned
+word "revenue" (single words such as customer, store or units still match
+it), so it measures new intents in partly new wording. It is frozen by
+`datasets/holdout-manifest.json`: a test fails when a holdout case is added,
+removed or changed without a reviewed manifest update
 (`npm run holdout-manifest -- --write --note "..."`). Error analysis and
 experiment design use dev failures only; report.md and the console show the
 holdout in aggregate (accuracy by split), never per case, unless
@@ -399,9 +412,9 @@ relaxations are opt-in per case: a customer pivot may also list customers
 with 0 everywhere, and a scalar total may be empty where the gold is NULL /
 0 (see [docs/evaluation-dataset.md](docs/evaluation-dataset.md#gold-conventions)).
 A case can be flagged as a known product gap (the validator rejects every
-correct answer today; one case, where a guardrail misreads a ledger account
-name); it still counts in accuracy, and its failures are system errors. The
-report contains:
+correct answer today; five cases, where a guardrail misreads a ledger account
+name or the word "credit": one dev, four holdout); it still counts in
+accuracy, and its failures are system errors. The report contains:
 
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval
@@ -686,7 +699,7 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - Missing foreign keys are ignored on purpose rather than guessed.
 - The local bootstrap uses the copied models to create a practical starter schema, not a byte-for-byte production clone.
 - Generated files are written to `generated/` and are excluded from git.
-- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`) and `hard-cases-public` (hand-written, including abstain / clarify cases), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits (every case is dev until the blind holdout lands; `datasets/holdout-manifest.json` freezes the holdout); their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
+- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`), `hard-cases-public` (hand-written, including abstain / clarify cases) and `holdout-public` (the fresh holdout v2, built by `npm run build-holdout-dataset`), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits (the first five are all dev; `holdout-public` is the holdout, frozen by `datasets/holdout-manifest.json`); their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
 - The *why* behind the pipeline and the web app — design decisions, trade-offs, and the invariants — is in `docs/architecture.md`.
 - Measured product changes (one variable, paired against the committed baseline) are written up in `docs/experiments/` (protocol in `docs/experiments/README.md`).
 
