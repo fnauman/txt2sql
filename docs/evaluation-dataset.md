@@ -160,9 +160,10 @@ question says so, by `AccountingPosting.PostingDate`.
 **Comparison blocks** follow the [comparison spec](#comparison-spec-value-aware-scoring):
 ranked for top-N and rankings (`value_columns` = the metric), rowset for
 breakdowns and series, scalar for totals; `tolerance: 0.01` for line money and
-averages (rounding placement can differ by a cent); `null_as_zero` for sums
-over a window some fixture has no rows in; `column_order` and `null_as_zero`
-for pivots; ledger rowsets compare the account name and the amounts (the code
+averages (rounding placement can differ by a cent); `null_as_zero` (and the
+`empty_as_zero` relaxation) for scalar sums over a window some fixture has no
+rows in; `column_order` and `null_as_zero` for pivots (and, for a pivot by
+customer, the `ignore_all_zero_rows` relaxation); ledger rowsets compare the account name and the amounts (the code
 may be left out; an answer with codes only fails, so those questions ask for
 the account names). **Alternative gold** where a second reading or output form
 is equally correct: a month labelled `'YYYY-MM-01'`, by number, by name (one
@@ -284,8 +285,11 @@ filter, every year instead of 2026).
 whatever their columns. A SUM over no rows is one row holding NULL, which
 does not equal 0 unless the column is listed in `null_as_zero` (the zero-row
 and windowed scalar cases list it). An empty result does not equal one NULL
-row, so the 2023 case accepts both forms (an alternative with `HAVING COUNT(*)
-> 0`). `test/eval-behavior.test.js` pins these rules. What it means for
+row unless the case opts into the `empty_as_zero` relaxation (every scalar
+sum does, see [Scoring relaxations](#scoring-relaxations)); the 2023 case
+also keeps its older alternative with `HAVING COUNT(*) > 0`.
+`test/eval-behavior.test.js` and `test/comparison-relaxations.test.js` pin
+these rules. What it means for
 scoring: an empty gold only tests that the product does not invent rows in an
 empty window. Any query that returns nothing (or 0 / NULL for a scalar)
 passes, a wrong metric or a document count included (the held-out `xh*`
@@ -523,8 +527,10 @@ Oracle rules (`scoreAgainstGold`):
   breakdown lists the members with activity in the window; listing every
   member with 0 or NULL is accepted only where the question invites it ("for
   each customer", a pivot, "each customer named ...", an empty window). A
-  scalar returns one row (NULL or 0 for an empty window); an empty result is
-  accepted only by the zero-row case whose whole point is the empty year.
+  scalar returns one row (NULL or 0 for an empty window). Two scoring
+  relaxations widen this on purpose (next section): a customer pivot also
+  accepts extra customers with 0 everywhere, and a scalar sum also accepts
+  an empty result where its gold is NULL / 0.
 
 ### Scoring relaxations
 
@@ -540,7 +546,29 @@ comparison spec changed") instead of counting a free flip.
 | `empty_as_zero` | scalar mode with `null_as_zero` | an empty prediction equals a gold of one NULL / 0 row |
 
 The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
-`test/comparison-relaxations.test.js` pins them.
+`test/comparison-relaxations.test.js` pins them. Where they are used, and why
+(both came out of the error analysis of the Experiment 1 failures):
+
+- `ignore_all_zero_rows`: the customer pivots (`edge_public_008` and the
+  templated `customer_net_sales_q1_2025_vs_q1_2026`, 3 cases; the generator
+  sets it on every pivot by customer). A pivot that also lists customers with
+  0 in every window (every customer that bought at any time, say) gives the
+  same answer. The oracle used to accept only the gold's customer set or
+  every customer (the LEFT JOIN alternative), so such an answer matched one
+  reading on one fixture and the other on another, and failed. The review
+  controls that encoded that rejection (`edge_public_008/r3` and `r4`) are
+  positive controls now (`rp7`, `rp8`). Not set on the single-row pivot (no
+  member to pad) or on the empty June 2026 case (an empty gold stays strict).
+- `empty_as_zero`: every scalar sum with `null_as_zero` (30 templated cases,
+  10 hard cases). "How much did South Store take in March 2026?" answered
+  with a total grouped by the store is empty on a fixture where the store
+  sold nothing, and one NULL row is what the gold returns there.
+
+Rescoring the committed gpt-4o-mini baseline (no LLM calls) with and without
+them: strict accuracy 72.8% → 74.8%, majority-pass cases 179 → 184, five
+improvements (the three customer pivots, `tpl_net_sales_south_store_mar_2026`
+×2) and no regression. A comparison with a report scored before them excludes
+these 43 cases (scoring fingerprint changed).
 
 ### Statuses and warnings
 
@@ -597,7 +625,7 @@ comparison: {
   (`'2026-01-01'`); `'2026-01'` is text. Dates never equal numbers.
 - **scalar / rowset**: an order-blind bijection of compared row tuples must
   exist. **Empty results**: two empty results match; an empty result never
-  equals one row.
+  equals one row (unless the case opts into `empty_as_zero`, below).
 - **ranked**: the bijection must exist **and** the model's primary value column
   must be monotonic in `order` (tie reordering by label is tolerated; NULL
   metrics sort last; values compare as cells match, so two values that both
@@ -685,10 +713,11 @@ rate is below `--min-kill-rate` (default 0.95). The original controls:
 - **Audit controls** (`m*`, `h*`, `a*`): 108 design mutants, 28 held-out
   mutants (written after the v2 fixture was frozen), 32 of the 35 correct
   alternatives, plus 5 positives for the alternative readings.
-- **Review controls** (`r*`, `rp*`): 44 design negatives for the families the
+- **Review controls** (`r*`, `rp*`): 42 design negatives for the families the
   oracle review found surviving (MONTH() without YEAR(), SUM(DISTINCT ...),
   invented IsActive filters, hedged answers, one-sided cancel filters, ...)
-  and 34 correct alternatives. `core_public_004/rp4` is flagged
+  and 36 correct alternatives (`edge_public_008/rp7` and `rp8` were the
+  negatives `r3` and `r4` until the `ignore_all_zero_rows` relaxation). `core_public_004/rp4` is flagged
   `validator_known_false_rejection` (the FAN_OUT guardrail rejects a boolean
   header aggregate that cannot fan out).
 - **Templated controls** (`n*` design, `h*` held-out, `p*` positive):
@@ -701,7 +730,7 @@ each distinct control once ("alone" = the oracle with that single fixture):
 
 | Design negatives | Seed alone | v2 alone | v3 alone | All three fixtures |
 |---|---|---|---|---|
-| 152 original (edge suite, audit + review) | 59 (38.8%) | 149 (98.0%) | 137 (90.1%) | **152 (100%)** |
+| 150 original (edge suite, audit + review) | 57 (38.0%) | 149 (99.3%) | 137 (91.3%) | **150 (100%)** |
 | 745 templated | 168 (22.6%) | 605 (81.2%) | 651 (87.4%) | **745 (100%)** |
 | 126 resolved by the hard cases (57 hand-written) | 45 (35.7%) | 117 (92.9%) | 111 (88.1%) | **126 (100%)** |
 
@@ -714,7 +743,7 @@ each distinct control once ("alone" = the oracle with that single fixture):
 Templated held-out kill rates by family: `QUARTER()` without `YEAR()` 30/31,
 the cancel filter in `HAVING` 52/55, grouping by `ProductNameSnapshot` 4/7,
 snapshot filters 1/5, rankings ordered by another amount 5/19. Positive
-controls all match on every fixture (71 original, 29 templated, 26 resolved by
+controls all match on every fixture (73 original, 29 templated, 26 resolved by
 the hard cases); every one passes the validator except `core_public_004/rp4`
 and those of questions flagged `known_validator_rejection` (rejected with the
 same code, a note). Per dataset the gate counts each control once per case
@@ -1185,8 +1214,9 @@ $0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` ca
   order value, last purchase date, "spend"), a convention inherited from the
   core cases; a reading that leaves them out fails.
 - **Breakdowns list members with activity**: a LEFT JOIN listing of every
-  member with 0 is accepted only where the question invites it; scalars must
-  return one row (see [Pins and alternative gold](#pins-and-alternative-gold)).
+  member with 0 is accepted only where the question invites it; scalars
+  return one row (see [Pins and alternative gold](#pins-and-alternative-gold)),
+  except under the [scoring relaxations](#scoring-relaxations).
 - **Ledger rows are compared on the account name**: an answer with account
   codes only fails, so the new ledger questions ask for names; the original
   ledger cases (`core_public_005` / `009`) do not say so.

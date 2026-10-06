@@ -1504,7 +1504,7 @@ function notesFor(intent) {
   }
   if (intent.template === 'pivot' && intent.dim === 'customer') {
     notes.push(
-      'Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales.'
+      'Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales. Scoring relaxation ignore_all_zero_rows: any other listing that adds customers with 0 (or NULL) in both windows, such as every customer that bought at any time, is the same answer.'
     );
   } else if (intent.template === 'pivot') {
     notes.push('column_order keeps the earlier window first unless the columns are named like the gold columns.');
@@ -1534,6 +1534,9 @@ function notesFor(intent) {
       'Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).'
     );
   }
+  if (comparisonFor(intent).empty_as_zero) {
+    notes.push('Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.');
+  }
   return notes.join(' ');
 }
 
@@ -1556,6 +1559,10 @@ function comparisonFor(intent) {
       decimals: 2,
       column_order: [...intent.columns],
       null_as_zero: [...intent.columns],
+      // Scoring relaxation: a customer listed with 0 in both windows is the
+      // same answer (the error analysis found models listing every customer
+      // with activity at any time).
+      ...(intent.dim === 'customer' ? { ignore_all_zero_rows: true } : {}),
     };
   }
   if (intent.template === 'ledger') {
@@ -1564,7 +1571,8 @@ function comparisonFor(intent) {
       return { mode: 'rowset', decimals: 2 };
     }
     if (intent.accountCode || intent.manualOnly) {
-      return { mode: 'scalar', decimals: 2, null_as_zero: aliases };
+      // Scoring relaxation: no rows is the same answer as a NULL / 0 total.
+      return { mode: 'scalar', decimals: 2, null_as_zero: aliases, empty_as_zero: true };
     }
     return { mode: 'rowset', compare_columns: ['AccountName', ...aliases], decimals: 2 };
   }
@@ -1578,8 +1586,9 @@ function comparisonFor(intent) {
     case 'breakdown':
       return base('rowset');
     case 'scalar':
-      // SUM over an empty window is NULL; 0 is the same answer.
-      return { ...base('scalar'), ...(metric.agg === 'sum' ? { null_as_zero: [metric.alias] } : {}) };
+      // SUM over an empty window is NULL; 0, and (a scoring relaxation) no
+      // rows at all, are the same answer.
+      return { ...base('scalar'), ...(metric.agg === 'sum' ? { null_as_zero: [metric.alias], empty_as_zero: true } : {}) };
     default:
       throw new Error(`${intent.intentId}: unknown shape ${intent.shape}`);
   }

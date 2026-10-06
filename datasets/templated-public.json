@@ -495,6 +495,7 @@
       "scalar",
       "single_month"
     ],
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'",
     "expected_tables": [
       "SalesDocument"
@@ -504,7 +505,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -525,6 +527,7 @@
       "scalar",
       "single_month"
     ],
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'",
     "expected_tables": [
       "SalesDocument"
@@ -534,7 +537,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -556,6 +560,7 @@
       "quarter"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-10-01' AND d.DocumentDate < '2026-01-01'",
     "expected_tables": [
       "SalesDocument"
@@ -565,7 +570,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -587,6 +593,7 @@
       "quarter"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-10-01' AND d.DocumentDate < '2026-01-01'",
     "expected_tables": [
       "SalesDocument"
@@ -596,7 +603,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -618,6 +626,7 @@
       "year"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01'",
     "expected_tables": [
       "SalesDocument"
@@ -627,7 +636,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -649,6 +659,7 @@
       "year"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01'",
     "expected_tables": [
       "SalesDocument"
@@ -658,7 +669,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -680,6 +692,7 @@
       "date_range"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-15' AND d.DocumentDate < '2026-03-16'",
     "expected_tables": [
       "SalesDocument"
@@ -689,7 +702,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -711,6 +725,7 @@
       "date_range"
     ],
     "failure_class": "time_window",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-15' AND d.DocumentDate < '2026-03-16'",
     "expected_tables": [
       "SalesDocument"
@@ -720,7 +735,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -947,7 +963,7 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales.",
+    "notes": "Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales. Scoring relaxation ignore_all_zero_rows: any other listing that adds customers with 0 (or NULL) in both windows, such as every customer that bought at any time, is the same answer.",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
     "alternative_expected_sql": [
       "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
@@ -971,7 +987,8 @@
       "null_as_zero": [
         "q1_2025_net_amount",
         "q1_2026_net_amount"
-      ]
+      ],
+      "ignore_all_zero_rows": true
     },
     "expected_row_counts": {
       "seed": 5,
@@ -994,7 +1011,7 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales.",
+    "notes": "Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales. Scoring relaxation ignore_all_zero_rows: any other listing that adds customers with 0 (or NULL) in both windows, such as every customer that bought at any time, is the same answer.",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
     "alternative_expected_sql": [
       "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
@@ -1018,7 +1035,8 @@
       "null_as_zero": [
         "q1_2025_net_amount",
         "q1_2026_net_amount"
-      ]
+      ],
+      "ignore_all_zero_rows": true
     },
     "expected_row_counts": {
       "seed": 5,
@@ -1179,6 +1197,7 @@
       "single_month"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND s.LocationName LIKE '%South Store%'",
     "expected_tables": [
       "SalesDocument",
@@ -1189,7 +1208,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -1212,6 +1232,7 @@
       "single_month"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND s.LocationName LIKE '%South Store%'",
     "expected_tables": [
       "SalesDocument",
@@ -1222,7 +1243,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -1385,6 +1407,7 @@
       "quarter"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Metro Online Store%'",
     "expected_tables": [
       "SalesDocument",
@@ -1395,7 +1418,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -1418,6 +1442,7 @@
       "quarter"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Metro Online Store%'",
     "expected_tables": [
       "SalesDocument",
@@ -1428,7 +1453,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -1646,6 +1672,7 @@
       "quarter"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -1655,7 +1682,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_gross_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -1677,6 +1705,7 @@
       "quarter"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -1686,7 +1715,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_gross_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -2909,6 +2939,7 @@
       "single_month"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' AND pc.CategoryName LIKE '%Household%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2922,7 +2953,8 @@
       "tolerance": 0.01,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -2945,6 +2977,7 @@
       "single_month"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' AND pc.CategoryName LIKE '%Household%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2958,7 +2991,8 @@
       "tolerance": 0.01,
       "null_as_zero": [
         "total_net_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -3453,6 +3487,7 @@
       "quarter"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Kitchen Towels 4 Roll%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -3464,7 +3499,8 @@
       "decimals": 3,
       "null_as_zero": [
         "total_qty"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -3487,6 +3523,7 @@
       "quarter"
     ],
     "failure_class": "entity_filter",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Kitchen Towels 4 Roll%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -3498,7 +3535,8 @@
       "decimals": 3,
       "null_as_zero": [
         "total_qty"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -3731,7 +3769,7 @@
       "scalar",
       "single_month"
     ],
-    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases. Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' AND l.ProductId IS NOT NULL",
     "expected_tables": [
       "SalesDocumentLine",
@@ -3742,7 +3780,8 @@
       "decimals": 3,
       "null_as_zero": [
         "total_qty"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -3763,7 +3802,7 @@
       "scalar",
       "single_month"
     ],
-    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases. Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' AND l.ProductId IS NOT NULL",
     "expected_tables": [
       "SalesDocumentLine",
@@ -3774,7 +3813,8 @@
       "decimals": 3,
       "null_as_zero": [
         "total_qty"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5002,6 +5042,7 @@
       "single_month"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5011,7 +5052,8 @@
       "decimals": 2,
       "null_as_zero": [
         "outstanding_balance"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5033,6 +5075,7 @@
       "single_month"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5042,7 +5085,8 @@
       "decimals": 2,
       "null_as_zero": [
         "outstanding_balance"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5125,6 +5169,7 @@
       "due_date"
     ],
     "failure_class": "wrong_date_column",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5134,7 +5179,8 @@
       "decimals": 2,
       "null_as_zero": [
         "outstanding_balance"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5157,6 +5203,7 @@
       "due_date"
     ],
     "failure_class": "wrong_date_column",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5166,7 +5213,8 @@
       "decimals": 2,
       "null_as_zero": [
         "outstanding_balance"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5320,6 +5368,7 @@
       "single_month"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS total_paid_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5329,7 +5378,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_paid_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5351,6 +5401,7 @@
       "single_month"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS total_paid_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -5360,7 +5411,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_paid_amount"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5684,7 +5736,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '1100'",
     "alternative_expected_sql": [
       "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '1100'"
@@ -5698,7 +5750,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_debit"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5721,7 +5774,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '1100'",
     "alternative_expected_sql": [
       "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '1100'"
@@ -5735,7 +5788,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_debit"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5758,7 +5812,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account.",
+    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account. Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL",
     "expected_tables": [
       "AccountingPosting"
@@ -5768,7 +5822,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_debit"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
@@ -5791,7 +5846,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account.",
+    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account. Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL",
     "expected_tables": [
       "AccountingPosting"
@@ -5801,7 +5856,8 @@
       "decimals": 2,
       "null_as_zero": [
         "total_debit"
-      ]
+      ],
+      "empty_as_zero": true
     },
     "expected_row_counts": {
       "seed": 1,
