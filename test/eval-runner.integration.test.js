@@ -416,7 +416,7 @@ test('behaviour-only selections: the benchmark profile fails an answered case; -
   const unanswerable = ['--dataset', 'hard-cases-public', '--tag', 'unanswerable'];
   const answered = await runEval(['--profile', 'benchmark', ...unanswerable], 'benchmark-behaviour');
   assert.equal(answered.code, 1, `${answered.stdout}\n${answered.stderr}`);
-  assert.match(answered.stdout, /FAIL: 4 case\(s\) failed \(benchmark profile, single run; 4 abstain\/clarify case\(s\) answered instead of declining\)/);
+  assert.match(answered.stdout, /FAIL: 4 case\(s\) failed \(benchmark profile, single run; 4 abstain\/clarify case\(s\) not declined: 4 answered\)/);
   const declined = await runEval(['--profile', 'benchmark', '--dataset', 'hard-cases-public', '--case-id', 'hard_abstain_competitor_prices'], 'benchmark-declined');
   assert.equal(declined.code, 0, `${declined.stdout}\n${declined.stderr}`);
 

@@ -840,9 +840,10 @@ the database is touched.
 `npm run benchmark` and `npm run evaluate` run the same runner with `--profile
 benchmark`: one dataset (default `core-public`), no Docker start, no seeding,
 no verification, and exit 1 when any case fails in a single-repetition run: an
-answer case that does not pass, or an abstain / clarify case the model answers
-instead of declining (behaviour cases stay out of strict accuracy, but not out
-of this rule).
+answer case that does not pass, or an abstain / clarify case that is not
+declined: the model answers it, or its call fails without SQL and without a
+decline code (behaviour cases stay out of strict accuracy, but not out of this
+rule).
 
 ### Reading report.md
 

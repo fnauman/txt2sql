@@ -282,7 +282,20 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
   assert.equal(answeredEverything.stats.repeat, 1);
   assert.deepEqual(computeExitCode(answeredEverything, { failOnAnyFailure: true }), {
     code: 1,
-    reasons: ['2 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) answered instead of declining)'],
+    reasons: ['2 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) not declined: 2 answered)'],
+  });
+  // A non-outage LLM error with no SQL and no decline code is not a decline
+  // either, but the model did not answer: the reason says so.
+  const errored = reportOf(
+    await recordsOf([
+      single(abstainCase, behaviorRep('llm_error', { error_code: 'LLM_BAD_JSON', attempts: [] })),
+      single(clarifyCase, behaviorRep('answered')),
+    ])
+  );
+  assert.equal(errored.results.find((record) => record.id === abstainCase.id).repetitions[0].outcome, 'llm_error');
+  assert.deepEqual(computeExitCode(errored, { failOnAnyFailure: true }), {
+    code: 1,
+    reasons: ['2 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) not declined: 1 answered, 1 errored)'],
   });
   // The eval profile still only measures behaviour cases.
   assert.deepEqual(computeExitCode(answeredEverything), { code: 0, reasons: [] });
@@ -298,7 +311,7 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
     ])
   );
   assert.deepEqual(computeExitCode(mixed, { failOnAnyFailure: true }).reasons, [
-    '2 case(s) failed (benchmark profile, single run; 1 abstain/clarify case(s) answered instead of declining)',
+    '2 case(s) failed (benchmark profile, single run; 1 abstain/clarify case(s) not declined: 1 answered)',
   ]);
   // With --repeat the benchmark profile does not fail on single cases (as before).
   const repeated = reportOf(await recordsOf([{ entry: { testCase: abstainCase, datasets: ['hard'] }, repetitions: [behaviorRep('answered'), behaviorRep('answered')] }]));

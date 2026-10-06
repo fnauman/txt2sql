@@ -280,7 +280,7 @@ npm run benchmark -- --dataset edge-cases-public          # public edge-case sui
 npm run benchmark -- --dataset edge-cases-public --tag join_path
 ```
 
-`npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run (an abstain / clarify case fails when the model answers it). The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
+`npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run (an abstain / clarify case fails when it is not declined: the model answers it, or its call fails without SQL). The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
 
 ### Datasets and the scoring oracle
 

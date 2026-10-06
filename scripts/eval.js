@@ -28,8 +28,9 @@
 // `npm run benchmark` / `npm run evaluate` run this with --profile benchmark:
 // one dataset (default core-public), no Docker start, no seeding (stale
 // fixtures only warn), no verification, and the old exit rule (1 when any case
-// fails in a single-repetition run; an abstain / clarify case fails when the
-// model answers it). Run with --help for every flag.
+// fails in a single-repetition run; an abstain / clarify case fails when it is
+// not declined: the model answers it, or its call fails without SQL). Run with
+// --help for every flag.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -121,7 +122,8 @@ Profiles:
                               (default core-public), no Docker, no seeding, no
                               verification, exit 1 when any case fails in a
                               single-repetition run (an abstain / clarify case
-                              fails when the model answers it)
+                              fails when it is not declined: answered, or an
+                              LLM error without SQL)
 Exit codes: 0 ok; 1 gate failed (--gate) or, in the benchmark profile, a failed
 case; 2 harness, dataset or infrastructure failure.
 ${ENV_USAGE}`;
@@ -619,12 +621,18 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (failOnAnyFailure && report.stats.repeat <= 1) {
     // An answer case fails when a counted repetition did not pass; an abstain
     // / clarify case (never counted in accuracy) when a repetition scored for
-    // its behaviour answered instead of declining.
+    // its behaviour did not decline: the model answered, or (outcome
+    // llm_error) its call failed without SQL and without a decline code.
     const records = report.results || [];
     const answerFailed = records.filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
-    const behaviorFailed = records.filter((record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted).length;
+    const behaviorFailedRecords = records.filter((record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted);
+    const behaviorFailed = behaviorFailedRecords.length;
     if (answerFailed + behaviorFailed > 0) {
-      const behavior = behaviorFailed > 0 ? `; ${behaviorFailed} abstain/clarify case(s) answered instead of declining` : '';
+      const answered = behaviorFailedRecords.filter((record) =>
+        (record.repetitions || []).some((repetition) => repetition.behavior_counted && String(repetition.outcome).startsWith('answered_instead_of_'))
+      ).length;
+      const parts = [answered > 0 ? `${answered} answered` : '', behaviorFailed - answered > 0 ? `${behaviorFailed - answered} errored` : ''].filter(Boolean);
+      const behavior = behaviorFailed > 0 ? `; ${behaviorFailed} abstain/clarify case(s) not declined: ${parts.join(', ')}` : '';
       failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior})`);
     }
   }
