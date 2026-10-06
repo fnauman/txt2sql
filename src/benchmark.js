@@ -1125,13 +1125,31 @@ function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples
     const actualAtBoundary = actualTuples.filter((tuple) => rankKey(tuple) === boundaryKey).map(tupleKey).sort();
     return sameList(goldAbove, actualAbove) && containsSortedKeys(pool, actualAtBoundary);
   }
+  return toleranceMatchingExists(matchingLeft(goldTuples, isBoundary, tieTuples), actualTuples, tieTuples.length, tolerance);
+}
+
+// The left side of a tolerance matching: every gold row, plus the ties at a
+// cut-off (see matchRowsAcrossBoundary); `inPool` marks the rows a stand-in
+// may absorb (the gold's boundary rows and the ties).
+function matchingLeft(goldTuples, isBoundary, tieTuples) {
+  return [
+    ...goldTuples.map((tuple, index) => ({ tuple, inPool: Boolean(isBoundary?.[index]) })),
+    ...tieTuples.map((tuple) => ({ tuple, inPool: true })),
+  ];
+}
+
+// Is there a perfect matching (Hopcroft-Karp) between `left` and the
+// prediction rows plus `standInCount` stand-ins? A left row pairs with a
+// prediction row whose tuple is within the tolerance of its own and for which
+// `allowed(leftIndex, actualIndex)` holds, and a pool row also with any
+// stand-in.
+function toleranceMatchingExists(left, actualTuples, standInCount, tolerance, allowed = () => true) {
   const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-  const standIns = tieTuples.map((_tuple, index) => actualTuples.length + index);
-  const left = [...goldTuples.map((tuple, index) => ({ tuple, inPool: isBoundary[index] })), ...tieTuples.map((tuple) => ({ tuple, inPool: true }))];
-  const adjacency = left.map(({ tuple, inPool }) => {
+  const standIns = Array.from({ length: standInCount }, (_value, index) => actualTuples.length + index);
+  const adjacency = left.map(({ tuple, inPool }, i) => {
     const neighbours = [];
     actualTuples.forEach((actual, j) => {
-      if (tuplesEqual(tuple, actual)) {
+      if (tuplesEqual(tuple, actual) && allowed(i, j)) {
         neighbours.push(j);
       }
     });
@@ -1140,7 +1158,7 @@ function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples
   if (adjacency.some((neighbours) => neighbours.length === 0)) {
     return false;
   }
-  return hasPerfectMatching(adjacency, actualTuples.length + standIns.length);
+  return hasPerfectMatching(adjacency, actualTuples.length + standInCount);
 }
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
@@ -1157,20 +1175,7 @@ function matchRowsUnordered(goldTuples, actualTuples, tolerance) {
   if (tolerance <= 0) {
     return sameList(goldTuples.map(tupleKey).sort(), actualTuples.map(tupleKey).sort());
   }
-  const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-  const adjacency = goldTuples.map((gold) => {
-    const neighbours = [];
-    actualTuples.forEach((actual, j) => {
-      if (tuplesEqual(gold, actual)) {
-        neighbours.push(j);
-      }
-    });
-    return neighbours;
-  });
-  if (adjacency.some((neighbours) => neighbours.length === 0)) {
-    return false;
-  }
-  return hasPerfectMatching(adjacency, actualTuples.length);
+  return toleranceMatchingExists(matchingLeft(goldTuples, null, []), actualTuples, 0, tolerance);
 }
 
 // Hopcroft-Karp: does the bipartite graph (left i -> adjacency[i], right
