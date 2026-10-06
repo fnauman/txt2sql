@@ -19,7 +19,7 @@ import {
 } from '../src/eval/compact-report.js';
 import { compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
-import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
+import { rescoreReportCases, restoreSharedCallUsage, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, caseMetadata } from '../src/eval/runner.js';
 import { createValidatorProbe } from '../src/eval/verify.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -233,13 +233,51 @@ test('a compact report is marked, versioned, idempotent and one line per case; a
     assert.ok(kept in record || full.results[0][kept] === undefined, `case ${kept}`);
   }
   assert.deepEqual(Object.keys(repetition.attempts[0]), ['attempt', 'retry', 'generatedSql', 'llm', 'validation', 'execution']);
-  assert.deepEqual(repetition.attempts[0].llm, {
+  // The repetition's only LLM call: its usage and cost are the repetition's,
+  // stored once there and named by llm_usage_attempt.
+  assert.equal(repetition.attempts.length, 1);
+  assert.equal(repetition.llm_usage_attempt, 1);
+  assert.deepEqual(repetition.attempts[0].llm, { ok: true, durationMs: 1300, tablesUsed: ['Customer'] });
+  assert.deepEqual(repetition.llm_usage, { prompt_tokens: 2000, completion_tokens: 100, total_tokens: 2100, prompt_tokens_details: { cached_tokens: 1024 } });
+  // restoreSharedCallUsage (what a rescore reads) gives the call its copy back.
+  const restored = restoreSharedCallUsage(repetition);
+  assert.equal('llm_usage_attempt' in restored, false);
+  assert.deepEqual(restored.attempts[0].llm, {
     ok: true,
     durationMs: 1300,
+    tablesUsed: ['Customer'],
     usage: { prompt_tokens: 2000, completion_tokens: 100, total_tokens: 2100, prompt_tokens_details: { cached_tokens: 1024 } },
     cost: { totalCost: 0.000287 },
-    tablesUsed: ['Customer'],
   });
+  assert.deepEqual(restored.attempts[0].llm, compactAttempt(full.results[0].repetitions[0].attempts[0]).llm);
+  for (const [index, rep] of full.results.flatMap((entry) => entry.repetitions).entries()) {
+    const back = restoreSharedCallUsage(compact.results.flatMap((entry) => entry.repetitions)[index]);
+    assert.deepEqual(back.attempts, rep.attempts.map(compactAttempt), `repetition ${index}: every call's usage and cost round-trip`);
+  }
+  // Two LLM calls (a retry): each keeps its own usage; nothing is shared.
+  const twoCalls = compactReport({
+    results: [
+      {
+        id: 'two_calls',
+        question: 'Q?',
+        expected_sql: 'SELECT 1',
+        repetitions: [
+          {
+            repetition: 1,
+            status: 'answered',
+            llm_usage: { prompt_tokens: 30, completion_tokens: 3, total_tokens: 33 },
+            llm_cost: { totalCost: 0.3 },
+            attempts: [
+              { attempt: 1, retry: false, generatedSql: 'SELECT x', llm: { ok: true, usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }, cost: { totalCost: 0.1 } } },
+              { attempt: 2, retry: true, generatedSql: 'SELECT 1', llm: { ok: true, usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 }, cost: { totalCost: 0.2 } } },
+            ],
+          },
+        ],
+      },
+    ],
+  }).results[0].repetitions[0];
+  assert.equal('llm_usage_attempt' in twoCalls, false);
+  assert.deepEqual(twoCalls.attempts.map((attempt) => attempt.llm.usage.total_tokens), [11, 22]);
   assert.deepEqual(repetition.attempts[0].execution, { ok: true, rowCount: 1, truncated: false });
   // A recorded guardrail verdict is re-judged by a rescore, never kept.
   assert.equal('guardrailCheck' in compactAttempt({ attempt: 1, guardrailCheck: { verdict: 'false_rejection' } }), false);
@@ -370,9 +408,9 @@ test('size: a 255-case report at --repeat 3 compacts to well under 1.5 MB', () =
   const full = syntheticReport();
   const fullBytes = Buffer.byteLength(`${JSON.stringify(full, null, 2)}\n`);
   const compactBytes = Buffer.byteLength(serializeCompactReport(compactReport(full)));
-  // The full report is written indented (writeJsonFile): about 8.9 MB here,
-  // the compact form about 1.3 MB.
-  assert.ok(fullBytes > 6 * 1024 * 1024, `full ${fullBytes}`);
-  assert.ok(compactBytes < 1.5 * 1024 * 1024, `compact ${compactBytes} bytes`);
+  // The full report is written indented (writeJsonFile): about 9 MB here.
+  // The bound is decimal (1.5e6 bytes), the unit the CLI prints.
+  assert.ok(fullBytes > 6e6, `full ${fullBytes}`);
+  assert.ok(compactBytes < 1.5e6, `compact ${compactBytes} bytes`);
   assert.ok(compactBytes < fullBytes / 5, `compact ${compactBytes} vs full ${fullBytes}`);
 });

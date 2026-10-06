@@ -1061,8 +1061,8 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       } else {
         // Compact: what --offline/--rescore, --compare/--gate and the
         // summaries need (src/eval/compact-report.js); report.json stays full.
-        const bytes = await writeCompactReport(target, report);
-        cli.log(`Baseline written: ${target} (compact, ${(bytes / 1024 / 1024).toFixed(2)} MB; the full report is ${reportPath})`);
+        const bytes = await writeCompactReport(target, report); // printed in MB of 10^6 bytes
+        cli.log(`Baseline written: ${target} (compact, ${(bytes / 1e6).toFixed(2)} MB; the full report is ${reportPath})`);
         if (!writesDefaultBaseline(options) && (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length)) {
           cli.log('  note: this run used a subset of the default suite; compare with it explicitly (--compare), it is not the default baseline.');
         }

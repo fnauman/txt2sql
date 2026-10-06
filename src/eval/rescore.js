@@ -105,10 +105,31 @@ export function finalAttemptSql(repetition) {
   return last ? last.generatedSql : '';
 }
 
+/**
+ * A compact report (compact-report.js) stores the usage and cost of a
+ * repetition's only LLM call once, at the repetition, and names the call in
+ * `llm_usage_attempt`. Returns the repetition with the call's copy put back
+ * and the mark removed (the repetition itself when it has no mark).
+ */
+export function restoreSharedCallUsage(repetition) {
+  if (repetition?.llm_usage_attempt === undefined) {
+    return repetition;
+  }
+  const { llm_usage_attempt: attemptNumber, ...rest } = repetition;
+  rest.attempts = (rest.attempts || []).map((attempt) => {
+    if (attempt?.attempt !== attemptNumber || !attempt.llm) {
+      return attempt;
+    }
+    const cost = rest.llm_cost ? { totalCost: rest.llm_cost.totalCost } : null;
+    return { ...attempt, llm: { ...attempt.llm, usage: rest.llm_usage ?? null, cost } };
+  });
+  return rest;
+}
+
 // The recorded repetition without its attribution, and with generated_sql
-// restored when a compact report left it out.
+// and a shared call usage restored when a compact report left them out.
 function stripAttribution(repetition) {
-  const { outcome, bucket, counted, outcome_tags: outcomeTags, ...rest } = repetition;
+  const { outcome, bucket, counted, outcome_tags: outcomeTags, ...rest } = restoreSharedCallUsage(repetition);
   void outcome;
   void bucket;
   void counted;

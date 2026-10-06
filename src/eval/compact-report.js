@@ -32,7 +32,9 @@
 // previews, explanation and assumption text, master-data candidates and
 // retrieved tables (both re-resolved by a rescore) and the previous
 // comparison are dropped; costs keep their totals and usages the token
-// counts the runner sums. The repetition's final SQL (generated_sql) is kept
+// counts the runner sums. The usage and cost of a repetition's only LLM call
+// are stored once, at the repetition (`llm_usage_attempt` names the call;
+// rescore.js restores the call's copy). The repetition's final SQL (generated_sql) is kept
 // only when it is not its last attempt's SQL (rescore.js restores it). A rescore of a compact report gives the
 // same outcomes and statistics as a rescore of the full one.
 
@@ -98,6 +100,7 @@ const REPETITION_FIELDS = [
   'llm_cost',
   'timings',
   'rescore',
+  'llm_usage_attempt',
 ];
 
 // An error message longer than this is cut (the code says what happened).
@@ -199,6 +202,34 @@ export function compactAttempt(attempt) {
   return out;
 }
 
+// A repetition with one LLM call records the same usage and cost twice (the
+// call's, and the repetition's sum of one). The call's copy is left out and
+// `llm_usage_attempt` names the attempt it belongs to;
+// restoreSharedCallUsage (rescore.js) puts it back. A repetition whose
+// already-shared attempt is compacted again (idempotence) has no call with a
+// usage left, so nothing changes.
+function shareSingleCallUsage(repetition, attempts) {
+  if (repetition.llm_usage_attempt !== undefined) {
+    return;
+  }
+  const called = attempts.filter((attempt) => attempt.llm && (attempt.llm.usage !== undefined || attempt.llm.cost !== undefined));
+  if (called.length !== 1) {
+    return;
+  }
+  const [attempt] = called;
+  const usage = attempt.llm.usage ?? null;
+  const cost = attempt.llm.cost ?? null;
+  const sameUsage = JSON.stringify(usage) === JSON.stringify(repetition.llm_usage ?? null);
+  const sameCost =
+    cost === null ? (repetition.llm_cost ?? null) === null : cost.totalCost !== undefined && cost.totalCost === repetition.llm_cost?.totalCost && Object.keys(cost).length === 1;
+  if (!sameUsage || !sameCost || !Number.isInteger(attempt.attempt)) {
+    return;
+  }
+  delete attempt.llm.usage;
+  delete attempt.llm.cost;
+  repetition.llm_usage_attempt = attempt.attempt;
+}
+
 function compactRepetition(repetition) {
   const out = pick(repetition, REPETITION_FIELDS);
   if (out.error !== undefined) {
@@ -211,6 +242,7 @@ function compactRepetition(repetition) {
     out.llm_cost = compactCost(out.llm_cost, ['currency', 'inputCost', 'outputCost', 'totalCost']);
   }
   const attempts = (repetition.attempts || []).map(compactAttempt);
+  shareSingleCallUsage(out, attempts);
   out.attempts = attempts;
   // Kept only when it is not the last attempt's SQL (a rescore restores it).
   if (repetition.generated_sql !== undefined && repetition.generated_sql !== finalAttemptSql({ attempts })) {
