@@ -315,11 +315,13 @@ data (`src/eval/fixture-data.js`), the case format and the existing datasets
 (to avoid their intents), and the semantic layer and the few-shot pool only to
 keep their vocabulary and examples out; no model output, failure analysis, run
 report or baseline was looked at, and nothing in the product (prompt rules,
-few-shot pool, semantic layer) has been tuned on it. It was built after the
-committed baseline, so the baseline has no records for it. Keep it that way:
+few-shot pool, semantic layer) has been tuned on it. Keep it that way:
 never tune on its wording or its failures, and do not edit a question or a gold
 to chase a score (an edited question gets a new id). When it has been looked
-at, retire it to dev and add a new holdout instead.
+at, retire it to dev and add a new holdout instead. Its golds were audited
+before any model answer to it was looked at (below), and the [current
+baseline](#current-baseline) measures it, read in aggregate only (41.3% on
+its 147 answer cases).
 
 It was authored on a branch where the inspected hash-split holdout was still
 `holdout`, and integrated onto the measurement-hygiene change afterwards: the
@@ -1499,9 +1501,10 @@ Rescoring and `--offline` cost nothing.
   fixtures were designed against; the held-out tiers (about 75-79%) are the
   estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
   and [Known blind spots](#known-blind-spots).
-- **A small, unmeasured holdout**: the inspected holdout was retired to dev
-  (`formerly_holdout`); the fresh one (147 answer cases over 75 intents) has
-  no baseline yet, so the committed baseline is a dev-only measurement. **A
+- **A small holdout, measured once**: the inspected holdout was retired to
+  dev (`formerly_holdout`); the fresh one (147 answer cases over 75 intents)
+  is measured by the [current baseline](#current-baseline) in aggregate only
+  (one 3-repetition run, 41.3%, a wide interval at that size). **A
   holdout mixes two effects**: unseen intents and unseen vocabulary. It avoids
   the semantic layer's multi-word phrases and its enforced word "revenue", not
   its single-word entity synonyms, so its wording differs from dev's
