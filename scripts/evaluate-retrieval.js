@@ -25,38 +25,32 @@ function ratio(hitCount, totalCount) {
   return hitCount / totalCount;
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
-  const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
-  const datasetPath = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
-  const datasetName = getOptionValue(argv, '--dataset') || (datasetPath ? null : DEFAULT_DATASET_NAME);
-  const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
-  const caseId = getOptionValue(argv, '--case-id');
-  const tag = getOptionValue(argv, '--tag');
-  const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
-
-  const schema = await loadNarrowSchema({
-    modelsDir: MODELS_DIR,
-    schemaPath: SCHEMA_PATH,
-    refreshSchema,
-  });
-  const datasetInfo = await loadBenchmarkDataset({
-    datasetName,
-    datasetPath,
-    datasetsDir,
-    caseId,
-    tag,
-  });
+/**
+ * Table-retrieval recall of answer cases. Abstain / clarify cases have no
+ * gold and so no expected tables (0 of 0 would read as full recall): they are
+ * not scored, and are returned apart in `behaviorCases` with the tables
+ * retrieval would offer for them. Returns { summary, cases, behaviorCases }.
+ */
+export function evaluateRetrieval(schema, testCases) {
   const nameToTableName = new Map(schema.tables.map((table) => [table.name, table.tableName]));
-
-  // Abstain / clarify cases have no gold, so no expected tables: 0 of 0 would
-  // read as full recall. They are left out (and counted in the summary).
-  const behaviorCases = datasetInfo.cases.filter(isBehaviorCase);
-  const cases = datasetInfo.cases.filter((testCase) => !isBehaviorCase(testCase)).map((testCase) => {
-    const retrieval = retrieveRelevantTables(schema, testCase.question);
+  const tablesFor = (question) => {
+    const retrieval = retrieveRelevantTables(schema, question);
+    return { retrieval, baseTables: retrieval.initialTableNames.map((name) => nameToTableName.get(name) || name), expandedTables: retrieval.expandedTableNames };
+  };
+  const behaviorCases = testCases.filter(isBehaviorCase).map((testCase) => {
+    const { baseTables, expandedTables } = tablesFor(testCase.question);
+    return {
+      id: testCase.id,
+      intentId: testCase.intentId,
+      question: testCase.question,
+      expected_behavior: testCase.expected_behavior,
+      base_tables: baseTables,
+      expanded_tables: expandedTables,
+    };
+  });
+  const cases = testCases.filter((testCase) => !isBehaviorCase(testCase)).map((testCase) => {
+    const { retrieval, baseTables, expandedTables } = tablesFor(testCase.question);
     const expectedTables = testCase.expected_tables?.length > 0 ? testCase.expected_tables : extractTablesFromSql(testCase.expected_sql);
-    const baseTables = retrieval.initialTableNames.map((name) => nameToTableName.get(name) || name);
-    const expandedTables = retrieval.expandedTableNames;
     const baseHits = expectedTables.filter((tableName) => baseTables.includes(tableName));
     const expandedHits = expectedTables.filter((tableName) => expandedTables.includes(tableName));
 
@@ -80,7 +74,7 @@ async function main() {
 
   const summary = {
     case_count: cases.length,
-    behavior_cases_skipped: behaviorCases.length,
+    behavior_case_count: behaviorCases.length,
     base_full_recall_count: cases.filter((entry) => entry.base_full_recall).length,
     expanded_full_recall_count: cases.filter((entry) => entry.expanded_full_recall).length,
     average_base_recall: average(cases.map((entry) => entry.base_recall)),
@@ -100,6 +94,32 @@ async function main() {
       return best;
     }, null),
   };
+  return { summary, cases, behaviorCases };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
+  const datasetPath = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
+  const datasetName = getOptionValue(argv, '--dataset') || (datasetPath ? null : DEFAULT_DATASET_NAME);
+  const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
+  const caseId = getOptionValue(argv, '--case-id');
+  const tag = getOptionValue(argv, '--tag');
+  const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
+
+  const schema = await loadNarrowSchema({
+    modelsDir: MODELS_DIR,
+    schemaPath: SCHEMA_PATH,
+    refreshSchema,
+  });
+  const datasetInfo = await loadBenchmarkDataset({
+    datasetName,
+    datasetPath,
+    datasetsDir,
+    caseId,
+    tag,
+  });
+  const { summary, cases, behaviorCases } = evaluateRetrieval(schema, datasetInfo.cases);
 
   const report = {
     generated_at: new Date().toISOString(),
@@ -113,20 +133,23 @@ async function main() {
     },
     summary,
     cases,
+    behavior_cases: behaviorCases,
   };
 
   await writeJsonFile(resultsPath, report);
 
   console.log(`Retrieval evaluation written to ${resultsPath}`);
   console.log(`Dataset: ${datasetInfo.datasetName}`);
-  console.log(`Cases: ${summary.case_count}${behaviorCases.length ? ` (${behaviorCases.length} abstain/clarify case(s) skipped: no gold tables)` : ''}`);
+  console.log(`Cases: ${summary.case_count}${behaviorCases.length ? ` (${behaviorCases.length} abstain/clarify case(s) not scored: no gold tables; listed under behavior_cases)` : ''}`);
   console.log(`Base full recall: ${summary.base_full_recall_count}/${summary.case_count}`);
   console.log(`Expanded full recall: ${summary.expanded_full_recall_count}/${summary.case_count}`);
   console.log(`Average expanded table count: ${summary.average_expanded_table_count.toFixed(2)}`);
   console.log(`Average extra expanded tables: ${summary.average_expanded_extra_tables.toFixed(2)}`);
 }
 
-main().catch((error) => {
-  console.error(`Retrieval evaluation failed: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((error) => {
+    console.error(`Retrieval evaluation failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
