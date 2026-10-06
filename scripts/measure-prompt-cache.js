@@ -9,6 +9,7 @@
 //   npm run measure-prompt-cache -- --suite --schema-scope all
 //   options: --dataset <name> | --dataset-file <path> | --suite  [--datasets-dir <dir>]
 //            [--case-id <id>] [--tag <tag>] [--schema-scope retrieved|full|auto|all]
+//            (with --suite, --case-id and --tag take comma-separated lists)
 //            [--results-file <path>] [--refresh-schema]
 //
 // --schema-scope defaults to the configured SCHEMA_SCOPE (default auto); `all`
@@ -22,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
 import { getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { selectSuite } from '../src/eval/suite.js';
+import { describeFilters, parseList, selectSuite } from '../src/eval/suite.js';
 import { buildOptimizedPrompt, loadNarrowSchema, rankedTableNames, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
 import { SCHEMA_SCOPES, describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 
@@ -119,13 +120,29 @@ export function measureScope(schema, testCases, schemaScope) {
   return { schema_scope: scope, summary, prefix_groups: prefixGroups, cases };
 }
 
-async function loadCases(argv) {
+/**
+ * The questions to measure and how they were selected: { dataset, cases }.
+ * --suite measures the eval default suite (every dataset, de-duplicated like
+ * npm run eval), narrowed by --case-id / --tag like npm run eval; otherwise one
+ * dataset, narrowed the same way. dataset.filters records the filters.
+ */
+export async function loadCases(argv) {
   const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
   if (hasOptionFlag(argv, '--suite')) {
-    // The eval default suite: every dataset, de-duplicated like npm run eval.
-    const selection = await selectSuite({ datasetsDir });
+    const selection = await selectSuite({
+      datasetsDir,
+      caseIds: parseList(getOptionValue(argv, '--case-id')),
+      tags: parseList(getOptionValue(argv, '--tag')),
+    });
+    const filtered = describeFilters(selection.filters) !== '';
     return {
-      dataset: { name: selection.name, path: null, selected_case_count: selection.entries.length, total_case_count: selection.totalCaseCount, filters: null },
+      dataset: {
+        name: selection.name,
+        path: null,
+        selected_case_count: selection.entries.length,
+        total_case_count: selection.totalCaseCount,
+        filters: filtered ? { caseIds: selection.filters.caseIds, tags: selection.filters.tags } : null,
+      },
       cases: selection.entries.map((entry) => entry.testCase),
     };
   }
@@ -148,6 +165,18 @@ async function loadCases(argv) {
     },
     cases: datasetInfo.cases,
   };
+}
+
+// The filters of either selection: a suite's { caseIds, tags } or a dataset's
+// { caseId, tag }.
+function describeSelectionFilters(filters) {
+  if (!filters) {
+    return '';
+  }
+  if (Array.isArray(filters.caseIds) || Array.isArray(filters.tags)) {
+    return describeFilters(filters);
+  }
+  return [filters.caseId != null ? `case-id=${filters.caseId}` : null, filters.tag ? `tag=${filters.tag}` : null].filter(Boolean).join(', ');
 }
 
 function printSummary(result) {
@@ -195,7 +224,8 @@ async function main() {
   await writeJsonFile(resultsPath, report);
 
   console.log(`Prompt cache measurement written to ${resultsPath}`);
-  console.log(`Dataset: ${dataset.name} (${dataset.selected_case_count} questions)`);
+  const filters = describeSelectionFilters(dataset.filters);
+  console.log(`Dataset: ${dataset.name} (${dataset.selected_case_count} questions${filters ? `; ${filters}` : ''})`);
   for (const result of results) {
     printSummary(result);
   }

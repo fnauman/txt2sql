@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { selectSuite } from '../src/eval/suite.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
-import { measureScope } from '../scripts/measure-prompt-cache.js';
+import { loadCases, measureScope } from '../scripts/measure-prompt-cache.js';
 
 // Prompt size per schema scope over the whole eval suite, offline (the numbers
 // in docs/experiments/01-schema-scope.md come from npm run
@@ -31,4 +31,23 @@ test('over the suite the full scope has one cacheable prefix and a small questio
   assert.ok(full.average_dynamic_estimated_tokens * 2 < retrieved.average_dynamic_estimated_tokens);
   const ratio = full.average_total_estimated_tokens / retrieved.average_total_estimated_tokens;
   assert.ok(ratio > 0.9 && ratio < 1.2, `full / retrieved prompt size ${ratio.toFixed(3)}`);
+});
+
+test('--suite honours --case-id and --tag and records them in the report', async () => {
+  const datasetsDir = path.join(REPO_ROOT, 'datasets');
+  const all = await loadCases(['--suite', '--datasets-dir', datasetsDir]);
+  assert.equal(all.cases.length, cases.length);
+  assert.equal(all.dataset.filters, null);
+
+  const byId = await loadCases(['--suite', '--datasets-dir', datasetsDir, '--case-id', 'core_public_001,core_public_002']);
+  assert.deepEqual(byId.cases.map((testCase) => testCase.id), ['core_public_001', 'core_public_002']);
+  assert.equal(byId.dataset.selected_case_count, 2);
+  assert.deepEqual(byId.dataset.filters, { caseIds: ['core_public_001', 'core_public_002'], tags: [] });
+
+  const byTag = await loadCases(['--suite', '--datasets-dir', datasetsDir, '--tag', 'swedish']);
+  assert.ok(byTag.cases.length > 0 && byTag.cases.length < cases.length);
+  assert.ok(byTag.cases.every((testCase) => testCase.tags.includes('swedish')));
+  assert.deepEqual(byTag.dataset.filters, { caseIds: [], tags: ['swedish'] });
+
+  await assert.rejects(loadCases(['--suite', '--datasets-dir', datasetsDir, '--tag', 'no_such_tag']), /No cases matched/);
 });
