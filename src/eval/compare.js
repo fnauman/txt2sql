@@ -90,6 +90,9 @@ function describeReport(report, label) {
     gitSha: report?.provenance?.git?.sha || report?.gitSha || null,
     gitDirty: report?.provenance?.git?.dirty ?? null,
     promptVersion: report?.provenance?.promptVersion || null,
+    // The product configuration (null for a report from before it was
+    // recorded, which ran the retrieved schema scope).
+    schemaScope: report?.provenance?.product?.schemaScope || null,
     mode: report?.mode || 'run',
   };
 }

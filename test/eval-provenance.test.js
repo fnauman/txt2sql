@@ -96,5 +96,35 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     dbProfileVersion: provenance.fixturesVersion.slice(0, 12),
     gitSha: 'f00',
     gitDirty: true,
+    schemaScope: 'auto',
+    schemaScopeEffective: 'full',
+    schemaFullEstimatedTokens: provenance.product.schemaScope.fullSchemaEstimatedTokens,
+    schemaWidenOnDemand: true,
   });
+});
+
+test('provenance records the product configuration (schema scope) and the prompt version it implies', async () => {
+  const base = { schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} };
+  const byDefault = await collectProvenance(base);
+  assert.deepEqual(byDefault.product.schemaScope, {
+    requested: 'auto',
+    effective: 'full',
+    fullSchemaEstimatedTokens: byDefault.product.schemaScope.fullSchemaEstimatedTokens,
+    fullSchemaMaxTokens: 8000,
+    widenOnDemand: true,
+    inScopeTableCount: 13,
+  });
+  assert.ok(byDefault.product.schemaScope.fullSchemaEstimatedTokens > 1000);
+  assert.equal(byDefault.promptVersion, computePromptVersion(schema, { schemaScope: 'full' }));
+
+  const retrieved = await collectProvenance({ ...base, schemaScope: { schemaScope: 'retrieved', widenOnDemand: false } });
+  assert.equal(retrieved.product.schemaScope.effective, 'retrieved');
+  assert.equal(retrieved.product.schemaScope.widenOnDemand, false);
+  // The retrieved scope's prompt is the pre-scope prompt: same version as the
+  // committed baseline; the full scope's system prompt differs.
+  const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  assert.equal(retrieved.promptVersion, baseline.provenance.promptVersion);
+  assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
+  assert.equal(baseline.provenance.product, undefined, 'the baseline predates the product block');
+  assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
 });
