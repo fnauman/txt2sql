@@ -47,7 +47,9 @@ export function createDeadline(timeoutMs) {
   const expired = new Promise((resolve) => {
     resolveExpired = resolve;
   });
-  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+  const enabled = Number.isFinite(timeoutMs) && timeoutMs > 0;
+  const deadlineAt = enabled ? performance.now() + timeoutMs : Infinity;
+  if (enabled) {
     timer = setTimeout(() => {
       controller.abort(new CaseTimeoutError(timeoutMs));
       resolveExpired();
@@ -58,6 +60,12 @@ export function createDeadline(timeoutMs) {
     expired,
     get timedOut() {
       return controller.signal.aborted && controller.signal.reason instanceof CaseTimeoutError;
+    },
+    // Whether the deadline has passed by the clock, even if its timer has not
+    // run yet: a task that finishes past the deadline in the same macrotask
+    // (synchronous row matching after the last round trip) is still late.
+    get passed() {
+      return this.timedOut || performance.now() >= deadlineAt;
     },
     clear() {
       if (timer) {
@@ -256,9 +264,10 @@ export async function runCaseRepetitions({
         pending.catch(() => {});
         return wasStopped() ? cancelledResult(stopReasonOf(stopSignal), { cancelled_in_flight: true }) : timeoutResult(caseTimeoutMs);
       }
-      // Checked as the result arrives: the deadline timer cannot fire between
-      // the task settling and this line (no macrotask runs in between).
-      if (deadline.timedOut) {
+      // Checked as the result arrives, by the clock as well as the timer: a
+      // result that resolves past the deadline before the timer callback had
+      // a chance to run is late too.
+      if (deadline.passed) {
         return lateTimeoutResult(raced, caseTimeoutMs);
       }
       if (raced?.status === 'aborted' && wasStopped()) {
@@ -267,7 +276,7 @@ export async function runCaseRepetitions({
       }
       return raced;
     } catch (error) {
-      if (deadline.timedOut) {
+      if (deadline.passed) {
         return { ...timeoutResult(caseTimeoutMs), error: `Case deadline of ${caseTimeoutMs} ms exceeded; the case then failed: ${error?.message || String(error)}` };
       }
       if (wasStopped()) {

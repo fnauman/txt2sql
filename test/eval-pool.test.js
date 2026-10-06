@@ -283,6 +283,45 @@ test('a result that arrives after the case deadline is a timeout, never a pass; 
   assert.equal(summarizeRunStatistics(records, { resamples: 50 }).strictAccuracy.value, 0.3333);
 });
 
+test('a result past the deadline is late even when the deadline timer has not run yet (same macrotask)', async () => {
+  const busy = (ms) => {
+    const until = performance.now() + ms;
+    while (performance.now() < until) {
+      // synchronous work, e.g. row matching after the last database round trip
+    }
+  };
+  const run = await runCaseRepetitions({
+    cases: cases(1),
+    caseTimeoutMs: 100,
+    graceMs: 1000,
+    runRepetition: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      busy(200); // finishes ~260 ms in, before the 100 ms timer callback can run
+      return { status: 'pass', attempts: [{ attempt: 1 }], attempt_count: 1, llm_cost: { totalUsd: 0.01 } };
+    },
+  });
+  const [[result]] = run.repetitions;
+  assert.deepEqual([result.status, result.timed_out, result.late_status, result.error_code], ['aborted', true, 'pass', 'CASE_TIMEOUT']);
+  assert.equal(result.attempt_count, 1, 'what it recorded is kept');
+
+  // A throw in the same situation is a timeout too, not an evaluation error.
+  const threw = await runCaseRepetitions({
+    cases: cases(1),
+    caseTimeoutMs: 100,
+    graceMs: 1000,
+    runRepetition: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      busy(200);
+      throw new Error('late failure');
+    },
+  });
+  assert.deepEqual([threw.repetitions[0][0].status, threw.repetitions[0][0].error_code], ['aborted', 'CASE_TIMEOUT']);
+
+  // A deadline that is disabled never makes a result late.
+  const deadline = createDeadline(0);
+  assert.equal(deadline.passed, false);
+});
+
 test('evaluateQuestion: the deadline reaches gold execution; a gold run cut short is a timeout, not a broken gold', async () => {
   const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
   const testCase = normalizeBenchmarkCase({ id: 'c', question: 'How many customers?', expected_sql: 'SELECT 1 AS n', comparison: { mode: 'scalar' } });
