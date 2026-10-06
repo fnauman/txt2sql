@@ -261,6 +261,47 @@ test('ties at the cut-off: the live baseline\'s tie-blind top 5 passes whichever
   }
 });
 
+test('ties at the cut-off: a gold cut by its LIMIT without a tie still checks the label at the cut-off', { skip }, async () => {
+  // Top-1 golds that every fixture cuts (or returns empty), so no fixture
+  // would compare their label if being cut were enough to relax it. Each
+  // prediction pairs the right top total with the wrong label: MAX() over
+  // grouped rows without a GROUP BY (sql_mode lacks ONLY_FULL_GROUP_BY), and
+  // the lowest-earning type next to the window's top total.
+  const cases = [
+    {
+      datasetName: 'hard-cases-public',
+      caseId: 'hard_vocab_outlet_turnover_top1_mar_2026',
+      killedOn: ['v2'],
+      sql:
+        'SELECT LocationName, MAX(total_net_amount) AS total_net_amount FROM (SELECT s.LocationName, ROUND(SUM(d.NetAmount), 2) AS total_net_amount ' +
+        'FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 ' +
+        "AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName) t",
+    },
+    {
+      datasetName: 'templated-public',
+      caseId: 'tpl_doctype_net_sales_top1_may_2026_ec6b39',
+      killedOn: ['v3'],
+      sql:
+        'SELECT t.DocumentTypeName, MAX(ROUND(SUM(d.NetAmount), 2)) OVER () AS total_net_amount FROM SalesDocument d ' +
+        'JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 ' +
+        "AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName " +
+        'ORDER BY SUM(d.NetAmount) ASC LIMIT 1',
+    },
+  ];
+  const connections = await openFixtureConnections({ env });
+  try {
+    for (const { datasetName, caseId, killedOn, sql } of cases) {
+      const [testCase] = (await loadBenchmarkDataset({ datasetName, caseId })).cases;
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, false, caseId);
+      assert.equal(score.reason, 'values', caseId);
+      assert.deepEqual(score.killedOn, killedOn, caseId);
+    }
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
 test('the seed-fixtures and verify-dataset scripts succeed end to end', { skip }, async () => {
   requireAdmin();
   const seeded = await execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/seed-fixtures.js')], { env: scriptEnv, cwd: REPO_ROOT });
