@@ -1449,65 +1449,53 @@ purpose.
 
 `eval/baselines/gpt-4o-mini.json`, written by
 `npm run eval -- --repeat 3 --budget-usd 1.5 --write-baseline` on 2026-10-06
-at commit `e42828b`: gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset
-(`auto` → `full`), prompt version `b264e57d8e15`, fixtures seed
-`094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
+(the [Experiment 2](experiments/02-hints-v2.md) live run, at commit
+`4ff6ecb`): gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset (`auto` →
+`full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
+seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.10 MB. It includes every
-measurement-hygiene change: the [scoring relaxations](#scoring-relaxations),
-the [gold conventions](#gold-conventions), known validator rejections, the
-retired (now dev) holdout and the audited fresh holdout. The attribution below
-is the offline rescore's (`npm run eval -- --offline`, which recomputes it):
-the attribution recorded inside the committed file predates the fix that
-books only the flagged rejection of a flagged case as a system error (it says
-model 430 · system 15, counting every failure of the five flagged cases);
-strict accuracy and the splits are the same either way.
+255, fresh holdout 149), compact file 2.07 MB.
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases / 205 intents) | 62.2% (95% CI 57.5%–66.8%, case bootstrap) |
-| Majority-pass cases | 244/392 (Wilson 95% 57.4%–66.9%) |
-| Intent-clustered accuracy | 60.6% (95% CI 54.7%–66.3%) |
-| By split | dev 74.7% (245 cases) · fresh holdout 41.3% (147 cases) |
-| Attribution (repetitions) | pass 731 · model 445 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion (1,261 attempts) | 94 wrong SQL caught, 0 correct SQL rejected, 429 wrong SQL accepted; precision 100%, recall 18.0% |
+| Strict accuracy (392 answer cases / 205 intents) | 73.6% (95% CI 69.2%–77.9%, case bootstrap) |
+| Majority-pass cases | 288/392 (Wilson 95% 68.9%–77.6%) |
+| Intent-clustered accuracy | 73.3% |
+| By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
+| Attribution (repetitions) | pass 866 · model 310 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion (1,233 attempts) | 0 correct SQL rejected; precision 100%, recall 19.4% |
 | Behaviour cases | 0 of 12 handled (abstain / clarify) |
-| Cost | $0.5406 total · $0.00045 per question · $0.00074 per correct answer · 91.5% of prompt tokens cached |
-| Latency | p50 2.53 s · p95 5.24 s (product loop) · retry rate 7.0% |
+| Cost | $0.6347 total · $0.00052 per question · $0.00073 per correct answer · 83.4% of prompt tokens cached |
+| Latency | p50 2.39 s · p95 4.25 s (product loop) · retry rate 5.0% |
 
 How to read it:
 
-- **Dev vs holdout.** The dev split (245 answer cases) is everything that was
-  inspected or tuned on, including the retired holdout; the fresh holdout
-  (147 answer cases) is new intents that were written blind and audited by
-  two independent annotators. The 33-point gap is the clearest measurement in
-  this repository: the holdout leans on analytical shapes the dev set barely
-  covers (shares and ratios, overdue and ageing balances, running totals,
-  month-over-month change, weekday and value-band breakdowns) and on
-  unfamiliar wording, so dev accuracy overstates what new questions get. Per
-  the [holdout policy](#splits-and-the-holdout-policy), only dev failures are
+- **Dev vs holdout.** Dev (245 answer cases) is everything that was inspected
+  or tuned on; the fresh holdout (147 answer cases) is new intents written
+  blind and audited by two independent annotators. Experiment 2 was designed
+  from dev failures, so its dev gain (74.7% → 88.3%) is in-sample; its holdout
+  gain (41.3% → 49.2%, 17 improvements vs 6 regressions, exact McNemar
+  p = 0.035) is the out-of-sample evidence. The remaining 39-point gap is the
+  clearest measurement in this repository: the holdout leans on analytical
+  shapes the dev set barely covers (shares and ratios, overdue and ageing
+  balances, running totals, month-over-month change, weekday and value-band
+  breakdowns) and on unfamiliar wording. Per the
+  [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
-- **Gold audit effect.** A run on the same code before the audit scored the
-  holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
-  readings, 2 rewordings, 1 wrong gold). The rest of the difference is
-  run-to-run variation between two live runs.
-- **System failures.** None. The 5 cases flagged
-  `known_validator_rejection` cap strict accuracy at 98.7% with perfect SQL,
-  but none of gpt-4o-mini's 15 failed repetitions on them ended in the flagged
-  rejection: they were wrong results or rejections of wrong SQL with another
-  code (the dev case's retries, for example, were rejected for `FAN_OUT`), so
-  they are model errors like every other failure (case majority: model 148,
-  system 0).
-- **Dev stability.** Paired with the previous (255-case) baseline on the 202
-  dev cases whose scoring did not change: 75.6% → 75.3%, 3 flips each way,
-  exact McNemar p = 1.0.
-- **Guardrails** never reject correct SQL but catch under a fifth of wrong SQL;
-  most wrong answers are semantically wrong SQL that is still valid.
+- **System failures.** None. Under hints v2 the dev flagged case
+  (`e1b20a`) is no longer rejected; the 4 holdout cases flagged
+  `known_validator_rejection` (`METRIC_COLUMN`) cap strict accuracy at 99.0%
+  with perfect SQL, and none of their failures in this run ended in the
+  flagged rejection.
+- **Guardrails** never reject correct SQL but catch about a fifth of wrong
+  SQL; most wrong answers are semantically wrong SQL that is still valid.
+- **Reproduction.** `npm run eval -- --offline --gate` rescores this file's
+  recorded SQL with today's code and reproduces it exactly (0 flips).
 
 Earlier baselines: the retrieved-scope baseline (prompt version
-`0c314451d4b7`) scored 68.8% on the 255-case suite with 92 system failures,
-all retrieval misses; the full-schema baseline of
-[Experiment 1](experiments/01-schema-scope.md) scored 72.8% on that suite.
+`0c314451d4b7`, 68.8% on the 255-case suite), the full-schema baseline of
+[Experiment 1](experiments/01-schema-scope.md) (72.8% on that suite), and the
+version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
 
 ### CI
 
@@ -1526,10 +1514,10 @@ all retrieval misses; the full-schema baseline of
 
 ### Cost
 
-LLM cost is small: the committed gpt-4o-mini baseline cost $0.00045 per
+LLM cost is small: the committed gpt-4o-mini baseline cost $0.00052 per
 question (one case repetition, up to two LLM calls), so one repetition of the
-whole 404-case suite is about 18 cents and `--repeat 3` about 54 cents
-(measured: $0.5406), inside the default 1 USD budget. `--budget-usd` caps it.
+whole 404-case suite is about 21 cents and `--repeat 3` about 63 cents
+(measured: $0.6347), inside the default 1 USD budget. `--budget-usd` caps it.
 Rescoring and `--offline` cost nothing.
 
 ## Known limits

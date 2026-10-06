@@ -5,7 +5,8 @@ file exists (for example `gpt-4o-mini.json`), and `npm run eval -- --offline`
 (the CI `db` job) rescores it with no LLM calls. The committed baseline is
 `gpt-4o-mini.json` (gpt-4o-mini, the whole 404-case suite with the fresh
 holdout, 3 repetitions, full-schema prompting via the default
-`SCHEMA_SCOPE=auto`, prompt version `b264e57d8e15`); its numbers are in
+`SCHEMA_SCOPE=auto` and hints v2 via the default `HINTS_VERSION=2`, prompt
+version `4358263bcf82`); its numbers are in
 [docs/evaluation-dataset.md](../../docs/evaluation-dataset.md#current-baseline).
 
 A baseline is a **compact** `report.json` (report version 2, marked

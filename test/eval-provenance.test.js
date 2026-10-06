@@ -127,6 +127,11 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
 // baseline (eval: commit the gpt-4o-mini baseline, 1aa30a3).
 const PRE_SCOPE_PROMPT_VERSION = '0c314451d4b7a5f347f574d4cebc60e20b0f92a592a71b1dd6d4ca35fcb1f10f';
 
+// Prompt version of the full-scope, hints-version-1 prompt: the version-1
+// baseline on the 404-case suite (eval: re-make the gpt-4o-mini baseline on
+// the audited 404-case suite).
+const FULL_SCOPE_V1_PROMPT_VERSION = 'b264e57d8e15f50c44f0d6da0cd67983d49767197dbfbe5f6509142c3fee6f39';
+
 test('provenance records the product configuration (schema scope) and the prompt version it implies', async () => {
   const base = { schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} };
   const byDefault = await collectProvenance(base);
@@ -153,17 +158,20 @@ test('provenance records the product configuration (schema scope) and the prompt
   // SCHEMA_SCOPE). The full scope's system prompt differs.
   assert.equal(retrieved.promptVersion, PRE_SCOPE_PROMPT_VERSION);
   assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
-  // The committed baseline was produced with the default schema scope and
-  // hints version 1 (before HINTS_VERSION existed: not recorded).
+  // Hints version 1 with the full scope is byte for byte the prompt of the
+  // version-1 baseline on the 404-case suite (before HINTS_VERSION existed).
   const fullV1 = await collectProvenance({ ...base, hintsVersion: 1 });
+  assert.equal(fullV1.promptVersion, FULL_SCOPE_V1_PROMPT_VERSION);
+  // The committed baseline was produced with the defaults: full scope and
+  // hints version 2 (the Experiment 2 live run).
   const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
-  assert.equal(baseline.provenance.promptVersion, fullV1.promptVersion);
+  assert.equal(baseline.provenance.promptVersion, byDefault.promptVersion);
   assert.equal(baseline.provenance.product.schemaScope.requested, 'auto');
   assert.equal(baseline.provenance.product.schemaScope.effective, 'full');
-  assert.equal(baseline.provenance.product.hintsVersion, undefined);
+  assert.equal(baseline.provenance.product.hintsVersion, 2);
   assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
   assert.equal(traceMetadataFromProvenance(retrieved).hintsVersion, 1);
-  assert.equal(traceMetadataFromProvenance(baseline.provenance).hintsVersion, null);
+  assert.equal(traceMetadataFromProvenance(baseline.provenance).hintsVersion, 2);
 });
 
 test('trace metadata keeps one type per key: the run-level scope never collides with the prompt events\' schemaScope object', async () => {

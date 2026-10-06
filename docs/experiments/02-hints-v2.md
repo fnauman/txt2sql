@@ -2,7 +2,7 @@
 
 **Variable:** `HINTS_VERSION`, from `1` (the committed baseline's prompt
 knowledge) to `2` (the new default).
-**Status:** offline measurements done; live run pending (the offline numbers re-measured after the review fixes, and on the measurement-hygiene base).
+**Status:** complete — adopted (live run on 2026-10-06; `HINTS_VERSION=2` is the default and its run is the committed baseline).
 **Source:** the error analysis of the 66 failing cases of the Experiment 1
 baseline, and the skeptic review's first recommendation ("Exp A: pipeline
 de-poisoning plus knowledge-only semantic layer").
@@ -369,8 +369,58 @@ HINTS_VERSION=1 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/
 
 ## Live results
 
-Not run yet.
+Paid run on 2026-10-06: `npm run eval -- --repeat 3 --budget-usd 1.5 --write-baseline`
+with the default `HINTS_VERSION` (2), paired automatically against the
+committed version-1 baseline of the measurement-hygiene base (404-case suite,
+392 answer cases; the fresh holdout read in aggregate only). Everything else
+was fixed: gpt-4o-mini, full-schema prompting, the same fixtures, datasets,
+oracle and retry budget. Run cost: $0.63.
+
+| | Baseline (v1) | Candidate (v2) |
+|---|---|---|
+| Git / prompt version | `e42828b` / `b264e57d8e15` | `4ff6ecb` / `4358263bcf82` |
+| Strict accuracy (95% CI) | 62.2% (57.5%–66.8%) | **73.6%** (69.2%–77.9%) |
+| dev (245 answer cases) | 74.7% | 88.3% |
+| fresh holdout (147 answer cases) | 41.3% | **49.2%** |
+| Majority-pass cases | 244/392 | 288/392 |
+| Intent-clustered accuracy | 60.6% | 73.3% |
+| Paired: improvements / regressions, exact McNemar p | | 57 / 13, p < 0.001 |
+| Δ strict accuracy (paired bootstrap 95% CI) | | +11.5 pts (+7.6 to +15.3) |
+| Attribution (repetitions, current rules) | pass 731 · model 445 · system 0 | pass 866 · model 310 · system 0 |
+| Guardrail precision / recall | 100% / 18.0% | 100% / 19.4% |
+| Abstain / clarify handled | 0 / 12 | 0 / 12 |
+| Cost per correct answer | $0.00074 | $0.00073 |
+| Prompt tokens per call / cached share | 3,676 / 91.5% | 4,367 / 83.4% |
+| Latency p50 / p95, retry rate | 2.53 s / 5.24 s, 7.0% | 2.39 s / 4.25 s, 5.0% |
+
+**By split** (aggregate counts only; the holdout policy forbids per-case
+holdout analysis):
+
+| Split | Paired cases | Improvements | Regressions | Exact McNemar p |
+|---|---|---|---|---|
+| dev (in-sample: the changes were designed from these failures) | 245 | 40 | 7 | 1.1 × 10⁻⁶ |
+| fresh holdout (out-of-sample, written blind, audited) | 147 | 17 | 6 | **0.035** |
+
+**Reading it.** The dev gain (+13.6 pts) is in-sample: every change was
+motivated by dev failures, so it is an upper bound on what v2 does for
+unseen questions. The holdout gain (+7.9 pts, 17 vs 6 flips, p = 0.035) is
+the evidence that the changes generalize: the holdout was written blind,
+before v2 existed, and nobody looked at its per-case results. Five holdout
+questions happen to use v2's new money words ("open balance", "unpaid
+balance"); they are pinned in the holdout builder and counted, not excluded —
+the words are ordinary business vocabulary, not tuned to the holdout. Cost per
+correct answer is flat: the prompt is about 19% longer and its cached share
+falls from 91.5% to 83.4%, but fewer retries and more correct answers offset
+it, and p95 latency drops by a second.
 
 ## Decision
 
-Pending the live run.
+**Adopt version 2 as the default.** It is the largest measured improvement in
+this repository so far (+11.5 pts strict accuracy, McNemar p < 0.001) and,
+crucially, it improves the blind holdout significantly (+7.9 pts, p = 0.035),
+at unchanged cost per correct answer and lower latency. `HINTS_VERSION=1`
+stays selectable and reproduces the previous prompts byte for byte. The
+committed baseline is replaced by this run. The 0 of 12 abstain/clarify cases
+remain the clearest product gap; the next experiments are the multi-table
+entity index, deterministic SQL lints, and the metric compiler (see the error
+analysis order in [README](README.md)).
