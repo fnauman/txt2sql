@@ -145,7 +145,6 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
   };
   validate.promptFor = promptFor;
   validate.schemaScope = effectiveScope;
-  validate.schema = schema;
   return validate;
 }
 

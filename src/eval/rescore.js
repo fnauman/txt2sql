@@ -29,6 +29,14 @@
 // again; that retry cannot be replayed, so the repetition is flagged
 // `rescore.replayTruncated`.
 //
+// Validation follows today's product configuration (SCHEMA_SCOPE, through
+// the validator probe): under the full scope a recorded TABLE_SCOPE rejection
+// of an in-scope table is accepted and the SQL runs; under the retrieved
+// scope with widen-on-demand, the attempt after such a rejection is judged
+// against the widened prompt, as the product loop would have widened it for
+// the retry (`widened_tables`, `rescore.widenedTables`). The recorded retry
+// was still generated from the narrower prompt: only decisions are replayed.
+//
 // Recorded verdicts are never carried over: a replayed attempt loses its
 // recorded `guardrailCheck`, and attribution re-checks every attempt that a
 // guardrail rejects TODAY (attribution.js). Otherwise a rejection that today's
