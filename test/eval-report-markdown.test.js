@@ -71,7 +71,14 @@ async function sampleReport({ mode = 'run', comparisonWith = null } = {}) {
       node: 'v24.0.0',
       platform: 'linux-x64',
     },
-    verification: { skipped: false, cases: 4, problems: [], gateFailures: [], datasets: [] },
+    verification: {
+      skipped: false,
+      cases: 4,
+      problems: [],
+      warnings: ['case_guard: known_validator_rejection is TABLE_SCOPE, but the production validator accepts the gold now: remove the flag'],
+      gateFailures: [],
+      datasets: [],
+    },
     budget: { limitUsd: 0.001, spentUsd: 0.0012, exhausted: true, skippedCases: ['case_skip'] },
     caseRecords,
     comparison,
@@ -106,6 +113,8 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
   assert.match(markdown, /\| Prompt version \| aaaaaaaaaaaa \|/);
   assert.match(markdown, /\| Model \/ endpoint \| gpt-4o-mini @ api\.openai\.com \|/);
   assert.doesNotMatch(markdown, /## Comparison with the baseline/);
+  // A stale known validator rejection is a warning in a run, not a stop.
+  assert.match(markdown, /Warnings \(npm run verify-dataset fails on these\): case_guard: known_validator_rejection is TABLE_SCOPE/);
   assert.ok(markdown.endsWith('\n'));
 });
 

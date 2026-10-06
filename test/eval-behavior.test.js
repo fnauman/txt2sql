@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compareResultsDetailed, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../src/benchmark.js';
+import { compareResultsDetailed, findInvalidSplits, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../src/benchmark.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
 import { computeExitCode } from '../scripts/eval.js';
 import { classifyRepetition, summarizeBehavior, summarizeCaseRepetitions } from '../src/eval/attribution.js';
-import { compareReports } from '../src/eval/compare.js';
+import { caseOutcomesFromReport, compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
 import { sha256Hex, stableStringify } from '../src/eval/provenance.js';
 import { normalizeSqlText } from '../src/eval/controls.js';
@@ -13,7 +13,7 @@ import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdow
 import { rescoreRepetition, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, caseMetadata } from '../src/eval/runner.js';
 import { scoringFingerprint } from '../src/eval/suite.js';
-import { verifyCase } from '../src/eval/verify.js';
+import { verifyCase, verifySuite } from '../src/eval/verify.js';
 
 // Splits, behavior cases (expected_behavior 'abstain' / 'clarify': no gold
 // SQL, never in strict accuracy) and known validator rejections, through
@@ -242,6 +242,15 @@ test('a comparison never pairs behavior cases; a selection of only behavior case
   const comparison = compareReports({ results: records }, { results: records }, { resamples: 100 });
   assert.equal(comparison.paired, 2);
   assert.deepEqual([...comparison.newCases, ...comparison.removedCases], []);
+  // Behaviour cases are skipped outright, not paired and not listed as
+  // excluded (not counted / gold changed) either.
+  const behaviorIds = records.filter((record) => record.expected_behavior !== 'answer').map((record) => record.id);
+  assert.ok(behaviorIds.length > 0);
+  const listed = [...comparison.excluded.notCounted, ...comparison.excluded.goldChanged].map((entry) => entry.id ?? entry);
+  assert.deepEqual(listed.filter((id) => behaviorIds.includes(id)), []);
+  assert.equal(comparison.excluded.notCounted.length, 0);
+  const outcomes = caseOutcomesFromReport({ results: records });
+  assert.deepEqual(behaviorIds.filter((id) => outcomes.has(id)), []);
 
   const behaviorOnly = reportOf(records.filter((record) => record.expected_behavior !== 'answer'));
   assert.equal(behaviorOnly.stats.strictAccuracy.value, null);
@@ -340,8 +349,33 @@ test('verifyCase: a behavior case runs nothing; a known validator rejection is a
   assert.match(otherCode.problems[0], /rejected by the production validator: FAN_OUT/);
   const stale = await verifyCase(flagged, { connections: goldConnections, validate: async () => null, checkControls: false });
   assert.match(stale.problems[0], /known_validator_rejection is TABLE_SCOPE, but the production validator accepts the gold now/);
+  // npm run eval verifies with staleKnownRejection 'warning': a product that
+  // closed the gap can still be measured; verify-dataset keeps the problem.
+  const staleWarning = await verifyCase(flagged, { connections: goldConnections, validate: async () => null, checkControls: false, staleKnownRejection: 'warning' });
+  assert.deepEqual(staleWarning.problems, []);
+  assert.match(staleWarning.warnings[0], /known_validator_rejection is TABLE_SCOPE, but the production validator accepts the gold now/);
+  const suite = await verifySuite({
+    datasets: [{ name: 'd', cases: [flagged] }],
+    connections: goldConnections,
+    validate: async () => null,
+    checkControls: false,
+    staleKnownRejection: 'warning',
+  });
+  assert.deepEqual([suite.problems, suite.gateFailures], [[], []]);
+  assert.match(suite.warnings[0], new RegExp(`^${flagged.id}: known_validator_rejection is TABLE_SCOPE`));
   const badSplit = await verifyCase({ ...answerCase, split: 'test' }, { connections: goldConnections, checkControls: false });
   assert.match(badSplit.problems[0], /split "test" is not one of dev, holdout/);
+  assert.deepEqual(findInvalidSplits([{ id: 'a', split: 'dev' }, { id: 'b' }, { id: 'c', split: 'train' }, { id: 'd', split: ' Holdout ' }, { id: 'e', split: 'test' }]), [
+    { id: 'c', split: 'train' },
+    { id: 'e', split: 'test' },
+  ]);
+
+  // A scalar comparison over a multi-row gold is a problem (the gold has the
+  // wrong shape for the one value the question asks for).
+  const twoRows = [{ code: '2100', total_debit: 0 }, { code: '5000', total_debit: 140 }];
+  const scalarCase = normalizeBenchmarkCase({ ...answerCase, comparison: { mode: 'scalar', null_as_zero: ['total_debit'] } });
+  const wrongShape = await verifyCase(scalarCase, { connections: [{ name: 'v2', database: 'demo_retail_v2', connection: { query: async () => [twoRows] } }], checkControls: false });
+  assert.ok(wrongShape.problems.some((problem) => /expected_sql returns 2 rows on v2, but the comparison mode is scalar/.test(problem)), wrongShape.problems.join('; '));
 });
 
 // Zero-row and NULL answers (documented in docs/evaluation-dataset.md): two

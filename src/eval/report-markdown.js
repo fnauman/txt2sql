@@ -107,7 +107,8 @@ function headline(report) {
     lines.push('');
     lines.push(
       `By split: ${splits.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases} case${entry.cases === 1 ? '' : 's'})`).join(' · ')}. ` +
-        'Dev cases are the wording the prompt rules and the semantic layer were tuned on; holdout cases are new intents in wording they do not contain.'
+        'Dev cases include the wording the prompt rules and the semantic layer were tuned on; holdout cases are new intents whose questions contain ' +
+        'no multi-word phrase of the semantic layer and not the tuned word "revenue" (single words such as customer, store or units still match it).'
     );
   }
   if (report.behavior?.cases > 0) {
@@ -344,7 +345,8 @@ function breakdownSection(report) {
   return ['## By split, failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
 }
 
-function behaviorPassText(summary) {
+/** "M/N declined" for a behaviour case's summary (its handled repetitions), or "excluded". */
+export function behaviorPassText(summary) {
   const behavior = summary?.behavior;
   return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} declined` : 'excluded';
 }
@@ -530,6 +532,10 @@ function verificationSection(report) {
     `Gold and controls: ${verification.cases} case(s) verified on every fixture, ${verification.problems.length} with problems; ` +
       `gates ${verification.gateFailures.length === 0 ? 'passed' : `FAILED (${verification.gateFailures.join('; ')})`}.`
   );
+  if (verification.warnings?.length) {
+    lines.push('');
+    lines.push(`Warnings (npm run verify-dataset fails on these): ${verification.warnings.join('; ')}.`);
+  }
   // Negative controls that are not a verdict, design + held-out. Undecided
   // ones (mapping search cut off) count as not killed; invalid (an SQL error)
   // and unscored (an infrastructure error) ones are problems. A summary

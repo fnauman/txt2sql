@@ -42,7 +42,7 @@ import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
-import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
+import { behaviorPassText, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
@@ -689,6 +689,9 @@ function printVerification(cli, verification) {
   for (const id of verification.controlStatus?.undecided || []) {
     cli.log(`  undecided (mapping search cut off, counted as not killed): ${id}`);
   }
+  for (const warning of verification.warnings || []) {
+    cli.log(`  warning: ${warning} (npm run verify-dataset fails on this)`);
+  }
   for (const failure of verification.gateFailures) {
     cli.log(`  FAIL: ${failure}`);
   }
@@ -1119,8 +1122,11 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   );
   for (const record of caseRecords) {
     const before = source.results.find((entry) => entry.id === record.id);
-    const was = before?.summary ? `${before.summary.passes}/${before.summary.counted}` : before?.status;
-    cli.log(`  ${record.id}: ${record.summary.passes}/${record.summary.counted} ${record.summary.outcome} (recorded: ${was})`);
+    // Behaviour cases count declined repetitions, not passes (as in report.md).
+    const behavior = isBehaviorCase(record);
+    const passText = (summary) => (behavior ? behaviorPassText(summary) : `${summary.passes}/${summary.counted}`);
+    const was = before?.summary ? passText(before.summary) : before?.status;
+    cli.log(`  ${record.id}: ${passText(record.summary)} ${record.summary.outcome} (recorded: ${was})`);
   }
 
   const sourceSuite = source.suite || {
@@ -1305,6 +1311,9 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
           checkControls: options.checkControls,
           minKillRate: options.minKillRate,
           minHeldoutKillRate: options.minHeldoutKillRate,
+          // A stale flag means the product now accepts a gold it used to
+          // reject: worth a warning, never a reason not to measure it.
+          staleKnownRejection: 'warning',
         });
       } catch (error) {
         if (isEvalInfraError(error) || isEvalInfraError(error?.cause)) {
