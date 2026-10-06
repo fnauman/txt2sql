@@ -1,8 +1,9 @@
 # Experiment 01: schema scope
 
-**Variable:** `SCHEMA_SCOPE`, from `retrieved` (the committed baseline) to
+**Variable:** `SCHEMA_SCOPE`, from `retrieved` (the baseline before this experiment) to
 `full` (what the new default `auto` resolves to on the 13-table demo schema).
-**Status:** offline measurements done; live run pending.
+**Status:** complete — adopted (`auto` is the default; live run 2026-10-06,
+see [Decision](#decision)).
 Audit findings: EVAL-RET-2 / D1 (a retrieval miss is an unrecoverable
 failure), EVAL-RET-9 / D8 (at 13 tables pruning buys little: measured below,
 about 8% of uncached prompt tokens, and it prints the schema twice).

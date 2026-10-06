@@ -8,7 +8,7 @@ is the protocol on top of it.
 
 | # | Experiment | Variable | Status |
 |---|---|---|---|
-| 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | offline measured; live run pending |
+| 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | complete — adopted |
 
 ## How an experiment is run
 

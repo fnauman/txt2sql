@@ -61,3 +61,19 @@ test('experiment 01: the historical rescore arms rescore the previous (retrieved
   assert.ok(recorded.gitSha.startsWith(baselineRow[1]), `${commit} holds the baseline recorded at ${baselineRow[1]}`);
   assert.ok(String(recorded.provenance?.promptVersion).startsWith(baselineRow[2]));
 });
+
+test('experiment status: the index and each write-up agree, and a write-up with a decision is not pending', () => {
+  const index = fs.readFileSync(path.join(REPO_ROOT, 'docs/experiments/README.md'), 'utf8');
+  const rows = [...index.matchAll(/^\| (\d+) \| \[[^\]]+\]\(([^)]+)\) \| [^|]+ \| ([^|]+) \|$/gm)];
+  assert.ok(rows.length > 0, 'the index lists the experiments');
+  for (const [, number, file, indexStatus] of rows) {
+    const doc = fs.readFileSync(path.join(REPO_ROOT, 'docs/experiments', file), 'utf8');
+    const status = /^\*\*Status:\*\* ([^\n]+)/m.exec(doc);
+    assert.ok(status, `${file} states its status`);
+    assert.ok(status[1].startsWith(indexStatus.trim()), `experiment ${number}: index "${indexStatus.trim()}" vs write-up "${status[1]}"`);
+    if (/^## Decision$/m.test(doc)) {
+      assert.doesNotMatch(indexStatus, /pending/, `experiment ${number} has a decision`);
+      assert.doesNotMatch(status[1], /pending/, `experiment ${number} has a decision`);
+    }
+  }
+});
