@@ -22,6 +22,13 @@
 //   ... + tag retrieval_miss    system  (a model-bucket failure where an
 //                                        expected table was not retrieved:
 //                                        the retrieved set is the allow-list)
+//   ... + tag known_validator_rejection
+//                               system  (a model-bucket failure of a case
+//                                        flagged known_validator_rejection:
+//                                        the production validator rejects
+//                                        every correct answer to it today, so
+//                                        no model can pass it and the failure
+//                                        is the system's)
 //   timeout / aborted           infra   (case deadline; counted as a failure)
 //   infra_error                 infra   (excluded from accuracy; also a gold
 //                                        query that failed because the
@@ -282,6 +289,13 @@ export function classifyRepetition(repetition, testCase = {}) {
       tags.push('retrieval_miss');
       bucket = 'system';
     }
+  }
+  if (OUTCOME_BUCKETS[outcome] === 'model' && testCase?.known_validator_rejection) {
+    // The dataset documents that the validator rejects every correct answer
+    // to this question (verify-dataset keeps the flag current): a failure is
+    // the product gap the flag measures, not the model's error.
+    tags.push('known_validator_rejection');
+    bucket = 'system';
   }
   if (repetition.rescore?.replayTruncated) {
     tags.push('replay_truncated');
@@ -609,6 +623,9 @@ export function summarizeAttribution(caseRecords) {
     system: {
       guardrailFalseRejections: failed.filter((repetition) => repetition.outcome === 'guardrail_false_rejection').length,
       retrievalMisses: failed.filter((repetition) => (repetition.outcome_tags || []).includes('retrieval_miss')).length,
+      // Failures of cases flagged known_validator_rejection (any model
+      // outcome; a repetition can also be a retrieval miss).
+      knownValidatorRejections: failed.filter((repetition) => (repetition.outcome_tags || []).includes('known_validator_rejection')).length,
       // False rejections in repetitions that ended in another non-pass outcome
       // (an outage or timeout on the retry): reported, not in the counts above.
       guardrailFalseRejectionsElsewhere: repetitions.filter((repetition) => (repetition.outcome_tags || []).includes('guardrail_false_rejection')).length,

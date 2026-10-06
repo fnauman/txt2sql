@@ -7,7 +7,7 @@ import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER } from 
 const BUCKET_LABELS = {
   pass: 'pass',
   model: 'model errors',
-  system: 'system errors (guardrail false rejections, retrieval misses)',
+  system: 'system errors (guardrail false rejections, retrieval misses, known validator rejections)',
   infra: 'infrastructure (timeouts, DB/provider failures)',
   skipped: 'skipped (budget, or the run was stopped)',
   harness: 'harness (gold or runner errors)',
@@ -284,8 +284,9 @@ function attributionSection(report) {
   lines.push('');
   lines.push(
     `System errors (counted repetitions): ${attribution.system.guardrailFalseRejections} guardrail false rejection(s), ` +
-      `${attribution.system.retrievalMisses} retrieval miss(es) (a failure where an expected table was not retrieved, so not allowed). ` +
-      'A model-bucket failure tagged retrieval_miss is counted as a system error.'
+      `${attribution.system.retrievalMisses} retrieval miss(es) (a failure where an expected table was not retrieved, so not allowed), ` +
+      `${attribution.system.knownValidatorRejections ?? 0} failure(s) of cases flagged known_validator_rejection (the production validator rejects ` +
+      'every correct answer to them today). A model-bucket failure tagged retrieval_miss or known_validator_rejection is counted as a system error.'
   );
   if (attribution.system.guardrailFalseRejectionsElsewhere) {
     lines.push('');
@@ -689,7 +690,8 @@ export function renderHeadline(report) {
       `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`,
     `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}); intent-clustered ${formatPercent(stats.intentClustered.value)}`,
     `Attribution (repetitions): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
-      `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}) · ` +
+      `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}, ` +
+      `known validator rejections ${attribution.system.knownValidatorRejections ?? 0}) · ` +
       `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
     ...((stats.bySplit || []).length > 1
       ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]

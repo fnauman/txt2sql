@@ -98,7 +98,8 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
   for (const heading of ['## Attribution', '## Guardrail confusion matrix', '## Cases', '## By split, failure class, difficulty and tag', '## Cost, latency, retries, tokens', '## Verification', '## Provenance', '## Legacy pooled reliability']) {
     assert.ok(markdown.includes(`\n${heading}\n`), heading);
   }
-  assert.match(markdown, /\| system errors \(guardrail false rejections, retrieval misses\) \| 2 \| 1 \|/);
+  assert.match(markdown, /\| system errors \(guardrail false rejections, retrieval misses, known validator rejections\) \| 2 \| 1 \|/);
+  assert.match(markdown, /0 failure\(s\) of cases flagged known_validator_rejection/);
   assert.match(markdown, /\| skipped_budget \| skipped \| 2 \| 1 \| excluded \|/);
   assert.match(markdown, /\| Rejected by a guardrail \| 2 \(false rejection\) \| 0 \(caught\) \|/);
   assert.match(markdown, /\| case_guard \| Products sold in Feb but not March\? \| 0\/2 \| guardrail_false_rejection \| system \|/);
@@ -144,7 +145,7 @@ test('a comparison section lists flips and the McNemar verdict; a rescore says w
   assert.match(headline, /exact McNemar p = 1\.000 \(1 regression\(s\), 0 improvement\(s\)\) → no significant difference from the baseline/);
   assert.match(headline, /regressions: case_guard \(pass → guardrail_false_rejection\)\n {2}improvements: none\n {2}not paired: 1 not counted or timed out in one report/);
   assert.match(headline, /^Strict accuracy 50\.0% \(95% CI .*\) over 3 cases \/ 3 intents, 2 repetition\(s\), gpt-4o-mini \[rescore, no LLM calls\]/);
-  assert.match(headline, /system 2 \(guardrail false rejections 2, retrieval misses 0\)/);
+  assert.match(headline, /system 2 \(guardrail false rejections 2, retrieval misses 0, known validator rejections 0\)/);
 });
 
 test('cell escaping and truncation', () => {

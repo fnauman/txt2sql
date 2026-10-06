@@ -351,9 +351,15 @@ question).
   and report.md's Verification section), so a product change that closes the
   gap can be measured, live or with `--offline --gate`, before the dataset is
   updated; the dataset change then follows in the same pull request.
-- In a run the case counts like any other. A correct answer the validator
-  throws away is a system failure: `guardrail_false_rejection`, or a
-  `safety_rejection` tagged `retrieval_miss`.
+- In a run the case counts in strict accuracy like any other, but **every
+  failure of it is a system error**: a model-bucket outcome (`wrong_result`,
+  `guardrail_true_rejection`, ...) of a flagged case is tagged
+  `known_validator_rejection` and moved to the system bucket, because no
+  model can pass a question whose every correct answer the validator rejects
+  (`report.json`'s `attribution.system.knownValidatorRejections`, the
+  Attribution section of report.md and the console headline count them). A
+  correct answer the validator throws away is, as for any case,
+  `guardrail_false_rejection`.
 
 **Retrieval misses and the schema scope.** Validation follows the product
 configuration (`SCHEMA_SCOPE`, see the README). Until the schema scope existed
@@ -954,6 +960,7 @@ rule).
   | `llm_error` | model | counted | truncated, refused or unusable output |
   | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a repetition that would otherwise be a model failure |
   | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not in the allow-list (retrieved schema scope only: in the full scope every in-scope table is allowed) |
+  | any model outcome tagged `known_validator_rejection` | system | counted | a failure of a case flagged `known_validator_rejection`: the validator rejects every correct answer to it today |
   | `timeout` / `aborted` | infra | counted | the case deadline fired |
   | `infra_error` | infra | excluded | the database failed (in the product loop, a gold query, or a guardrail re-check: tagged `guardrail_unverified`) |
   | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/404/429/5xx, unknown model (`LLM_MODEL_NOT_FOUND`) |
