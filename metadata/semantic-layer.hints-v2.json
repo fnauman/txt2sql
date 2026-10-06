@@ -304,7 +304,7 @@
       "preferred_columns": [
         "SalesDocument.BalanceAmount"
       ],
-      "alternative_column_sets": [
+      "alternative_differences": [
         [
           "SalesDocument.NetPayableAmount",
           "SalesDocument.PaidAmount"

@@ -398,16 +398,84 @@ test('v2 layer: a question naming another amount, or an equivalent open-amount f
   assert.equal(metricOf(v1Plan('What was our revenue including tax in March 2026?'), 'net_sales').enforcement, 'enforced');
   assert.equal(metricOf(v2Plan('Net sales and gross amount in March 2026.'), 'net_sales').enforcement, 'enforced');
 
-  // Open amount: BalanceAmount, or NetPayableAmount together with PaidAmount.
+  // Open amount: BalanceAmount, or NetPayableAmount - PaidAmount.
   const open = 'Total open amount on documents with a due date in April 2026.';
   const april = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
   assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.NetPayableAmount,0) - COALESCE(d.PaidAmount,0)),2) AS open_amount ${april}`), null);
   assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.BalanceAmount,0)),2) AS open_amount ${april}`), null);
   assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.NetPayableAmount,0)),2) AS open_amount ${april}`), 'METRIC_COLUMN');
   assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.BillTotalAmount,0) - COALESCE(d.PaidAmount,0)),2) AS open_amount ${april}`), 'METRIC_COLUMN');
-  // Version 1 plans never carry the alternative column sets.
-  assert.ok(!('alternativeColumnSets' in (metricOf(v1Plan('Show net sales in March 2026.'), 'net_sales') || {})));
-  assert.ok(!('alternativeColumnSets' in metricOf(v2Plan('Show net sales in March 2026.'), 'net_sales')));
+  // Only the open balance carries an alternative difference; version 1 plans never do.
+  assert.deepEqual(metricOf(v2Plan(open), 'open_balance').alternativeDifferences, [['SalesDocument.NetPayableAmount', 'SalesDocument.PaidAmount']]);
+  assert.ok(!('alternativeDifferences' in (metricOf(v1Plan('Show net sales in March 2026.'), 'net_sales') || {})));
+  assert.ok(!('alternativeDifferences' in metricOf(v2Plan('Show net sales in March 2026.'), 'net_sales')));
+});
+
+test('v2 METRIC_COLUMN: the open-balance alternative needs NetPayableAmount - PaidAmount computed, not both columns mentioned', () => {
+  // Review finding: the alternative was satisfied when both columns appeared
+  // anywhere in the SQL, so a sum of NetPayableAmount next to a PaidAmount
+  // filter, or NetPayableAmount + PaidAmount, passed as an open balance.
+  const open = 'Total open amount on documents with a due date in April 2026.';
+  const prompt = buildOptimizedPrompt(schema, open);
+  const allowed = prompt.tables.map((table) => table.tableName);
+  const rejects = (sql) => {
+    try {
+      validateReadOnlySql(sql, allowed, { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const april = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
+  for (const expression of [
+    'SUM(COALESCE(d.NetPayableAmount,0) - COALESCE(d.PaidAmount,0))',
+    'SUM(d.NetPayableAmount - d.PaidAmount)',
+    'SUM(IFNULL(d.NetPayableAmount, 0.00) - IFNULL(d.PaidAmount, 0))',
+    'SUM(d.NetPayableAmount) - SUM(d.PaidAmount)',
+    'COALESCE(SUM(d.NetPayableAmount),0) - COALESCE(SUM(d.PaidAmount),0)',
+    'SUM(`d`.`NetPayableAmount` - `d`.`PaidAmount`)',
+    'SUM((d.NetPayableAmount) - (d.PaidAmount))',
+    'SUM(GREATEST(d.NetPayableAmount - d.PaidAmount, 0))',
+    'SUM(d.NetPayableAmount - d.PaidAmount + 0)',
+    'SUM(d.NetPayableAmount - d.PaidAmount - 0)',
+  ]) {
+    assert.equal(rejects(`SELECT ROUND(${expression}, 2) AS open_amount ${april}`), null, expression);
+  }
+  // Unqualified and table-qualified columns.
+  const unaliased = "FROM SalesDocument WHERE IFNULL(IsCanceled,0)=0 AND DueDate >= '2026-04-01' AND DueDate < '2026-05-01'";
+  assert.equal(rejects(`SELECT SUM(NetPayableAmount - PaidAmount) AS open_amount ${unaliased}`), null);
+  assert.equal(rejects(`SELECT SUM(SalesDocument.NetPayableAmount - SalesDocument.PaidAmount) AS open_amount ${unaliased}`), null);
+  // A derived table computing the difference counts too.
+  assert.equal(rejects(`SELECT SUM(t.bal) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`), null);
+
+  for (const expression of [
+    // Both columns present, not their difference.
+    'SUM(d.NetPayableAmount)) AS open_amount, ROUND(SUM(d.PaidAmount)',
+    'SUM(d.NetPayableAmount + d.PaidAmount)',
+    'SUM(d.NetPayableAmount) / SUM(d.PaidAmount)',
+    'SUM(d.PaidAmount) / NULLIF(SUM(d.NetPayableAmount), 0)',
+    // The reversed difference, or one bound to another operator.
+    'SUM(d.PaidAmount - d.NetPayableAmount)',
+    'SUM(d.NetPayableAmount - d.PaidAmount * 2)',
+    'SUM(d.NetPayableAmount * 2 - d.PaidAmount)',
+    'SUM(0 - d.NetPayableAmount - d.PaidAmount)',
+    'SUM(-d.NetPayableAmount - d.PaidAmount)',
+    // A summed and a row-level side, or another function around a column.
+    'SUM(d.NetPayableAmount) - d.PaidAmount',
+    'SUM(ABS(d.NetPayableAmount) - d.PaidAmount)',
+    'SUM(d.NetPayableAmount - d.GrossAmount)',
+    'SUM(d.BillTotalAmount - d.PaidAmount)',
+  ]) {
+    assert.equal(rejects(`SELECT ROUND(${expression}, 2) AS open_amount ${april}`), 'METRIC_COLUMN', expression);
+  }
+  // The difference in a filter or a string literal does not count (the safety layer rejects comments).
+  assert.equal(rejects(`SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND d.PaidAmount < d.NetPayableAmount`), 'METRIC_COLUMN');
+  assert.equal(rejects(`SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount, 'NetPayableAmount - PaidAmount' AS note ${april}`), 'METRIC_COLUMN');
+  // The rejection names the accepted difference.
+  assert.throws(() => validateReadOnlySql(`SELECT SUM(d.NetPayableAmount + d.PaidAmount) AS open_amount ${april}`, allowed, { promptContext: prompt.context, response: { sql: '', tables_used: ['SalesDocument'] } }), {
+    code: 'METRIC_COLUMN',
+    message: /\(SalesDocument\.BalanceAmount; or SalesDocument\.NetPayableAmount - SalesDocument\.PaidAmount\)/,
+  });
 });
 
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {

@@ -1118,6 +1118,196 @@ function columnMentioned(sqlText, qualifiedColumn) {
   return new RegExp(`\\b${lowerColumn}\\b`).test(sqlText) || sqlText.includes(lowerQualified);
 }
 
+// Wrappers an operand of a column difference may have: a NULL default
+// (COALESCE(col, 0)) or a SUM, which distributes over the difference.
+const DIFFERENCE_NULL_DEFAULT_FUNCTIONS = new Set(['COALESCE', 'IFNULL', 'NVL']);
+const DIFFERENCE_AGGREGATE_FUNCTIONS = new Set(['SUM']);
+// Operators binding tighter than binary minus: next to an operand they take
+// it away from the difference ("a - b * 2", "2 * a - b").
+const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
+const DIFFERENCE_TIGHTER_KEYWORDS = new Set(['DIV', 'MOD']);
+
+function matchingParens(tokens) {
+  const closeOf = new Map();
+  const openOf = new Map();
+  const stack = [];
+  tokens.forEach((token, index) => {
+    if (isPunctToken(token, '(')) {
+      stack.push(index);
+    } else if (isPunctToken(token, ')') && stack.length > 0) {
+      const open = stack.pop();
+      closeOf.set(open, index);
+      openOf.set(index, open);
+    }
+  });
+  return { closeOf, openOf };
+}
+
+function isPlainIdentifierToken(token) {
+  if (token?.type === 'quoted_identifier') {
+    return true;
+  }
+  return token?.type === 'word' && !SQL_KEYWORDS.has(token.upper) && !KNOWN_SQL_FUNCTIONS.has(token.upper) && !OPERATOR_WORDS.has(token.upper);
+}
+
+// The top-level comma-separated ranges [start, end] of tokens[start..end].
+function splitTopLevelArguments(tokens, start, end, parens) {
+  const ranges = [];
+  let from = start;
+  for (let index = start; index <= end; index += 1) {
+    if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+      index = parens.closeOf.get(index);
+    } else if (isPunctToken(tokens[index], ',')) {
+      ranges.push([from, index - 1]);
+      from = index + 1;
+    }
+  }
+  ranges.push([from, end]);
+  return ranges;
+}
+
+/**
+ * The column tokens[start..end] reads as a whole, or null: a column reference
+ * (`col`, `t.col`, `db.t.col`, quoted or not), in grouping parentheses, in a
+ * NULL default (COALESCE(x, 0), IFNULL(x, 0)) or in SUM(x). Returns
+ * { column (lower-case name), sums (number of SUM wrappers) }.
+ */
+function columnOperandOf(tokens, start, end, parens) {
+  if (start > end || start < 0) {
+    return null;
+  }
+  if (isPunctToken(tokens[end], ')') && parens.openOf.get(end) !== undefined) {
+    const open = parens.openOf.get(end);
+    if (open === start) {
+      return columnOperandOf(tokens, start + 1, end - 1, parens);
+    }
+    if (open !== start + 1 || tokens[start]?.type !== 'word') {
+      return null;
+    }
+    const functionName = tokens[start].upper;
+    const args = splitTopLevelArguments(tokens, open + 1, end - 1, parens);
+    if (DIFFERENCE_AGGREGATE_FUNCTIONS.has(functionName)) {
+      const inner = args.length === 1 ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+      return inner ? { ...inner, sums: inner.sums + 1 } : null;
+    }
+    if (DIFFERENCE_NULL_DEFAULT_FUNCTIONS.has(functionName)) {
+      const defaultsAreNumbers = args.slice(1).every(([from, to]) => {
+        const valueStart = isOperatorToken(tokens[from], '-', '+') ? from + 1 : from;
+        return valueStart === to && tokens[to]?.type === 'number';
+      });
+      return args.length >= 2 && defaultsAreNumbers ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+    }
+    return null;
+  }
+  // A column reference: identifier ('.' identifier){0,2}.
+  const parts = [];
+  for (let index = start; index <= end; index += 1) {
+    const expectIdentifier = (index - start) % 2 === 0;
+    if (expectIdentifier ? !isPlainIdentifierToken(tokens[index]) : !isPunctToken(tokens[index], '.')) {
+      return null;
+    }
+    if (expectIdentifier) {
+      parts.push(identifierTokenName(tokens[index]));
+    }
+  }
+  if ((end - start) % 2 !== 0 || parts.length === 0 || parts.length > 3) {
+    return null;
+  }
+  return { column: String(parts[parts.length - 1]).toLowerCase(), sums: 0 };
+}
+
+// The start index of the operand that ends at tokens[end]: a parenthesized
+// group with its function name, or a dotted column reference.
+function operandStartBefore(tokens, end, parens) {
+  if (isPunctToken(tokens[end], ')')) {
+    const open = parens.openOf.get(end);
+    if (open === undefined) {
+      return -1;
+    }
+    // A word before the group is its function name ("SUM(", "ABS("), unless
+    // it is a keyword that only precedes a grouped expression ("SELECT (").
+    const before = tokens[open - 1];
+    const isGroupingKeyword = before?.type === 'word' && SQL_KEYWORDS.has(before.upper) && !KNOWN_SQL_FUNCTIONS.has(before.upper);
+    return before?.type === 'word' && !isGroupingKeyword ? open - 1 : open;
+  }
+  let start = end;
+  while (isPunctToken(tokens[start - 1], '.') && tokens[start - 2] && (tokens[start - 2].type === 'word' || tokens[start - 2].type === 'quoted_identifier')) {
+    start -= 2;
+  }
+  return start;
+}
+
+// The end index of the operand that starts at tokens[start].
+function operandEndAfter(tokens, start, parens) {
+  if (isPunctToken(tokens[start], '(')) {
+    return parens.closeOf.get(start) ?? -1;
+  }
+  if (tokens[start]?.type === 'word' && isPunctToken(tokens[start + 1], '(')) {
+    return parens.closeOf.get(start + 1) ?? -1;
+  }
+  let end = start;
+  while (isPunctToken(tokens[end + 1], '.') && tokens[end + 2] && (tokens[end + 2].type === 'word' || tokens[end + 2].type === 'quoted_identifier')) {
+    end += 2;
+  }
+  return end;
+}
+
+function bindsTighterThanMinus(token) {
+  return (token?.type === 'operator' && DIFFERENCE_TIGHTER_OPERATORS.has(token.value)) || (token?.type === 'word' && DIFFERENCE_TIGHTER_KEYWORDS.has(token.upper));
+}
+
+// A minus before the minuend subtracts it too ("x - a - b" is x - (a + b);
+// "-a - b" negates it).
+function negatesMinuend(token) {
+  return token?.type === 'operator' && token.value === '-';
+}
+
+/**
+ * Whether the SQL computes `minuend - subtrahend` (qualified column names,
+ * matched by column name like columnMentioned): a binary minus whose left
+ * operand is exactly the minuend column and whose right operand is exactly
+ * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
+ * defaults and SUM (both sides summed alike), and neither operand bound to a
+ * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
+ * difference may sit anywhere (a derived table computing it counts); a
+ * difference of aliases of the two columns ("np - pa") does not.
+ */
+function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
+  const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();
+  const wantLeft = columnName(minuend);
+  const wantRight = columnName(subtrahend);
+  if (!wantLeft || !wantRight) {
+    return false;
+  }
+
+  for (let index = 1; index < tokens.length - 1; index += 1) {
+    if (!isOperatorToken(tokens[index], '-')) {
+      continue;
+    }
+    const leftEnd = index - 1;
+    const leftStart = operandStartBefore(tokens, leftEnd, parens);
+    const rightStart = index + 1;
+    const rightEnd = operandEndAfter(tokens, rightStart, parens);
+    if (leftStart < 0 || rightEnd < 0) {
+      continue;
+    }
+    const left = columnOperandOf(tokens, leftStart, leftEnd, parens);
+    const right = columnOperandOf(tokens, rightStart, rightEnd, parens);
+    if (
+      left?.column === wantLeft &&
+      right?.column === wantRight &&
+      left.sums === right.sums &&
+      !bindsTighterThanMinus(tokens[leftStart - 1]) &&
+      !negatesMinuend(tokens[leftStart - 1]) &&
+      !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
+      !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function metricEnforcement(metric) {
   // Plans built before metric arbitration existed (or by hand in tests) carry no
   // enforcement flag; they keep the original, enforced behavior.
@@ -1142,6 +1332,7 @@ function validateMetricGuardrails(sql, promptContext = {}) {
   const metrics = promptContext.semanticPlan?.metrics || [];
   const hasLineMetric = metrics.some((metric) => metric.name === 'line_net_sales');
   const sqlText = normalizeSqlForColumnSearch(sql);
+  let sqlTokens = null;
   const checkedMetrics = [];
   const warnings = [];
 
@@ -1157,9 +1348,14 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     if (preferredColumns.length === 0) {
       continue;
     }
-    // All columns of one alternative set together also satisfy the metric
-    // ("NetPayableAmount - PaidAmount" is the open balance).
-    const alternativeColumnSets = Array.isArray(metric.alternativeColumnSets) ? metric.alternativeColumnSets.filter(Array.isArray) : [];
+    // A difference [minuend, subtrahend] the SQL computes also satisfies the
+    // metric ("NetPayableAmount - PaidAmount" is the open balance). Both
+    // columns merely appearing does not: "SUM(NetPayableAmount)" next to a
+    // PaidAmount filter, or "NetPayableAmount + PaidAmount", is not that
+    // difference.
+    const alternativeDifferences = Array.isArray(metric.alternativeDifferences)
+      ? metric.alternativeDifferences.filter((pair) => Array.isArray(pair) && pair.length === 2)
+      : [];
 
     checkedMetrics.push({
       name: metric.name,
@@ -1168,8 +1364,9 @@ function validateMetricGuardrails(sql, promptContext = {}) {
       enforcementReason: metric.enforcementReason || null,
       satisfied:
         preferredColumns.some((column) => columnMentioned(sqlText, column)) ||
-        alternativeColumnSets.some((columns) => columns.length > 0 && columns.every((column) => columnMentioned(sqlText, column))),
-      ...(alternativeColumnSets.length > 0 ? { alternativeColumnSets } : {}),
+        (alternativeDifferences.length > 0 &&
+          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference((sqlTokens ??= significantTokensOf(sql)), minuend, subtrahend))),
+      ...(alternativeDifferences.length > 0 ? { alternativeDifferences } : {}),
     });
   }
 
@@ -1178,7 +1375,7 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     throw guardrailError(
       'METRIC_COLUMN',
       `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}${
-        metric.alternativeColumnSets ? metric.alternativeColumnSets.map((columns) => `; or ${columns.join(' with ')}`).join('') : ''
+        metric.alternativeDifferences ? metric.alternativeDifferences.map(([minuend, subtrahend]) => `; or ${minuend} - ${subtrahend}`).join('') : ''
       }).`,
       { metric: metric.name, preferredColumns: metric.preferredColumns }
     );

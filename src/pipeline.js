@@ -743,10 +743,11 @@ function summarizeSemanticEntry(entry, matchedSynonyms) {
     displayColumns: entry.display_columns || [],
     preferredColumns: entry.preferred_columns || [],
     preferredExpression: entry.preferred_expression || null,
-    // Hints-v2 overlay only (absent from every version-1 plan): column sets
-    // that, all used together, satisfy the metric guardrail as well
-    // ("NetPayableAmount - PaidAmount" for the open balance).
-    ...(entry.alternative_column_sets ? { alternativeColumnSets: entry.alternative_column_sets } : {}),
+    // Hints-v2 overlay only (absent from every version-1 plan): column
+    // differences [minuend, subtrahend] that, computed by the SQL, satisfy the
+    // metric guardrail as well ("NetPayableAmount - PaidAmount" for the open
+    // balance).
+    ...(entry.alternative_differences ? { alternativeDifferences: entry.alternative_differences } : {}),
     defaultFilters: entry.default_filters || [],
     notes: entry.notes || [],
     score: semanticMatchScore(matchedSynonyms),
