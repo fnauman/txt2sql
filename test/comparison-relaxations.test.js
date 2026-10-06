@@ -71,6 +71,47 @@ test('ignore_all_zero_rows: a gold zero row must still be listed; zero rows pair
   assert.equal(compareResultsDetailed(goldWithZero, withZeroRows.filter((row) => row.CustomerName !== 'Gamma').concat([{ CustomerName: 'Omega', january: 0, february: 0, CustomerId: 8 }]), RELAXED).match, false);
 });
 
+test('ignore_all_zero_rows: a second, all-zero row for a member the answer already lists is not ignored', () => {
+  // A pivot grouped one level too fine (by IsCanceled, or by YEAR without the
+  // window): the gold rows are there, plus a contradictory 0/0 row for Acme.
+  const duplicateZero = [...withZeroRows.slice(0, 2), { CustomerName: 'Acme', january: 0, february: 0, CustomerId: 1 }];
+  assert.equal(compareResultsDetailed(gold, duplicateZero, RELAXED).match, false);
+  const duplicateNull = [...withZeroRows.slice(0, 2), { CustomerName: 'Beta', january: null, february: null, CustomerId: 2 }];
+  assert.equal(compareResultsDetailed(gold, duplicateNull, RELAXED).match, false);
+  // The review's probe: gold {A,10,5},{B,0,7}, prediction gold + {A,0,0}.
+  const probeGold = [
+    { CustomerName: 'A', jan_net_amount: 10, feb_net_amount: 5 },
+    { CustomerName: 'B', jan_net_amount: 0, feb_net_amount: 7 },
+  ];
+  const probe = [
+    { CustomerName: 'A', january: 10, february: 5 },
+    { CustomerName: 'B', january: 0, february: 7 },
+    { CustomerName: 'A', january: 0, february: 0 },
+  ];
+  assert.equal(compareResultsDetailed(probeGold, probe, RELAXED).match, false);
+  assert.equal(compareResultsDetailed(probeGold, probe.map((row, index) => (index === 2 ? { ...row, january: null, february: null } : row)), RELAXED).match, false);
+  // A member absent from the gold listed twice with 0/0 is a duplicate too.
+  const twiceGamma = [...withZeroRows, { CustomerName: 'Gamma', january: 0, february: 0, CustomerId: 3 }];
+  assert.equal(compareResultsDetailed(gold, twiceGamma, RELAXED).match, false);
+  // The tolerance path agrees.
+  const tolerant = { ...RELAXED, tolerance: 0.01 };
+  assert.equal(compareResultsDetailed(gold, duplicateZero, tolerant).match, false);
+  assert.equal(compareResultsDetailed(gold, duplicateNull, tolerant).match, false);
+  assert.equal(compareResultsDetailed(gold, twiceGamma, tolerant).match, false);
+  assert.equal(compareResultsDetailed(gold, withZeroRows, tolerant).match, true);
+});
+
+test('ignore_all_zero_rows: with every compared column in null_as_zero there is no member, so nothing is relaxed', () => {
+  const metricsOnly = { mode: 'rowset', compare_columns: ['jan_net_amount', 'feb_net_amount'], null_as_zero: ['jan_net_amount', 'feb_net_amount'], ignore_all_zero_rows: true };
+  const metricsGold = [{ jan_net_amount: 100, feb_net_amount: 0 }];
+  const prediction = [
+    { january: 100, february: 0 },
+    { january: 0, february: 0 },
+  ];
+  assert.equal(compareResultsDetailed(metricsGold, prediction, metricsOnly).reason, 'row_count');
+  assert.equal(compareResultsDetailed(metricsGold, prediction.slice(0, 1), metricsOnly).match, true);
+});
+
 test('ignore_all_zero_rows: an empty gold stays strict, and the tolerance path agrees with the exact one', () => {
   assert.equal(compareResultsDetailed([], withZeroRows.slice(2), RELAXED).reason, 'row_count');
   assert.equal(compareResultsDetailed([], [], RELAXED).match, true);

@@ -891,12 +891,16 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   both need null_as_zero, see docs/evaluation-dataset.md):
 //   - ignore_all_zero_rows (rowset mode): a prediction row with no counterpart
 //     in the gold is ignored when every compared null_as_zero column it
-//     carries is 0 (NULL read as 0) under the column assignment: a breakdown
-//     or pivot that also lists members without activity (0 in every metric)
-//     gives the same answer. Every gold row must still pair with a distinct
-//     prediction row, and every prediction row that holds a non-zero metric
-//     must pair with a gold row. An empty gold stays strict (no rows tell
-//     which prediction columns are metrics).
+//     carries is 0 (NULL read as 0) under the column assignment and its
+//     member (its compared cells outside null_as_zero) is absent from the
+//     gold and appears on no other prediction row: a breakdown or pivot that
+//     also lists members without activity (0 in every metric) gives the same
+//     answer, but a second, all-zero row for a member the answer already
+//     lists (`A 200 0` and `A 0 0`) contradicts it. Every gold row must still
+//     pair with a distinct prediction row, and every prediction row that holds
+//     a non-zero metric must pair with a gold row. An empty gold, or a
+//     comparison whose compared columns are all null_as_zero (no member to
+//     tell), stays strict.
 //   - empty_as_zero (scalar mode): an empty prediction equals a gold of one
 //     row whose compared cells are all NULL, or 0 in a null_as_zero column
 //     (a SUM over an empty window). The reverse (an empty gold) is not
@@ -1182,23 +1186,35 @@ function isZeroCell(cell, tolerance) {
 
 // ignore_all_zero_rows (see the spec above): every gold row pairs with a
 // distinct, equal prediction row, and every prediction row left over is an
-// all-zero row (`isZeroTuple`). Without a tolerance equality is exact, so
-// equal tuples are interchangeable: remove one prediction tuple per gold
-// tuple and check what is left. With a tolerance it is a perfect matching
-// (Hopcroft-Karp) between the gold rows plus one stand-in per surplus row
-// and the prediction rows; a stand-in pairs with any all-zero prediction row.
-function matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, tolerance) {
-  if (actualTuples.length < goldTuples.length) {
+// ignorable row: all zero (`isZeroTuple`) and a member absent from the gold.
+// A row's member is its compared cells outside the null_as_zero columns
+// (`memberIndexes`); a surplus zero row whose member is also a gold row's, or
+// another prediction row's, is a contradictory duplicate (`A 200 0` next to
+// `A 0 0`), not a member without activity, and is never ignored. Without a
+// tolerance equality is exact, so equal tuples are interchangeable: remove
+// one prediction tuple per gold tuple and check what is left. With a
+// tolerance it is a perfect matching (Hopcroft-Karp) between the gold rows
+// plus one stand-in per surplus row and the prediction rows; a stand-in pairs
+// with any ignorable prediction row.
+function matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, memberIndexes, tolerance) {
+  if (actualTuples.length < goldTuples.length || memberIndexes.length === 0) {
     return false;
   }
+  const sameMember = (left, right) => memberIndexes.every((index) => cellsEqual(left[index], right[index], tolerance));
+  const ignorable = actualTuples.map(
+    (tuple, index) =>
+      isZeroTuple(tuple) &&
+      !goldTuples.some((gold) => sameMember(gold, tuple)) &&
+      !actualTuples.some((other, otherIndex) => otherIndex !== index && sameMember(other, tuple))
+  );
   if (tolerance <= 0) {
     const remaining = new Map();
-    for (const tuple of actualTuples) {
+    actualTuples.forEach((tuple, index) => {
       const key = tupleKey(tuple);
-      const entry = remaining.get(key) || { tuple, count: 0 };
+      const entry = remaining.get(key) || { ignorable: ignorable[index], count: 0 };
       entry.count += 1;
       remaining.set(key, entry);
-    }
+    });
     for (const tuple of goldTuples) {
       const entry = remaining.get(tupleKey(tuple));
       if (!entry || entry.count === 0) {
@@ -1206,10 +1222,10 @@ function matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, tolera
       }
       entry.count -= 1;
     }
-    return [...remaining.values()].every((entry) => entry.count === 0 || isZeroTuple(entry.tuple));
+    return [...remaining.values()].every((entry) => entry.count === 0 || entry.ignorable);
   }
   const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-  const zeroRows = actualTuples.map((tuple, index) => (isZeroTuple(tuple) ? index : -1)).filter((index) => index !== -1);
+  const zeroRows = ignorable.map((flag, index) => (flag ? index : -1)).filter((index) => index !== -1);
   const surplus = actualTuples.length - goldTuples.length;
   if (zeroRows.length < surplus) {
     return false;
@@ -1582,16 +1598,19 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
   const nullAsZero = new Set(Array.isArray(comparison.null_as_zero) ? comparison.null_as_zero : []);
   const relaxations = comparisonRelaxations(comparison);
   // ignore_all_zero_rows: the compared null_as_zero columns decide whether a
-  // prediction row is all zero; without one compared, nothing is relaxed.
+  // prediction row is all zero, and the other compared columns name its
+  // member; without a compared column of each kind, nothing is relaxed.
   const zeroIndexes = relaxations.ignoreAllZeroRows
     ? goldColumns.map((column, index) => (nullAsZero.has(column) ? index : -1)).filter((index) => index !== -1)
     : [];
+  const memberIndexes = goldColumns.map((column, index) => (nullAsZero.has(column) ? -1 : index)).filter((index) => index !== -1);
+  const relaxSurplus = zeroIndexes.length > 0 && memberIndexes.length > 0;
 
   if (expected.length !== actual.length) {
     if (relaxations.emptyAsZero && actual.length === 0 && isZeroGoldRow(expected, goldColumns, nullAsZero, decimals)) {
       return emptyMatch;
     }
-    if (!(zeroIndexes.length > 0 && expected.length > 0 && actual.length > expected.length)) {
+    if (!(relaxSurplus && expected.length > 0 && actual.length > expected.length)) {
       return fail('row_count');
     }
   }
@@ -1676,7 +1695,7 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     const valuesMatch = isBoundary
       ? matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples, rankIndexes, tolerance)
       : surplus > 0
-        ? matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, tolerance)
+        ? matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, memberIndexes, tolerance)
         : matchRowsUnordered(goldTuples, actualTuples, tolerance);
     if (!valuesMatch) {
       return 'values';

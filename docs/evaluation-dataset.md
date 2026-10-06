@@ -735,7 +735,7 @@ comparison spec changed") instead of counting a free flip.
 
 | Flag | Applies to | Relaxation |
 |---|---|---|
-| `ignore_all_zero_rows` | rowset mode with `null_as_zero` | prediction rows whose `null_as_zero` metrics are all 0 / NULL and that have no counterpart in the gold are ignored |
+| `ignore_all_zero_rows` | rowset mode with `null_as_zero` | prediction rows whose `null_as_zero` metrics are all 0 / NULL and whose member is absent from the gold (and listed once) are ignored |
 | `empty_as_zero` | scalar mode with `null_as_zero` | an empty prediction equals a gold of one NULL / 0 row |
 
 The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
@@ -746,7 +746,10 @@ The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
   templated `customer_net_sales_q1_2025_vs_q1_2026`, 3 cases; the generator
   sets it on every pivot by customer). A pivot that also lists customers with
   0 in every window (every customer that bought at any time, say) gives the
-  same answer. The oracle used to accept only the gold's customer set or
+  same answer, as long as each extra customer is listed once and is not a
+  customer the gold lists: a pivot grouped one level too fine (by year
+  without the window, or by `IsCanceled`) that adds a 0/0 row next to a
+  customer's real row still fails. The oracle used to accept only the gold's customer set or
   every customer (the LEFT JOIN alternative), so such an answer matched one
   reading on one fixture and the other on another, and failed. The review
   controls that encoded that rejection (`edge_public_008/r3` and `r4`) are
@@ -871,9 +874,20 @@ comparison: {
   - `ignore_all_zero_rows` (rowset mode with `null_as_zero`): a prediction
     row with no counterpart in the gold is ignored when every compared
     `null_as_zero` column it carries (under the column assignment) is 0 or
-    NULL. Every gold row must still pair with a distinct prediction row, and
-    a prediction row with any non-zero metric must pair with a gold row. An
-    empty gold stays strict. The oracle reads up to
+    NULL and its member (its compared cells outside `null_as_zero`, the
+    customer name in a customer pivot) is absent from the gold and appears on
+    no other prediction row. A second, all-zero row for a member the answer
+    already lists (`Lakeside Wholesale 200.00 0.00` next to
+    `Lakeside Wholesale 0.00 0.00`, from a pivot grouped by year or by
+    `IsCanceled` as well) contradicts the answer and is never ignored. Every
+    gold row must still pair with a distinct prediction row, and a prediction
+    row with any non-zero metric must pair with a gold row. An empty gold, or
+    a comparison whose compared columns are all `null_as_zero` (no member to
+    tell), stays strict. The member is what the gold compares, so in the
+    customer pivots it is the customer name: two customers that share a name
+    (the two Summit Grocers) are one member, and a 0/0 row for one of them
+    next to the other's real row fails too (a known strictness; on the current
+    fixtures every listing of extra customers passes, `rp7` and `rp8`). The oracle reads up to
     `ALL_ZERO_ROWS_ALLOWANCE` (1000) rows past the gold for such a case; a
     prediction longer than that is a `row_count` mismatch.
   - `empty_as_zero` (scalar mode with `null_as_zero`): an empty prediction
