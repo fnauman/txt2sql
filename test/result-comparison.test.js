@@ -227,6 +227,40 @@ test('ranked: ranking values compare as the cells match, rounded to decimals (or
   assert.equal(compareResults(gold, [{ name: 'A', v: 5 }, { name: 'B', v: null }, { name: 'C', v: 0.004 }], { ...spec, tolerance: 0.005 }), true);
 });
 
+test('ranked: under a tolerance, two values that both match one gold value tie, even 2x the tolerance apart', () => {
+  const tolerant = { mode: 'ranked', order: 'desc', value_columns: ['v'], tolerance: 0.01 };
+  // A NULL read as 0 and 0.012 both match the gold's 0.005 within 0.01.
+  const tied = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0.005 },
+    { name: 'C', v: 0.005 },
+  ];
+  for (const tail of [[null, 0.012], [0.012, null]]) {
+    const actual = [{ name: 'A', v: 5 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    const detailed = compareResultsDetailed(tied, actual, { ...tolerant, null_as_zero: ['v'] });
+    assert.deepEqual([detailed.match, detailed.reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // A tied gold 10.00 summed per line can come back as 9.992 / 10.008: both
+  // match, in either order.
+  const cents = [
+    { name: 'A', v: 20 },
+    { name: 'B', v: 10 },
+    { name: 'C', v: 10 },
+  ];
+  for (const tail of [[9.992, 10.008], [10.008, 9.992]]) {
+    const actual = [{ name: 'A', v: 20 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    const detailed = compareResultsDetailed(cents, actual, tolerant);
+    assert.deepEqual([detailed.match, detailed.reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // Values further apart than any one gold value allows are still ranked.
+  const distinct = [
+    { name: 'A', v: 20 },
+    { name: 'B', v: 10.05 },
+    { name: 'C', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(distinct, [distinct[0], distinct[2], distinct[1]], tolerant).reason, 'ranking');
+});
+
 // Behavior change (EVAL-1 / ORACLE-10): signal checks and the disallowed-column
 // lint used to turn a value match into 'low_signal_success' /
 // 'disallowed_column_used' failures. Only values decide now; both are warnings.

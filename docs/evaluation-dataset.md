@@ -572,9 +572,10 @@ comparison: {
   equals one row.
 - **ranked**: the bijection must exist **and** the model's primary value column
   must be monotonic in `order` (tie reordering by label is tolerated; NULL
-  metrics sort last; values compare as cells match, rounded to `decimals` or
-  within the tolerance, so a NULL under `null_as_zero` and 0.004 tie at two
-  decimals). The default ranking column is the first truly numeric
+  metrics sort last; values compare as cells match, so two values that both
+  match one gold value tie: rounded to `decimals`, a NULL under
+  `null_as_zero` and 0.004 tie at two decimals; with a tolerance, values within
+  twice it tie, as 9.992 and 10.008 both match a gold 10 at 0.01). The default ranking column is the first truly numeric
   gold column, never a numeric-looking code string.
 - **Ties at the cut-off** (ranked only): when a gold variant returns as many
   rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), the

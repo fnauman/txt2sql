@@ -839,8 +839,8 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   be monotonic in `order` (catches "didn't sort / sorted wrong" while
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
 //   model's may not). Ranking values compare as cells match (rounded to
-//   `decimals`, or within the tolerance), so values that match the same gold
-//   value are a tie. The default ranking column is the first truly numeric
+//   `decimals`, or within twice the tolerance), so values that match the same
+//   gold value are a tie. The default ranking column is the first truly numeric
 //   gold column (JS numbers, not numeric-looking code strings like '4000').
 // - ties at the cut-off (ranked only, and only when the caller passes
 //   `goldTies`: the rows the gold's own LIMIT left out, see isCutByLimit):
@@ -1343,14 +1343,15 @@ function rankValueOf(value) {
 
 // `nullAsZero`: the ranking column's gold column is listed in null_as_zero,
 // so a NULL is ranked as the 0 it was matched as. Values compare as cells
-// match: within the tolerance when one is set, else rounded to `decimals`, so
-// two values that both match the same gold value (NULL and 0.004 for a gold 0
-// at two decimals) are a tie.
+// match, so two values that both match the same gold value are a tie: rounded
+// to `decimals` (NULL and 0.004 for a gold 0 at two decimals), or, when a
+// tolerance is set, within twice it (each cell is within the tolerance of the
+// gold, cellsEqual, so 9.992 and 10.008 both match a gold 10 at 0.01).
 function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullAsZero = false, decimals = DEFAULT_DECIMALS } = {}) {
   if (!primaryActualColumn) {
     return true;
   }
-  const slack = tolerance > 0 ? tolerance : 1e-6;
+  const slack = tolerance > 0 ? 2 * (tolerance + 1e-9) : 1e-6;
   let previous = null;
   for (const row of actualRows) {
     const raw = row?.[primaryActualColumn];
