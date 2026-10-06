@@ -103,38 +103,69 @@ test('retrieval misses re-attribute model-looking failures to the system', () =>
   assert.deepEqual([unverified.outcome, unverified.outcome_tags], ['infra_error', ['guardrail_unverified']]);
 });
 
-test('failures of a case flagged known_validator_rejection are system errors, never the model\'s', () => {
+test('only the flagged rejection of a case flagged known_validator_rejection is a system error', () => {
   // The validator rejects every correct answer to the question today
-  // (tpl_revenue_credits_monthly_q1_2026_e1b20a: METRIC_COLUMN), so no model
-  // can pass it; its failures measure the product gap the flag documents.
+  // (tpl_revenue_credits_monthly_q1_2026_e1b20a: METRIC_COLUMN). The flag
+  // describes that rejection, so only a repetition whose final attempt the
+  // validator rejected with METRIC_COLUMN is the system's.
   const flagged = { ...testCase, known_validator_rejection: 'METRIC_COLUMN' };
+  const metric = repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'true_rejection' } })]);
+  const result = classifyRepetition(metric, flagged);
+  assert.deepEqual([result.outcome, result.bucket, result.counted, result.outcome_tags], ['guardrail_true_rejection', 'system', true, ['known_validator_rejection']]);
+  assert.equal(classifyRepetition(metric, testCase).bucket, 'model');
+  // A safety-layer rejection with the flagged code is the same gap.
+  const safety = classifyRepetition(repetition('validation_error', [rejected('SELECT 1', 'safety', 'METRIC_COLUMN')]), flagged);
+  assert.deepEqual([safety.outcome, safety.bucket, safety.outcome_tags], ['safety_rejection', 'system', ['known_validator_rejection']]);
+  // A retry rejected with the flagged code after an earlier different failure: the final attempt decides.
+  const retried = repetition('validation_error', [
+    accepted('SELECT nope', { ok: false, stage: 'execution', code: 'ER_BAD_FIELD_ERROR' }),
+    rejected('SELECT 2', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'true_rejection' } }),
+  ]);
+  assert.deepEqual(classifyRepetition(retried, flagged).outcome_tags, ['known_validator_rejection']);
+
+  // Every other failure of the flagged case is judged as usual: the model's.
   for (const [input, outcome] of [
-    [repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'true_rejection' } })]), 'guardrail_true_rejection'],
     [repetition('result_mismatch', [accepted('SELECT 1')]), 'wrong_result'],
+    [repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'FAN_OUT', { guardrailCheck: { verdict: 'true_rejection' } })]), 'guardrail_true_rejection'],
+    [
+      repetition('validation_error', [
+        rejected('SELECT 1', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'true_rejection' } }),
+        rejected('SELECT 2', 'guardrail', 'FAN_OUT', { guardrailCheck: { verdict: 'true_rejection' } }),
+      ]),
+      'guardrail_true_rejection',
+    ],
+    [repetition('validation_error', [rejected('DELETE FROM x', 'safety', 'WRITE_OPERATION')]), 'safety_rejection'],
     [repetition('execution_error', [accepted('SELECT nope', { ok: false, stage: 'execution', code: 'ER_BAD_FIELD_ERROR' })]), 'execution_error'],
     [repetition('llm_error', [], { error_code: 'LLM_TRUNCATED' }), 'llm_error'],
   ]) {
-    const result = classifyRepetition(input, flagged);
-    assert.deepEqual([result.outcome, result.bucket, result.counted, result.outcome_tags], [outcome, 'system', true, ['known_validator_rejection']], input.status);
-    // The same failure of an unflagged case is the model's.
-    assert.equal(classifyRepetition(input, testCase).bucket, 'model', input.status);
+    const other = classifyRepetition(input, flagged);
+    assert.deepEqual([other.outcome, other.bucket, other.counted, other.outcome_tags], [outcome, 'model', true, []], `${input.status} ${outcome}`);
   }
   // A pass, an outage, a false rejection and a retrieval miss keep their usual attribution.
   assert.deepEqual(Object.values(classifyRepetition(repetition('pass', [accepted('SELECT 1')]), flagged)).slice(0, 2), ['pass', 'pass']);
   assert.equal(classifyRepetition(repetition('llm_error', [], { error_code: 'HTTP_429' }), flagged).bucket, 'infra');
-  const falseRejection = classifyRepetition(repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'FAN_OUT', { guardrailCheck: { verdict: 'false_rejection' } })]), flagged);
+  const falseRejection = classifyRepetition(repetition('validation_error', [rejected('SELECT 1', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'false_rejection' } })]), flagged);
   assert.deepEqual([falseRejection.outcome, falseRejection.bucket, falseRejection.outcome_tags], ['guardrail_false_rejection', 'system', []]);
-  const both = classifyRepetition({ ...repetition('retrieval_miss', [accepted('SELECT 1')]), retrieved_tables: ['SalesDocument'] }, flagged);
+  const missed = { retrieved_tables: ['SalesDocument'] };
+  const wrongMissed = classifyRepetition({ ...repetition('retrieval_miss', [accepted('SELECT 1')]), ...missed }, flagged);
+  assert.deepEqual([wrongMissed.bucket, wrongMissed.outcome_tags], ['system', ['retrieval_miss']]);
+  const both = classifyRepetition({ ...metric, ...missed }, flagged);
   assert.deepEqual([both.bucket, both.outcome_tags], ['system', ['retrieval_miss', 'known_validator_rejection']]);
 
-  // Counted in the summary's system block, and the case's majority bucket is system.
-  const reps = [repetition('result_mismatch', [accepted('a')]), repetition('pass', [accepted('b')]), repetition('result_mismatch', [accepted('c')])].map((rep) => attributeRepetition(rep, flagged));
+  // Counted in the summary's system block only for the flagged rejection.
+  const reps = [
+    repetition('result_mismatch', [accepted('a')]),
+    metric,
+    repetition('validation_error', [rejected('c', 'guardrail', 'METRIC_COLUMN', { guardrailCheck: { verdict: 'true_rejection' } })]),
+    repetition('pass', [accepted('b')]),
+  ].map((rep) => attributeRepetition(rep, flagged));
   const caseSummary = summarizeCaseRepetitions(reps);
-  assert.deepEqual([caseSummary.outcome, caseSummary.bucket, caseSummary.tags], ['wrong_result', 'system', ['known_validator_rejection']]);
+  assert.deepEqual([caseSummary.outcome, caseSummary.bucket, caseSummary.tags], ['guardrail_true_rejection', 'system', ['known_validator_rejection']]);
   const summary = summarizeAttribution([{ id: 'flagged', repetitions: reps, summary: caseSummary }]);
   assert.equal(summary.system.knownValidatorRejections, 2);
-  assert.deepEqual(summary.repetitions.byBucket, { pass: 1, system: 2 });
-  assert.deepEqual(summary.byOutcomeBucket.wrong_result, { system: 2 });
+  assert.deepEqual(summary.repetitions.byBucket, { pass: 1, model: 1, system: 2 });
+  assert.deepEqual(summary.byOutcomeBucket.wrong_result, { model: 1 });
+  assert.deepEqual(summary.byOutcomeBucket.guardrail_true_rejection, { system: 2 });
 });
 
 test('case summary: pass rate over counted repetitions, strict majority, failure wins ties', () => {

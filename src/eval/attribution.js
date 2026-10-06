@@ -23,12 +23,17 @@
 //                                        expected table was not retrieved:
 //                                        the retrieved set is the allow-list)
 //   ... + tag known_validator_rejection
-//                               system  (a model-bucket failure of a case
-//                                        flagged known_validator_rejection:
-//                                        the production validator rejects
-//                                        every correct answer to it today, so
-//                                        no model can pass it and the failure
-//                                        is the system's)
+//                               system  (a guardrail or safety rejection of a
+//                                        case flagged known_validator_rejection
+//                                        whose final attempt was rejected with
+//                                        the flagged code: the production
+//                                        validator rejects every correct answer
+//                                        to it today, so that rejection is the
+//                                        gap the flag documents. Any other
+//                                        failure of a flagged case (a wrong
+//                                        result, an execution error, a
+//                                        rejection with a different code) is
+//                                        judged like any other case's)
 //   timeout / aborted           infra   (case deadline; counted as a failure)
 //   infra_error                 infra   (excluded from accuracy; also a gold
 //                                        query that failed because the
@@ -191,6 +196,28 @@ export function classifyBehaviorRepetition(repetition, testCase) {
   return { outcome, bucket: OUTCOME_BUCKETS[outcome], counted: false, behavior_counted: true, outcome_tags: tags };
 }
 
+// Validator rejections (guardrail or safety layer) a known_validator_rejection
+// flag can explain.
+const VALIDATOR_REJECTIONS = new Set(['guardrail_true_rejection', 'safety_rejection']);
+
+/**
+ * True when a model-bucket failure of a case flagged known_validator_rejection
+ * IS the flagged rejection: the repetition ended with its final attempt
+ * rejected by the validator with the flagged code. A flag describes the
+ * validator rejecting the case's correct gold, so any other failure (a wrong
+ * result, an execution error, an LLM error, a rejection with another code)
+ * stays the model's.
+ */
+export function isKnownValidatorRejection(repetition, outcome, testCase) {
+  const flag = testCase?.known_validator_rejection ? String(testCase.known_validator_rejection).trim() : '';
+  if (!flag || !VALIDATOR_REJECTIONS.has(outcome)) {
+    return false;
+  }
+  const final = finalAttempt(repetition);
+  const code = final ? final.validation?.code : repetition?.error_code;
+  return code === flag;
+}
+
 /**
  * Attribution of one repetition (an evaluateQuestion result, possibly with
  * attempts annotated by checkGuardrailRejections). Returns
@@ -290,10 +317,12 @@ export function classifyRepetition(repetition, testCase = {}) {
       bucket = 'system';
     }
   }
-  if (OUTCOME_BUCKETS[outcome] === 'model' && testCase?.known_validator_rejection) {
+  if (isKnownValidatorRejection(repetition, outcome, testCase)) {
     // The dataset documents that the validator rejects every correct answer
-    // to this question (verify-dataset keeps the flag current): a failure is
-    // the product gap the flag measures, not the model's error.
+    // to this question with this code (verify-dataset keeps the flag
+    // current): the rejection is the product gap the flag measures, not the
+    // model's error. Only that rejection: the flag says nothing about a
+    // wrong result or a rejection for another reason.
     tags.push('known_validator_rejection');
     bucket = 'system';
   }
@@ -623,8 +652,8 @@ export function summarizeAttribution(caseRecords) {
     system: {
       guardrailFalseRejections: failed.filter((repetition) => repetition.outcome === 'guardrail_false_rejection').length,
       retrievalMisses: failed.filter((repetition) => (repetition.outcome_tags || []).includes('retrieval_miss')).length,
-      // Failures of cases flagged known_validator_rejection (any model
-      // outcome; a repetition can also be a retrieval miss).
+      // Rejections of cases flagged known_validator_rejection with the
+      // flagged code (a repetition can also be a retrieval miss).
       knownValidatorRejections: failed.filter((repetition) => (repetition.outcome_tags || []).includes('known_validator_rejection')).length,
       // False rejections in repetitions that ended in another non-pass outcome
       // (an outage or timeout on the retry): reported, not in the counts above.

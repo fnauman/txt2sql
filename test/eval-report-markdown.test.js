@@ -99,7 +99,7 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
     assert.ok(markdown.includes(`\n${heading}\n`), heading);
   }
   assert.match(markdown, /\| system errors \(guardrail false rejections, retrieval misses, known validator rejections\) \| 2 \| 1 \|/);
-  assert.match(markdown, /0 failure\(s\) of cases flagged known_validator_rejection/);
+  assert.match(markdown, /0 known validator rejection\(s\) \(a case flagged known_validator_rejection whose final attempt the validator rejected with the flagged code/);
   assert.match(markdown, /\| skipped_budget \| skipped \| 2 \| 1 \| excluded \|/);
   assert.match(markdown, /\| Rejected by a guardrail \| 2 \(false rejection\) \| 0 \(caught\) \|/);
   assert.match(markdown, /\| case_guard \| Products sold in Feb but not March\? \| 0\/2 \| guardrail_false_rejection \| system \|/);

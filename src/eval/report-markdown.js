@@ -320,8 +320,9 @@ function attributionSection(report) {
   lines.push(
     `System errors (counted repetitions): ${attribution.system.guardrailFalseRejections} guardrail false rejection(s), ` +
       `${attribution.system.retrievalMisses} retrieval miss(es) (a failure where an expected table was not retrieved, so not allowed), ` +
-      `${attribution.system.knownValidatorRejections ?? 0} failure(s) of cases flagged known_validator_rejection (the production validator rejects ` +
-      'every correct answer to them today). A model-bucket failure tagged retrieval_miss or known_validator_rejection is counted as a system error.'
+      `${attribution.system.knownValidatorRejections ?? 0} known validator rejection(s) (a case flagged known_validator_rejection whose final attempt ` +
+      'the validator rejected with the flagged code: it rejects every correct answer to that question today; any other failure of a flagged case ' +
+      'is judged as usual). A model-bucket failure tagged retrieval_miss or known_validator_rejection is counted as a system error.'
   );
   if (attribution.system.guardrailFalseRejectionsElsewhere) {
     lines.push('');
