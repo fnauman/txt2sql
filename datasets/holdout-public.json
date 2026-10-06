@@ -673,7 +673,8 @@
       "all_time"
     ],
     "failure_class": "metric_column_confusion",
-    "expected_sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.BalanceAmount, 0) DESC, d.DocumentNo ASC LIMIT 5",
+    "notes": "An open item is a document with an unpaid balance (BalanceAmount > 0, as in the ageing and overdue golds): a fully paid document is not listed, so the seed fixture, with three open documents, returns three rows. Gold corrected on 2026-10-06 after the gold audit (it used to fill the top 5 with paid documents at 0.00).",
+    "expected_sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.BalanceAmount > 0 ORDER BY d.BalanceAmount DESC, d.DocumentNo ASC LIMIT 5",
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -687,7 +688,7 @@
       "decimals": 2
     },
     "expected_row_counts": {
-      "seed": 5,
+      "seed": 3,
       "v2": 5,
       "v3": 5
     }
@@ -709,7 +710,8 @@
       "typo"
     ],
     "failure_class": "typo",
-    "expected_sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.BalanceAmount, 0) DESC, d.DocumentNo ASC LIMIT 5",
+    "notes": "An open item is a document with an unpaid balance (BalanceAmount > 0, as in the ageing and overdue golds): a fully paid document is not listed, so the seed fixture, with three open documents, returns three rows. Gold corrected on 2026-10-06 after the gold audit (it used to fill the top 5 with paid documents at 0.00).",
+    "expected_sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.BalanceAmount > 0 ORDER BY d.BalanceAmount DESC, d.DocumentNo ASC LIMIT 5",
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -723,7 +725,7 @@
       "decimals": 2
     },
     "expected_row_counts": {
-      "seed": 5,
+      "seed": 3,
       "v2": 5,
       "v3": 5
     }
@@ -744,14 +746,22 @@
       "quarter"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "\"For each customer\" invites every customer: the customers with Q1 2026 documents (the gold) and every customer, 0 / 0 without documents (alternative_expected_sql, added on 2026-10-06 after the gold audit); null_as_zero accepts NULL for a customer without documents.",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
     ],
     "comparison": {
       "mode": "rowset",
-      "decimals": 2
+      "decimals": 2,
+      "null_as_zero": [
+        "paid_amount",
+        "open_balance"
+      ]
     },
     "expected_row_counts": {
       "seed": 5,
@@ -775,14 +785,22 @@
       "quarter"
     ],
     "failure_class": "metric_column_confusion",
+    "notes": "\"For each customer\" invites every customer: the customers with Q1 2026 documents (the gold) and every customer, 0 / 0 without documents (alternative_expected_sql, added on 2026-10-06 after the gold audit); null_as_zero accepts NULL for a customer without documents.",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
     ],
     "comparison": {
       "mode": "rowset",
-      "decimals": 2
+      "decimals": 2,
+      "null_as_zero": [
+        "paid_amount",
+        "open_balance"
+      ]
     },
     "expected_row_counts": {
       "seed": 5,
@@ -3352,8 +3370,11 @@
       "single_month"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.",
+    "notes": "A pivot invites every store: the stores with March or April 2026 sales (the gold) and every store, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.",
     "expected_sql": "SELECT s.LocationName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026 FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-05-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC",
+    "alternative_expected_sql": [
+      "SELECT s.LocationName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026 FROM StoreLocation s LEFT JOIN SalesDocument d ON d.StoreLocationId = s.StoreLocationId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-05-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "StoreLocation"
@@ -3398,8 +3419,11 @@
       "bilingual"
     ],
     "failure_class": "multilingual",
-    "notes": "column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.",
+    "notes": "A pivot invites every store: the stores with March or April 2026 sales (the gold) and every store, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.",
     "expected_sql": "SELECT s.LocationName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026 FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-05-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC",
+    "alternative_expected_sql": [
+      "SELECT s.LocationName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026 FROM StoreLocation s LEFT JOIN SalesDocument d ON d.StoreLocationId = s.StoreLocationId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-05-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "StoreLocation"
@@ -3443,8 +3467,11 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Line net amounts by the product category; column_order keeps H1 first unless the columns are named like the gold columns.",
+    "notes": "Line net amounts by the product category. A pivot invites every category: the categories with 2025 sales (the gold; empty on the seed fixture, which has no 2025 sales) and every category, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps H1 first unless the columns are named like the gold columns.",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-07-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h1_2025, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-07-01' AND d.DocumentDate < '2026-01-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h2_2025 FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC",
+    "alternative_expected_sql": [
+      "SELECT pc.CategoryName, ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-01-01' AND x.DocumentDate < '2025-07-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h1_2025, ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-07-01' AND x.DocumentDate < '2026-01-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h2_2025 FROM ProductCategory pc LEFT JOIN (SELECT p.ProductCategoryId, d.DocumentDate, l.NetAmount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01') x ON x.ProductCategoryId = pc.ProductCategoryId GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC"
+    ],
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3491,8 +3518,11 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Line net amounts by the product category; column_order keeps H1 first unless the columns are named like the gold columns.",
+    "notes": "Line net amounts by the product category. A pivot invites every category: the categories with 2025 sales (the gold; empty on the seed fixture, which has no 2025 sales) and every category, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps H1 first unless the columns are named like the gold columns.",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-07-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h1_2025, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-07-01' AND d.DocumentDate < '2026-01-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h2_2025 FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC",
+    "alternative_expected_sql": [
+      "SELECT pc.CategoryName, ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-01-01' AND x.DocumentDate < '2025-07-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h1_2025, ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-07-01' AND x.DocumentDate < '2026-01-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h2_2025 FROM ProductCategory pc LEFT JOIN (SELECT p.ProductCategoryId, d.DocumentDate, l.NetAmount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01') x ON x.ProductCategoryId = pc.ProductCategoryId GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC"
+    ],
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3726,10 +3756,10 @@
     }
   },
   {
-    "id": "ho2_documents_last_7_days_asof_2026_04_07_8ee6c9",
+    "id": "ho2_documents_last_7_days_asof_2026_04_07_8ca4d2",
     "intentId": "documents_last_7_days_asof_2026_04_07",
     "split": "holdout",
-    "question": "Documents raised in the 7 days up to and including 7 April 2026?",
+    "question": "How many documents were raised in the 7 days up to and including 7 April 2026?",
     "canonicalQuestion": "As of 2026-04-07, how many documents have we raised in the last 7 days, today included?",
     "difficulty": "medium",
     "tags": [
@@ -4123,10 +4153,10 @@
     }
   },
   {
-    "id": "ho2_campaign_units_by_store_q1_2026_144980",
+    "id": "ho2_campaign_units_by_store_q1_2026_12ee7a",
     "intentId": "campaign_units_by_store_q1_2026",
     "split": "holdout",
-    "question": "How many units did each campaign shift through each outlet in Q1 2026?",
+    "question": "How many units did each campaign shift through each outlet in Q1 2026, for the campaign and outlet combinations that had sales?",
     "canonicalQuestion": "Units per promotion and store for Q1 2026.",
     "difficulty": "hard",
     "tags": [

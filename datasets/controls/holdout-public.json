@@ -462,43 +462,43 @@
   },
   "ho2_largest_open_items_top5_599841": {
     "intentId": "largest_open_items_top5",
-    "gold_fingerprint": "49a16542ca0e08f1",
+    "gold_fingerprint": "f42df6b4b419b01f",
     "negative": [
       {
         "id": "n1",
         "type": "cancel",
-        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId ORDER BY COALESCE(d.BalanceAmount, 0) DESC, d.DocumentNo ASC LIMIT 5",
+        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.BalanceAmount > 0 ORDER BY d.BalanceAmount DESC, d.DocumentNo ASC LIMIT 5",
         "note": "canceled documents not excluded"
       },
       {
         "id": "n2",
         "type": "metric",
-        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.NetPayableAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.NetPayableAmount, 0) DESC, d.DocumentNo ASC LIMIT 5",
+        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.NetPayableAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.NetPayableAmount > 0 ORDER BY d.NetPayableAmount DESC, d.DocumentNo ASC LIMIT 5",
         "note": "payable amount instead of the open balance"
       },
       {
         "id": "n3",
         "type": "metric",
-        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.NetAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.NetAmount, 0) DESC, d.DocumentNo ASC LIMIT 5",
+        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.NetAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.NetAmount > 0 ORDER BY d.NetAmount DESC, d.DocumentNo ASC LIMIT 5",
         "note": "net amount instead of the open balance"
       },
       {
         "id": "n4",
         "type": "order_limit",
-        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.BalanceAmount, 0) ASC, d.DocumentNo ASC LIMIT 5",
+        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.BalanceAmount > 0 ORDER BY d.BalanceAmount ASC, d.DocumentNo ASC LIMIT 5",
         "note": "sorted ascending instead of descending"
       },
       {
         "id": "n5",
         "type": "order_limit",
-        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 ORDER BY COALESCE(d.BalanceAmount, 0) DESC, d.DocumentNo ASC",
+        "sql": "SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.BalanceAmount > 0 ORDER BY d.BalanceAmount DESC, d.DocumentNo ASC",
         "note": "LIMIT 5 missing"
       }
     ],
     "positive": [
       {
         "id": "p1",
-        "sql": "SELECT x.DocumentNo, x.CustomerName, x.balance FROM (SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0) x ORDER BY x.balance DESC, x.DocumentNo ASC LIMIT 5",
+        "sql": "SELECT x.DocumentNo, x.CustomerName, x.balance FROM (SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS balance FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND COALESCE(d.BalanceAmount, 0) > 0) x ORDER BY x.balance DESC, x.DocumentNo ASC LIMIT 5",
         "note": "a derived table, sorted and limited outside"
       }
     ]

@@ -15,6 +15,13 @@
 // being a fresh holdout once anyone tunes against it. Add a new holdout
 // instead.
 //
+// Gold audit (2026-10-06, recorded in datasets/holdout-manifest.json): an
+// independent two-annotator audit of every answer case, with no model output
+// inspected, corrected one gold (largest_open_items_top5: only documents with
+// an unpaid balance), added the every-member reading to three pivots
+// (store_mar_vs_apr_2026, customer_paid_vs_open_q1_2026,
+// category_h1_vs_h2_2025) and reworded two questions (new ids).
+//
 // Every case is split 'holdout' by construction (not by the intent hash of
 // splitForIntent: the whole set is held out). Questions follow the holdout
 // wording rule of the other datasets: no multi-word phrase of
@@ -527,20 +534,21 @@ const INTENTS = [
     failure_class: 'metric_column_confusion',
     tags: ['outstanding_balance', 'document', 'ranking', 'all_time'],
     phrasings: ['List the five documents with the largest unpaid balance, with document number, customer and balance; break ties by document number.', typo('top 5 open items by balance (doc no, customer, amount)')],
-    sql: `SELECT d.DocumentNo, c.CustomerName, ROUND(COALESCE(d.BalanceAmount, 0), 2) AS open_balance FROM SalesDocument d ${CJ} WHERE ${NC} ORDER BY COALESCE(d.BalanceAmount, 0) DESC, d.DocumentNo ASC LIMIT 5`,
+    sql: `SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS open_balance FROM SalesDocument d ${CJ} WHERE ${NC} AND d.BalanceAmount > 0 ORDER BY d.BalanceAmount DESC, d.DocumentNo ASC LIMIT 5`,
     comparison: { mode: 'ranked', value_columns: ['open_balance'], order: 'desc', decimals: 2 },
+    notes: 'An open item is a document with an unpaid balance (BalanceAmount > 0, as in the ageing and overdue golds): a fully paid document is not listed, so the seed fixture, with three open documents, returns three rows. Gold corrected on 2026-10-06 after the gold audit (it used to fill the top 5 with paid documents at 0.00).',
     negative: [
       ['cancel'],
       ['metric', 'd.BalanceAmount', 'd.NetPayableAmount', 'payable amount instead of the open balance'],
       ['metric', 'd.BalanceAmount', 'd.NetAmount', 'net amount instead of the open balance'],
-      ['rep', 'order_limit', 'sorted ascending instead of descending', [['0) DESC', '0) ASC']]],
+      ['rep', 'order_limit', 'sorted ascending instead of descending', [['d.BalanceAmount DESC', 'd.BalanceAmount ASC']]],
       ['rep', 'order_limit', 'LIMIT 5 missing', [[' LIMIT 5', '']]],
     ],
     positive: [
       [
         'sql',
         'a derived table, sorted and limited outside',
-        `SELECT x.DocumentNo, x.CustomerName, x.balance FROM (SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS balance FROM SalesDocument d ${CJ} WHERE ${NC}) x ORDER BY x.balance DESC, x.DocumentNo ASC LIMIT 5`,
+        `SELECT x.DocumentNo, x.CustomerName, x.balance FROM (SELECT d.DocumentNo, c.CustomerName, ROUND(d.BalanceAmount, 2) AS balance FROM SalesDocument d ${CJ} WHERE ${NC} AND COALESCE(d.BalanceAmount, 0) > 0) x ORDER BY x.balance DESC, x.DocumentNo ASC LIMIT 5`,
       ],
     ],
   },
@@ -552,7 +560,11 @@ const INTENTS = [
     tags: ['paid_amount', 'outstanding_balance', 'customer', 'quarter'],
     phrasings: ['For each customer, how much of what we billed in Q1 2026 has been paid and how much is still open?', 'Per client: paid vs still-outstanding amounts on Q1 2026 documents.'],
     sql: `SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM SalesDocument d ${CJ} WHERE ${NC} AND ${Q1_2026} GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC`,
-    comparison: { mode: 'rowset', decimals: 2 },
+    alternatives: () => [
+      `SELECT c.CustomerName, ROUND(SUM(COALESCE(d.PaidAmount, 0)), 2) AS paid_amount, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS open_balance FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND ${NC} AND ${Q1_2026} GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC`,
+    ],
+    comparison: { mode: 'rowset', decimals: 2, null_as_zero: ['paid_amount', 'open_balance'] },
+    notes: '"For each customer" invites every customer: the customers with Q1 2026 documents (the gold) and every customer, 0 / 0 without documents (alternative_expected_sql, added on 2026-10-06 after the gold audit); null_as_zero accepts NULL for a customer without documents.',
     negative: [
       ['cancel'],
       ['date_col'],
@@ -1513,8 +1525,14 @@ const INTENTS = [
     sql: s(`SELECT s.LocationName, ROUND(SUM(CASE WHEN ${MAR_2026} THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026,
       ROUND(SUM(CASE WHEN ${APR_2026} THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026
       FROM SalesDocument d ${SJ} WHERE ${NC} AND ${win('2026-03-01', '2026-05-01')} GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC`),
+    alternatives: () => [
+      s(`SELECT s.LocationName, ROUND(SUM(CASE WHEN ${MAR_2026} THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS mar_2026,
+        ROUND(SUM(CASE WHEN ${APR_2026} THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS apr_2026
+        FROM StoreLocation s LEFT JOIN SalesDocument d ON d.StoreLocationId = s.StoreLocationId AND ${NC} AND ${win('2026-03-01', '2026-05-01')}
+        GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC`),
+    ],
     comparison: { mode: 'rowset', compare_columns: ['LocationName', 'mar_2026', 'apr_2026'], decimals: 2, column_order: ['mar_2026', 'apr_2026'], null_as_zero: ['mar_2026', 'apr_2026'] },
-    notes: 'column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.',
+    notes: 'A pivot invites every store: the stores with March or April 2026 sales (the gold) and every store, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps March first unless the columns are named like the gold columns; null_as_zero accepts NULL for a month without sales.',
     negative: [
       ['cancel'],
       ['date_col'],
@@ -1534,8 +1552,14 @@ const INTENTS = [
     sql: s(`SELECT pc.CategoryName, ROUND(SUM(CASE WHEN ${win('2025-01-01', '2025-07-01')} THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h1_2025,
       ROUND(SUM(CASE WHEN ${win('2025-07-01', '2026-01-01')} THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS h2_2025
       FROM ${LINES} ${PJ} ${PCJ} WHERE ${NC} AND ${Y2025} GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC`),
+    alternatives: () => [
+      s(`SELECT pc.CategoryName, ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-01-01' AND x.DocumentDate < '2025-07-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h1_2025,
+        ROUND(SUM(CASE WHEN x.DocumentDate >= '2025-07-01' AND x.DocumentDate < '2026-01-01' THEN COALESCE(x.NetAmount, 0) ELSE 0 END), 2) AS h2_2025
+        FROM ProductCategory pc LEFT JOIN (SELECT p.ProductCategoryId, d.DocumentDate, l.NetAmount FROM ${LINES} ${PJ} WHERE ${NC} AND ${Y2025}) x ON x.ProductCategoryId = pc.ProductCategoryId
+        GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY pc.CategoryName ASC`),
+    ],
     comparison: { mode: 'rowset', compare_columns: ['CategoryName', 'h1_2025', 'h2_2025'], decimals: 2, tolerance: 0.01, column_order: ['h1_2025', 'h2_2025'], null_as_zero: ['h1_2025', 'h2_2025'] },
-    notes: 'Line net amounts by the product category; column_order keeps H1 first unless the columns are named like the gold columns.',
+    notes: 'Line net amounts by the product category. A pivot invites every category: the categories with 2025 sales (the gold; empty on the seed fixture, which has no 2025 sales) and every category, 0 where it sold nothing (alternative_expected_sql, added on 2026-10-06 after the gold audit). column_order keeps H1 first unless the columns are named like the gold columns.',
     negative: [
       ['cancel'],
       ['date_col'],
@@ -1628,7 +1652,7 @@ const INTENTS = [
     difficulty: 'medium',
     failure_class: 'relative_date',
     tags: ['document_count', 'as_of'],
-    phrasings: ['As of 2026-04-07, how many documents have we raised in the last 7 days, today included?', 'Documents raised in the 7 days up to and including 7 April 2026?'],
+    phrasings: ['As of 2026-04-07, how many documents have we raised in the last 7 days, today included?', 'How many documents were raised in the 7 days up to and including 7 April 2026?'],
     sql: `SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE ${NC} AND ${win('2026-04-01', '2026-04-08')}`,
     comparison: { mode: 'scalar' },
     notes: 'The last 7 days including the as-of date: 1 to 7 April 2026.',
@@ -1758,7 +1782,7 @@ const INTENTS = [
     difficulty: 'hard',
     failure_class: 'campaign_join_path',
     tags: ['quantity', 'campaign', 'store_location', 'quarter'],
-    phrasings: ['Units per promotion and store for Q1 2026.', 'How many units did each campaign shift through each outlet in Q1 2026?'],
+    phrasings: ['Units per promotion and store for Q1 2026.', 'How many units did each campaign shift through each outlet in Q1 2026, for the campaign and outlet combinations that had sales?'],
     sql: `SELECT cp.CampaignName, s.LocationName, ROUND(${QTY}, 3) AS total_qty FROM ${LINES} ${PJ} ${CPJ} ${SJ} WHERE ${NC} AND ${Q1_2026} GROUP BY cp.CampaignId, cp.CampaignName, s.StoreLocationId, s.LocationName ORDER BY cp.CampaignName ASC, s.LocationName ASC`,
     comparison: { mode: 'rowset', decimals: 3 },
     notes: "The campaign of a unit is its product's campaign (Product.CampaignId), not the document header's.",
