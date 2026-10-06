@@ -326,7 +326,7 @@ retrieved schema scope; the only
 question edits after that kept two questions under the few-shot similarity
 limit. Its golds predate the [gold conventions](#gold-conventions) write-up
 and its two opt-in scoring relaxations: no fresh case sets
-`ignore_all_zero_rows` or `empty_as_zero` (26 set `null_as_zero`, 14 of them
+`ignore_all_zero_rows` or `empty_as_zero` (28 set `null_as_zero`, 14 of them
 scalar), so on those questions the holdout scores a little more strictly
 than dev does. A sampled review found one more such strictness: a "for each
 month from ... to ..." question whose gold lists only the months with sales,
@@ -337,6 +337,39 @@ each". These are recorded, not fixed: changing a holdout gold or its scoring
 needs a dated manifest note (`npm run holdout-manifest -- --write --note
 ...`), and the decision is the maintainer's, made without looking at holdout
 results.
+
+**Gold audit.** On 2026-10-06 the golds were audited before any model
+answer to the fresh questions was looked at. Each of the 147 answer cases
+was given to two annotators who worked independently (294 annotations). Each
+annotator wrote their own SQL from the question, the schema and the master
+data, scored it against the gold with the oracle (`scoreAgainstGold`) on all
+three fixtures, and checked the gold against the [gold
+conventions](#gold-conventions). Where the annotators disagreed with the gold
+or with each other, an adjudicator re-ran both readings with the oracle, the
+case's controls and the production validator. No model output, run report or
+baseline was opened, and no LLM was called. Of the disputed cases, 9 were
+adjudicated to a change, and the change was applied to every phrasing of the
+intent, so 10 cases over 6 intents changed. None was dropped:
+
+- **1 gold fix (2 cases).** "Largest open items" now lists only documents
+  with an unpaid balance (`d.BalanceAmount > 0`, as in the ageing and overdue
+  golds). On seed it returns 3 rows; it used to fill the top 5 with paid
+  documents at 0.00.
+- **3 every-member alternatives (6 cases).** The store March/April pivot,
+  "for each customer ... paid and still open" (which also gets `null_as_zero`
+  on both amounts) and the category H1/H2 pivot accept the `LEFT JOIN`
+  listing of every member with 0, as the dev pivots do.
+- **2 rewordings (2 cases, new ids).** "Documents raised in the 7 days ..."
+  became "How many documents were raised ...", because the case is scalar.
+  "Each campaign ... through each outlet" now names "the campaign and outlet
+  combinations that had sales", the rewording the templated generator uses
+  for the same two-dimension ambiguity.
+
+The seed pin of the open-items intent moved from 5 to 3. The pins were
+rewritten on freshly seeded fixtures, and the controls still kill every
+design negative and pass every positive (779/779 and 23/23). The change is
+recorded in `datasets/holdout-manifest.json`. The counts in this section
+are after the audit.
 
 **How it was built.** `scripts/build-holdout-dataset.mjs` (`npm run
 build-holdout-dataset`, `-- --check` for drift; the hygiene tests check it
@@ -364,7 +397,7 @@ changed for it.
 | Abstain (`unanswerable`) | 2 | stock on hand, a salesperson |
 
 Across the cases: 6 Swedish and 2 bilingual phrasings, 7 typo or shorthand
-ones, 19 with an explicit as-of date, 28 with alternative gold, 10 ranked, 32
+ones, 19 with an explicit as-of date, 34 with alternative gold, 10 ranked, 32
 scalar and 105 rowset comparisons. Four cases are known validator rejections
 (`METRIC_COLUMN`): "credit notes" makes the credit-amount guardrail demand
 `AccountingPosting.CreditAmount` on a document question, and the "Sales
