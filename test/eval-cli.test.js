@@ -316,6 +316,32 @@ test('verifySuite checks a case shared by two datasets once and applies the kill
   assert.deepEqual(result.gateFailures, ['edge: design kill rate 75.0% < 95.0%']);
 });
 
+test('verifySuite verifies every distinct definition of a case id, not only the first with that gold', async () => {
+  // Same id and gold, another row-count pin: selectSuite refuses such a suite
+  // (a dataset conflict); a caller that verifies the datasets directly still
+  // checks the second pin instead of letting it pass unseen.
+  const first = normalizeBenchmarkCase({ id: 'x', question: 'Q?', expected_sql: 'SELECT 1', expected_row_counts: { seed: 1 } });
+  const second = normalizeBenchmarkCase({ id: 'x', question: 'Q?', expected_sql: 'SELECT 1', expected_row_counts: { seed: 2 } });
+  const verified = [];
+  const verify = async (testCase) => {
+    verified.push(testCase.expected_row_counts.seed);
+    const pinned = testCase.expected_row_counts.seed;
+    return { id: testCase.id, problems: pinned === 1 ? [] : [`seed: expected ${pinned} row(s) but gold returned 1`], notes: [], goldRowCounts: { seed: 1 }, controls: null };
+  };
+  const result = await verifySuite({
+    datasets: [
+      { name: 'a', cases: [first] },
+      { name: 'b', cases: [second, first] },
+    ],
+    connections: [{ name: 'seed' }],
+    verify,
+    checkControls: false,
+  });
+  assert.deepEqual(verified, [1, 2], 'each definition once');
+  assert.equal(result.cases, 2);
+  assert.deepEqual(result.problems, [{ id: 'x', datasets: ['b'], problems: ['seed: expected 2 row(s) but gold returned 1'] }]);
+});
+
 test('the in-process verify gate: invalid and unscored controls are problems (exit 2), undecided ones only lower the kill rate', async () => {
   const testCase = normalizeBenchmarkCase({ id: 'c1', question: 'Q?', expected_sql: 'SELECT 1' });
   const killed = (id) => ({ id, type: 'join_path', heldout: false, status: 'killed', killed: true, killedOn: ['v2'] });

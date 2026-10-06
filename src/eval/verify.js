@@ -42,9 +42,10 @@ import {
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
-import { goldFingerprint, resolveCaseControls } from './controls.js';
+import { resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
+import { caseDefinitionFingerprint } from './suite.js';
 
 /**
  * Validates SQL the way the product does for `question`: master-data
@@ -481,7 +482,9 @@ export function pinWriteRefusal(checks) {
 /**
  * In-process verify-dataset for an evaluation run (scripts/eval.js): every
  * case of every dataset is verified once (a case shared by two datasets, like
- * the core cases in the edge suite, is checked once and counted in both), and
+ * the core cases in the edge suite, is checked once and counted in both; two
+ * different definitions of one id, which selectSuite rejects as a dataset
+ * conflict, are each verified), and
  * the same gates apply: no case problem, and each dataset's design (and
  * held-out) kill rate at or above the floors. `datasets` are
  * [{ name, cases }] of normalized cases. `staleKnownRejection: 'warning'`
@@ -515,7 +518,10 @@ export async function verifySuite({
   for (const dataset of datasets) {
     const results = [];
     for (const testCase of dataset.cases) {
-      const key = `${testCase.id}\u0000${goldFingerprint(testCase.expected_sql)}`;
+      // One verification per distinct definition: a second definition of an
+      // id (another row-count pin, signal check, flag, ...) is verified too,
+      // never covered by the first one's result.
+      const key = `${testCase.id}\u0000${caseDefinitionFingerprint(testCase)}`;
       let entry = verified.get(key);
       if (!entry) {
         const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls, staleKnownRejection });
