@@ -196,7 +196,12 @@ export async function collectProvenance({
   };
 }
 
-/** The short form stamped on every trace line (createTraceLogger metadata). */
+/**
+ * The short form stamped on every trace line (createTraceLogger metadata). The
+ * scope keys are flat strings/numbers and never `schemaScope`: prompt.built and
+ * prompt.widened carry a `schemaScope` object in their payload, which would
+ * override a metadata key of that name on those lines.
+ */
 export function traceMetadataFromProvenance(provenance) {
   return {
     promptVersion: shortHash(provenance?.promptVersion),
@@ -204,7 +209,7 @@ export function traceMetadataFromProvenance(provenance) {
     dbProfileVersion: shortHash(provenance?.fixturesVersion),
     gitSha: provenance?.git?.sha || null,
     gitDirty: provenance?.git?.dirty ?? null,
-    schemaScope: provenance?.product?.schemaScope?.requested ?? null,
+    schemaScopeRequested: provenance?.product?.schemaScope?.requested ?? null,
     schemaScopeEffective: provenance?.product?.schemaScope?.effective ?? null,
     schemaFullEstimatedTokens: provenance?.product?.schemaScope?.fullSchemaEstimatedTokens ?? null,
     schemaWidenOnDemand: provenance?.product?.schemaScope?.widenOnDemand ?? null,

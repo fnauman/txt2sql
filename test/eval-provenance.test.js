@@ -17,6 +17,7 @@ import {
   traceMetadataFromProvenance,
 } from '../src/eval/provenance.js';
 import { buildOptimizedPrompt } from '../src/pipeline.js';
+import { createBufferedTraceLogger } from '../src/query-service.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,7 +97,7 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     dbProfileVersion: provenance.fixturesVersion.slice(0, 12),
     gitSha: 'f00',
     gitDirty: true,
-    schemaScope: 'auto',
+    schemaScopeRequested: 'auto',
     schemaScopeEffective: 'full',
     schemaFullEstimatedTokens: provenance.product.schemaScope.fullSchemaEstimatedTokens,
     schemaWidenOnDemand: true,
@@ -127,4 +128,17 @@ test('provenance records the product configuration (schema scope) and the prompt
   assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
   assert.equal(baseline.provenance.product, undefined, 'the baseline predates the product block');
   assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
+});
+
+test('trace metadata keeps one type per key: the run-level scope never collides with the prompt events\' schemaScope object', async () => {
+  const provenance = await collectProvenance({ schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} });
+  const trace = createBufferedTraceLogger({ metadata: traceMetadataFromProvenance(provenance) });
+  await trace.emit('run.started', {});
+  // The product loop's prompt.built payload carries the scope as an object.
+  await trace.emit('prompt.built', { schemaScope: { requested: 'auto', effective: 'full' } });
+  for (const line of trace.events) {
+    assert.equal(line.schemaScopeRequested, 'auto', `${line.event} carries the requested scope as a string`);
+    assert.equal(line.schemaScopeEffective, 'full');
+  }
+  assert.equal(trace.events.find((line) => line.event === 'run.started').schemaScope, undefined);
 });

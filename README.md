@@ -584,7 +584,7 @@ Notes:
 - You can combine both flags to trace to stdout and a file at the same time
 - All events share a `runId` for correlating events from the same run
 - Each event includes `timestamp` and duration timings (`startedAt`, `endedAt`, `durationMs`)
-- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching, and `schemaScope` (requested and effective scope, the full-schema token estimate, widened tables); a widen-on-demand retry emits `prompt.widened` with the rejected and added tables
+- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching, and `schemaScope` (requested and effective scope, the full-schema token estimate, widened tables); a widen-on-demand retry emits `prompt.widened` with the rejected and added tables; `npm run eval` also stamps every trace line with `schemaScopeRequested`, `schemaScopeEffective`, `schemaFullEstimatedTokens` and `schemaWidenOnDemand`
 - LLM cost output includes cached input token counts and percentages when the provider returns `prompt_tokens_details.cached_tokens`
 
 ## Prompt Cache Measurement
