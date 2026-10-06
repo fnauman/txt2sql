@@ -1543,6 +1543,20 @@ function notesFor(intent) {
       'Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).'
     );
   }
+  const campaignScoped = [...(intent.dims || []), ...(intent.filters || []).map((filter) => filter.dim)].includes('campaign');
+  if (campaignScoped) {
+    notes.push(
+      'Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.'
+    );
+  }
+  if (intent.metric === 'aov') {
+    notes.push(
+      'Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.'
+    );
+  }
+  if (intent.shape === 'rank') {
+    notes.push('A ranking without a number lists every member (no LIMIT); only "top N" keeps N (gold convention).');
+  }
   if (comparisonFor(intent).empty_as_zero) {
     notes.push('Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.');
   }

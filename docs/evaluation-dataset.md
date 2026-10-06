@@ -296,6 +296,32 @@ passes, a wrong metric or a document count included (the held-out `xh*`
 controls of the 2023 and June cases are such survivors); the design controls
 are the plausible mistakes that do return rows on some fixture.
 
+## Gold conventions
+
+Every gold encodes choices a careful analyst could make differently. They
+are written down here (and, where a case depends on one, in its `notes`) so
+that a failure on a convention is visible as such, and so that no experiment
+is credited with a convention it happened to change. They were reviewed
+after the error analysis of the Experiment 1 failures: the golds were kept,
+one alternative reading was added (`hard_entity_lakeside_spend_q1_2026`,
+below; the committed baseline answered it with the bill total, so a rescore
+passes it: 184 → 185 majority-pass cases, a gold decision, not a model
+gain), and where the analysis found another reading defensible but the
+gold stays, the reason is given.
+
+| Convention | Rule | Other reading, and the decision |
+|---|---|---|
+| Sales amounts | Sales, revenue, turnover, takings, spend and order value are net of tax: header `SalesDocument.NetAmount`, or line `SalesDocumentLine.NetAmount` (next row). `GrossAmount` only when the question says gross or including tax, or as an accepted reading of an ambiguous word ("sales", "spend"). | **"Spend"** (`hard_entity_lakeside_spend_q1_2026`): net (gold), gross and, since the analysis, the billed total `BillTotalAmount` (what the customer was billed) are accepted: the case already accepted gross, so rejecting the bill total was arbitrary. The billed total is not accepted elsewhere. **Average order value** (`tpl_*average_order_value*`): the average header `NetAmount` per non-canceled document; a bill-total average is not accepted (the usual definition of order value excludes tax and charges, and the analysis judged the gold reasonable). |
+| Header vs line grain | Header amounts for document-level dimensions and filters (customer, store, document type, month); line amounts whenever a product, brand, category or campaign is a dimension or filter, also next to a document-level dimension (customer × brand); never a header amount summed over a line join. | None defensible: a header amount over a line join counts a document once per line, and a header amount for a product slice includes the document's other products. `tpl_customer_net_sales_sales_invoices_mar_2026_*` (a document-type filter) is header grain; `tpl_weekend_pantry_net_sales_monthly_q1_2026_*` (a campaign filter) is line grain. |
+| Campaign attribution | A sale belongs to the campaign of the product sold: `Product.CampaignId`, on line amounts. `SalesDocument.CampaignId` is the campaign a whole document was entered under (an order-level tag) and is not used for sales attribution. | The document campaign is a declared foreign key ("Optional campaign directly associated with this document"), so the analysis found it defensible on its face (`tpl_campaign_net_sales_q1_2026_*`, `edge_public_002`, `tpl_weekend_pantry_*`). Kept as the gold anyway: the product itself tells the model to attribute through the product (the prompt rule "For campaign-filtered product sales, join SalesDocumentLine to Product and Product to Campaign", the semantic layer's only campaign join path `product_to_campaign`, "campaign sales" as a line-level metric), the two readings differ on every fixture, and accepting both would drop the `campaign_join_path` trap. The ambiguous metadata comment is a product defect to fix in the product (metadata or semantic layer), not in the dataset. |
+| Brand | `Product.BrandId`, the product's current brand. | `ProductBrand` is a partial bridge (4 of the 13 products), so a brand total through it leaves products out: not an alternative. |
+| Canceled documents | Every question that selects sales documents leaves canceled ones out (`IFNULL(d.IsCanceled, 0) = 0`) unless it asks for them, also when `SalesDocument` is joined only for its date (ledger questions by document date) and inside an anti-join (customers or products without sales). | **Ledger questions by the posting date** select postings by their own date: there the postings of canceled documents may be kept (the gold, with manual journals) or left out (alternative). **Ledger questions by the document date** (`core_public_005` / `009`, their paraphrases, `tpl_account_net_movement_feb_2026_*`, `tpl_account_debit_credit_q1_2026_*`) select postings through their sales document and keep the filter: the product's own rule says to exclude canceled documents whenever it queries `SalesDocument`, and accepting the unfiltered answer would pass four failing cases by relaxing the gold. |
+| Units | Units are product units: product lines only (`l.ProductId IS NOT NULL`, or a join to `Product`); the delivery-fee lines (NULL `ProductId`, quantity 1) are service charges, not units sold. | Counting the fee lines is not a defensible answer to a units question. The analysis is right that the product does not tell the model (the `quantity_sold` metric has no default filter); that is a product gap for a semantic-layer change to close, not a reason to accept fee lines. |
+| Breakdowns and zero rows | A breakdown lists the members with activity in the window. Listing every member with 0 is accepted where the question invites it (alternatives: "for each customer", a pivot, "each customer named ...", an empty window). A customer pivot also accepts any extra customers with 0 everywhere, and a scalar sum an empty result for an empty window ([scoring relaxations](#scoring-relaxations)). | See [Pins and alternative gold](#pins-and-alternative-gold). |
+| Top N and rankings | "Top N", "the N biggest": `LIMIT N` after a deterministic tiebreak (items tied at the cut-off are interchangeable, see the oracle rules). "Top" without a number (`core_public_002` / `008` and their paraphrases): the product's own rule, `LIMIT 10`. "Rank", "order every ... highest first", "from highest to lowest" without a number: every member, no `LIMIT`. A singular superlative ("which outlet had the highest ..."): `LIMIT 1`. | A `LIMIT 10` on "Rank products by turnover" (`tpl_product_net_sales_rank_dec_2025_*`) cuts v3's 13 products: the question asks for the ranking, not a top 10. The prompt rule that says `LIMIT 10` for "top", "biggest" and "most" does not mention rankings. |
+| Dates | `DocumentDate` unless the question says posted / posting date (`SalesDocument.PostingDate` for documents, `AccountingPosting.PostingDate` for postings) or due date (`DueDate`); half-open ranges; a quarter, a "January–March" range or "1 to 10 March, inclusive" means every day in it. | Kept; the temporal failures the analysis found are product defects (a range resolved as one month, an as-of date ignored), not readings. |
+| Document types | Every document type is a sale, Credit Memos included (they carry positive amounts in this schema). | A reading that leaves Credit Memos out fails; see [Known limits](#known-limits). |
+
 ## Behaviour cases (abstain / clarify)
 
 A case with `expected_behavior: 'abstain'` (the data cannot answer it) or
@@ -551,7 +577,7 @@ Oracle rules (`scoreAgainstGold`):
   ledger questions without canceled documents' postings, customer pivots,
   per-name lists, the June 2026 zero-row case and "each customer's last
   purchase" with every customer, both readings of "sales" and "orders", month
-  to date with or without today, "spend" with or without tax, and an empty
+  to date with or without today, "spend" net, with tax or as billed, and an empty
   result for a year without sales.
 - **Which readings get an alternative** (one rule for the whole suite): a
   breakdown lists the members with activity in the window; listing every

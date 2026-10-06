@@ -304,6 +304,7 @@
       "ranking",
       "single_month"
     ],
+    "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -337,6 +338,7 @@
       "ranking",
       "single_month"
     ],
+    "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2025-12-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -2075,6 +2077,7 @@
       "single_month"
     ],
     "failure_class": "grain_confusion",
+    "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2111,6 +2114,7 @@
       "single_month"
     ],
     "failure_class": "grain_confusion",
+    "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2575,6 +2579,7 @@
       "quarter"
     ],
     "failure_class": "campaign_join_path",
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT cp.CampaignName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY cp.CampaignId, cp.CampaignName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, cp.CampaignName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2608,6 +2613,7 @@
       "quarter"
     ],
     "failure_class": "campaign_join_path",
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT cp.CampaignName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY cp.CampaignId, cp.CampaignName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, cp.CampaignName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -2641,7 +2647,7 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
@@ -2682,7 +2688,7 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
@@ -3424,6 +3430,7 @@
       "aggregation",
       "single_month"
     ],
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT cp.CampaignName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY cp.CampaignId, cp.CampaignName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, cp.CampaignName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -3455,6 +3462,7 @@
       "aggregation",
       "single_month"
     ],
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT cp.CampaignName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY cp.CampaignId, cp.CampaignName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, cp.CampaignName ASC",
     "expected_tables": [
       "SalesDocumentLine",
@@ -4605,6 +4613,7 @@
       "quarter"
     ],
     "failure_class": "distinct_count",
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Urban Refresh%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -4636,6 +4645,7 @@
       "quarter"
     ],
     "failure_class": "distinct_count",
+    "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Urban Refresh%'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -4720,6 +4730,7 @@
       "single_month"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -4749,6 +4760,7 @@
       "single_month"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocument"
@@ -4779,6 +4791,7 @@
       "quarter"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT s.LocationName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -4810,6 +4823,7 @@
       "quarter"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT s.LocationName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -4840,7 +4854,7 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
@@ -4877,7 +4891,7 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
@@ -4915,6 +4929,7 @@
       "single_month"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT t.DocumentTypeName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -4946,6 +4961,7 @@
       "single_month"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT t.DocumentTypeName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
     "expected_tables": [
       "SalesDocument",
@@ -4977,6 +4993,7 @@
       "quarter"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT c.CustomerName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
     "expected_tables": [
       "SalesDocument",
@@ -5012,6 +5029,7 @@
       "quarter"
     ],
     "failure_class": "ratio_metric",
+    "notes": "Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.",
     "expected_sql": "SELECT c.CustomerName, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY AVG(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
     "expected_tables": [
       "SalesDocument",

@@ -66,6 +66,7 @@
       "ranking",
       "temporal"
     ],
+    "notes": "\"Top\" without a number (gold convention): the product's own LIMIT 10 rule, which binds on v3 (12 products sell in March 2026); a full ranking or another N fails.",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 10",
     "expected_tables": [
       "SalesDocumentLine",
@@ -208,7 +209,7 @@
       "temporal"
     ],
     "failure_class": "default_filter",
-    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
+    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too. Ledger convention: postings selected through their sales document's date (SalesDocument.DocumentDate) leave canceled documents out, like every question that selects sales documents; only posting-date ledger questions also accept the postings of canceled documents.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.DebitAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
@@ -335,6 +336,7 @@
       "ranking",
       "temporal"
     ],
+    "notes": "\"Top\" without a number (gold convention): the product's own LIMIT 10 rule, which binds on v3 (12 products sell in March 2026); a full ranking or another N fails.",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC LIMIT 10",
     "expected_tables": [
       "SalesDocumentLine",
@@ -385,7 +387,7 @@
       "temporal"
     ],
     "failure_class": "default_filter",
-    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
+    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too. Ledger convention: postings selected through their sales document's date (SalesDocument.DocumentDate) leave canceled documents out, like every question that selects sales documents; only posting-date ledger questions also accept the postings of canceled documents.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.CreditAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"

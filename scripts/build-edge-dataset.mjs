@@ -79,7 +79,7 @@ const PUBLIC_EDGE_CASES = [
       "fuzzy"
     ],
     "failure_class": "campaign_join_path",
-    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign.",
+    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign. Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocumentLine",

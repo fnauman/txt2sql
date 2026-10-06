@@ -743,10 +743,11 @@
       "scalar"
     ],
     "failure_class": "metric_column_confusion",
-    "notes": "A customer named in the question. Two readings are accepted: net sales (the gold) and the gross amount including tax (alternative_expected_sql), since \"spend\" can include VAT. Scoring relaxation empty_as_zero: where the window has no rows, an empty result equals the NULL / 0 total.",
+    "notes": "A customer named in the question. Three readings are accepted: net sales (the gold), the gross amount including tax (alternative_expected_sql[0]), since \"spend\" can include VAT, and the billed total (BillTotalAmount, alternative_expected_sql[1]), what the customer was billed, added after the Experiment 1 error analysis (a gold convention decision, not a model gain). Scoring relaxation empty_as_zero: where the window has no rows, an empty result equals the NULL / 0 total.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'",
     "alternative_expected_sql": [
-      "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'"
+      "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'",
+      "SELECT ROUND(SUM(COALESCE(d.BillTotalAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'"
     ],
     "expected_tables": [
       "SalesDocument",
