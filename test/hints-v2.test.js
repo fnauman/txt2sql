@@ -438,6 +438,13 @@ test('v2 METRIC_COLUMN: the open-balance alternative needs NetPayableAmount - Pa
     'SUM(GREATEST(d.NetPayableAmount - d.PaidAmount, 0))',
     'SUM(d.NetPayableAmount - d.PaidAmount + 0)',
     'SUM(d.NetPayableAmount - d.PaidAmount - 0)',
+    // Re-review: value-keeping casts, and the same ROUND on both sides.
+    'SUM(CAST(d.NetPayableAmount AS DECIMAL(12,2)) - CAST(d.PaidAmount AS DECIMAL(12,2)))',
+    'SUM(CONVERT(d.NetPayableAmount, DECIMAL(12,2)) - CONVERT(d.PaidAmount, DECIMAL(12,2)))',
+    'SUM(CAST(COALESCE(d.NetPayableAmount, 0) AS DOUBLE) - COALESCE(d.PaidAmount, 0))',
+    'ROUND(SUM(d.NetPayableAmount), 2) - ROUND(SUM(d.PaidAmount), 2)',
+    'SUM(ROUND(d.NetPayableAmount, 2) - ROUND(d.PaidAmount, 2))',
+    'ROUND(SUM(d.NetPayableAmount)) - ROUND(SUM(d.PaidAmount), 0)',
   ]) {
     assert.equal(rejects(`SELECT ROUND(${expression}, 2) AS open_amount ${april}`), null, expression);
   }
@@ -465,6 +472,12 @@ test('v2 METRIC_COLUMN: the open-balance alternative needs NetPayableAmount - Pa
     'SUM(ABS(d.NetPayableAmount) - d.PaidAmount)',
     'SUM(d.NetPayableAmount - d.GrossAmount)',
     'SUM(d.BillTotalAmount - d.PaidAmount)',
+    // Different rounding on the two sides, or a cast that drops the decimals or the number.
+    'ROUND(SUM(d.NetPayableAmount), 2) - ROUND(SUM(d.PaidAmount), 1)',
+    'ROUND(SUM(d.NetPayableAmount), 2) - SUM(d.PaidAmount)',
+    'SUM(ROUND(d.NetPayableAmount, 2)) - ROUND(SUM(d.PaidAmount), 2)',
+    'SUM(CAST(d.NetPayableAmount AS SIGNED) - CAST(d.PaidAmount AS SIGNED))',
+    'SUM(CAST(d.NetPayableAmount AS CHAR) - d.PaidAmount)',
   ]) {
     assert.equal(rejects(`SELECT ROUND(${expression}, 2) AS open_amount ${april}`), 'METRIC_COLUMN', expression);
   }

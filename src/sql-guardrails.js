@@ -1119,9 +1119,15 @@ function columnMentioned(sqlText, qualifiedColumn) {
 }
 
 // Wrappers an operand of a column difference may have: a NULL default
-// (COALESCE(col, 0)) or a SUM, which distributes over the difference.
+// (COALESCE(col, 0)) or a cast to a non-integer number type, which keep the
+// value; and a SUM, which distributes over the difference, or a ROUND to n
+// places, which both sides must share. (TRUNCATE never reaches this check:
+// the safety layer rejects the word.)
 const DIFFERENCE_NULL_DEFAULT_FUNCTIONS = new Set(['COALESCE', 'IFNULL', 'NVL']);
 const DIFFERENCE_AGGREGATE_FUNCTIONS = new Set(['SUM']);
+const DIFFERENCE_ROUNDING_FUNCTIONS = new Set(['ROUND']);
+const DIFFERENCE_CAST_FUNCTIONS = new Set(['CAST', 'CONVERT']);
+const DIFFERENCE_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED', 'DOUBLE', 'FLOAT', 'REAL']);
 // Operators binding tighter than binary minus: next to an operand they take
 // it away from the difference ("a - b * 2", "2 * a - b").
 const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
@@ -1166,11 +1172,29 @@ function splitTopLevelArguments(tokens, start, end, parens) {
   return ranges;
 }
 
+// Whether tokens[start..end] is an integer literal, optionally signed.
+function isIntegerLiteral(tokens, start, end) {
+  const valueStart = isOperatorToken(tokens[start], '-', '+') ? start + 1 : start;
+  return valueStart === end && tokens[end]?.type === 'number' && /^\d+$/.test(tokens[end].value);
+}
+
+// Whether tokens[start..end] names a non-integer number type ("DECIMAL",
+// "DECIMAL(12,2)", "DOUBLE").
+function isValueKeepingCastType(tokens, start, end, parens) {
+  const typeName = tokens[start];
+  if (typeName?.type !== 'word' || !DIFFERENCE_CAST_TYPES.has(typeName.upper)) {
+    return false;
+  }
+  return start === end || (isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end);
+}
+
 /**
  * The column tokens[start..end] reads as a whole, or null: a column reference
  * (`col`, `t.col`, `db.t.col`, quoted or not), in grouping parentheses, in a
- * NULL default (COALESCE(x, 0), IFNULL(x, 0)) or in SUM(x). Returns
- * { column (lower-case name), sums (number of SUM wrappers) }.
+ * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast to a non-integer number
+ * type (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
+ * Returns { column (lower-case name), wrappers (the SUM and ROUND wrappers,
+ * outermost first, e.g. ['ROUND(2)', 'SUM']) }.
  */
 function columnOperandOf(tokens, start, end, parens) {
   if (start > end || start < 0) {
@@ -1188,7 +1212,33 @@ function columnOperandOf(tokens, start, end, parens) {
     const args = splitTopLevelArguments(tokens, open + 1, end - 1, parens);
     if (DIFFERENCE_AGGREGATE_FUNCTIONS.has(functionName)) {
       const inner = args.length === 1 ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
-      return inner ? { ...inner, sums: inner.sums + 1 } : null;
+      return inner ? { ...inner, wrappers: [functionName, ...inner.wrappers] } : null;
+    }
+    if (DIFFERENCE_ROUNDING_FUNCTIONS.has(functionName)) {
+      const places = args.length === 2 && isIntegerLiteral(tokens, args[1][0], args[1][1]) ? Number(tokens[args[1][1]].value) * (isOperatorToken(tokens[args[1][0]], '-') ? -1 : 1) : null;
+      if (places === null && args.length !== 1) {
+        return null;
+      }
+      const inner = columnOperandOf(tokens, args[0][0], args[0][1], parens);
+      return inner ? { ...inner, wrappers: [`${functionName}(${places ?? 0})`, ...inner.wrappers] } : null;
+    }
+    if (DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
+      if (functionName === 'CONVERT') {
+        return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+      }
+      if (args.length !== 1) {
+        return null;
+      }
+      // CAST(<operand> AS <type>): the last top-level AS splits them.
+      let asIndex = -1;
+      for (let index = args[0][0]; index <= args[0][1]; index += 1) {
+        if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+          index = parens.closeOf.get(index);
+        } else if (isKeywordToken(tokens[index], 'AS')) {
+          asIndex = index;
+        }
+      }
+      return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? columnOperandOf(tokens, args[0][0], asIndex - 1, parens) : null;
     }
     if (DIFFERENCE_NULL_DEFAULT_FUNCTIONS.has(functionName)) {
       const defaultsAreNumbers = args.slice(1).every(([from, to]) => {
@@ -1213,7 +1263,7 @@ function columnOperandOf(tokens, start, end, parens) {
   if ((end - start) % 2 !== 0 || parts.length === 0 || parts.length > 3) {
     return null;
   }
-  return { column: String(parts[parts.length - 1]).toLowerCase(), sums: 0 };
+  return { column: String(parts[parts.length - 1]).toLowerCase(), wrappers: [] };
 }
 
 // The start index of the operand that ends at tokens[end]: a parenthesized
@@ -1498,7 +1548,8 @@ function expressionIsComputedValue(tokens, start, end, parens) {
  * matched by column name like columnMentioned): a binary minus whose left
  * operand is exactly the minuend column and whose right operand is exactly
  * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
- * defaults and SUM (both sides summed alike), and neither operand bound to a
+ * defaults, non-integer casts, SUM and ROUND(x, n) (both sides
+ * summed and rounded alike), and neither operand bound to a
  * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
  * difference must be a computed value (expressionIsComputedValue): in a
  * SELECT list, a derived table's included, not in a filter, join, grouping,
@@ -1529,7 +1580,7 @@ function computesColumnDifference(tokens, minuend, subtrahend, parens = matching
     if (
       left?.column === wantLeft &&
       right?.column === wantRight &&
-      left.sums === right.sums &&
+      left.wrappers.join(' ') === right.wrappers.join(' ') &&
       !bindsTighterThanMinus(tokens[leftStart - 1]) &&
       !negatesMinuend(tokens[leftStart - 1]) &&
       !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
