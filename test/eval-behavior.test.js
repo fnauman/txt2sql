@@ -289,7 +289,7 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
   const recordsOf = (runs) => attributeCaseRuns(runs, { checkGuardrails: false });
   const answeredEverything = reportOf(await recordsOf([single(abstainCase, behaviorRep('answered')), single(clarifyCase, behaviorRep('answered'))]));
   assert.equal(answeredEverything.stats.repeat, 1);
-  assert.deepEqual(computeExitCode(answeredEverything, { failOnAnyFailure: true }), {
+  assert.deepEqual(computeExitCode(answeredEverything, { failOnAnyFailure: true, revealHoldout: true }), {
     code: 1,
     reasons: ['2 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) not declined: 2 answered)'],
   });
@@ -302,7 +302,7 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
     ])
   );
   assert.equal(errored.results.find((record) => record.id === abstainCase.id).repetitions[0].outcome, 'llm_error');
-  assert.deepEqual(computeExitCode(errored, { failOnAnyFailure: true }), {
+  assert.deepEqual(computeExitCode(errored, { failOnAnyFailure: true, revealHoldout: true }), {
     code: 1,
     reasons: ['2 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) not declined: 1 answered, 1 errored)'],
   });
@@ -319,12 +319,48 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
       single(clarifyCase, behaviorRep('validation_error')),
     ])
   );
-  assert.deepEqual(computeExitCode(mixed, { failOnAnyFailure: true }).reasons, [
+  assert.deepEqual(computeExitCode(mixed, { failOnAnyFailure: true, revealHoldout: true }).reasons, [
     '2 case(s) failed (benchmark profile, single run; 1 abstain/clarify case(s) not declined: 1 answered)',
   ]);
   // With --repeat the benchmark profile does not fail on single cases (as before).
   const repeated = reportOf(await recordsOf([{ entry: { testCase: abstainCase, datasets: ['hard'] }, repetitions: [behaviorRep('answered'), behaviorRep('answered')] }]));
   assert.deepEqual(computeExitCode(repeated, { failOnAnyFailure: true }), { code: 0, reasons: [] });
+});
+
+test('benchmark profile: the failure reason never gives a hidden holdout outcome away', async () => {
+  // abstainCase is a holdout case: whether the model answered or declined it
+  // must not change the printed reason unless --reveal-holdout (subtracting
+  // the listed dev rows from the reason's counts would reveal it).
+  const single = (testCase, rep) => ({ entry: { testCase, datasets: ['hard'] }, repetitions: [rep] });
+  const recordsOf = (runs) => attributeCaseRuns(runs, { checkGuardrails: false });
+  const run = async (holdoutStatus) =>
+    reportOf(
+      await recordsOf([
+        { entry: { testCase: answerCase, datasets: ['d'] }, repetitions: [answerRep('result_mismatch')] },
+        single(clarifyCase, behaviorRep('answered')),
+        single(abstainCase, behaviorRep(holdoutStatus)),
+      ])
+    );
+  const answered = await run('answered');
+  const declined = await run('validation_error');
+  const expected = {
+    code: 1,
+    reasons: [
+      '2 case(s) failed (benchmark profile, single run; 1 abstain/clarify case(s) not declined: 1 answered; ' +
+        'holdout cases are not counted here: holdout results are read in aggregate only, --reveal-holdout counts them)',
+    ],
+  };
+  assert.deepEqual(computeExitCode(answered, { failOnAnyFailure: true }), expected);
+  assert.deepEqual(computeExitCode(declined, { failOnAnyFailure: true }), expected);
+  assert.deepEqual(computeExitCode(answered, { failOnAnyFailure: true, revealHoldout: true }).reasons, [
+    '3 case(s) failed (benchmark profile, single run; 2 abstain/clarify case(s) not declined: 2 answered)',
+  ]);
+  // Only a holdout case failed: the exit code still fails, without itemizing.
+  const holdoutOnly = reportOf(await recordsOf([single(clarifyCase, behaviorRep('validation_error')), single(abstainCase, behaviorRep('answered'))]));
+  assert.deepEqual(computeExitCode(holdoutOnly, { failOnAnyFailure: true }), {
+    code: 1,
+    reasons: ['holdout case(s) failed (benchmark profile, single run; not itemized: holdout results are read in aggregate only, --reveal-holdout counts them)'],
+  });
 });
 
 test('--min-accuracy with only abstain / clarify cases selected is refused (exit 2), never compared with a missing accuracy', async () => {
