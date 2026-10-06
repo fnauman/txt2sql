@@ -217,3 +217,24 @@ test('holdout behaviour cases alone are counted without their outcomes', async (
   assert.doesNotMatch(markdown, /\n\n\n/, 'no empty summary table');
   assert.match(renderReportMarkdown(answered, { revealHoldout: true }), /0 handled correctly/);
 });
+
+test('a run of holdout cases only prints no empty attribution, guardrail or cost tables', async () => {
+  const report = await reportWith({ secret_holdout_case: ['result_mismatch'], secret_holdout_abstain: ['answered'] });
+  const markdown = renderReportMarkdown(report);
+  assert.doesNotMatch(markdown, /\n\n\n/, 'no empty table leaves stacked blank lines');
+  assert.match(markdown, /## Attribution\n\nNo dev answer case in this run: the 1 holdout answer case\(s\) are shown in aggregate \(accuracy by split\)\.\n\nExcluded from accuracy: 1 holdout abstain\/clarify case\(s\) \(not listed\)\.\n/);
+  assert.match(markdown, /## Guardrail confusion matrix\n\nNo dev answer case in this run \(the holdout is shown in aggregate, by split\)\.\n/);
+  assert.match(markdown, /## Cost, latency, retries, tokens\n\nNo dev case in this run: cost, latency, retries and tokens cover the dev cases only/);
+  assert.doesNotMatch(markdown, /\| Bucket \||attempts 0|\| Total LLM cost \|/);
+  const console = renderHeadline(report);
+  assert.match(console, /\nAttribution: no dev answer case in this run \(the holdout is shown in aggregate, by split\)\n/);
+  assert.match(console, /\nCost: no dev case in this run \(cost, latency and retries cover dev cases only while the holdout is hidden\)/);
+  assert.doesNotMatch(console, /pass 0 · model 0|\$0\.0000/);
+  // A budget still shows the whole run's spend.
+  report.budget = { limitUsd: 1, spentUsd: 0.0002, exhausted: false, skippedCases: [] };
+  assert.match(renderReportMarkdown(report), /tokens cover the dev cases only[^\n]*\n\n\| Metric \| Value \|\n\| --- \| --- \|\n\| Budget \| \$0\.0002 of \$1\.00 \|\n/);
+  // revealHoldout shows every table as usual.
+  const revealed = renderReportMarkdown(report, { revealHoldout: true });
+  assert.match(revealed, /\| Bucket \| Repetitions \| Cases \(majority\) \|/);
+  assert.match(revealed, /\| Total LLM cost \| \$0\.0002 \|/);
+});

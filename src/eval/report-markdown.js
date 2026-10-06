@@ -64,6 +64,12 @@ function displayedSummaries(report, hidden = new Set()) {
   };
 }
 
+// With the holdout hidden, a run can list no dev answer case (or no dev case
+// at all, e.g. --split holdout): its sections then say so in one line
+// instead of printing empty or all-zero tables.
+const noListedAnswerCase = (shown) => shown.hidden && !shown.records.some((record) => !isBehaviorRecord(record));
+const NO_DEV_ANSWER_CASE = 'No dev answer case in this run';
+
 function hiddenBehaviorNote(count) {
   return count > 0
     ? `${count} holdout behaviour case(s) not listed and not in these counts: holdout results are read in aggregate only, and the ` +
@@ -336,6 +342,14 @@ function bucketText(attribution, outcome) {
 function attributionSection(report, shown = displayedSummaries(report)) {
   const attribution = shown.attribution;
   const lines = ['## Attribution', ''];
+  if (noListedAnswerCase(shown)) {
+    lines.push(
+      `${NO_DEV_ANSWER_CASE}${shown.hiddenAnswerCases > 0 ? `: the ${shown.hiddenAnswerCases} holdout answer case(s) are shown in aggregate (accuracy by split)` : ''}.`
+    );
+    lines.push('');
+    lines.push(excludedLine(attribution, shown));
+    return lines.join('\n');
+  }
   lines.push(
     'Who caused each outcome. Repetitions are every (case, repetition) run; cases use each case\'s majority outcome. ' +
       'Excluded outcomes are not in the accuracy denominator.' +
@@ -387,8 +401,14 @@ function attributionSection(report, shown = displayedSummaries(report)) {
         'are infra_error, not model errors: the rejection might have been a false one.'
     );
   }
-  // Excluded outcomes (repetitions of answer cases), and the abstain /
-  // clarify cases, which are never in accuracy or in the tables above.
+  lines.push('');
+  lines.push(excludedLine(attribution, shown));
+  return lines.join('\n');
+}
+
+// Excluded outcomes (repetitions of answer cases), and the abstain / clarify
+// cases, which are never in accuracy or in the attribution tables.
+function excludedLine(attribution, shown) {
   const excluded = Object.entries(attribution.excluded);
   const behaviorCases = shown.records.filter(isBehaviorRecord);
   const parts = [];
@@ -405,9 +425,7 @@ function attributionSection(report, shown = displayedSummaries(report)) {
   if (shown.hiddenBehaviorCases > 0) {
     parts.push(`${shown.hiddenBehaviorCases} holdout abstain/clarify case(s) (not listed)`);
   }
-  lines.push('');
-  lines.push(`Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`);
-  return lines.join('\n');
+  return `Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`;
 }
 
 const UNKNOWN_LABELS = {
@@ -428,6 +446,10 @@ function unknownBreakdown(unknownBy) {
 function confusionSection(report, shown = displayedSummaries(report)) {
   const matrix = shown.attribution.guardrailConfusion;
   const lines = ['## Guardrail confusion matrix', ''];
+  if (noListedAnswerCase(shown)) {
+    lines.push(`${NO_DEV_ANSWER_CASE} (the holdout is shown in aggregate, by split).`);
+    return lines.join('\n');
+  }
   lines.push(
     'Every attempt, retries included. "Rejected" = a guardrail-layer rejection; correctness of rejected SQL is decided by re-running it ' +
       'read-only on every fixture (only after it passes the safety layer). An accepted attempt that failed at execution counts as incorrect.' +
@@ -563,7 +585,8 @@ function behaviorSection(report, hidden = new Set(), shown = displayedSummaries(
 
 function costSection(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
   const { cost, latency, retries, tokens } = shown.usage;
-  const rows = [
+  const noListedCase = shown.hidden && shown.records.length === 0;
+  const usageRows = [
     [
       'Total LLM cost',
       `${formatUsd(cost.total)}${cost.questionsWithoutCost ? ` (${cost.questionsWithoutCost} question(s) used tokens without a known price, so this is a lower bound)` : ''}` +
@@ -582,6 +605,7 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
     ],
     ['Tokens', `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}`],
   ];
+  const rows = noListedCase ? [] : usageRows;
   if (report.budget?.limitUsd != null) {
     // Skipped holdout cases are counted, not named (aggregate only).
     const skipped = report.budget.skippedCases || [];
@@ -595,12 +619,11 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
     '',
     ...(shown.hidden
       ? [
-          'Cost, latency, retries and tokens cover the dev cases only (the holdout is shown in aggregate, by split; the Budget row, when ' +
-            'there is one, is the whole run\'s spend). `--reveal-holdout` covers every case.',
-          '',
+          `${noListedCase ? 'No dev case in this run: c' : 'C'}ost, latency, retries and tokens cover the dev cases only (the holdout is shown in ` +
+            'aggregate, by split; the Budget row, when there is one, is the whole run\'s spend). `--reveal-holdout` covers every case.',
         ]
       : []),
-    table(['Metric', 'Value'], rows),
+    ...(rows.length > 0 ? [...(shown.hidden ? [''] : []), table(['Metric', 'Value'], rows)] : []),
   ].join('\n');
 }
 
@@ -851,17 +874,21 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
     `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} (95% CI ${formatInterval(stats.strictAccuracy.ci95)}) over ${stats.cases.counted} cases / ${stats.cases.intents} intents, ` +
       `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`,
     `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}); intent-clustered ${formatPercent(stats.intentClustered.value)}`,
-    `Attribution (repetitions${shown.hiddenAnswerCases > 0 ? ', dev cases' : ''}): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
-      `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}, ` +
-      `known validator rejections ${attribution.system.knownValidatorRejections ?? 0}) · ` +
-      `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
+    noListedAnswerCase(shown)
+      ? `Attribution: ${NO_DEV_ANSWER_CASE.toLowerCase()} (the holdout is shown in aggregate, by split)`
+      : `Attribution (repetitions${shown.hiddenAnswerCases > 0 ? ', dev cases' : ''}): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
+        `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}, ` +
+        `known validator rejections ${attribution.system.knownValidatorRejections ?? 0}) · ` +
+        `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
     ...((stats.bySplit || []).length > 1
       ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]
       : []),
     ...(behaviorSummaryText(shown) ? [`${behaviorSummaryText(shown)} (not in accuracy)`] : []),
-    `Cost${shown.hidden ? ' (dev cases)' : ''} ${formatUsd(usage.cost.total)} (${formatUsd(usage.cost.perQuestion, 5)}/question, ` +
-      `${formatUsd(usage.cost.perCorrect, 5)}/correct) · ` +
-      `latency p50 ${formatMs(usage.latency.questionWallMs.p50)} p95 ${formatMs(usage.latency.questionWallMs.p95)} · retry rate ${formatPercent(usage.retries.rate)}`,
+    shown.hidden && shown.records.length === 0
+      ? 'Cost: no dev case in this run (cost, latency and retries cover dev cases only while the holdout is hidden)'
+      : `Cost${shown.hidden ? ' (dev cases)' : ''} ${formatUsd(usage.cost.total)} (${formatUsd(usage.cost.perQuestion, 5)}/question, ` +
+        `${formatUsd(usage.cost.perCorrect, 5)}/correct) · ` +
+        `latency p50 ${formatMs(usage.latency.questionWallMs.p50)} p95 ${formatMs(usage.latency.questionWallMs.p95)} · retry rate ${formatPercent(usage.retries.rate)}`,
   ];
   if (report.stopped) {
     lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);
