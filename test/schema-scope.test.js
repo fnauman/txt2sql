@@ -43,7 +43,8 @@ const OUTLET_GOLD =
   "SELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC LIMIT 1";
 
 function promptFor(question, schemaScope, extra = {}) {
-  return buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question), schemaScope, ...extra });
+  const { hintsVersion, ...rest } = extra;
+  return buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question, { hintsVersion }), schemaScope, ...rest });
 }
 
 function validateIn(prompt, sql) {
@@ -119,10 +120,11 @@ test('auto is full while the full schema block fits SCHEMA_FULL_MAX_TOKENS, else
 
 // test/fixtures/retrieved-scope-prompts-main.json was written by main's
 // buildOptimizedPrompt before schema scopes existed (its prompt version is the
-// committed baseline's; test/eval-provenance.test.js checks that).
-test('retrieved scope reproduces main\'s prompt and allow-list byte for byte', () => {
+// committed baseline's; test/eval-provenance.test.js checks that), and so
+// before HINTS_VERSION existed: hints version 1.
+test('retrieved scope reproduces main\'s prompt and allow-list byte for byte (hints version 1)', () => {
   for (const expected of MAIN_PROMPTS.prompts) {
-    const prompt = promptFor(expected.question, 'retrieved');
+    const prompt = promptFor(expected.question, 'retrieved', { hintsVersion: 1 });
     assert.equal(prompt.system, expected.system, expected.question);
     assert.equal(prompt.user, expected.user, expected.question);
     assert.deepEqual(prompt.tables.map((table) => table.tableName), expected.allowedTables);

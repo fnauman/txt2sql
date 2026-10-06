@@ -244,7 +244,64 @@ function buildMonthRange(year, month) {
   };
 }
 
-export function extractTemporalReferences(question) {
+// Hints version 2: a "<Month> <Year>" match that is only part of a date
+// phrase the resolver does not understand is dropped instead of being
+// resolved to the whole month. Day ranges and as-of days ("between 1 and 10
+// March 2026", "Today is 15 February 2026"), month ranges and lists sharing a
+// year ("January to March 2026", "between November 2025 and February 2026",
+// "January and February 2026"), anchors ("as of", "since", "before", "until")
+// and to-date phrases ("March 2026 to date") all made the whole-month range
+// wrong; the model reads such a phrase itself (business rule 4). A month
+// with its own year next to another one ("March 2025 and March 2026") is
+// still resolved.
+const MONTH_ALTERNATION = [...MONTH_TOKEN_TO_INFO.keys()].sort((left, right) => right.length - left.length).join('|');
+const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till)';
+const LIST_CONNECTOR = '(?:,|and|or|&)';
+const DAY_OF_MONTH = '\\d{1,2}(?:st|nd|rd|th)?';
+const PARTIAL_BEFORE_PATTERNS = [
+  // A day of the month right before: "15 February 2026", "1 and 10 March 2026".
+  new RegExp(`\\b${DAY_OF_MONTH}\\s+(?:of\\s+)?$`, 'i'),
+  // The end of a month range: "January to March 2026", "November 2025 through February 2026".
+  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s*${RANGE_CONNECTOR}\\s*$`, 'i'),
+  // A month without its own year shares this one: "January and February 2026".
+  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?\\s*${LIST_CONNECTOR}\\s*$`, 'i'),
+  // The end of "between <month> [year] and <month> <year>".
+  new RegExp(`\\bbetween\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s+and\\s*$`, 'i'),
+  // An anchor, not a window: "as of", "since", "before", "until", "end of".
+  /\b(?:as of|as at|today is|since|before|after|until|till|up to|prior to|through|thru|end of|start of|beginning of)\s+(?:the\s+)?$/i,
+];
+const PARTIAL_AFTER_PATTERNS = [
+  // The start of a range: "November 2025 through February 2026", "1 March 2026 to 10 March 2026".
+  new RegExp(`^\\s*${RANGE_CONNECTOR}\\s*(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\b`, 'i'),
+  // To-date and open-ended phrases: "March 2026 to date", "March 2026 onwards".
+  /^\s*(?:to date|so far|onwards?|and later|or later|and earlier|or earlier)\b/i,
+];
+const BETWEEN_START_PATTERN = new RegExp(
+  `^\\s*and\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\b`,
+  'i'
+);
+
+function isPartialMonthReference(text, startIndex, matchedText) {
+  const before = text.slice(0, startIndex);
+  const after = text.slice(startIndex + matchedText.length);
+  if (PARTIAL_BEFORE_PATTERNS.some((pattern) => pattern.test(before))) {
+    return true;
+  }
+  if (PARTIAL_AFTER_PATTERNS.some((pattern) => pattern.test(after))) {
+    return true;
+  }
+  // The start of "between <month> <year> and <month> <year>".
+  return /\bbetween\s+(?:the\s+)?$/i.test(before) && BETWEEN_START_PATTERN.test(after);
+}
+
+/**
+ * Whole-month references ("March 2026", "Feb, 26") in `question`, each with
+ * its half-open range. `hintsVersion` 2 (the default) drops a match that is
+ * only part of a longer date phrase (see isPartialMonthReference); version 1
+ * resolves every match.
+ */
+export function extractTemporalReferences(question, { hintsVersion = undefined } = {}) {
+  const version = normalizeHintsVersion(hintsVersion);
   const temporalReferences = [];
   const text = String(question || '');
 
@@ -255,6 +312,9 @@ export function extractTemporalReferences(question) {
     const year = normalizeYearToken(String(match[3] || ''), separator);
 
     if (!monthInfo || !year) {
+      continue;
+    }
+    if (version !== 1 && isPartialMonthReference(text, match.index ?? 0, match[0])) {
       continue;
     }
 
@@ -295,9 +355,9 @@ function normalizeQuestionTemporalText(question, temporalReferences) {
  * selects how dates are resolved and which tokens retrieval ignores.
  */
 export function buildQuestionContext(question, { hintsVersion = undefined } = {}) {
-  normalizeHintsVersion(hintsVersion);
+  const version = normalizeHintsVersion(hintsVersion);
   const originalQuestion = String(question || '');
-  const temporalReferences = extractTemporalReferences(originalQuestion);
+  const temporalReferences = extractTemporalReferences(originalQuestion, { hintsVersion: version });
   const normalizedQuestion = normalizeQuestionTemporalText(originalQuestion, temporalReferences);
 
   return {

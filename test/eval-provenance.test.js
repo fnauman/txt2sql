@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { BUSINESS_RULES, DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
+import { BUSINESS_RULES, BUSINESS_RULES_V2, DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import {
   collectProvenance,
   computePromptVersion,
@@ -30,7 +30,15 @@ test('promptVersion hashes the real system prompt, business rules, few-shots and
   assert.equal(computePromptVersion(schema), version, 'stable across calls');
   // Built from the product's builder: passing the same parts explicitly gives the same hash.
   const system = buildOptimizedPrompt(schema, 'anything at all').system;
-  assert.equal(computePromptVersion(schema, { systemPrompt: system, businessRules: BUSINESS_RULES, fewShotExamples: FEW_SHOT_EXAMPLES }), version);
+  assert.equal(computePromptVersion(schema, { systemPrompt: system, businessRules: BUSINESS_RULES_V2, fewShotExamples: FEW_SHOT_EXAMPLES }), version);
+  // The hints version decides the system prompt and the business rules.
+  const v1System = buildOptimizedPrompt(schema, 'anything at all', { hintsVersion: 1 }).system;
+  assert.equal(
+    computePromptVersion(schema, { hintsVersion: 1 }),
+    computePromptVersion(schema, { systemPrompt: v1System, businessRules: BUSINESS_RULES, fewShotExamples: FEW_SHOT_EXAMPLES })
+  );
+  assert.notEqual(computePromptVersion(schema, { hintsVersion: 1 }), version);
+  assert.equal(computePromptVersion(schema, { hintsVersion: 2 }), version, 'version 2 is the default');
   // Any one input changing changes the version.
   assert.notEqual(computePromptVersion(schema, { fewShotExamples: FEW_SHOT_EXAMPLES.slice(1) }), version);
   assert.notEqual(computePromptVersion(schema, { businessRules: [...BUSINESS_RULES, 'New rule.'] }), version);

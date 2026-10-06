@@ -65,12 +65,35 @@ export const BUSINESS_RULES = [
   'When sorting ranking queries, sort rounded aggregate outputs by the underlying unrounded aggregate expression first, then use a secondary deterministic sort key (e.g., entity name/code like CustomerName, ProductName, AccountCode) in ASC order to handle equal values cleanly.',
 ];
 
+// Hints version 2 (src/hints-version.js, docs/experiments/02-hints-v2.md):
+// version 1's rules with the ambiguous ones rewritten. Each replacement names
+// the version-1 rule it replaces.
+const V1_TEMPORAL_RULE = BUSINESS_RULES[3];
+
+const HINTS_V2_RULE_REPLACEMENTS = new Map([
+  // Version 1 told the model not to reinterpret dates even when the resolver
+  // had turned "between 1 and 10 March 2026" into all of March. Version 2
+  // resolves only whole-month phrases it fully understands, and says so.
+  [
+    V1_TEMPORAL_RULE,
+    'Resolved temporal references are exact for the phrases they quote: use their half-open ranges for those phrases. Date wording that is not listed there (quarters, day or month ranges, as-of or relative dates) was not resolved: work out the window from the question itself, again as a half-open range.',
+  ],
+]);
+
+for (const replaced of HINTS_V2_RULE_REPLACEMENTS.keys()) {
+  if (!BUSINESS_RULES.includes(replaced)) {
+    throw new Error(`Hints v2 replaces a business rule that is not in BUSINESS_RULES: ${replaced}`);
+  }
+}
+
+export const BUSINESS_RULES_V2 = Object.freeze(BUSINESS_RULES.map((rule) => HINTS_V2_RULE_REPLACEMENTS.get(rule) ?? rule));
+
 /**
  * The business rules of hints version `version` (src/hints-version.js).
  * Version 1 is BUSINESS_RULES, unchanged.
  */
 export function businessRulesFor(version = 1) {
-  return BUSINESS_RULES;
+  return Number(version) === 1 ? BUSINESS_RULES : BUSINESS_RULES_V2;
 }
 
 // Few-shot examples teach patterns (anti-joins, header grain with a dimension,
