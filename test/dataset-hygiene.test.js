@@ -21,8 +21,12 @@ import {
   CONTROLS_PATH as HOLDOUT_CONTROLS_PATH,
   DATASET_NAME as HOLDOUT_DATASET,
   DATASET_PATH as HOLDOUT_DATASET_PATH,
+  FROZEN_HINTS_V2_VOCABULARY,
   HOLDOUT_INTENTS,
   holdoutCaseIdFor,
+  semanticLayerPhrases,
+  semanticLayerPhrasesIn,
+  vocabularyLayers,
 } from '../scripts/build-holdout-dataset.mjs';
 import { CASE_SPLITS, isDatasetFileName, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
@@ -504,6 +508,51 @@ test('fresh holdout: the builder rejects semantic-layer wording and the enforced
     } finally {
       HOLDOUT_INTENTS.splice(index, 1, original);
     }
+  }
+});
+
+test('fresh holdout: the wording rule covers the hints-v2 overlay vocabulary too (both HINTS_VERSION arms); the frozen exceptions are pinned', () => {
+  const overlay = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'metadata/semantic-layer.hints-v2.json'), 'utf8'));
+  const layers = vocabularyLayers(layer, overlay);
+  assert.equal(layers.length, 2);
+  const v1Phrases = semanticLayerPhrases(layer);
+  const v2Phrases = semanticLayerPhrases(layers[1]);
+  for (const phrase of ['average order value', 'order value', 'open amount', 'open balance', 'unpaid balance']) {
+    assert.ok(v2Phrases.includes(phrase), phrase);
+    assert.ok(!v1Phrases.includes(phrase), phrase);
+  }
+  // Version 1's vocabulary is checked too ("stopped selling" left the overlay, not the base layer).
+  assert.ok(v1Phrases.includes('stopped selling'));
+  assert.ok(!v2Phrases.includes('stopped selling'));
+
+  // The committed holdout: no version 1 vocabulary, and version 2's only in
+  // the frozen cases FROZEN_HINTS_V2_VOCABULARY lists, exactly.
+  const committed = JSON.parse(fs.readFileSync(HOLDOUT_DATASET_PATH, 'utf8'));
+  assert.deepEqual(buildHoldoutDataset({ previousCases: committed, layers }).problems, []);
+  const v2Only = v2Phrases.filter((phrase) => !v1Phrases.includes(phrase));
+  const found = Object.fromEntries(
+    freshCases.map((testCase) => [testCase.id, semanticLayerPhrasesIn(testCase.question, v2Only)]).filter(([, phrases]) => phrases.length > 0)
+  );
+  assert.deepEqual(found, { ...FROZEN_HINTS_V2_VOCABULARY });
+  // Without the exceptions those cases are refused; an exception that no
+  // longer matches is refused too.
+  const strict = buildHoldoutDataset({ previousCases: committed, layers, frozenExceptions: {} }).problems;
+  assert.equal(strict.length, Object.keys(FROZEN_HINTS_V2_VOCABULARY).length, strict.join('\n'));
+  assert.ok(strict.every((problem) => /hints-v2 vocabulary/.test(problem)));
+  const extra = buildHoldoutDataset({ previousCases: committed, layers, frozenExceptions: { ...FROZEN_HINTS_V2_VOCABULARY, ho2_missing_000000: ['open balance'] } }).problems;
+  assert.deepEqual(extra, ['ho2_missing_000000: listed in FROZEN_HINTS_V2_VOCABULARY but not a case: update FROZEN_HINTS_V2_VOCABULARY']);
+
+  // A new holdout phrasing with version 2's vocabulary is refused under both
+  // arms' layers (and passes version 1's alone).
+  const index = HOLDOUT_INTENTS.findIndex((intent) => intent.answer !== false);
+  const original = HOLDOUT_INTENTS[index];
+  HOLDOUT_INTENTS.splice(index, 1, { ...original, phrasings: [...original.phrasings.slice(0, 1), 'What was the average order value per store?'] });
+  try {
+    assert.deepEqual(buildHoldoutDataset({ layer }).problems.filter((problem) => problem.includes(original.intentId)), []);
+    const { problems } = buildHoldoutDataset({ layers });
+    assert.ok(problems.some((problem) => problem.includes(original.intentId) && /hints-v2 vocabulary: average order value/.test(problem)), problems.join('\n'));
+  } finally {
+    HOLDOUT_INTENTS.splice(index, 1, original);
   }
 });
 

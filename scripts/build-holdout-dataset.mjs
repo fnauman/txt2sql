@@ -26,7 +26,11 @@
 // splitForIntent: the whole set is held out). Questions follow the holdout
 // wording rule of the other datasets: no multi-word phrase of
 // metadata/semantic-layer.json and not the enforced word "revenue" (the build
-// fails on either). Unlike the templated generator, intents are hand-written:
+// fails on either). The rule covers both HINTS_VERSION arms: the phrases the
+// hints-v2 overlay (metadata/semantic-layer.hints-v2.json) adds are refused
+// too, except in the frozen cases listed in FROZEN_HINTS_V2_VOCABULARY (the
+// set was frozen against the base layer, before the overlay's vocabulary was
+// checked against it; see that constant). Unlike the templated generator, intents are hand-written:
 // each lists its gold SQL (and any alternative reading), the comparison block
 // and 1-3 phrasings, some of them Swedish, bilingual, typo-ridden or
 // shorthand. Gold SQL follows the repo conventions: IFNULL(d.IsCanceled, 0) =
@@ -63,6 +67,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { applySemanticLayerOverlay } from '../src/semantic-layer.js';
 import { serialize } from './build-eval-dataset.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -70,10 +75,37 @@ export const DATASET_NAME = 'holdout-public';
 export const DATASET_PATH = path.join(ROOT, 'datasets', `${DATASET_NAME}.json`);
 export const CONTROLS_PATH = path.join(ROOT, 'datasets', 'controls', `${DATASET_NAME}.json`);
 export const SEMANTIC_LAYER_PATH = path.join(ROOT, 'metadata', 'semantic-layer.json');
+export const SEMANTIC_LAYER_OVERLAY_PATH = path.join(ROOT, 'metadata', 'semantic-layer.hints-v2.json');
 export const AUTHORED_ON = '2026-10-06';
 export const ID_PREFIX = 'ho2_';
 
 // --- holdout wording rule ---------------------------------------------------
+
+/**
+ * The semantic layers whose vocabulary holdout wording must avoid: the base
+ * layer (hints version 1) and the base layer with the hints-v2 overlay
+ * applied (version 2).
+ */
+export function vocabularyLayers(baseLayer, overlay = null) {
+  return overlay ? [baseLayer, applySemanticLayerOverlay(baseLayer, overlay)] : [baseLayer];
+}
+
+/**
+ * The frozen cases whose wording contains phrases of hints version 2's
+ * vocabulary only (the overlay's), by case id: exactly those phrases. The set
+ * was authored blind against the base layer and frozen (holdout-manifest.json)
+ * before the overlay's vocabulary was checked against it, and the questions
+ * stay as frozen. For the HINTS_VERSION=2 arm these cases do not measure
+ * unseen vocabulary (docs/experiments/02-hints-v2.md). Any other match, or an
+ * entry here that no longer matches, fails the build.
+ */
+export const FROZEN_HINTS_V2_VOCABULARY = Object.freeze({
+  ho2_overdue_by_customer_asof_2026_04_30_9a7944: ['open balance'],
+  ho2_ar_ageing_asof_2026_05_31_47ffd1: ['open balance'],
+  ho2_largest_open_items_top5_599841: ['unpaid balance'],
+  ho2_due_rest_of_month_asof_2026_05_10_6ce3d9: ['open balance'],
+  ho2_due_rest_of_month_asof_2026_05_10_e5a04c: ['open balance'],
+});
 
 /**
  * Every multi-word synonym of the semantic layer (entities, metrics, filter
@@ -2189,12 +2221,19 @@ function phrasingOf(phrasing) {
 /**
  * Builds the dataset and its controls in memory. `previousCases` (the
  * committed dataset) supplies the expected_row_counts of cases whose id and
- * gold SQL are unchanged. `layer` is the parsed semantic layer, used only to
- * reject holdout wording that contains its vocabulary.
+ * gold SQL are unchanged. `layer` is the parsed semantic layer, or `layers`
+ * several (vocabularyLayers: both hints versions', the base layer first),
+ * used only to reject holdout wording that contains their vocabulary; a
+ * phrase only a later layer has is allowed in the case ids of
+ * `frozenExceptions` (FROZEN_HINTS_V2_VOCABULARY), exactly.
  */
-export function buildHoldoutDataset({ previousCases = [], layer = null } = {}) {
+export function buildHoldoutDataset({ previousCases = [], layer = null, layers = layer ? [layer] : [], frozenExceptions = FROZEN_HINTS_V2_VOCABULARY } = {}) {
   const previous = new Map((previousCases || []).map((testCase) => [testCase.id, testCase]));
-  const phrases = layer ? semanticLayerPhrases(layer) : null;
+  const basePhrases = layers.length > 0 ? semanticLayerPhrases(layers[0]) : null;
+  const laterPhrases =
+    layers.length > 1 ? [...new Set(layers.slice(1).flatMap((entry) => semanticLayerPhrases(entry)))].filter((phrase) => !basePhrases.includes(phrase)).sort() : [];
+  const phrases = basePhrases;
+  const exceptionsSeen = new Set();
   const cases = [];
   const controls = {};
   const problems = [];
@@ -2225,6 +2264,7 @@ export function buildHoldoutDataset({ previousCases = [], layer = null } = {}) {
     const ids = [];
     for (const phrasing of phrasings) {
       const question = phrasing.q;
+      const id = holdoutCaseIdFor(intent.intentId, question);
       if (phrases) {
         const found = semanticLayerPhrasesIn(question, phrases);
         if (found.length > 0) {
@@ -2234,7 +2274,20 @@ export function buildHoldoutDataset({ previousCases = [], layer = null } = {}) {
           problems.push(`${intent.intentId}: "${question}" uses the enforced metric word "revenue"`);
         }
       }
-      const id = holdoutCaseIdFor(intent.intentId, question);
+      if (laterPhrases.length > 0) {
+        const found = semanticLayerPhrasesIn(question, laterPhrases);
+        const allowed = frozenExceptions[id] || null;
+        if (allowed) {
+          exceptionsSeen.add(id);
+        }
+        if (found.length > 0 || allowed) {
+          if (!allowed) {
+            problems.push(`${intent.intentId}: "${question}" contains hints-v2 vocabulary: ${found.join(', ')}`);
+          } else if (found.join('|') !== [...allowed].sort().join('|')) {
+            problems.push(`${id}: frozen hints-v2 vocabulary ${allowed.join(', ')}, found ${found.join(', ') || 'none'}: update FROZEN_HINTS_V2_VOCABULARY`);
+          }
+        }
+      }
       if (seenIds.has(id)) {
         problems.push(`duplicate case id ${id}`);
       }
@@ -2327,6 +2380,12 @@ export function buildHoldoutDataset({ previousCases = [], layer = null } = {}) {
     };
   }
 
+  if (laterPhrases.length > 0) {
+    for (const id of Object.keys(frozenExceptions).filter((entry) => !exceptionsSeen.has(entry))) {
+      problems.push(`${id}: listed in FROZEN_HINTS_V2_VOCABULARY but not a case: update FROZEN_HINTS_V2_VOCABULARY`);
+    }
+  }
+
   return { cases, controls, problems };
 }
 
@@ -2344,8 +2403,9 @@ async function readJsonIfExists(file) {
 async function main(argv = process.argv.slice(2)) {
   const check = argv.includes('--check');
   const layer = JSON.parse(await fs.readFile(SEMANTIC_LAYER_PATH, 'utf8'));
+  const overlay = JSON.parse(await fs.readFile(SEMANTIC_LAYER_OVERLAY_PATH, 'utf8'));
   const previousCases = (await readJsonIfExists(DATASET_PATH)) || [];
-  const { cases, controls, problems } = buildHoldoutDataset({ previousCases, layer });
+  const { cases, controls, problems } = buildHoldoutDataset({ previousCases, layers: vocabularyLayers(layer, overlay) });
   if (problems.length > 0) {
     console.error(`build-holdout-dataset: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
     return 1;
