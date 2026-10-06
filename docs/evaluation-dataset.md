@@ -925,9 +925,26 @@ interrupted. Exit 2 wins over 1.
 ### Baselines
 
 The committed baseline for a model lives at `eval/baselines/<model>.json`: a
-plain report of the whole default suite (see `eval/baselines/README.md`).
+**compact** report of the whole default suite (see `eval/baselines/README.md`).
 `npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree,
-only when the run exits 0 with no case skipped by the budget. A filtered or
+only when the run exits 0 with no case skipped by the budget; the run's own
+`report.json` stays complete. The compact form (`src/eval/compact-report.js`,
+`compact: true`, `compactVersion: 1`, still report version 2) keeps what
+`--offline` / `--rescore`, `--compare` / `--gate` and the summaries read: the
+top-level model, provenance, runner, suite, oracle, stats, attribution,
+behaviour and verification blocks (without per-case notes); per case its id,
+the case fields a rescore rebuilds it from, `gold_fingerprint`,
+`scoring_fingerprint`, `datasets` and `summary`; per repetition its status,
+outcome, error code, usage and cost, timings and every attempt (SQL, the LLM
+call's usage, total cost, duration, `tables_used` and failure code, the
+validation verdict with its message, the execution verdict). It drops what a
+rescore re-derives or nobody reads: row previews, explanations and
+assumptions, master-data candidates and retrieved tables, the oracle's
+per-fixture details, recorded guardrail re-checks, the previous comparison and
+the first repetition's copy at the case's top level. A rescore of the compact
+baseline gives the same outcomes and statistics as a rescore of the full
+report; for 255 cases at `--repeat 3` it is about 1.3 MB instead of about
+6-9 MB, one line per case. A filtered or
 partial run (filters, fewer fixtures, or a case set that differs from the
 default suite) is refused before it starts; `--baseline-file <path>` saves
 such a subset somewhere else, never inside `eval/baselines/` (every file there

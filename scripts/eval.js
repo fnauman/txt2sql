@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR, isBehaviorCase } from '../src/benchmark.js';
 import { classifyRepetition } from '../src/eval/attribution.js';
+import { compactReportProblem, isCompactReport, writeCompactReport } from '../src/eval/compact-report.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
@@ -99,8 +100,9 @@ Compare and gate:
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X
-  --write-baseline            also save report.json as eval/baselines/<model>.json (only from a clean
-                              run of the whole default suite on every fixture)
+  --write-baseline            also save a compact copy of report.json (what rescore, compare and gate
+                              read) as eval/baselines/<model>.json (only from a clean run of the
+                              whole default suite on every fixture)
   --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset;
                               never inside eval/baselines/, which holds only full default baselines)
 No LLM calls:
@@ -621,6 +623,11 @@ export function validateBaselineReport(report, filePath) {
     const version = typeof report.reportVersion === 'number' ? report.reportVersion : JSON.stringify(report.reportVersion);
     throw fail(`${filePath} has report version ${version} (unknown: this runner reads up to ${REPORT_VERSION}).`);
   }
+  // A compact baseline (--write-baseline) is a report too, of a known compact version.
+  const compactProblem = compactReportProblem(report);
+  if (compactProblem) {
+    throw fail(`${filePath} ${compactProblem}.`);
+  }
   if (report.results.length === 0) {
     throw fail(`${filePath} has no cases (results[] is empty).`);
   }
@@ -1052,8 +1059,10 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       if (refusal) {
         cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
       } else {
-        await writeJsonFile(target, report);
-        cli.log(`Baseline written: ${target}`);
+        // Compact: what --offline/--rescore, --compare/--gate and the
+        // summaries need (src/eval/compact-report.js); report.json stays full.
+        const bytes = await writeCompactReport(target, report);
+        cli.log(`Baseline written: ${target} (compact, ${(bytes / 1024 / 1024).toFixed(2)} MB; the full report is ${reportPath})`);
         if (!writesDefaultBaseline(options) && (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length)) {
           cli.log('  note: this run used a subset of the default suite; compare with it explicitly (--compare), it is not the default baseline.');
         }
@@ -1085,6 +1094,10 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   const recorded = await readJson(sourcePath, 'report to rescore');
   if (!Array.isArray(recorded.results)) {
     throw new HarnessError(`${sourcePath} has no results[]; is it an evaluation report.json?`, { code: 'REPORT_INVALID' });
+  }
+  const compactProblem = compactReportProblem(recorded);
+  if (compactProblem) {
+    throw new HarnessError(`${sourcePath} ${compactProblem}.`, { code: 'REPORT_INVALID' });
   }
   const model = recorded.model || options.model;
   const statementTimeoutMs = resolveStatementTimeoutMs();
@@ -1201,6 +1214,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
       gitSha: source.provenance?.git?.sha || source.gitSha || null,
       promptVersion: source.provenance?.promptVersion || null,
       reportVersion: source.reportVersion || 1,
+      compact: isCompactReport(source),
     },
     traceFile: null,
   });

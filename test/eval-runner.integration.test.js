@@ -287,6 +287,59 @@ test('--compare prints a paired table with McNemar p; --gate fails a significant
   assert.match(markdown, /\| paraphrase_public_001 \| Who are our biggest buyers in March 2026\? \| 100% \(pass\) \| 0% \((wrong_result|guardrail_true_rejection)\) \|/);
 });
 
+test('--write-baseline writes a compact baseline that rescores, compares and gates like the full report', { skip }, async () => {
+  requireAdmin();
+  mode = 'base';
+  const baselineFile = path.join(outputRoot, 'compact-baseline', 'subset.json');
+  const run = await runEval([...LEGACY, '--repeat', '2', '--write-baseline', '--baseline-file', baselineFile], 'compact-baseline');
+  assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
+  assert.match(run.stdout, /Baseline written: \S+subset\.json \(compact, [\d.]+ MB; the full report is \S+report\.json\)/);
+  const { reportPath, report } = await findReport(run.outputDir);
+  const compact = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
+  assert.deepEqual([compact.compact, compact.compactVersion, compact.reportVersion], [true, 1, 2]);
+  assert.ok((await fs.stat(baselineFile)).size * 3 < (await fs.stat(reportPath)).size, 'the compact baseline is a fraction of report.json');
+  assert.deepEqual(outcomesOf(compact), outcomesOf(report));
+
+  // Rescored with zero LLM calls, the compact baseline gives the full report's outcomes and statistics.
+  const [fromFull, fromCompact] = await Promise.all([
+    runEval(['--rescore', reportPath, '--skip-verify', ...LEGACY], 'compact-rescore-full'),
+    runEval(['--rescore', baselineFile, '--skip-verify', ...LEGACY], 'compact-rescore-compact'),
+  ]);
+  assert.equal(fromFull.code, 0, fromFull.stdout + fromFull.stderr);
+  assert.equal(fromCompact.code, 0, fromCompact.stdout + fromCompact.stderr);
+  const full = (await findReport(fromFull.outputDir)).report;
+  const rescored = (await findReport(fromCompact.outputDir)).report;
+  assert.deepEqual(outcomesOf(rescored), outcomesOf(full));
+  assert.deepEqual(
+    rescored.results.map((record) => record.summary),
+    full.results.map((record) => record.summary)
+  );
+  for (const block of ['attribution', 'behavior']) {
+    assert.deepEqual(rescored[block], full[block], block);
+  }
+  const { cost, tokens, retries, strictAccuracy, cases } = full.stats;
+  assert.deepEqual(
+    { cost, tokens, retries, strictAccuracy, cases },
+    { cost: rescored.stats.cost, tokens: rescored.stats.tokens, retries: rescored.stats.retries, strictAccuracy: rescored.stats.strictAccuracy, cases: rescored.stats.cases }
+  );
+  assert.equal(rescored.rescoredFrom.compact, true);
+  assert.equal(full.rescoredFrom.compact, false);
+
+  // --compare / --gate against it: a rescore of the full report pairs every case, a regressed live run fails the gate.
+  const gated = await runEval(['--rescore', reportPath, '--compare', baselineFile, '--gate', '--skip-verify', ...LEGACY], 'compact-gate-rescore');
+  assert.equal(gated.code, 0, gated.stdout + gated.stderr);
+  const gatedReport = (await findReport(gated.outputDir)).report;
+  assert.deepEqual([gatedReport.comparison.paired, gatedReport.comparison.mcnemar.regressions, gatedReport.comparison.mcnemar.improvements], [26, 0, 0]);
+  mode = 'regressed';
+  try {
+    const regressed = await runEval([...LEGACY, '--compare', baselineFile, '--gate'], 'compact-gate-live');
+    assert.equal(regressed.code, 1, regressed.stdout + regressed.stderr);
+    assert.match(regressed.stdout, /exact McNemar p = 0\.031 \(6 regression\(s\), 0 improvement\(s\)\) → significantly WORSE than the baseline/);
+  } finally {
+    mode = 'base';
+  }
+});
+
 test('the whole default suite: splits, behaviour cases and known validator rejections end to end', { skip }, async () => {
   requireAdmin();
   mode = 'base';

@@ -55,7 +55,7 @@ const EXECUTED_STATUSES = new Set(['pass', 'result_mismatch', 'retrieval_miss'])
 const KEPT_STATUSES = new Set(['skipped_budget', 'cancelled', 'evaluation_error']);
 const CUT_SHORT_STATUSES = new Set(['aborted', 'infra_error']);
 
-const CASE_FIELDS = [
+export const CASE_FIELDS = [
   'id',
   'intentId',
   'question',
@@ -95,12 +95,27 @@ export function recordedRepetitions(record) {
   return [{ ...record, repetition: 1 }];
 }
 
+/**
+ * The SQL a repetition ended with as its attempts recorded it: the last
+ * non-empty generatedSql, or ''. A compact report (compact-report.js) leaves
+ * out a repetition's generated_sql when it equals this.
+ */
+export function finalAttemptSql(repetition) {
+  const last = [...(repetition?.attempts || [])].reverse().find((attempt) => String(attempt?.generatedSql || '').trim() !== '');
+  return last ? last.generatedSql : '';
+}
+
+// The recorded repetition without its attribution, and with generated_sql
+// restored when a compact report left it out.
 function stripAttribution(repetition) {
   const { outcome, bucket, counted, outcome_tags: outcomeTags, ...rest } = repetition;
   void outcome;
   void bucket;
   void counted;
   void outcomeTags;
+  if (rest.generated_sql === undefined) {
+    rest.generated_sql = finalAttemptSql(rest);
+  }
   return rest;
 }
 
