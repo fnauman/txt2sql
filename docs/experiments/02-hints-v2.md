@@ -312,15 +312,23 @@ errors, the inspected holdout retired to dev, the fresh blind holdout, and the
 baseline re-made on the 404-case suite with prompt version `b264e57d8e15`).
 Holdout numbers are aggregates.
 
+These rescores ran against the version-1 baseline of that base. The committed
+`eval/baselines/gpt-4o-mini.json` has since been replaced by the version-2
+live run (see Live results), so plain `npm run eval -- --offline` now rescores
+that run (73.6% under either `HINTS_VERSION`). To reproduce the numbers in
+this section, rescore the earlier file (the base branch's baseline, as it
+was before the commit "eval: adopt hints v2 and refresh the baseline from its
+live run") explicitly; see Reproduce below.
+
 **Version 1 is the base.** The system and user prompts (full and retrieved
 scope), allow-lists and semantic plans of all 404 suite questions under
 `HINTS_VERSION=1` equal the base commit's (sha256 per question).
-`HINTS_VERSION=1 npm run eval -- --offline` reproduces the committed
-baseline: 62.2% (dev 74.7%, holdout 41.3%), 392 paired answer cases, 0
+`HINTS_VERSION=1` rescoring of the version-1 baseline (`--rescore`, see Reproduce)
+reproduces it: 62.2% (dev 74.7%, holdout 41.3%), 392 paired answer cases, 0
 flips, 0 pass-rate changes.
 
-**Rescore under version 2** (`npm run eval -- --offline`; validator and
-semantic-plan effects only, as above):
+**Rescore under version 2** (the same `--rescore`, default
+`HINTS_VERSION`; validator and semantic-plan effects only, as above):
 
 | | Baseline (= version-1 rescore) | Rescore, version 2 |
 |---|---|---|
@@ -328,6 +336,10 @@ semantic-plan effects only, as above):
 | Repetitions: pass / wrong result / guardrail true rejection | 731 / 417 / 21 | 731 / 405 / 33 |
 | Attribution (repetitions) | model 430 · system 15 | model 430 · system 15 |
 | Guardrail confusion (over every attempt) | TP 94, FP 0, FN 429 · precision 100%, recall 18.0% | TP 103, FP 0, FN 417 · precision 100%, recall 19.8% |
+
+(Attribution as measured then. The current attribution rules, which the Live
+results table also uses, give pass 731 · model 445 · system 0 for both
+rescores; the outcomes are unchanged.)
 
 The movement is the same as on the old suite, all of it in dev: the 15
 repetitions of the five average-order-value / open-amount cases answered with
@@ -354,9 +366,13 @@ node --test test/hints-version.test.js test/hints-v2.test.js
 npm run seed-fixtures
 npm run verify-dataset
 HINTS_VERSION=1 npm run verify-dataset
-# rescore of the committed baseline (no LLM calls)
+# rescore of the committed baseline (no LLM calls; now the version-2 live run)
 npm run eval -- --offline
 HINTS_VERSION=1 npm run eval -- --offline
+# rescore of the earlier version-1 baseline (the 62.2% above)
+git show "$(git log -1 --format=%H --grep='adopt hints v2 and refresh the baseline')^:eval/baselines/gpt-4o-mini.json" > /tmp/v1-baseline.json
+npm run eval -- --rescore /tmp/v1-baseline.json --compare /tmp/v1-baseline.json
+HINTS_VERSION=1 npm run eval -- --rescore /tmp/v1-baseline.json --compare /tmp/v1-baseline.json
 # no eval wording in the v2 prompt text
 node --test test/few-shot-leakage.test.js
 # prompt size over the suite
