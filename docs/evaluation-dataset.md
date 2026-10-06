@@ -943,7 +943,10 @@ execution under `recorded`), so a later rescore can still replay them, and
 `attempt_count` and the retry statistics stay those of the original run.
 Recorded guardrail verdicts are never reused. The case definition is today's
 dataset case with the same id (so a fixed gold is rescored with the fix),
-else the recorded one. Behaviour cases are kept as recorded (their outcome
+else the recorded one, and the rescored report records the definition its
+verdicts used: recorded case fields never override it (a report from before
+`repetitions[]` existed is its own single repetition, minus its case fields).
+Behaviour cases are kept as recorded (their outcome
 only depends on whether the run produced SQL). Cost, latency and tokens stay
 the original run's. The selection filters (`--split`, `--case-id`, `--tag`,
 `--intent`) pick which recorded cases are rescored.
