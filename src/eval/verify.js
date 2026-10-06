@@ -19,9 +19,15 @@
 //   which is right for a model's SQL) is undecided, not a kill: it is listed
 //   and counts as not killed, like a survivor.
 //
+// Validation follows the product configuration (SCHEMA_SCOPE, see
+// src/schema-scope.js). Under the default scope every in-scope table is
+// allowed; under SCHEMA_SCOPE=retrieved a gold that needs an in-scope table
+// retrieval did not pick is a retrieval miss the run measures, so it is a
+// note, not a problem.
+//
 // A case flagged `known_validator_rejection: <code>` documents a product gap:
 // the production validator rejects correct answers to that question (for
-// example retrieval does not pick a table the answer needs). Its gold, its
+// example a guardrail misreads the wording). Its gold, its
 // alternatives and its positive controls rejected with that code are notes,
 // not problems; when the validator rejects none of its gold variants any more
 // the flag is stale, which is a problem for verify-dataset (so it is removed)
@@ -40,7 +46,7 @@ import {
   runSignalChecks,
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
-import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
+import { buildOptimizedPrompt, buildSemanticPlan, resolveEffectiveSchemaScope, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
@@ -53,8 +59,19 @@ import { caseDefinitionFingerprint } from './suite.js';
  * context, and a response whose tables_used lists the SQL's own tables (what a
  * consistent model returns) unless `options.tablesUsed` gives the response's
  * own list (rescore passes the recorded one). Returns null when accepted, else
- * the error. `validate.promptFor(question)` exposes the cached prompt context
- * ({ context, allowedTables, masterDataCandidates }).
+ * the error: { code, layer, message, table, retrievalScope }, where `table` is
+ * the table a TABLE_SCOPE rejection names and `retrievalScope` is true when
+ * that table is in scope and only the retrieved scope's allow-list lacks it (a
+ * retrieval miss, not a dataset problem). `validate.promptFor(question,
+ * { extraTables })` exposes the cached prompt context ({ context,
+ * allowedTables, masterDataCandidates, schemaScope }); `options.extraTables`
+ * validates against the retrieved scope widened with those tables (what
+ * widen-on-demand gives a retry). `validate.schemaScope` is the scope in
+ * effect for `schema`.
+ *
+ * `schemaScope` is a scope name or config (src/schema-scope.js); omitted, the
+ * product defaults (auto). Entry points pass resolveSchemaScopeConfig(env), so
+ * verification validates exactly what the product would.
  *
  * Master-data lookup failures are handled like the product loop handles them:
  * an infrastructure failure (the database went away) is thrown, not hidden
@@ -63,14 +80,21 @@ import { caseDefinitionFingerprint } from './suite.js';
  * statement timeout) degrade to no candidates. The lookup runs under
  * `statementTimeoutMs` like the product's.
  */
-export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null }) {
+export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null, schemaScope = undefined }) {
   const prompts = new Map();
-  const promptFor = async (question) => {
-    if (!prompts.has(question)) {
+  const effectiveScope = resolveEffectiveSchemaScope(schema, schemaScope);
+  const inScopeTables = new Set(schema.tables.map((table) => table.tableName));
+  const promptFor = async (question, { extraTables = [] } = {}) => {
+    const extra = [...new Set(extraTables)].sort();
+    const key = `${question}\u0000${extra.join(',')}`;
+    if (!prompts.has(key)) {
       const pending = (async () => {
         const semanticPlan = buildSemanticPlan(question);
         let masterDataCandidates = [];
-        if (connection) {
+        if (extra.length > 0) {
+          // A widened prompt reuses the question's own master-data lookup.
+          ({ masterDataCandidates } = await promptFor(question));
+        } else if (connection) {
           try {
             masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan, statementTimeoutMs });
           } catch (error) {
@@ -80,18 +104,23 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
             masterDataCandidates = [];
           }
         }
-        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
-        return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName), masterDataCandidates };
+        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan, schemaScope, extraTables: extra });
+        return {
+          context: prompt.context,
+          allowedTables: prompt.tables.map((table) => table.tableName),
+          masterDataCandidates,
+          schemaScope: prompt.context.schemaScope,
+        };
       })();
-      prompts.set(question, pending);
+      prompts.set(key, pending);
       // A failed lookup is not cached: the next call tries again.
-      pending.catch(() => prompts.delete(question));
+      pending.catch(() => prompts.delete(key));
     }
-    return prompts.get(question);
+    return prompts.get(key);
   };
 
-  const validate = async function validate(question, sql, { tablesUsed: declaredTables = null } = {}) {
-    const { context, allowedTables } = await promptFor(question);
+  const validate = async function validate(question, sql, { tablesUsed: declaredTables = null, extraTables = [] } = {}) {
+    const { context, allowedTables } = await promptFor(question, { extraTables });
     try {
       let tablesUsed = Array.isArray(declaredTables) ? declaredTables : [];
       if (!Array.isArray(declaredTables)) {
@@ -104,11 +133,28 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
       validateReadOnlySql(sql, allowedTables, { promptContext: context, response: { sql, tables_used: tablesUsed } });
       return null;
     } catch (error) {
-      return { code: error.code || null, layer: error.layer || null, message: error.message };
+      const table = error.code === 'TABLE_SCOPE' ? error.details?.table ?? null : null;
+      return {
+        code: error.code || null,
+        layer: error.layer || null,
+        message: error.message,
+        table,
+        retrievalScope: Boolean(table) && error.layer === 'safety' && effectiveScope.effective === 'retrieved' && inScopeTables.has(table),
+      };
     }
   };
   validate.promptFor = promptFor;
+  validate.schemaScope = effectiveScope;
+  validate.schema = schema;
   return validate;
+}
+
+// A retrieved-scope TABLE_SCOPE rejection of an in-scope table: the product
+// gap the schema-scope experiment measures (a run attributes it as a
+// retrieval miss), so verification notes it instead of failing the dataset
+// when SCHEMA_SCOPE=retrieved. Under the default scope it cannot happen.
+function retrievalScopeNote(label, rejection) {
+  return `${label}: rejected under the retrieved schema scope because retrieval did not pick ${rejection.table} (TABLE_SCOPE); a retrieval miss the run measures, not a dataset problem`;
 }
 
 /**
@@ -191,6 +237,9 @@ export async function verifyCase(testCase, {
   }
   const knownRejection = testCase.known_validator_rejection || null;
   let knownRejectionsSeen = 0;
+  // Variants rejected for the retrieved scope's allow-list before the flagged
+  // check could run (the safety layer comes first): the flag cannot be judged.
+  let scopeMasked = 0;
 
   for (const variant of variants) {
     for (const fixtureConnection of connections) {
@@ -229,12 +278,15 @@ export async function verifyCase(testCase, {
       if (rejection && knownRejection && rejection.code === knownRejection) {
         knownRejectionsSeen += 1;
         notes.push(`${variant.label}: known validator rejection (${rejection.code})`);
+      } else if (rejection?.retrievalScope) {
+        scopeMasked += 1;
+        notes.push(retrievalScopeNote(variant.label, rejection));
       } else if (rejection) {
         problems.push(`${variant.label} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
       }
     }
   }
-  if (validate && knownRejection && knownRejectionsSeen === 0 && !goldFailed) {
+  if (validate && knownRejection && knownRejectionsSeen === 0 && scopeMasked === 0 && !goldFailed) {
     const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
     (staleKnownRejection === 'warning' ? warnings : problems).push(message);
   }
@@ -259,6 +311,8 @@ export async function verifyCase(testCase, {
           notes.push(`positive control ${control.id}: known validator false rejection (${rejection.code})`);
         } else if (knownRejection && rejection.code === knownRejection) {
           notes.push(`positive control ${control.id}: known validator rejection of this question (${rejection.code})`);
+        } else if (rejection.retrievalScope) {
+          notes.push(retrievalScopeNote(`positive control ${control.id}`, rejection));
         } else {
           problems.push(`positive control ${control.id} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
         }
