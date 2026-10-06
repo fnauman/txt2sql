@@ -18,9 +18,23 @@
 //   a column-mapping search cut off by its bound (the oracle fails closed,
 //   which is right for a model's SQL) is undecided, not a kill: it is listed
 //   and counts as not killed, like a survivor.
+//
+// A case flagged `known_validator_rejection: <code>` documents a product gap:
+// the production validator rejects correct answers to that question (for
+// example retrieval does not pick a table the answer needs). Its gold, its
+// alternatives and its positive controls rejected with that code are notes,
+// not problems; when the validator rejects none of its gold variants any more
+// the flag is stale, which is a problem for verify-dataset (so it is removed)
+// and only a warning for the in-process verification of `npm run eval`
+// (`staleKnownRejection: 'warning'`), so a product change that closes the gap
+// can still be measured before the dataset is updated.
+// Abstain / clarify cases (expected_behavior) have no gold and no controls:
+// nothing is executed for them.
 
 import {
+  CASE_SPLITS,
   compareResults,
+  isBehaviorCase,
   listGoldVariants,
   resolveExpectedRowCount,
   runSignalChecks,
@@ -155,12 +169,27 @@ export async function verifyCase(testCase, {
   validate = null,
   controlsIndex = null,
   checkControls = true,
+  staleKnownRejection = 'problem',
 } = {}) {
   const problems = [];
   const notes = [];
+  const warnings = [];
   const goldRowCounts = {};
   const variants = listGoldVariants(testCase);
   let goldFailed = false;
+  const split = testCase.split ?? 'dev';
+  if (!CASE_SPLITS.includes(split)) {
+    problems.push(`split "${split}" is not one of ${CASE_SPLITS.join(', ')}`);
+  }
+  if (isBehaviorCase(testCase)) {
+    if (controlsIndex?.byCaseId?.has(testCase.id)) {
+      problems.push(`controls are defined for ${testCase.id}, but a ${testCase.expected_behavior} case has no gold to run them against`);
+    }
+    notes.push(`${testCase.expected_behavior} case: no gold SQL to execute and no controls`);
+    return { id: testCase.id, problems, notes, warnings, goldRowCounts, controls: null, behavior: testCase.expected_behavior };
+  }
+  const knownRejection = testCase.known_validator_rejection || null;
+  let knownRejectionsSeen = 0;
 
   for (const variant of variants) {
     for (const fixtureConnection of connections) {
@@ -180,6 +209,11 @@ export async function verifyCase(testCase, {
           problems.push(`${fixture}: expected ${pinned} row(s) but gold returned ${rows.length}`);
         }
       }
+      // A scalar comparison of a multi-row gold can never be met by the one
+      // value the question asks for (the gold has the wrong shape).
+      if (testCase.comparison?.mode === 'scalar' && rows.length > 1) {
+        problems.push(`${variant.label} returns ${rows.length} rows on ${fixture}, but the comparison mode is scalar`);
+      }
       if (!compareResults(rows, rows, testCase.comparison)) {
         problems.push(`${variant.label} is not self-consistent under its comparison spec on ${fixture}`);
       }
@@ -191,10 +225,17 @@ export async function verifyCase(testCase, {
     }
     if (validate) {
       const rejection = await validate(testCase.question, variant.sql);
-      if (rejection) {
+      if (rejection && knownRejection && rejection.code === knownRejection) {
+        knownRejectionsSeen += 1;
+        notes.push(`${variant.label}: known validator rejection (${rejection.code})`);
+      } else if (rejection) {
         problems.push(`${variant.label} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
       }
     }
+  }
+  if (validate && knownRejection && knownRejectionsSeen === 0 && !goldFailed) {
+    const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
+    (staleKnownRejection === 'warning' ? warnings : problems).push(message);
   }
 
   let controls = null;
@@ -215,6 +256,8 @@ export async function verifyCase(testCase, {
       if (rejection) {
         if (control.validator_known_false_rejection) {
           notes.push(`positive control ${control.id}: known validator false rejection (${rejection.code})`);
+        } else if (knownRejection && rejection.code === knownRejection) {
+          notes.push(`positive control ${control.id}: known validator rejection of this question (${rejection.code})`);
         } else {
           problems.push(`positive control ${control.id} is rejected by the production validator: ${rejection.code} (${rejection.layer}) ${rejection.message}`);
         }
@@ -258,7 +301,7 @@ export async function verifyCase(testCase, {
     controls = { source: resolved.source, matchedBy: resolved.matchedBy, positive, negative };
   }
 
-  return { id: testCase.id, problems, notes, goldRowCounts, controls };
+  return { id: testCase.id, problems, notes, warnings, goldRowCounts, controls };
 }
 
 function rate(killed, total) {
@@ -441,12 +484,14 @@ export function pinWriteRefusal(checks) {
  * the core cases in the edge suite, is checked once and counted in both), and
  * the same gates apply: no case problem, and each dataset's design (and
  * held-out) kill rate at or above the floors. `datasets` are
- * [{ name, cases }] of normalized cases. Returns { cases, problems: [{ id,
- * datasets, problems }], notes, gateFailures, controlStatus: { undecided,
- * invalid, unscored }, datasets: [{ name, cases, failures, controls }] }.
- * controlStatus lists (as caseId/controlId, each verified case once) the
- * negative controls that are not a verdict: invalid and unscored controls are
- * problems (the run must not start), undecided ones count as not killed.
+ * [{ name, cases }] of normalized cases. `staleKnownRejection: 'warning'`
+ * reports a stale known_validator_rejection flag as a warning instead of a
+ * problem. Returns { cases, problems: [{ id, datasets, problems }], notes,
+ * warnings, gateFailures, controlStatus: { undecided, invalid, unscored },
+ * datasets: [{ name, cases, failures, controls }] }. controlStatus lists (as
+ * caseId/controlId, each verified case once) the negative controls that are
+ * not a verdict: invalid and unscored controls are problems (the run must not
+ * start), undecided ones count as not killed.
  */
 export async function verifySuite({
   datasets,
@@ -459,10 +504,12 @@ export async function verifySuite({
   minHeldoutKillRate = 0,
   fixtureNames = connections.map((entry) => entry.name),
   verify = verifyCase,
+  staleKnownRejection = 'problem',
 } = {}) {
   const verified = new Map();
   const problems = [];
   const notes = [];
+  const warnings = [];
   const gateFailures = [];
   const datasetSummaries = [];
   for (const dataset of datasets) {
@@ -471,13 +518,14 @@ export async function verifySuite({
       const key = `${testCase.id}\u0000${goldFingerprint(testCase.expected_sql)}`;
       let entry = verified.get(key);
       if (!entry) {
-        const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
+        const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls, staleKnownRejection });
         entry = { id: testCase.id, result, datasets: [] };
         verified.set(key, entry);
         if (result.problems.length > 0) {
           problems.push({ id: testCase.id, datasets: entry.datasets, problems: result.problems });
         }
         notes.push(...result.notes.map((note) => `${testCase.id}: ${note}`));
+        warnings.push(...(result.warnings || []).map((warning) => `${testCase.id}: ${warning}`));
       }
       entry.datasets.push(dataset.name);
       results.push(entry.result);
@@ -500,5 +548,5 @@ export async function verifySuite({
       controlStatus[negativeStatusOf(control)]?.push(`${entry.id}/${control.id}`);
     }
   }
-  return { cases: verified.size, problems, notes, gateFailures, controlStatus, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
+  return { cases: verified.size, problems, notes, warnings, gateFailures, controlStatus, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
 }

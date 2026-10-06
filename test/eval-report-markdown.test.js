@@ -71,7 +71,14 @@ async function sampleReport({ mode = 'run', comparisonWith = null } = {}) {
       node: 'v24.0.0',
       platform: 'linux-x64',
     },
-    verification: { skipped: false, cases: 4, problems: [], gateFailures: [], datasets: [] },
+    verification: {
+      skipped: false,
+      cases: 4,
+      problems: [],
+      warnings: ['case_guard: known_validator_rejection is TABLE_SCOPE, but the production validator accepts the gold now: remove the flag'],
+      gateFailures: [],
+      datasets: [],
+    },
     budget: { limitUsd: 0.001, spentUsd: 0.0012, exhausted: true, skippedCases: ['case_skip'] },
     caseRecords,
     comparison,
@@ -88,7 +95,7 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
   assert.match(markdown, /\*\*Strict accuracy 50\.0%\*\* \(95% CI [\d.]+%–[\d.]+%, case bootstrap\) · 3 cases · 3 intents · 2 repetitions · gpt-4o-mini · 2026-10-05 10:00:00 UTC/);
   assert.match(markdown, /Majority-pass cases 1\/3 \(Wilson 95% /);
   assert.match(markdown, /1 of 4 selected case\(s\) had no counted repetition/);
-  for (const heading of ['## Attribution', '## Guardrail confusion matrix', '## Cases', '## By failure class, difficulty and tag', '## Cost, latency, retries, tokens', '## Verification', '## Provenance', '## Legacy pooled reliability']) {
+  for (const heading of ['## Attribution', '## Guardrail confusion matrix', '## Cases', '## By split, failure class, difficulty and tag', '## Cost, latency, retries, tokens', '## Verification', '## Provenance', '## Legacy pooled reliability']) {
     assert.ok(markdown.includes(`\n${heading}\n`), heading);
   }
   assert.match(markdown, /\| system errors \(guardrail false rejections, retrieval misses\) \| 2 \| 1 \|/);
@@ -106,6 +113,8 @@ test('report.md has the headline, attribution, confusion matrix, cases, costs an
   assert.match(markdown, /\| Prompt version \| aaaaaaaaaaaa \|/);
   assert.match(markdown, /\| Model \/ endpoint \| gpt-4o-mini @ api\.openai\.com \|/);
   assert.doesNotMatch(markdown, /## Comparison with the baseline/);
+  // A stale known validator rejection is a warning in a run, not a stop.
+  assert.match(markdown, /Warnings \(npm run verify-dataset fails on these\): case_guard: known_validator_rejection is TABLE_SCOPE/);
   assert.ok(markdown.endsWith('\n'));
 });
 

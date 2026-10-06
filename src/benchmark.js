@@ -57,6 +57,58 @@ function normalizeSignalChecks(signalChecks) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+// Dataset splits: `dev` cases are the ones the prompt rules and the semantic
+// layer were tuned on; `holdout` cases (new intents, and wording the semantic
+// layer does not contain) estimate how the product does on what it was not
+// tuned for. A case without a split is dev.
+export const CASE_SPLITS = Object.freeze(['dev', 'holdout']);
+
+// What a correct product does with a case: answer it with SQL (scored against
+// the gold), abstain (the data cannot answer it: no gold SQL), or ask a
+// clarifying question (the question is ambiguous: no gold SQL). Behaviour
+// cases are reported on their own and never count in strict accuracy.
+export const EXPECTED_BEHAVIORS = Object.freeze(['answer', 'abstain', 'clarify']);
+
+export function isBehaviorCase(testCase) {
+  return Boolean(testCase?.expected_behavior) && testCase.expected_behavior !== 'answer';
+}
+
+/**
+ * Every raw (not yet normalized) case whose split is not one of CASE_SPLITS,
+ * as [{ id, split }], so a verifier can name them all instead of stopping at
+ * the first one normalizeBenchmarkCase throws on.
+ */
+export function findInvalidSplits(rawCases) {
+  return (Array.isArray(rawCases) ? rawCases : [])
+    .filter((testCase) => {
+      const value = testCase?.split;
+      return !(value === undefined || value === null || value === '') && !CASE_SPLITS.includes(String(value).trim().toLowerCase());
+    })
+    .map((testCase) => ({ id: String(testCase?.id ?? '?'), split: testCase.split }));
+}
+
+function normalizeSplit(value, id) {
+  if (value === undefined || value === null || value === '') {
+    return 'dev';
+  }
+  const split = String(value).trim().toLowerCase();
+  if (!CASE_SPLITS.includes(split)) {
+    throw new Error(`Benchmark case ${id} has split "${value}"; use one of ${CASE_SPLITS.join(', ')}.`);
+  }
+  return split;
+}
+
+function normalizeExpectedBehavior(value, id) {
+  if (value === undefined || value === null || value === '') {
+    return 'answer';
+  }
+  const behavior = String(value).trim().toLowerCase();
+  if (!EXPECTED_BEHAVIORS.includes(behavior)) {
+    throw new Error(`Benchmark case ${id} has expected_behavior "${value}"; use one of ${EXPECTED_BEHAVIORS.join(', ')}.`);
+  }
+  return behavior;
+}
+
 export function normalizeBenchmarkCase(testCase) {
   if (!testCase || typeof testCase !== 'object') {
     throw new Error('Benchmark cases must be objects.');
@@ -74,6 +126,43 @@ export function normalizeBenchmarkCase(testCase) {
     throw new Error(`Benchmark case ${id} is missing question.`);
   }
 
+  const split = normalizeSplit(testCase.split, id);
+  const expectedBehavior = normalizeExpectedBehavior(testCase.expected_behavior, id);
+  const knownValidatorRejection = testCase.known_validator_rejection ? String(testCase.known_validator_rejection).trim() : null;
+
+  if (expectedBehavior !== 'answer') {
+    // No SQL is a correct answer to an abstain or clarify case, so there is
+    // nothing to score against: a gold here would be ignored, so it is an error.
+    const stray = ['expected_sql', 'alternative_expected_sql', 'comparison', 'expected_row_counts', 'known_validator_rejection'].filter((field) => {
+      const value = testCase[field];
+      return value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && value.length === 0);
+    });
+    if (stray.length > 0) {
+      throw new Error(`Benchmark case ${id} expects behavior "${expectedBehavior}" and must not carry ${stray.join(', ')}.`);
+    }
+    return {
+      ...testCase,
+      id,
+      intentId: String(testCase.intentId || id).trim(),
+      split,
+      expected_behavior: expectedBehavior,
+      question,
+      canonicalQuestion: String(testCase.canonicalQuestion || question).trim(),
+      difficulty: testCase.difficulty || null,
+      tags: uniqueStrings(testCase.tags),
+      expected_sql: '',
+      expected_tables: uniqueStrings(testCase.expected_tables),
+      expected_columns: [],
+      disallowed_columns: [],
+      signal_checks: null,
+      comparison: null,
+      alternative_expected_sql: [],
+      expected_row_counts: null,
+      known_validator_rejection: null,
+      failure_class: testCase.failure_class || null,
+    };
+  }
+
   if (!expectedSql) {
     throw new Error(`Benchmark case ${id} is missing expected_sql.`);
   }
@@ -82,6 +171,8 @@ export function normalizeBenchmarkCase(testCase) {
     ...testCase,
     id,
     intentId: String(testCase.intentId || id).trim(),
+    split,
+    expected_behavior: expectedBehavior,
     question,
     canonicalQuestion: String(testCase.canonicalQuestion || question).trim(),
     difficulty: testCase.difficulty || null,
@@ -97,6 +188,7 @@ export function normalizeBenchmarkCase(testCase) {
     comparison: normalizeComparison(testCase.comparison),
     alternative_expected_sql: uniqueStrings(testCase.alternative_expected_sql).filter((sql) => sql !== expectedSql),
     expected_row_counts: normalizeExpectedRowCounts(testCase.expected_row_counts),
+    known_validator_rejection: knownValidatorRejection,
     failure_class: testCase.failure_class || null,
   };
 }
@@ -130,10 +222,82 @@ export function resolveExpectedRowCount(testCase, fixtureName, { primaryFixture 
 
 /** Gold SQL variants a prediction may match: the gold first, then alternatives. */
 export function listGoldVariants(testCase) {
+  if (isBehaviorCase(testCase)) {
+    return [];
+  }
   return [
     { label: 'expected_sql', sql: testCase.expected_sql },
     ...(testCase.alternative_expected_sql || []).map((sql, index) => ({ label: `alternative_expected_sql[${index}]`, sql })),
   ];
+}
+
+// The row-count token of a query's outermost LIMIT (`LIMIT n`, `LIMIT offset,
+// n`, `LIMIT n OFFSET m`) and its value, or null when there is no LIMIT at
+// paren depth 0 or its count is not a literal. A LIMIT inside a subquery or
+// CTE does not count, and neither does text in strings or comments.
+function locateTopLevelLimitCount(sql) {
+  let tokens;
+  try {
+    tokens = tokenizeSql(String(sql ?? ''), { tolerant: true });
+  } catch {
+    return null;
+  }
+  const significant = tokens.filter((token) => !['whitespace', 'comment', 'executable_comment'].includes(token.type));
+  let depth = 0;
+  let limitAt = -1;
+  significant.forEach((token, index) => {
+    if (token.type === 'punct' && token.value === '(') {
+      depth += 1;
+    } else if (token.type === 'punct' && token.value === ')') {
+      depth -= 1;
+    } else if (depth === 0 && isKeywordToken(token, 'LIMIT')) {
+      limitAt = index;
+    }
+  });
+  if (limitAt === -1) {
+    return null;
+  }
+  const separator = significant[limitAt + 2];
+  const token = significant[separator?.type === 'punct' && separator.value === ',' ? limitAt + 3 : limitAt + 1];
+  return token?.type === 'number' && /^\d+$/.test(token.value) ? { token, count: Number(token.value) } : null;
+}
+
+/**
+ * Row count of a query's outermost LIMIT (`LIMIT n`, `LIMIT offset, n`,
+ * `LIMIT n OFFSET m`), or null when it has none at paren depth 0 or its count
+ * is not a literal. A LIMIT inside a subquery or CTE does not count, and
+ * neither does text in strings or comments.
+ */
+export function topLevelLimitRowCount(sql) {
+  return locateTopLevelLimitCount(sql)?.count ?? null;
+}
+
+/**
+ * The same query with its outermost LIMIT's row count replaced by `count`
+ * (its offset, if any, kept), or null when topLevelLimitRowCount finds none.
+ */
+export function withTopLevelLimitRowCount(sql, count) {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new TypeError(`count must be a non-negative integer; got ${count}.`);
+  }
+  const located = locateTopLevelLimitCount(sql);
+  if (!located) {
+    return null;
+  }
+  const text = String(sql);
+  return `${text.slice(0, located.token.start)}${count}${text.slice(located.token.end)}`;
+}
+
+/**
+ * The gold was cut by its own LIMIT: it returned as many rows as its outermost
+ * LIMIT allows, so items tied with its last row may have been left out. A gold
+ * with fewer rows, or without a LIMIT, holds every item. Being cut is not yet
+ * a tie: the oracle runs such a gold past its LIMIT to find the rows it left
+ * out (ties at the cut-off in the comparison spec).
+ */
+export function isCutByLimit(sql, rowCount) {
+  const limit = topLevelLimitRowCount(sql);
+  return limit !== null && limit > 0 && rowCount >= limit;
 }
 
 export function caseMatchesId(testCase, caseId) {
@@ -676,6 +840,21 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
 //   model's may not). The default ranking column is the first truly numeric
 //   gold column (JS numbers, not numeric-looking code strings like '4000').
+// - ties at the cut-off (ranked only, and only when the caller passes
+//   `goldTies`: the rows the gold's own LIMIT left out, see isCutByLimit):
+//   the gold rows whose ranking values (every value column) equal its last
+//   row's are the boundary, and the left-out rows with those same ranking
+//   values are its ties. A LIMIT through a group of tied items keeps
+//   whichever of them its tiebreak (or, without one, MariaDB's execution
+//   plan) puts first, so another of those items is as correct. When the gold
+//   has ties, each prediction row with the boundary's ranking values must
+//   equal, by its full tuple, a distinct row of (boundary rows + ties): the
+//   number of boundary-valued rows must agree and each must be a real tied
+//   item, listed once. Every row above the boundary still pairs by its full
+//   tuple, and the ranking must still hold. Without ties (no rows left out
+//   share the boundary value, or the gold returned fewer rows than its LIMIT,
+//   or has none) the comparison is strict: another label at the last value
+//   is an item that does not belong there.
 // - name pinning: when exactly one prediction column has a gold column's name
 //   (ignoring case and punctuation), only that column may carry that gold
 //   column, and it carries no other. Names are otherwise ignored, but a column
@@ -860,8 +1039,104 @@ function columnsCompatible(goldCells, actualCells, tolerance) {
   );
 }
 
+// Is every key of `subset` in `superset`, counting repeats? Both sorted.
+function containsSortedKeys(superset, subset) {
+  let index = 0;
+  for (const key of subset) {
+    while (index < superset.length && superset[index] < key) {
+      index += 1;
+    }
+    if (index >= superset.length || superset[index] !== key) {
+      return false;
+    }
+    index += 1;
+  }
+  return true;
+}
+
+// Necessary condition for pairing each of `goldCells` with a distinct equal
+// cell of the prediction column (an injection, not a bijection): the gold
+// rows above a cut-off's boundary must all appear in a carrier, which may
+// hold other items at the boundary. With a tolerance each gold number takes
+// the smallest unused prediction number within it; the windows all have the
+// same width, so this greedy pass finds an injection whenever one exists.
+function columnContains(goldCells, actualCells, tolerance) {
+  for (const kind of ['null', 'time', 'text']) {
+    if (!containsSortedKeys(sortedKeys(actualCells, kind), sortedKeys(goldCells, kind))) {
+      return false;
+    }
+  }
+  if (tolerance <= 0) {
+    return containsSortedKeys(sortedKeys(actualCells, 'num'), sortedKeys(goldCells, 'num'));
+  }
+  const goldNumbers = goldCells.filter((cell) => cell.kind === 'num').map((cell) => cell.num).sort((a, b) => a - b);
+  const actualNumbers = actualCells.filter((cell) => cell.kind === 'num').map((cell) => cell.num).sort((a, b) => a - b);
+  let index = 0;
+  for (const value of goldNumbers) {
+    while (index < actualNumbers.length && actualNumbers[index] < value - tolerance - 1e-9) {
+      index += 1;
+    }
+    if (index >= actualNumbers.length || actualNumbers[index] > value + tolerance + 1e-9) {
+      return false;
+    }
+    index += 1;
+  }
+  return true;
+}
+
 function tupleKey(tuple) {
   return tuple.map((cell) => cell.key).join('\u0001');
+}
+
+// Ties at the cut-off (see the comparison spec): which gold rows have the
+// ranking values (the cells at `rankIndexes`) of the gold's last row.
+function boundaryRowFlags(goldTuples, rankIndexes, tolerance) {
+  const last = goldTuples[goldTuples.length - 1];
+  return goldTuples.map((tuple) => rankIndexes.every((index) => cellsEqual(tuple[index], last[index], tolerance)));
+}
+
+// matchRowsUnordered for a gold cut through a tie: every gold row above the
+// boundary pairs with an equal prediction tuple, and every other prediction
+// row with a distinct equal tuple of the pool (the gold's boundary rows plus
+// its ties, all with the boundary's ranking values). Without a tolerance
+// equality is exact, so a prediction row with the boundary's ranking values
+// can only pair with a pool row and every other row only with a row above
+// the boundary: the rest must be the same multiset of tuples as the gold's
+// rows above the boundary, and the boundary-valued rows (as many as the
+// gold's, since the lengths agree) a sub-multiset of the pool. With a
+// tolerance it is a perfect matching (Hopcroft-Karp, as above) between the
+// gold rows plus the ties and the prediction rows plus one stand-in per tie;
+// a stand-in pairs with any pool row and so absorbs the pool rows the
+// prediction did not pick, never a row above the boundary.
+function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples, rankIndexes, tolerance) {
+  if (goldTuples.length !== actualTuples.length) {
+    return false;
+  }
+  if (tolerance <= 0) {
+    const rankKey = (tuple) => rankIndexes.map((index) => tuple[index].key).join('\u0001');
+    const boundaryKey = rankKey(goldTuples[goldTuples.length - 1]);
+    const goldAbove = goldTuples.filter((_tuple, index) => !isBoundary[index]).map(tupleKey).sort();
+    const actualAbove = actualTuples.filter((tuple) => rankKey(tuple) !== boundaryKey).map(tupleKey).sort();
+    const pool = [...goldTuples.filter((_tuple, index) => isBoundary[index]), ...tieTuples].map(tupleKey).sort();
+    const actualAtBoundary = actualTuples.filter((tuple) => rankKey(tuple) === boundaryKey).map(tupleKey).sort();
+    return sameList(goldAbove, actualAbove) && containsSortedKeys(pool, actualAtBoundary);
+  }
+  const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
+  const standIns = tieTuples.map((_tuple, index) => actualTuples.length + index);
+  const left = [...goldTuples.map((tuple, index) => ({ tuple, inPool: isBoundary[index] })), ...tieTuples.map((tuple) => ({ tuple, inPool: true }))];
+  const adjacency = left.map(({ tuple, inPool }) => {
+    const neighbours = [];
+    actualTuples.forEach((actual, j) => {
+      if (tuplesEqual(tuple, actual)) {
+        neighbours.push(j);
+      }
+    });
+    return inPool ? [...neighbours, ...standIns] : neighbours;
+  });
+  if (adjacency.some((neighbours) => neighbours.length === 0)) {
+    return false;
+  }
+  return hasPerfectMatching(adjacency, actualTuples.length + standIns.length);
 }
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
@@ -1155,7 +1430,12 @@ const ASSIGNMENT_REQUIREMENTS = ['values', 'column_order', 'scalar_column', 'ran
 // - prefixHolds(partial): a necessary condition on the first gold columns'
 //   carriers (their row tuples agree as multisets), or always true when a
 //   tolerance makes that check unsound to prune with.
-function prepareResultSetMatch(expected, actual, comparison) {
+// `goldTies` (ranked mode only): the rows the gold's own LIMIT left out, in
+// any order; those with the boundary's ranking values are its ties (see the
+// spec above). With ties, the per-column and prefix checks require the gold
+// rows above the boundary to appear in the prediction and the prediction's
+// rows to appear among the gold rows plus the ties.
+function prepareResultSetMatch(expected, actual, comparison, { goldTies = null } = {}) {
   if (!comparison || typeof comparison !== 'object') {
     return { outcome: legacyOutcome(expected, actual) };
   }
@@ -1203,6 +1483,26 @@ function prepareResultSetMatch(expected, actual, comparison) {
       : goldColumns.filter((column) => isTrulyNumericColumn(expected, column));
   const primaryValueIndex = valueColumns.length > 0 ? goldColumns.indexOf(valueColumns[0]) : -1;
 
+  // Ties at the cut-off: the ranking columns (every value column the gold
+  // compares), which gold rows share the last row's ranking values, and the
+  // left-out rows that share them too. No ties, no relaxation.
+  const rankIndexes =
+    mode === 'ranked' && Array.isArray(goldTies) && goldTies.length > 0
+      ? [...new Set(valueColumns.map((column) => goldColumns.indexOf(column)).filter((index) => index !== -1))]
+      : [];
+  let isBoundary = null;
+  let tieTuples = [];
+  if (rankIndexes.length > 0) {
+    const last = goldTuples[goldTuples.length - 1];
+    const tieCells = goldColumns.map((column) => describeColumn(goldTies, column, decimals, { nullAsZero: nullAsZero.has(column) }));
+    tieTuples = goldTies
+      .map((_row, rowIndex) => tieCells.map((cells) => cells[rowIndex]))
+      .filter((tuple) => rankIndexes.every((index) => cellsEqual(tuple[index], last[index], tolerance)));
+    isBoundary = tieTuples.length > 0 ? boundaryRowFlags(goldTuples, rankIndexes, tolerance) : null;
+  }
+  const aboveBoundary = (cells) => cells.filter((_cell, rowIndex) => !isBoundary[rowIndex]);
+  const withTies = (cells, goldIndex) => [...cells, ...tieTuples.map((tuple) => tuple[goldIndex])];
+
   // Name pinning: a gold column whose exact name (ignoring case and
   // punctuation) appears on exactly one prediction column may only be carried
   // by that column, and that column carries no other gold column. A wrong
@@ -1213,15 +1513,23 @@ function prepareResultSetMatch(expected, actual, comparison) {
     return sameName.length === 1 ? sameName[0] : null;
   });
   const pinnedColumns = new Set(pinned.filter(Boolean));
+  const compatible = (cells, goldIndex, column) =>
+    isBoundary
+      ? columnContains(aboveBoundary(cells), cellsFor(goldIndex, column), tolerance) &&
+        columnContains(cellsFor(goldIndex, column), withTies(cells, goldIndex), tolerance)
+      : columnsCompatible(cells, cellsFor(goldIndex, column), tolerance);
   const candidates = goldCells.map((cells, goldIndex) =>
     (pinned[goldIndex] ? [pinned[goldIndex]] : actualColumns.filter((column) => !pinnedColumns.has(column))).filter((column) =>
-      columnsCompatible(cells, cellsFor(goldIndex, column), tolerance)
+      compatible(cells, goldIndex, column)
     )
   );
 
   const check = (assignment) => {
     const actualTuples = actual.map((_row, rowIndex) => assignment.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex]));
-    if (!matchRowsUnordered(goldTuples, actualTuples, tolerance)) {
+    const valuesMatch = isBoundary
+      ? matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples, rankIndexes, tolerance)
+      : matchRowsUnordered(goldTuples, actualTuples, tolerance);
+    if (!valuesMatch) {
       return 'values';
     }
     if (columnOrder.length > 0 && !columnOrderHolds(columnOrder, goldColumns, assignment, actualColumns)) {
@@ -1238,16 +1546,23 @@ function prepareResultSetMatch(expected, actual, comparison) {
 
   // Without a tolerance cell equality is exact, so any valid assignment's
   // first k carriers hold the gold's first k columns as the same multiset of
-  // row tuples (the full bijection restricted to those columns).
+  // row tuples (the full bijection restricted to those columns). Across a
+  // tie at the cut-off the gold rows above the boundary must be among the
+  // prediction's restricted tuples, and those among the gold's plus the ties'.
+  const prefixKey = (tuple, length) => tupleKey(tuple.slice(0, length));
   const prefixHolds =
     tolerance > 0
       ? () => true
       : (partial) => {
-          const goldKeys = goldTuples.map((tuple) => tupleKey(tuple.slice(0, partial.length))).sort();
           const actualKeys = actual
             .map((_row, rowIndex) => tupleKey(partial.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex])))
             .sort();
-          return sameList(goldKeys, actualKeys);
+          if (!isBoundary) {
+            return sameList(goldTuples.map((tuple) => prefixKey(tuple, partial.length)).sort(), actualKeys);
+          }
+          const aboveKeys = aboveBoundary(goldTuples).map((tuple) => prefixKey(tuple, partial.length)).sort();
+          const poolKeys = [...goldTuples, ...tieTuples].map((tuple) => prefixKey(tuple, partial.length)).sort();
+          return containsSortedKeys(actualKeys, aboveKeys) && containsSortedKeys(poolKeys, actualKeys);
         };
 
   return { goldColumns, actualColumns, candidates, check, prefixHolds };
@@ -1265,12 +1580,15 @@ function prepareResultSetMatch(expected, actual, comparison) {
  * any valid assignment was found (never a match). `empty` marks two empty
  * results, which match under any assignment. `truncated` means the list may
  * be incomplete; the multi-fixture oracle never relies on it and uses
- * findSharedAssignment for its one-mapping rule.
+ * findSharedAssignment for its one-mapping rule. `goldTies`: the rows the
+ * gold's own LIMIT left out (isCutByLimit); in ranked mode those tied with the
+ * gold's last ranking value may stand in for its boundary rows (ties at the
+ * cut-off, see the spec).
  */
-export function matchResultSets(expectedRows, actualRows, comparison = null, { limit = MAX_ASSIGNMENTS } = {}) {
+export function matchResultSets(expectedRows, actualRows, comparison = null, { limit = MAX_ASSIGNMENTS, goldTies = null } = {}) {
   const expected = Array.isArray(expectedRows) ? expectedRows : [];
   const actual = Array.isArray(actualRows) ? actualRows : [];
-  const prepared = prepareResultSetMatch(expected, actual, comparison);
+  const prepared = prepareResultSetMatch(expected, actual, comparison, { goldTies });
   if (prepared.outcome) {
     return prepared.outcome;
   }
@@ -1337,7 +1655,8 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
  * The multi-fixture one-mapping rule: ONE gold-column -> prediction-column
  * assignment that is valid on every (gold, prediction) pair at once (one pair
  * per fixture, all from the same prediction SQL). Pairs of two empty results
- * match under any assignment and do not constrain it.
+ * match under any assignment and do not constrain it. A pair's `goldTies`
+ * holds the rows its gold's own LIMIT left out (see matchResultSets).
  *
  * The search intersects each gold column's candidate carriers over the pairs,
  * then backtracks, pruning a partial assignment as soon as its row tuples
@@ -1352,8 +1671,8 @@ export function matchResultSets(expectedRows, actualRows, comparison = null, { l
  * before deciding; fails closed, never a match).
  */
 export function findSharedAssignment(pairs, comparison = null, { maxSteps = MAX_SHARED_ASSIGNMENT_STEPS } = {}) {
-  const prepared = pairs.map(({ expected, actual }) =>
-    prepareResultSetMatch(Array.isArray(expected) ? expected : [], Array.isArray(actual) ? actual : [], comparison)
+  const prepared = pairs.map(({ expected, actual, goldTies = null }) =>
+    prepareResultSetMatch(Array.isArray(expected) ? expected : [], Array.isArray(actual) ? actual : [], comparison, { goldTies })
   );
   const goldColumns = prepared.map((entry) => entry.goldColumns ?? entry.outcome.goldColumns).find((columns) => columns.length > 0) ?? [];
   const decided = prepared.filter((entry) => entry.outcome);
@@ -1421,9 +1740,10 @@ export function findSharedAssignment(pairs, comparison = null, { maxSteps = MAX_
  * Value-aware comparison with an explanation: `{ match, assignment, reason }`.
  * `assignment` maps each compared gold column to the prediction column that
  * carries it (null when nothing matched; `{}` for two empty results).
+ * `goldTies`: the rows the gold's own LIMIT left out (see matchResultSets).
  */
-export function compareResultsDetailed(expectedRows, actualRows, comparison = null) {
-  const outcome = matchResultSets(expectedRows, actualRows, comparison, { limit: 1 });
+export function compareResultsDetailed(expectedRows, actualRows, comparison = null, { goldTies = null } = {}) {
+  const outcome = matchResultSets(expectedRows, actualRows, comparison, { limit: 1, goldTies });
   const [first] = outcome.assignments;
   return {
     match: outcome.match,
@@ -1436,8 +1756,8 @@ export function compareResultsDetailed(expectedRows, actualRows, comparison = nu
   };
 }
 
-export function compareResults(expectedRows, actualRows, comparison = null) {
-  return compareResultsDetailed(expectedRows, actualRows, comparison).match;
+export function compareResults(expectedRows, actualRows, comparison = null, options = {}) {
+  return compareResultsDetailed(expectedRows, actualRows, comparison, options).match;
 }
 
 function normalizeComparison(comparison) {

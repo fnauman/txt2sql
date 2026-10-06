@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import mysql from 'mysql2/promise';
 
-import { loadBenchmarkDataset } from '../src/benchmark.js';
+import { selectSuite } from '../src/eval/suite.js';
 
 // Opt-in end-to-end check of `npm run eval` (scripts/eval.js) against a real
 // MariaDB and a local stand-in for the OpenAI API (no paid call). Enabled by
@@ -24,6 +24,9 @@ import { loadBenchmarkDataset } from '../src/benchmark.js';
 // - core_public_004 gets a correct SQL that the FAN_OUT guardrail rejects
 //   (the known false rejection, controls rp4) -> guardrail_false_rejection;
 // - core_public_007 gets SQL without the IsActive filter -> wrong_result;
+// - abstain / clarify cases get `SELECT 1` (answered instead of declining),
+//   except hard_abstain_competitor_prices, which gets an empty query
+//   (declined: handled correctly);
 // - in the "regressed" mode six paraphrase cases get `SELECT 1`;
 // - in the "expensive" mode every call reports 1M prompt tokens;
 // - in the "slow" mode it answers after 5 s;
@@ -51,10 +54,7 @@ before(async () => {
   if (!configured) {
     return;
   }
-  const cases = [];
-  for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
-    cases.push(...(await loadBenchmarkDataset({ datasetName })).cases);
-  }
+  const cases = (await selectSuite()).entries.map((entry) => entry.testCase);
   const byQuestion = [...new Map(cases.map((testCase) => [testCase.question, testCase])).values()].sort((left, right) => right.question.length - left.question.length);
   const controls = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets/controls/core-public.json'), 'utf8'));
   const falselyRejected = controls.core_public_004.positive.find((control) => control.id === 'rp4').sql;
@@ -86,7 +86,9 @@ before(async () => {
       const userText = (payload.messages || []).filter((message) => message.role === 'user').map((message) => message.content).join('\n');
       const testCase = byQuestion.find((entry) => userText.includes(entry.question));
       let sql = testCase?.expected_sql || 'SELECT 1';
-      if (testCase?.id === 'core_public_004') {
+      if (testCase?.id === 'hard_abstain_competitor_prices') {
+        sql = '';
+      } else if (testCase?.id === 'core_public_004') {
         sql = falselyRejected;
       } else if (testCase?.id === 'core_public_007') {
         sql = 'SELECT COUNT(*) AS active_customers FROM Customer';
@@ -149,6 +151,11 @@ function evalEnv() {
   };
 }
 
+// The first tests run the three original datasets (26 cases, 17 intents), so
+// their numbers do not move when datasets are added; the last one runs the
+// whole default suite.
+const LEGACY = ['--dataset', 'core-public,paraphrase-public,edge-cases-public'];
+
 function evalArgs(args, outputDir) {
   return [path.join(REPO_ROOT, 'scripts/eval.js'), '--no-docker', '--no-baseline', '--output-dir', outputDir, ...args];
 }
@@ -190,13 +197,13 @@ let first;
 test('npm run eval: fixtures, verification, a concurrent repeated run, attribution, report files', { skip }, async () => {
   requireAdmin();
   mode = 'base';
-  const run = await runEval(['--concurrency', '2', '--repeat', '2'], 'run');
+  const run = await runEval([...LEGACY, '--concurrency', '2', '--repeat', '2'], 'run');
   assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
   assert.match(run.stdout, /Verify: 26 unique case\(s\) on 3 fixture\(s\), 0 with problems\./);
   assert.match(run.stdout, /Strict accuracy 92\.3% \(95% CI [\d.]+%–100\.0%\) over 26 cases \/ 17 intents, 2 repetition\(s\), gpt-4o-mini/);
   const { reportPath, report } = await findReport(run.outputDir);
   first = { reportPath, report };
-  assert.match(reportPath, /[/\\]all[/\\]gpt-4o-mini[/\\]report\.json$/);
+  assert.match(reportPath, /[/\\]core-public-paraphrase-public-edge-cases-public[/\\]gpt-4o-mini[/\\]report\.json$/);
 
   assert.equal(report.reportVersion, 2);
   assert.equal(report.mode, 'run');
@@ -263,7 +270,7 @@ test('--rescore reproduces every outcome with zero LLM calls', { skip }, async (
 test('--compare prints a paired table with McNemar p; --gate fails a significant regression', { skip }, async () => {
   assert.ok(first, 'needs the first run');
   mode = 'regressed';
-  const run = await runEval(['--compare', first.reportPath, '--gate'], 'compare');
+  const run = await runEval([...LEGACY, '--compare', first.reportPath, '--gate'], 'compare');
   assert.equal(run.code, 1, `${run.stdout}\n${run.stderr}`);
   // The console prints the paired 2x2 table, the McNemar p and the flipped cases.
   assert.match(run.stdout, /Paired comparison with .*report\.json: 26 paired case\(s\)\n {17}candidate pass {2}candidate fail\n {2}baseline pass {14}18 {15}6\n {2}baseline fail {15}0 {15}2\n/);
@@ -278,6 +285,126 @@ test('--compare prints a paired table with McNemar p; --gate fails a significant
   assert.match(markdown, /### Regressions \(baseline majority pass → candidate fail\)/);
   // `SELECT 1` is either rejected by a guardrail (its tables_used do not match) or runs and mismatches.
   assert.match(markdown, /\| paraphrase_public_001 \| Who are our biggest buyers in March 2026\? \| 100% \(pass\) \| 0% \((wrong_result|guardrail_true_rejection)\) \|/);
+});
+
+test('--write-baseline writes a compact baseline that rescores, compares and gates like the full report', { skip }, async () => {
+  requireAdmin();
+  mode = 'base';
+  const baselineFile = path.join(outputRoot, 'compact-baseline', 'subset.json');
+  const run = await runEval([...LEGACY, '--repeat', '2', '--write-baseline', '--baseline-file', baselineFile], 'compact-baseline');
+  assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
+  assert.match(run.stdout, /Baseline written: \S+subset\.json \(compact, [\d.]+ MB; the full report is \S+report\.json\)/);
+  const { reportPath, report } = await findReport(run.outputDir);
+  const compact = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
+  assert.deepEqual([compact.compact, compact.compactVersion, compact.reportVersion], [true, 1, 2]);
+  assert.ok((await fs.stat(baselineFile)).size * 3 < (await fs.stat(reportPath)).size, 'the compact baseline is a fraction of report.json');
+  assert.deepEqual(outcomesOf(compact), outcomesOf(report));
+
+  // Rescored with zero LLM calls, the compact baseline gives the full report's outcomes and statistics.
+  const [fromFull, fromCompact] = await Promise.all([
+    runEval(['--rescore', reportPath, '--skip-verify', ...LEGACY], 'compact-rescore-full'),
+    runEval(['--rescore', baselineFile, '--skip-verify', ...LEGACY], 'compact-rescore-compact'),
+  ]);
+  assert.equal(fromFull.code, 0, fromFull.stdout + fromFull.stderr);
+  assert.equal(fromCompact.code, 0, fromCompact.stdout + fromCompact.stderr);
+  const full = (await findReport(fromFull.outputDir)).report;
+  const rescored = (await findReport(fromCompact.outputDir)).report;
+  assert.deepEqual(outcomesOf(rescored), outcomesOf(full));
+  assert.deepEqual(
+    rescored.results.map((record) => record.summary),
+    full.results.map((record) => record.summary)
+  );
+  for (const block of ['attribution', 'behavior']) {
+    assert.deepEqual(rescored[block], full[block], block);
+  }
+  const { cost, tokens, retries, strictAccuracy, cases } = full.stats;
+  assert.deepEqual(
+    { cost, tokens, retries, strictAccuracy, cases },
+    { cost: rescored.stats.cost, tokens: rescored.stats.tokens, retries: rescored.stats.retries, strictAccuracy: rescored.stats.strictAccuracy, cases: rescored.stats.cases }
+  );
+  assert.equal(rescored.rescoredFrom.compact, true);
+  assert.equal(full.rescoredFrom.compact, false);
+
+  // --compare / --gate against it: a rescore of the full report pairs every case, a regressed live run fails the gate.
+  const gated = await runEval(['--rescore', reportPath, '--compare', baselineFile, '--gate', '--skip-verify', ...LEGACY], 'compact-gate-rescore');
+  assert.equal(gated.code, 0, gated.stdout + gated.stderr);
+  const gatedReport = (await findReport(gated.outputDir)).report;
+  assert.deepEqual([gatedReport.comparison.paired, gatedReport.comparison.mcnemar.regressions, gatedReport.comparison.mcnemar.improvements], [26, 0, 0]);
+  mode = 'regressed';
+  try {
+    const regressed = await runEval([...LEGACY, '--compare', baselineFile, '--gate'], 'compact-gate-live');
+    assert.equal(regressed.code, 1, regressed.stdout + regressed.stderr);
+    assert.match(regressed.stdout, /exact McNemar p = 0\.031 \(6 regression\(s\), 0 improvement\(s\)\) → significantly WORSE than the baseline/);
+  } finally {
+    mode = 'base';
+  }
+});
+
+test('the whole default suite: splits, behaviour cases and known validator rejections end to end', { skip }, async () => {
+  requireAdmin();
+  mode = 'base';
+  const selection = await selectSuite();
+  const cases = selection.entries.map((entry) => entry.testCase);
+  const behavior = cases.filter((testCase) => testCase.expected_behavior !== 'answer');
+  const answer = cases.filter((testCase) => testCase.expected_behavior === 'answer');
+  const flagged = answer.filter((testCase) => testCase.known_validator_rejection);
+  const run = await runEval(['--concurrency', '4'], 'full');
+  assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
+  const { reportPath, report } = await findReport(run.outputDir);
+  assert.match(reportPath, /[/\\]all[/\\]gpt-4o-mini[/\\]report\.json$/);
+  assert.equal(report.results.length, cases.length);
+  assert.equal(report.verification.datasets.length, 5);
+  assert.ok(report.verification.datasets.every((dataset) => !dataset.controls || dataset.controls.design.rate >= 0.95));
+
+  // Behaviour cases: never in accuracy, reported on their own.
+  assert.equal(report.stats.cases.behavior, behavior.length);
+  assert.equal(report.stats.cases.counted, answer.length);
+  assert.equal(report.behavior.cases, behavior.length);
+  assert.equal(report.behavior.handled, 1);
+  const byId = Object.fromEntries(report.results.map((record) => [record.id, record]));
+  assert.equal(byId.hard_abstain_competitor_prices.summary.outcome, 'declined');
+  for (const testCase of behavior.filter((entry) => entry.id !== 'hard_abstain_competitor_prices')) {
+    assert.equal(byId[testCase.id].summary.outcome, `answered_instead_of_${testCase.expected_behavior}`, testCase.id);
+    assert.equal(byId[testCase.id].summary.counted, 0, testCase.id);
+  }
+
+  // A known validator rejection of the gold itself is a system failure (a
+  // guardrail false rejection, or a retrieval miss: the table was not
+  // allowed); a case whose flag concerns an alternative reading passes with
+  // the gold. Everything else passes but the two scripted cases.
+  let systemFailures = 0;
+  for (const testCase of flagged) {
+    const record = byId[testCase.id];
+    if (record.summary.outcome === 'pass') {
+      assert.ok(testCase.alternative_expected_sql.length > 0, `${testCase.id} passed although its gold is flagged`);
+      continue;
+    }
+    systemFailures += 1;
+    assert.equal(record.summary.bucket, 'system', `${testCase.id}: ${record.summary.outcome} ${record.summary.tags.join(',')}`);
+    assert.ok(
+      record.summary.outcome === 'guardrail_false_rejection' || record.summary.tags.includes('retrieval_miss'),
+      `${testCase.id}: ${record.summary.outcome} ${record.summary.tags.join(',')}`
+    );
+  }
+  assert.ok(systemFailures >= flagged.length - 1, `${systemFailures} of ${flagged.length}`);
+  const passes = report.results.filter((record) => record.summary.outcome === 'pass').length;
+  assert.equal(passes, answer.length - systemFailures - 2);
+  assert.equal(report.stats.strictAccuracy.value, Number((passes / answer.length).toFixed(4)));
+  assert.deepEqual(report.stats.bySplit.map((entry) => entry.key), ['dev', 'holdout']);
+  assert.equal(report.stats.bySplit.reduce((sum, entry) => sum + entry.cases, 0), answer.length);
+
+  const markdown = await fs.readFile(reportPath.replace(/report\.json$/, 'report.md'), 'utf8');
+  assert.match(markdown, new RegExp(`Behaviour cases: abstain/clarify — ${behavior.length} cases, 1 handled correctly\\.`));
+  assert.match(markdown, /By split: dev [\d.]+% \(\d+ cases\) · holdout [\d.]+% \(\d+ cases\)\./);
+  assert.match(markdown, /## Behaviour cases \(abstain \/ clarify\)/);
+  assert.match(run.stdout, /ok   hard_abstain_competitor_prices: declined \(expects abstain\)/);
+
+  // --split holdout runs only holdout cases.
+  const holdout = await runEval(['--split', 'holdout', '--concurrency', '4', '--skip-verify'], 'holdout');
+  assert.equal(holdout.code, 0, `${holdout.stdout}\n${holdout.stderr}`);
+  const { report: holdoutReport } = await findReport(holdout.outputDir);
+  assert.ok(holdoutReport.results.length > 0 && holdoutReport.results.every((record) => record.split === 'holdout'));
+  assert.equal(holdoutReport.suite.filters.split, 'holdout');
 });
 
 test('--budget-usd stops starting cases once the spend reaches the budget', { skip }, async () => {
@@ -386,7 +513,8 @@ test('npm run eval --write-baseline: a run of one dataset never replaces the def
   try {
     const run = await runEval(['--dataset', 'core-public', '--model', model, '--write-baseline', '--skip-verify'], 'baseline-subset');
     assert.equal(run.code, 2, run.stdout + run.stderr);
-    assert.match(run.stdout + run.stderr, /--write-baseline refused before the run: the run selects 9 of the default suite's 26 case\(s\)/);
+    const suiteSize = (await selectSuite()).entries.length;
+    assert.match(run.stdout + run.stderr, new RegExp(`--write-baseline refused before the run: the run selects 9 of the default suite's ${suiteSize} case\\(s\\)`));
     assert.doesNotMatch(run.stdout, /^Running /m, 'nothing ran');
     await assert.rejects(fs.access(target), 'no baseline written');
   } finally {
@@ -508,16 +636,21 @@ test('--gate on a rescore exits 2 when the recorded report does not cover today\
   assert.equal(renamed.code, 2, renamed.stdout + renamed.stderr);
   assert.match(renamed.stdout, /HARNESS: --gate checked none of today's 26 suite case\(s\) against the baseline \S+: 26 not in the rescored report/);
 
-  // A one-case recorded report.
+  // A one-case recorded report (today's suite: the three datasets it was run on).
   const oneCase = path.join(outputRoot, 'one-case-report.json');
   await fs.writeFile(oneCase, JSON.stringify({ ...first.report, results: first.report.results.slice(0, 1) }));
-  const subset = await runEval(['--rescore', oneCase, '--gate', '--skip-verify'], 'gate-subset-suite');
+  const subset = await runEval(['--rescore', oneCase, '--gate', '--skip-verify', ...LEGACY], 'gate-subset-suite');
   assert.equal(subset.code, 2, subset.stdout + subset.stderr);
   assert.match(subset.stdout, /HARNESS: --gate checked only 1 of today's 26 suite case\(s\) \(below 50%\)/);
 
-  // The full recorded report covers the suite.
-  const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-full-suite');
+  // The full recorded report covers the suite it was run on, but not the
+  // whole default suite (26 of its answer cases).
+  const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify', ...LEGACY], 'gate-full-suite');
   assert.equal(full.code, 0, full.stdout + full.stderr);
+  const answerCases = (await selectSuite()).entries.filter((entry) => !['abstain', 'clarify'].includes(entry.testCase.expected_behavior)).length;
+  const wholeSuite = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-whole-suite');
+  assert.equal(wholeSuite.code, 2, wholeSuite.stdout + wholeSuite.stderr);
+  assert.match(wholeSuite.stdout, new RegExp(`HARNESS: --gate checked only 26 of today's ${answerCases} suite case\\(s\\) \\(below 50%\\)`));
 });
 
 test('--rescore --case-id with a dropped duplicate\'s id rescores the kept case, as a live run would run it', { skip }, async () => {

@@ -39,11 +39,13 @@
 // run (skipped_budget, cancelled, harness errors). Runs that were cut short (aborted, infra_error) keep their status
 // unless a recorded attempt now completes; such recorded outcomes (and
 // recorded provider outages) are flagged `rescore.inherited`, so they do not
-// make a rescore exit as a harness failure today. Rescoring the same report twice
+// make a rescore exit as a harness failure today. Abstain / clarify cases are
+// not replayed (there is no gold; their outcome depends only on whether the
+// recorded run produced SQL) and are flagged inherited. Rescoring the same report twice
 // gives identical results: validation and execution durations are not
 // re-measured (null), and all statistics are seeded.
 
-import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
+import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
 import { validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
@@ -53,7 +55,7 @@ const EXECUTED_STATUSES = new Set(['pass', 'result_mismatch', 'retrieval_miss'])
 const KEPT_STATUSES = new Set(['skipped_budget', 'cancelled', 'evaluation_error']);
 const CUT_SHORT_STATUSES = new Set(['aborted', 'infra_error']);
 
-const CASE_FIELDS = [
+export const CASE_FIELDS = [
   'id',
   'intentId',
   'question',
@@ -61,6 +63,8 @@ const CASE_FIELDS = [
   'difficulty',
   'tags',
   'split',
+  'expected_behavior',
+  'known_validator_rejection',
   'expected_sql',
   'alternative_expected_sql',
   'expected_tables',
@@ -91,12 +95,48 @@ export function recordedRepetitions(record) {
   return [{ ...record, repetition: 1 }];
 }
 
+/**
+ * The SQL a repetition ended with as its attempts recorded it: the last
+ * non-empty generatedSql, or ''. A compact report (compact-report.js) leaves
+ * out a repetition's generated_sql when it equals this.
+ */
+export function finalAttemptSql(repetition) {
+  const last = [...(repetition?.attempts || [])].reverse().find((attempt) => String(attempt?.generatedSql || '').trim() !== '');
+  return last ? last.generatedSql : '';
+}
+
+/**
+ * A compact report (compact-report.js) stores the usage and cost of a
+ * repetition's only LLM call once, at the repetition, and names the call in
+ * `llm_usage_attempt`. Returns the repetition with the call's copy put back
+ * and the mark removed (the repetition itself when it has no mark).
+ */
+export function restoreSharedCallUsage(repetition) {
+  if (repetition?.llm_usage_attempt === undefined) {
+    return repetition;
+  }
+  const { llm_usage_attempt: attemptNumber, ...rest } = repetition;
+  rest.attempts = (rest.attempts || []).map((attempt) => {
+    if (attempt?.attempt !== attemptNumber || !attempt.llm) {
+      return attempt;
+    }
+    const cost = rest.llm_cost ? { totalCost: rest.llm_cost.totalCost } : null;
+    return { ...attempt, llm: { ...attempt.llm, usage: rest.llm_usage ?? null, cost } };
+  });
+  return rest;
+}
+
+// The recorded repetition without its attribution, and with generated_sql
+// and a shared call usage restored when a compact report left them out.
 function stripAttribution(repetition) {
-  const { outcome, bucket, counted, outcome_tags: outcomeTags, ...rest } = repetition;
+  const { outcome, bucket, counted, outcome_tags: outcomeTags, ...rest } = restoreSharedCallUsage(repetition);
   void outcome;
   void bucket;
   void counted;
   void outcomeTags;
+  if (rest.generated_sql === undefined) {
+    rest.generated_sql = finalAttemptSql(rest);
+  }
   return rest;
 }
 
@@ -191,6 +231,19 @@ export async function rescoreRepetition(repetition, {
 }) {
   const recorded = stripAttribution(repetition);
   const originalStatus = recorded.status;
+  if (isBehaviorCase(testCase)) {
+    // No gold to re-score against: whether the recorded run produced SQL is
+    // all an abstain / clarify case is judged on, and that does not change.
+    return {
+      ...recorded,
+      rescore: {
+        replayed: false,
+        reason: `${testCase.expected_behavior} case: judged on whether the recorded run produced SQL, which a rescore cannot change`,
+        originalStatus,
+        inherited: true,
+      },
+    };
+  }
   const attempts = (recorded.attempts || []).map(asRecordedAttempt).sort((left, right) => left.attempt - right.attempt);
   if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
     // A recorded gold failure whose gold passes today (this function only runs

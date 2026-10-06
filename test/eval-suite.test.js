@@ -73,13 +73,21 @@ test('filters: split (missing = dev), case ids, any-of tags, intents', () => {
 test('the default suite is every committed dataset, de-duplicated to the unique cases', async () => {
   const suite = await selectSuite();
   assert.equal(suite.name, 'all');
-  assert.deepEqual(suite.datasets.map((dataset) => dataset.name), ['core-public', 'edge-cases-public', 'paraphrase-public']);
-  assert.equal(suite.totalCaseCount, 35);
-  assert.equal(suite.uniqueCaseCount, 26);
-  assert.equal(suite.entries.length, 26);
+  assert.deepEqual(suite.datasets.map((dataset) => dataset.name), ['core-public', 'edge-cases-public', 'hard-cases-public', 'paraphrase-public', 'templated-public']);
+  assert.equal(suite.totalCaseCount, 264);
+  assert.equal(suite.uniqueCaseCount, 255);
+  assert.equal(suite.entries.length, 255);
   assert.equal(suite.duplicates.length, 9);
   assert.ok(suite.duplicates.every((entry) => entry.reason === 'same case id' && entry.dataset === 'edge-cases-public'));
-  assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 17);
+  assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 140);
+  const holdout = await selectSuite({ split: 'holdout' });
+  assert.equal(holdout.entries.length, 81);
+  assert.equal(new Set(holdout.entries.map((entry) => entry.testCase.intentId)).size, 45);
+  assert.equal((await selectSuite({ split: 'dev' })).entries.length, 255 - 81);
+  // The pre-existing datasets alone are still the 26 cases over 17 intents.
+  const legacy = await selectSuite({ datasetNames: ['core-public', 'paraphrase-public', 'edge-cases-public'] });
+  assert.equal(legacy.entries.length, 26);
+  assert.equal(new Set(legacy.entries.map((entry) => entry.testCase.intentId)).size, 17);
 
   const edgeOnly = await selectSuite({ datasetNames: ['edge-cases-public'], tags: ['join_path'] });
   assert.equal(edgeOnly.name, 'edge-cases-public');

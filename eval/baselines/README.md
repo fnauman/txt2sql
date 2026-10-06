@@ -2,16 +2,29 @@
 
 `npm run eval` compares every run with `eval/baselines/<model>.json` when that
 file exists (for example `gpt-4o-mini.json`), and `npm run eval -- --offline`
-(the CI `db` job) rescores it with no LLM calls. No baseline is committed yet;
-until one is, those steps say so and skip the comparison.
+(the CI `db` job) rescores it with no LLM calls. The committed baseline is
+`gpt-4o-mini.json` (gpt-4o-mini, whole suite, 3 repetitions, prompt version
+`0c314451d4b7`); its numbers are in
+[docs/evaluation-dataset.md](../../docs/evaluation-dataset.md#current-baseline).
 
-A baseline is an ordinary `report.json` (report version 2) of the **whole
-default suite** (every dataset in `datasets/`, de-duplicated) with enough
-repetitions to be stable. To make one:
+A baseline is a **compact** `report.json` (report version 2, marked
+`compact: true`) of the **whole default suite** (every dataset in `datasets/`,
+de-duplicated) with enough repetitions to be stable. Compact means it keeps
+only what the rescore, the comparison and the gate read (the run's summaries,
+each case's definition, fingerprints and summary, and per repetition its
+outcome, usage, cost, timings and every attempt's SQL and verdicts) and drops
+row previews, explanations, master-data candidates, per-fixture oracle details
+and recorded guardrail re-checks; see `src/eval/compact-report.js`. Rescoring
+it gives the same outcomes and statistics as rescoring the full report, at
+about 1.4 MB (10^6 bytes) for 255 cases x 3 repetitions instead of 6-9 MB,
+one line per case. A repetition's only LLM call shares its usage and cost
+with the repetition (`llm_usage_attempt`); a rescore restores the call's
+copy. The run's own `report.json` under `generated/runs/` stays complete.
+To make one:
 
 ```bash
 git status                                   # commit first: the report records the git sha and a dirty flag
-npm run eval -- --repeat 3 --write-baseline  # writes the run's report.json here as <model>.json
+npm run eval -- --repeat 3 --write-baseline  # writes a compact copy of the run's report.json here as <model>.json
 ```
 
 `--write-baseline` only writes after a clean, complete run (exit 0, no case

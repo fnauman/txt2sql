@@ -13,7 +13,7 @@ import { loadControlsIndex } from '../src/eval/controls.js';
 import { FACT_TABLES, MASTER_TABLES } from '../src/eval/fixture-data.js';
 import { checkFixtureContent, checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, describeFixtureContent } from '../src/eval/fixtures.js';
-import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
+import { closeFixtureConnections, createGoldCache, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
 import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
 import { createMariaDbConnection } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -203,7 +203,7 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
   const goldCache = createGoldCache();
   const validate = createValidatorProbe({ schema, connection: connections[0].connection });
   try {
-    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
+    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public']) {
       const { cases } = await loadBenchmarkDataset({ datasetName });
       const results = [];
       for (const testCase of cases) {
@@ -214,11 +214,88 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
       const summary = summarizeControls(results, { fixtureNames: FIXTURES.map((fixture) => fixture.name) });
       assert.ok(summary.design.rate >= 0.95, `${datasetName} design kill rate ${summary.design.rate}`);
       assert.equal(summary.positive.matched, summary.positive.total);
-      // Every positive passes the validator except the flagged known false rejections.
-      const flagged = results.flatMap((result) => result.notes.filter((note) => /known validator false rejection/.test(note)));
+      // Every positive passes the validator except the flagged known false
+      // rejections and those of a question whose gold the validator rejects
+      // too (known_validator_rejection: a measured product gap).
+      const flagged = results.flatMap((result) => result.notes.filter((note) => /^positive control .*known validator (false )?rejection/.test(note)));
       assert.equal(summary.positive.validatorAccepted + flagged.length, summary.positive.total);
       // The point of the extra fixtures: the seed alone catches far less.
       assert.ok(summary.design.seedOnlyRate < summary.design.rate);
+    }
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
+test('ties at the cut-off: the live baseline\'s tie-blind top 5 passes whichever tied product MariaDB returns', { skip }, async () => {
+  // tpl_product_qty_top5_feb_2026_8a9dc1 on v3: 'Herbal Tea Variety Pack' and
+  // 'Spring Water 24 Pack' both moved 34 units, at position 5. The recorded
+  // gpt-4o-mini SQL orders by the quantity alone, so the plan picks the fifth
+  // product (it scored wrong_result live and pass on a rescore); the tails
+  // force each of the two legal answers.
+  const { cases } = await loadBenchmarkDataset({ datasetName: 'templated-public', caseId: 'tpl_product_qty_top5_feb_2026_8a9dc1' });
+  const [testCase] = cases;
+  const tieBlind =
+    'SELECT p.ProductName, ROUND(SUM(sdl.Quantity), 3) AS total_qty FROM SalesDocument sd ' +
+    'JOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId JOIN Product p ON sdl.ProductId = p.ProductId ' +
+    "WHERE IFNULL(sd.IsCanceled, 0) = 0 AND sd.DocumentDate >= '2026-02-01' AND sd.DocumentDate < '2026-03-01' " +
+    'GROUP BY p.ProductId, p.ProductName ORDER BY SUM(sdl.Quantity) DESC';
+  const connections = await openFixtureConnections({ env });
+  try {
+    const v3 = connections.find((entry) => entry.name === 'v3');
+    const fifth = {};
+    for (const [label, tail] of [['as written', ''], ['name ASC', ', p.ProductName ASC'], ['name DESC', ', p.ProductName DESC']]) {
+      const sql = `${tieBlind}${tail} LIMIT 5`;
+      const [rows] = await v3.connection.query(sql);
+      fifth[label] = rows[4].ProductName;
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, true, `${label}: ${score.reason} (killed on ${score.killedOn.join(', ')})`);
+    }
+    // The fixture still holds the tie this test is about.
+    assert.deepEqual([fifth['name ASC'], fifth['name DESC']], ['Herbal Tea Variety Pack', 'Spring Water 24 Pack']);
+    // Another product at the cut-off with another quantity is still wrong.
+    const wrong = await scoreAgainstGold({ testCase, predictedSql: `${tieBlind.replace(">= '2026-02-01'", "> '2026-02-01'")} LIMIT 5`, connections });
+    assert.equal(wrong.match, false);
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
+test('ties at the cut-off: a gold cut by its LIMIT without a tie still checks the label at the cut-off', { skip }, async () => {
+  // Top-1 golds that every fixture cuts (or returns empty), so no fixture
+  // would compare their label if being cut were enough to relax it. Each
+  // prediction pairs the right top total with the wrong label: MAX() over
+  // grouped rows without a GROUP BY (sql_mode lacks ONLY_FULL_GROUP_BY), and
+  // the lowest-earning type next to the window's top total.
+  const cases = [
+    {
+      datasetName: 'hard-cases-public',
+      caseId: 'hard_vocab_outlet_turnover_top1_mar_2026',
+      killedOn: ['v2'],
+      sql:
+        'SELECT LocationName, MAX(total_net_amount) AS total_net_amount FROM (SELECT s.LocationName, ROUND(SUM(d.NetAmount), 2) AS total_net_amount ' +
+        'FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 ' +
+        "AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName) t",
+    },
+    {
+      datasetName: 'templated-public',
+      caseId: 'tpl_doctype_net_sales_top1_may_2026_ec6b39',
+      killedOn: ['v3'],
+      sql:
+        'SELECT t.DocumentTypeName, MAX(ROUND(SUM(d.NetAmount), 2)) OVER () AS total_net_amount FROM SalesDocument d ' +
+        'JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 ' +
+        "AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName " +
+        'ORDER BY SUM(d.NetAmount) ASC LIMIT 1',
+    },
+  ];
+  const connections = await openFixtureConnections({ env });
+  try {
+    for (const { datasetName, caseId, killedOn, sql } of cases) {
+      const [testCase] = (await loadBenchmarkDataset({ datasetName, caseId })).cases;
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, false, caseId);
+      assert.equal(score.reason, 'values', caseId);
+      assert.deepEqual(score.killedOn, killedOn, caseId);
     }
   } finally {
     await closeFixtureConnections(connections);

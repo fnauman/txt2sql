@@ -33,7 +33,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR } from '../src/benchmark.js';
+import { createBenchmarkRunPaths, DEFAULT_DATASETS_DIR, DEFAULT_RUNS_DIR, isBehaviorCase } from '../src/benchmark.js';
+import { classifyRepetition } from '../src/eval/attribution.js';
+import { compactReportProblem, isCompactReport, writeCompactReport } from '../src/eval/compact-report.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
@@ -41,7 +43,7 @@ import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
-import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
+import { behaviorPassText, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
@@ -98,8 +100,9 @@ Compare and gate:
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X
-  --write-baseline            also save report.json as eval/baselines/<model>.json (only from a clean
-                              run of the whole default suite on every fixture)
+  --write-baseline            also save a compact copy of report.json (what rescore, compare and gate
+                              read) as eval/baselines/<model>.json (only from a clean run of the
+                              whole default suite on every fixture)
   --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset;
                               never inside eval/baselines/, which holds only full default baselines)
 No LLM calls:
@@ -458,7 +461,8 @@ export function gatePairingFailure(comparison, { minFraction = MIN_GATE_PAIRED_F
 }
 
 /**
- * How much of today's suite a rescore's comparison covers: { suiteCases,
+ * How much of today's suite (its answer cases: abstain / clarify cases are
+ * never compared) a rescore's comparison covers: { suiteCases,
  * paired, notInReport, goldChanged, notCounted, notInBaseline } (id lists).
  * A rescore re-judges the RECORDED cases: one whose id is no longer in the
  * suite (renamed) is rescored from its recorded definition and pairs with its
@@ -474,7 +478,9 @@ export function describeSuiteCoverage(suiteEntries, comparison) {
   const goldChanged = idsOf(comparison.excluded?.goldChanged);
   const notCounted = idsOf(comparison.excluded?.notCounted);
   const notInBaseline = idsOf(comparison.newCases);
-  const suiteIds = [...new Set(suiteEntries.map((entry) => entry.testCase.id))].sort();
+  // Abstain / clarify cases are never compared (not in strict accuracy), so
+  // they are not part of what the gate must have checked.
+  const suiteIds = [...new Set(suiteEntries.filter((entry) => !isBehaviorCase(entry.testCase)).map((entry) => entry.testCase.id))].sort();
   const pick = (set) => suiteIds.filter((id) => set.has(id));
   return {
     suiteCases: suiteIds.length,
@@ -548,7 +554,9 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (report.stopped?.reason) {
     harness.push(`the run was stopped early: ${report.stopped.reason}`);
   }
-  if (report.stats?.strictAccuracy?.value == null) {
+  // A selection of only abstain / clarify cases has no accuracy by design.
+  const answerCases = (report.stats?.cases?.selected ?? 0) - (report.stats?.cases?.behavior ?? 0);
+  if (report.stats?.strictAccuracy?.value == null && (answerCases > 0 || !(report.behavior?.cases > 0))) {
     harness.push('no case was counted, so there is no accuracy to report');
   }
   if (gate && report.comparison) {
@@ -615,6 +623,11 @@ export function validateBaselineReport(report, filePath) {
     const version = typeof report.reportVersion === 'number' ? report.reportVersion : JSON.stringify(report.reportVersion);
     throw fail(`${filePath} has report version ${version} (unknown: this runner reads up to ${REPORT_VERSION}).`);
   }
+  // A compact baseline (--write-baseline) is a report too, of a known compact version.
+  const compactProblem = compactReportProblem(report);
+  if (compactProblem) {
+    throw fail(`${filePath} ${compactProblem}.`);
+  }
   if (report.results.length === 0) {
     throw fail(`${filePath} has no cases (results[] is empty).`);
   }
@@ -646,15 +659,27 @@ function isGithubActions(env = process.env) {
   return env.GITHUB_ACTIONS === 'true';
 }
 
-function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
+/** One console progress line for a finished repetition (exported for tests). */
+export function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
-  const status =
+  let status =
     result.status === 'aborted' && result.timed_out
       ? `timeout${result.late_status ? ` (finished late: ${result.late_status})` : ''}`
       : result.status === 'expected_sql_error' && result.error_infra
         ? 'expected_sql_error (the database failed)'
         : result.status;
-  const label = status === 'pass' ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
+  let passed = status === 'pass';
+  if (isBehaviorCase(testCase)) {
+    // An abstain / clarify case passes when the product returned no SQL. A
+    // repetition that is not judged on that (a timeout, an outage, a budget
+    // skip) keeps its usual label.
+    const judged = classifyRepetition(result, testCase);
+    if (judged.behavior_counted) {
+      passed = judged.outcome === 'declined';
+      status = `${judged.outcome} (expects ${testCase.expected_behavior})`;
+    }
+  }
+  const label = passed ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
   const seconds = Number.isFinite(totalMs) ? (totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${Math.round(totalMs)}ms`) : '';
   const cost = Number.isFinite(result.llm_cost?.totalCost) ? `$${result.llm_cost.totalCost.toFixed(5)}` : '';
@@ -678,6 +703,9 @@ function printVerification(cli, verification) {
   }
   for (const id of verification.controlStatus?.undecided || []) {
     cli.log(`  undecided (mapping search cut off, counted as not killed): ${id}`);
+  }
+  for (const warning of verification.warnings || []) {
+    cli.log(`  warning: ${warning} (npm run verify-dataset fails on this)`);
   }
   for (const failure of verification.gateFailures) {
     cli.log(`  FAIL: ${failure}`);
@@ -1031,8 +1059,10 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       if (refusal) {
         cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
       } else {
-        await writeJsonFile(target, report);
-        cli.log(`Baseline written: ${target}`);
+        // Compact: what --offline/--rescore, --compare/--gate and the
+        // summaries need (src/eval/compact-report.js); report.json stays full.
+        const bytes = await writeCompactReport(target, report); // printed in MB of 10^6 bytes
+        cli.log(`Baseline written: ${target} (compact, ${(bytes / 1e6).toFixed(2)} MB; the full report is ${reportPath})`);
         if (!writesDefaultBaseline(options) && (describeFilters(selection.filters) || options.datasetNames.length || options.datasetFiles.length)) {
           cli.log('  note: this run used a subset of the default suite; compare with it explicitly (--compare), it is not the default baseline.');
         }
@@ -1064,6 +1094,10 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   const recorded = await readJson(sourcePath, 'report to rescore');
   if (!Array.isArray(recorded.results)) {
     throw new HarnessError(`${sourcePath} has no results[]; is it an evaluation report.json?`, { code: 'REPORT_INVALID' });
+  }
+  const compactProblem = compactReportProblem(recorded);
+  if (compactProblem) {
+    throw new HarnessError(`${sourcePath} ${compactProblem}.`, { code: 'REPORT_INVALID' });
   }
   const model = recorded.model || options.model;
   const statementTimeoutMs = resolveStatementTimeoutMs();
@@ -1109,8 +1143,11 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   );
   for (const record of caseRecords) {
     const before = source.results.find((entry) => entry.id === record.id);
-    const was = before?.summary ? `${before.summary.passes}/${before.summary.counted}` : before?.status;
-    cli.log(`  ${record.id}: ${record.summary.passes}/${record.summary.counted} ${record.summary.outcome} (recorded: ${was})`);
+    // Behaviour cases count declined repetitions, not passes (as in report.md).
+    const behavior = isBehaviorCase(record);
+    const passText = (summary) => (behavior ? behaviorPassText(summary) : `${summary.passes}/${summary.counted}`);
+    const was = before?.summary ? passText(before.summary) : before?.status;
+    cli.log(`  ${record.id}: ${passText(record.summary)} ${record.summary.outcome} (recorded: ${was})`);
   }
 
   const sourceSuite = source.suite || {
@@ -1177,6 +1214,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
       gitSha: source.provenance?.git?.sha || source.gitSha || null,
       promptVersion: source.provenance?.promptVersion || null,
       reportVersion: source.reportVersion || 1,
+      compact: isCompactReport(source),
     },
     traceFile: null,
   });
@@ -1295,6 +1333,9 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
           checkControls: options.checkControls,
           minKillRate: options.minKillRate,
           minHeldoutKillRate: options.minHeldoutKillRate,
+          // A stale flag means the product now accepts a gold it used to
+          // reject: worth a warning, never a reason not to measure it.
+          staleKnownRejection: 'warning',
         });
       } catch (error) {
         if (isEvalInfraError(error) || isEvalInfraError(error?.cause)) {

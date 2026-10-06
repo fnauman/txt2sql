@@ -1,0 +1,1281 @@
+[
+  {
+    "id": "hard_vocab_outlet_turnover_top1_mar_2026",
+    "intentId": "store_net_sales_top1_mar_2026",
+    "split": "dev",
+    "question": "Which outlet had the highest turnover in March 2026?",
+    "canonicalQuestion": "Which outlet had the highest turnover in March 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "new_vocabulary",
+      "store_location",
+      "net_sales",
+      "ranking"
+    ],
+    "failure_class": "vocabulary",
+    "notes": "\"Outlet\" and \"turnover\" are not in the semantic layer: a store location and document-level net sales (turnover excludes VAT).",
+    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC LIMIT 1",
+    "expected_tables": [
+      "SalesDocument",
+      "StoreLocation"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc",
+      "decimals": 2
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_vocab_debtors_owe_q1_2026",
+    "intentId": "outstanding_balance_q1_2026",
+    "split": "dev",
+    "question": "How much do our debtors still owe us for sales made in Q1 2026?",
+    "canonicalQuestion": "How much do our debtors still owe us for sales made in Q1 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "new_vocabulary",
+      "outstanding_balance",
+      "scalar"
+    ],
+    "failure_class": "vocabulary",
+    "notes": "\"Debtors\" (customers who owe money) is not in the semantic layer: the outstanding SalesDocument.BalanceAmount of documents dated in Q1 2026.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01'",
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "outstanding_balance"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_vocab_department_turnover_feb_2026",
+    "intentId": "category_net_sales_feb_2026",
+    "split": "dev",
+    "question": "Show turnover by department for February 2026.",
+    "canonicalQuestion": "Show turnover by department for February 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "new_vocabulary",
+      "product_category",
+      "line_net_sales",
+      "aggregation"
+    ],
+    "failure_class": "vocabulary",
+    "notes": "\"Turnover\" is not in the semantic layer; by department (product category) it is line-level net sales.",
+    "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "ProductCategory"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 2,
+      "tolerance": 0.01
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 3,
+      "v3": 4
+    }
+  },
+  {
+    "id": "hard_vocab_shoppers_apr_2026",
+    "intentId": "distinct_customers_apr_2026",
+    "split": "dev",
+    "question": "How many distinct shoppers made a purchase in April 2026?",
+    "canonicalQuestion": "How many distinct shoppers made a purchase in April 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "new_vocabulary",
+      "distinct_customers",
+      "scalar"
+    ],
+    "failure_class": "vocabulary",
+    "notes": "\"Shoppers\" is not in the semantic layer: distinct customers with a non-canceled document in April 2026 (any document type). The question says \"made a purchase\", not \"placed an order\", so it does not raise the all-documents-or-Online-Orders ambiguity of hard_ambiguous_orders_mar_2026.",
+    "expected_sql": "SELECT COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01'",
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_vocab_receivables_by_outlet_mar_2026",
+    "intentId": "store_outstanding_balance_mar_2026",
+    "split": "holdout",
+    "question": "What is the receivables position by outlet for March 2026 sales?",
+    "canonicalQuestion": "What is the receivables position by outlet for March 2026 sales?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "new_vocabulary",
+      "outstanding_balance",
+      "store_location",
+      "aggregation"
+    ],
+    "failure_class": "vocabulary",
+    "notes": "\"Receivables position\" and \"outlet\" are not in the semantic layer: outstanding BalanceAmount by store location for documents dated March 2026.",
+    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.BalanceAmount, 0)) DESC, s.LocationName ASC",
+    "expected_tables": [
+      "SalesDocument",
+      "StoreLocation"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 2
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 3,
+      "v3": 3
+    }
+  },
+  {
+    "id": "hard_sv_top_customers_net_sales_mar_2026",
+    "intentId": "customer_net_sales_march_2026",
+    "split": "dev",
+    "question": "Visa de största kunderna efter nettoförsäljning i mars 2026.",
+    "canonicalQuestion": "Show the top customers by total net sales amount in March 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "swedish",
+      "customer",
+      "net_sales",
+      "ranking"
+    ],
+    "failure_class": "multilingual",
+    "notes": "Swedish for core_public_001 (\"Show the biggest customers by net sales in March 2026\"); same gold and scoring.",
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 10",
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "expected_columns": [
+      "NetAmount",
+      "DocumentDate",
+      "CustomerName"
+    ],
+    "disallowed_columns": [
+      "NetPayableAmount"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc",
+      "decimals": 2
+    },
+    "signal_checks": {
+      "min_row_count": 4,
+      "require_nonzero_columns": [
+        "total_net_amount"
+      ],
+      "require_nonnull_columns": [
+        "CustomerName"
+      ],
+      "min_distinct_counts": {
+        "CustomerName": 4
+      }
+    },
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 7,
+      "v3": 7
+    }
+  },
+  {
+    "id": "hard_sv_active_customer_count",
+    "intentId": "active_customer_count",
+    "split": "dev",
+    "question": "Hur många aktiva kunder har vi?",
+    "canonicalQuestion": "How many active customers do we have?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "swedish",
+      "customer",
+      "count"
+    ],
+    "failure_class": "multilingual",
+    "notes": "Swedish for core_public_007 (\"How many active customers do we have?\"); same gold and scoring.",
+    "expected_sql": "SELECT COUNT(*) AS active_customer_count FROM Customer WHERE IsActive = 1",
+    "expected_tables": [
+      "Customer"
+    ],
+    "expected_columns": [
+      "IsActive"
+    ],
+    "comparison": {
+      "mode": "scalar"
+    },
+    "signal_checks": {
+      "min_row_count": 1,
+      "require_nonzero_columns": [
+        "active_customer_count"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_sv_products_most_units_mar_2026",
+    "intentId": "product_qty_sold_march_2026",
+    "split": "dev",
+    "question": "Vilka är de tio produkter som sålde flest enheter i mars 2026?",
+    "canonicalQuestion": "Show the top products by quantity sold in March 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "swedish",
+      "product",
+      "quantity",
+      "ranking"
+    ],
+    "failure_class": "multilingual",
+    "notes": "Swedish for core_public_002 with the number spelled out (\"Which are the ten products that sold the most units in March 2026?\"): the gold LIMIT 10 binds on v3, where 12 products sell, so the question names it. Same gold and scoring as core_public_002.",
+    "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 10",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "Product",
+      "SalesDocument"
+    ],
+    "expected_columns": [
+      "Quantity",
+      "DocumentDate",
+      "ProductName"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "value_columns": [
+        "total_qty"
+      ],
+      "order": "desc",
+      "decimals": 3
+    },
+    "signal_checks": {
+      "min_row_count": 5,
+      "require_nonzero_columns": [
+        "total_qty"
+      ],
+      "require_nonnull_columns": [
+        "ProductName"
+      ],
+      "min_distinct_counts": {
+        "ProductName": 5
+      }
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 5,
+      "v2": 9,
+      "v3": 10
+    }
+  },
+  {
+    "id": "hard_mixed_brand_net_sales_mar_2026",
+    "intentId": "brand_net_sales_march_2026",
+    "split": "dev",
+    "question": "Visa net sales per varumärke för March 2026, störst först.",
+    "canonicalQuestion": "Show the top brands by net sales in March 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "bilingual",
+      "brand",
+      "line_net_sales",
+      "ranking"
+    ],
+    "failure_class": "multilingual",
+    "notes": "Swedish and English mixed (\"Show net sales per brand for March 2026, largest first\"), the intent of edge_public_001; same gold and scoring.",
+    "expected_sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "Brand"
+    ],
+    "expected_columns": [
+      "BrandName",
+      "NetAmount"
+    ],
+    "disallowed_columns": [
+      "BrandNameSnapshot",
+      "ProductBrand"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc",
+      "decimals": 2,
+      "tolerance": 0.01
+    },
+    "signal_checks": {
+      "min_row_count": 3,
+      "require_nonzero_columns": [
+        "total_net_amount"
+      ],
+      "require_nonnull_columns": [
+        "BrandName"
+      ]
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 4,
+      "v3": 5
+    }
+  },
+  {
+    "id": "hard_sv_documents_by_type_mar_2026",
+    "intentId": "document_count_by_type_march_2026",
+    "split": "dev",
+    "question": "Antal försäljningsdokument per dokumenttyp i mars 2026?",
+    "canonicalQuestion": "Show sales document count by document type in March 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "swedish",
+      "document_type",
+      "document_count"
+    ],
+    "failure_class": "multilingual",
+    "notes": "Swedish for core_public_003 (\"Number of sales documents per document type in March 2026?\"); same gold and scoring.",
+    "expected_sql": "SELECT t.DocumentTypeName, COUNT(*) AS document_count FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY document_count DESC, t.DocumentTypeName ASC",
+    "expected_tables": [
+      "SalesDocument",
+      "DocumentType"
+    ],
+    "expected_columns": [
+      "DocumentDate",
+      "DocumentTypeName"
+    ],
+    "disallowed_columns": [
+      "DocumentTypeClass"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "compare_columns": [
+        "DocumentTypeName",
+        "document_count"
+      ]
+    },
+    "signal_checks": {
+      "min_row_count": 3,
+      "require_nonzero_columns": [
+        "document_count"
+      ],
+      "require_nonnull_columns": [
+        "DocumentTypeName"
+      ],
+      "min_distinct_counts": {
+        "DocumentTypeName": 3
+      }
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
+  },
+  {
+    "id": "hard_typo_top_customers_mar_2026",
+    "intentId": "customer_net_sales_march_2026",
+    "split": "dev",
+    "question": "top custmers by net sales in Mrach 2026",
+    "canonicalQuestion": "Show the top customers by total net sales amount in March 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "typo",
+      "customer",
+      "net_sales",
+      "ranking"
+    ],
+    "failure_class": "typo",
+    "notes": "Misspelled core_public_001 (\"customers\", \"March\"); same gold and scoring.",
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 10",
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "expected_columns": [
+      "NetAmount",
+      "DocumentDate",
+      "CustomerName"
+    ],
+    "disallowed_columns": [
+      "NetPayableAmount"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc",
+      "decimals": 2
+    },
+    "signal_checks": {
+      "min_row_count": 4,
+      "require_nonzero_columns": [
+        "total_net_amount"
+      ],
+      "require_nonnull_columns": [
+        "CustomerName"
+      ],
+      "min_distinct_counts": {
+        "CustomerName": 4
+      }
+    },
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 7,
+      "v3": 7
+    }
+  },
+  {
+    "id": "hard_typo_ar_balance_by_store_mar_2026",
+    "intentId": "store_outstanding_balance_mar_2026",
+    "split": "holdout",
+    "question": "AR bal by store mar 2026",
+    "canonicalQuestion": "What is the receivables position by outlet for March 2026 sales?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "typo",
+      "outstanding_balance",
+      "store_location",
+      "aggregation"
+    ],
+    "failure_class": "typo",
+    "notes": "Shorthand for outstanding (accounts-receivable) balance by store location for documents dated March 2026; same intent and gold as hard_vocab_receivables_by_outlet_mar_2026.",
+    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.BalanceAmount, 0)) DESC, s.LocationName ASC",
+    "expected_tables": [
+      "SalesDocument",
+      "StoreLocation"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 2
+    },
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 3,
+      "v3": 3
+    }
+  },
+  {
+    "id": "hard_typo_qty_by_category_feb_2026",
+    "intentId": "category_qty_feb_2026",
+    "split": "dev",
+    "question": "qty sold by catgory feb 2026",
+    "canonicalQuestion": "Quantity sold per product category in February 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "typo",
+      "product_category",
+      "quantity",
+      "aggregation"
+    ],
+    "failure_class": "typo",
+    "notes": "Shorthand and a typo for the templated intent category_qty_feb_2026; same gold and scoring.",
+    "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "ProductCategory"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 3
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 3,
+      "v3": 4
+    }
+  },
+  {
+    "id": "hard_typo_rev_by_brand_q1_2026",
+    "intentId": "brand_net_sales_q1_2026",
+    "split": "dev",
+    "question": "rev by brnd Q1 26",
+    "canonicalQuestion": "rev by brnd Q1 26",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "typo",
+      "brand",
+      "line_net_sales",
+      "aggregation"
+    ],
+    "failure_class": "typo",
+    "notes": "Shorthand for net revenue (line level) by brand for Q1 2026.",
+    "expected_sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "Brand"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 2,
+      "tolerance": 0.01
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 5,
+      "v3": 5
+    }
+  },
+  {
+    "id": "hard_asof_last_month_net_sales",
+    "intentId": "total_net_sales_mar_2026",
+    "split": "dev",
+    "question": "As of 2026-04-01, what were last month's net sales?",
+    "canonicalQuestion": "As of 2026-04-01, what were last month's net sales?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "relative_date",
+      "net_sales",
+      "scalar"
+    ],
+    "failure_class": "relative_date",
+    "notes": "Last month as of 2026-04-01 is March 2026.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_asof_month_to_date_documents",
+    "intentId": "document_count_feb01_15_2026",
+    "split": "dev",
+    "question": "Today is 15 February 2026. How many sales documents have we recorded this month so far?",
+    "canonicalQuestion": "Today is 15 February 2026. How many sales documents have we recorded this month so far?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "relative_date",
+      "document_count",
+      "scalar"
+    ],
+    "failure_class": "relative_date",
+    "notes": "Month to date as of 15 February 2026. Two readings are accepted: through the end of today (the gold, 1-15 February) and up to the start of today (alternative_expected_sql, 1-14 February).",
+    "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-02-16'",
+    "alternative_expected_sql": [
+      "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-02-15'"
+    ],
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_asof_previous_quarter_units_by_category",
+    "intentId": "category_qty_q1_2026",
+    "split": "holdout",
+    "question": "As of 2026-05-10, how many units did each category sell in the previous quarter?",
+    "canonicalQuestion": "As of 2026-05-10, how many units did each category sell in the previous quarter?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "relative_date",
+      "product_category",
+      "quantity",
+      "aggregation"
+    ],
+    "failure_class": "relative_date",
+    "notes": "The previous quarter as of 2026-05-10 is Q1 2026 (January-March).",
+    "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "ProductCategory"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 3
+    },
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 4,
+      "v3": 4
+    }
+  },
+  {
+    "id": "hard_asof_last_calendar_year_net_sales",
+    "intentId": "total_net_sales_2025",
+    "split": "dev",
+    "question": "Assume today is 2026-01-05. What were our total net sales last calendar year?",
+    "canonicalQuestion": "What were our net sales for the whole of 2025?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "relative_date",
+      "net_sales",
+      "scalar"
+    ],
+    "failure_class": "relative_date",
+    "notes": "Last calendar year as of 2026-01-05 is 2025; the templated intent total_net_sales_2025.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01'",
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_asof_year_to_date_gross",
+    "intentId": "total_gross_q1_2026",
+    "split": "dev",
+    "question": "As of 31 March 2026, what's our year-to-date gross amount?",
+    "canonicalQuestion": "What was the total gross amount for Q1 2026?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "relative_date",
+      "gross_amount",
+      "scalar"
+    ],
+    "failure_class": "relative_date",
+    "notes": "Year to date as of 31 March 2026 is 1 January - 31 March 2026 (Q1 2026); the templated intent total_gross_q1_2026.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01'",
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_gross_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_entity_lakeside_spend_q1_2026",
+    "intentId": "net_sales_lakeside_q1_2026",
+    "split": "dev",
+    "question": "How much did Lakeside Wholesale spend with us in Q1 2026?",
+    "canonicalQuestion": "How much did Lakeside Wholesale spend with us in Q1 2026?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "named_entity",
+      "customer",
+      "net_sales",
+      "scalar"
+    ],
+    "failure_class": "entity_resolution",
+    "notes": "A customer named in the question. Two readings are accepted: net sales (the gold) and the gross amount including tax (alternative_expected_sql), since \"spend\" can include VAT.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'",
+    "alternative_expected_sql": [
+      "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Lakeside Wholesale%'"
+    ],
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_entity_weekend_pantry_units_feb_2026",
+    "intentId": "weekend_pantry_qty_feb_2026",
+    "split": "holdout",
+    "question": "How many units of Weekend Pantry campaign products did we sell in February 2026?",
+    "canonicalQuestion": "How many units of Weekend Pantry campaign products did we sell in February 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "named_entity",
+      "campaign",
+      "quantity",
+      "scalar"
+    ],
+    "failure_class": "entity_resolution",
+    "notes": "A campaign named in the question: units on lines whose product belongs to the Weekend Pantry campaign.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' AND cp.CampaignName LIKE '%Weekend Pantry%'",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "Campaign"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 3,
+      "null_as_zero": [
+        "total_qty"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_entity_clearspring_units_mar_2026",
+    "intentId": "clearspring_qty_mar_2026",
+    "split": "holdout",
+    "question": "How many units of Clearspring Waters products did we sell in March 2026?",
+    "canonicalQuestion": "How many units of Clearspring Waters products did we sell in March 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "named_entity",
+      "brand",
+      "quantity",
+      "scalar"
+    ],
+    "failure_class": "entity_resolution",
+    "notes": "A brand named in the question: units of products whose brand (Product.BrandId) is Clearspring Waters.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Clearspring Waters%'",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "Brand"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 3,
+      "null_as_zero": [
+        "total_qty"
+      ]
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_entity_sales_revenue_credits_feb_2026",
+    "intentId": "sales_revenue_credits_posted_feb_2026",
+    "split": "dev",
+    "question": "Total credits posted to the Sales Revenue account in February 2026?",
+    "canonicalQuestion": "Total credits posted to the Sales Revenue account in February 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "named_entity",
+      "accounting",
+      "credit",
+      "posting_date",
+      "scalar"
+    ],
+    "failure_class": "entity_resolution",
+    "notes": "A ledger account named in the question, postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting (the gold) and the same without postings of canceled sales documents (alternative_expected_sql).",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-02-01' AND p.PostingDate < '2026-03-01' AND a.AccountName LIKE '%Sales Revenue%'",
+    "alternative_expected_sql": [
+      "SELECT ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-02-01' AND p.PostingDate < '2026-03-01' AND a.AccountName LIKE '%Sales Revenue%'"
+    ],
+    "expected_tables": [
+      "AccountingPosting",
+      "LedgerAccount"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_credit"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_entity_summit_grocers_by_code_mar_2026",
+    "intentId": "summit_grocers_net_sales_by_code_mar_2026",
+    "split": "holdout",
+    "question": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
+    "canonicalQuestion": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "named_entity",
+      "customer",
+      "net_sales",
+      "duplicate_name"
+    ],
+    "failure_class": "entity_resolution",
+    "notes": "Two customers share the name Summit Grocers (C-005 and C-008); the question asks for each of them. Two readings are accepted: the customers with March 2026 sales (the gold) and both customers, 0 for one without sales (alternative_expected_sql, LEFT JOIN from Customer).",
+    "expected_sql": "SELECT c.CustomerCode, c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Summit Grocers%' GROUP BY c.CustomerId, c.CustomerCode, c.CustomerName ORDER BY c.CustomerCode ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerCode, c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' WHERE c.CustomerName LIKE '%Summit Grocers%' GROUP BY c.CustomerId, c.CustomerCode, c.CustomerName ORDER BY c.CustomerCode ASC"
+    ],
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "compare_columns": [
+        "CustomerCode",
+        "total_net_amount"
+      ],
+      "decimals": 2
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 2,
+      "v3": 2
+    }
+  },
+  {
+    "id": "hard_clarify_summit_grocers_mar_2026",
+    "intentId": "summit_grocers_purchases_mar_2026",
+    "split": "dev",
+    "question": "How much did Summit Grocers buy in March 2026?",
+    "canonicalQuestion": "How much did Summit Grocers buy in March 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "ambiguous",
+      "customer",
+      "duplicate_name"
+    ],
+    "failure_class": "clarification",
+    "expected_behavior": "clarify",
+    "notes": "Two different customers are named Summit Grocers (C-005 and C-008), so the name alone does not say whose purchases are meant (in the master data every fixture shares, whatever their March sales). A correct product asks which one is meant. Under the behaviour scoring any SQL counts as not clarifying, a per-customer breakdown included: that reading is scored as the answer case hard_entity_summit_grocers_by_code_mar_2026, whose question asks for each namesake."
+  },
+  {
+    "id": "hard_zero_customers_jun_2026",
+    "intentId": "customer_net_sales_jun_2026",
+    "split": "dev",
+    "question": "Show net sales by customer for June 2026.",
+    "canonicalQuestion": "Show net sales by customer for June 2026.",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "zero_row",
+      "customer",
+      "net_sales",
+      "aggregation"
+    ],
+    "failure_class": "empty_result",
+    "notes": "No fixture has a document in June 2026, so the answer is empty (two empty results match). Listing every customer with 0 or NULL (LEFT JOIN from Customer) is accepted too (alternative_expected_sql, null_as_zero), as in edge_public_008. An empty gold only tests that no rows are invented for the empty window: any query that returns nothing passes (see the controls for the plausible mistakes that do return rows).",
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-06-01' AND d.DocumentDate < '2026-07-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-06-01' AND d.DocumentDate < '2026-07-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 0,
+      "v2": 0,
+      "v3": 0
+    }
+  },
+  {
+    "id": "hard_zero_total_net_sales_2023",
+    "intentId": "total_net_sales_2023",
+    "split": "dev",
+    "question": "What were total net sales in 2023?",
+    "canonicalQuestion": "What were total net sales in 2023?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "zero_row",
+      "net_sales",
+      "scalar"
+    ],
+    "failure_class": "empty_result",
+    "notes": "No fixture has a 2023 document: SUM over no rows is one NULL row. null_as_zero accepts 0 for it, and an empty result is accepted too (alternative_expected_sql with HAVING COUNT(*) > 0 returns no row).",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2023-01-01' AND d.DocumentDate < '2024-01-01'",
+    "alternative_expected_sql": [
+      "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2023-01-01' AND d.DocumentDate < '2024-01-01' HAVING COUNT(*) > 0"
+    ],
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_zero_harbor_kiosk_products_mar_2026",
+    "intentId": "harbor_kiosk_products_mar_2026",
+    "split": "dev",
+    "question": "Which products did Harbor Kiosk buy in March 2026?",
+    "canonicalQuestion": "Which products did Harbor Kiosk buy in March 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "zero_row",
+      "customer",
+      "product"
+    ],
+    "failure_class": "empty_result",
+    "notes": "Harbor Kiosk has no March 2026 document in any fixture: the answer is an empty list.",
+    "expected_sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND c.CustomerName LIKE '%Harbor Kiosk%' ORDER BY p.ProductName ASC",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "rowset",
+      "compare_columns": [
+        "ProductName"
+      ]
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 0,
+      "v2": 0,
+      "v3": 0
+    }
+  },
+  {
+    "id": "hard_zero_harbor_kiosk_credit_notes_2026",
+    "intentId": "harbor_kiosk_credit_memos_2026",
+    "split": "holdout",
+    "question": "How many credit notes did Harbor Kiosk receive in 2026?",
+    "canonicalQuestion": "How many credit notes did Harbor Kiosk receive in 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "zero_row",
+      "customer",
+      "document_type",
+      "document_count",
+      "scalar"
+    ],
+    "failure_class": "empty_result",
+    "notes": "\"Credit note\" is the British name of the Credit Memo document type; Harbor Kiosk has none in 2026 in any fixture, so the count is 0.",
+    "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND c.CustomerName LIKE '%Harbor Kiosk%' AND t.DocumentTypeName LIKE '%Credit Memo%'",
+    "expected_tables": [
+      "SalesDocument",
+      "Customer",
+      "DocumentType"
+    ],
+    "comparison": {
+      "mode": "scalar"
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_abstain_employee_headcount_by_store",
+    "intentId": "employee_headcount_by_store",
+    "split": "dev",
+    "question": "What is our employee headcount by store?",
+    "canonicalQuestion": "What is our employee headcount by store?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "unanswerable"
+    ],
+    "failure_class": "abstention",
+    "expected_behavior": "abstain",
+    "notes": "The schema has no employee or staffing data."
+  },
+  {
+    "id": "hard_abstain_weather_on_peak_day",
+    "intentId": "weather_on_peak_sales_day",
+    "split": "holdout",
+    "question": "What was the weather in Stockholm on the day our sales peaked in March 2026?",
+    "canonicalQuestion": "What was the weather in Stockholm on the day our sales peaked in March 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "unanswerable"
+    ],
+    "failure_class": "abstention",
+    "expected_behavior": "abstain",
+    "notes": "The peak day is answerable, the weather is not: there is no weather data."
+  },
+  {
+    "id": "hard_abstain_sales_forecast_jul_2026",
+    "intentId": "net_sales_forecast_jul_2026",
+    "split": "dev",
+    "question": "Forecast our net sales for July 2026.",
+    "canonicalQuestion": "Forecast our net sales for July 2026.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "unanswerable"
+    ],
+    "failure_class": "abstention",
+    "expected_behavior": "abstain",
+    "notes": "A forecast is not in the data, and SQL over past sales is not a forecast; the product should say so instead of returning history."
+  },
+  {
+    "id": "hard_abstain_competitor_prices",
+    "intentId": "competitor_prices",
+    "split": "holdout",
+    "question": "Which competitors sell the same products cheaper than we do?",
+    "canonicalQuestion": "Which competitors sell the same products cheaper than we do?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "unanswerable"
+    ],
+    "failure_class": "abstention",
+    "expected_behavior": "abstain",
+    "notes": "There is no competitor or market price data."
+  },
+  {
+    "id": "hard_abstain_customer_satisfaction",
+    "intentId": "customer_satisfaction_score",
+    "split": "dev",
+    "question": "What is the customer satisfaction score for Lakeside Wholesale?",
+    "canonicalQuestion": "What is the customer satisfaction score for Lakeside Wholesale?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "unanswerable"
+    ],
+    "failure_class": "abstention",
+    "expected_behavior": "abstain",
+    "notes": "There is no survey or satisfaction data."
+  },
+  {
+    "id": "hard_clarify_sales_last_month",
+    "intentId": "sales_last_month_no_date",
+    "split": "dev",
+    "question": "Show sales for last month.",
+    "canonicalQuestion": "Show sales for last month.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "ambiguous"
+    ],
+    "failure_class": "clarification",
+    "expected_behavior": "clarify",
+    "notes": "No as-of date over a static demo database: \"last month\" cannot be resolved without asking (the as-of cases give the date; net vs gross \"sales\" alone is answerable, see hard_ambiguous_sales_mar_2026)."
+  },
+  {
+    "id": "hard_clarify_best_customer",
+    "intentId": "best_customer_unspecified",
+    "split": "dev",
+    "question": "Who is our best customer?",
+    "canonicalQuestion": "Who is our best customer?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "ambiguous"
+    ],
+    "failure_class": "clarification",
+    "expected_behavior": "clarify",
+    "notes": "Best by what (net sales, number of orders, payment record) and over which period?"
+  },
+  {
+    "id": "hard_clarify_south_store_performance",
+    "intentId": "south_store_performance_vague",
+    "split": "holdout",
+    "question": "How is the South Store doing?",
+    "canonicalQuestion": "How is the South Store doing?",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "ambiguous"
+    ],
+    "failure_class": "clarification",
+    "expected_behavior": "clarify",
+    "notes": "No metric and no period: a correct product asks what \"doing\" should measure."
+  },
+  {
+    "id": "hard_clarify_this_year_vs_last_year",
+    "intentId": "compare_this_year_last_year",
+    "split": "holdout",
+    "question": "Compare this year with last year.",
+    "canonicalQuestion": "Compare this year with last year.",
+    "difficulty": "hard",
+    "tags": [
+      "hard_case",
+      "ambiguous"
+    ],
+    "failure_class": "clarification",
+    "expected_behavior": "clarify",
+    "notes": "No metric and no as-of date (\"this year\" in a static demo database)."
+  },
+  {
+    "id": "hard_ambiguous_sales_mar_2026",
+    "intentId": "total_net_sales_mar_2026",
+    "split": "dev",
+    "question": "What were sales in March 2026?",
+    "canonicalQuestion": "What were sales in March 2026?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "ambiguous",
+      "net_sales",
+      "scalar"
+    ],
+    "failure_class": "ambiguous_metric",
+    "notes": "\"Sales\" without a qualifier: net sales (the gold, the business rule) and the gross amount including tax (alternative_expected_sql) are both accepted. Same gold as hard_asof_last_month_net_sales, so it shares that intent (total_net_sales_mar_2026) and its dev split.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
+    "alternative_expected_sql": [
+      "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+    ],
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar",
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  },
+  {
+    "id": "hard_ambiguous_orders_mar_2026",
+    "intentId": "orders_mar_2026_all_or_online",
+    "split": "dev",
+    "question": "How many orders did we get in March 2026?",
+    "canonicalQuestion": "How many orders did we get in March 2026?",
+    "difficulty": "medium",
+    "tags": [
+      "hard_case",
+      "ambiguous",
+      "document_count",
+      "scalar"
+    ],
+    "failure_class": "ambiguous_metric",
+    "notes": "\"Orders\" can mean every sales document (the gold) or only documents of type Online Order (alternative_expected_sql); both are accepted.",
+    "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
+    "alternative_expected_sql": [
+      "SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND t.DocumentTypeName LIKE '%Online Order%'"
+    ],
+    "expected_tables": [
+      "SalesDocument"
+    ],
+    "comparison": {
+      "mode": "scalar"
+    },
+    "known_validator_rejection": "TABLE_SCOPE",
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
+  }
+]

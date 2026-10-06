@@ -102,10 +102,31 @@ function headline(report) {
     `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}) · ` +
       `intent-clustered accuracy ${formatPercent(stats.intentClustered.value)} (95% CI ${formatInterval(stats.intentClustered.ci95)}, ${stats.intentClustered.intents} intents)`
   );
-  if (stats.cases.excluded > 0) {
+  const splits = stats.bySplit || [];
+  if (splits.length > 1) {
     lines.push('');
     lines.push(
-      `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
+      `By split: ${splits.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases} case${entry.cases === 1 ? '' : 's'})`).join(' · ')}. ` +
+        'Dev cases include the wording the prompt rules and the semantic layer were tuned on; holdout cases are new intents whose questions contain ' +
+        'no multi-word phrase of the semantic layer and not the tuned word "revenue" (single words such as customer, store or units still match it).'
+    );
+  }
+  if (report.behavior?.cases > 0) {
+    lines.push('');
+    lines.push(behaviorLine(report.behavior) + ' Not in strict accuracy (see Behaviour cases).');
+  }
+  if (stats.cases.excluded > 0) {
+    lines.push('');
+    // The denominator is the answer cases: abstain/clarify cases never have a
+    // counted repetition and are reported on their own, so counting them here
+    // would make "excluded of selected" disagree with the accuracy's n.
+    const behaviorCases = stats.cases.behavior || 0;
+    const answerCases = stats.cases.selected - behaviorCases;
+    lines.push(
+      behaviorCases > 0
+        ? `${stats.cases.excluded} of ${answerCases} answer case(s) had no counted repetition and are left out of accuracy (see Attribution); ` +
+            `the ${behaviorCases} abstain/clarify case(s) are scored apart.`
+        : `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
     );
   }
   if (report.stopped) {
@@ -266,13 +287,23 @@ function attributionSection(report) {
         'are infra_error, not model errors: the rejection might have been a false one.'
     );
   }
+  // Excluded outcomes (repetitions of answer cases), and the abstain /
+  // clarify cases, which are never in accuracy or in the tables above.
   const excluded = Object.entries(attribution.excluded);
+  const behaviorCases = (report.results || []).filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const parts = [];
+  if (excluded.length > 0) {
+    parts.push(excluded.map(([outcome, count]) => `${outcome} ${count}`).join(', '));
+  }
+  if (behaviorCases.length > 0) {
+    const repetitions = behaviorCases.reduce((total, record) => total + (record.repetitions?.length || 0), 0);
+    parts.push(
+      `${behaviorCases.length} abstain/clarify case${behaviorCases.length === 1 ? '' : 's'} ` +
+        `(${repetitions} repetition${repetitions === 1 ? '' : 's'}; see Behaviour cases)`
+    );
+  }
   lines.push('');
-  lines.push(
-    excluded.length > 0
-      ? `Excluded from accuracy: ${excluded.map(([outcome, count]) => `${outcome} ${count}`).join(', ')}.`
-      : 'Excluded from accuracy: none.'
-  );
+  lines.push(`Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`);
   return lines.join('\n');
 }
 
@@ -320,6 +351,7 @@ function breakdownSection(report) {
   const stats = report.stats;
   const rows = [];
   for (const [label, entries] of [
+    ['split', stats.bySplit || []],
     ['failure_class', stats.byFailureClass],
     ['difficulty', stats.byDifficulty],
     ['tag', stats.byTag],
@@ -328,18 +360,70 @@ function breakdownSection(report) {
       rows.push([label, entry.key, entry.cases, formatPercent(entry.accuracy), `${entry.majorityPasses}/${entry.cases}`]);
     }
   }
-  return ['## By failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
+  return ['## By split, failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
+}
+
+/** "M/N declined" for a behaviour case's summary (its handled repetitions), or "excluded". */
+export function behaviorPassText(summary) {
+  const behavior = summary?.behavior;
+  return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} declined` : 'excluded';
 }
 
 function casesSection(report) {
-  const rows = report.results.map((record) => [
-    record.id,
-    truncate(record.question, 60),
-    passRateText(record.summary),
-    record.summary?.outcome || record.status,
-    [record.summary?.bucket, ...(record.summary?.tags || [])].filter(Boolean).join(', '),
-  ]);
+  const rows = report.results.map((record) => {
+    const behavior = record.expected_behavior && record.expected_behavior !== 'answer';
+    return [
+      record.id,
+      truncate(record.question, 60),
+      behavior ? behaviorPassText(record.summary) : passRateText(record.summary),
+      record.summary?.outcome || record.status,
+      [behavior ? `expects ${record.expected_behavior}` : null, record.summary?.bucket, ...(record.summary?.tags || [])].filter(Boolean).join(', '),
+    ];
+  });
   return ['## Cases', '', table(['Case', 'Question', 'Passes', 'Outcome', 'Attribution'], rows)].join('\n');
+}
+
+export function behaviorLine(behavior) {
+  return `Behaviour cases: abstain/clarify — ${behavior.cases} case${behavior.cases === 1 ? '' : 's'}, ${behavior.handled} handled correctly` +
+    (behavior.counted < behavior.cases ? ` (${behavior.cases - behavior.counted} without a counted repetition)` : '') +
+    '.';
+}
+
+function behaviorSection(report) {
+  const behavior = report.behavior;
+  if (!behavior || behavior.cases === 0) {
+    return '';
+  }
+  const lines = ['## Behaviour cases (abstain / clarify)', '', behaviorLine(behavior), ''];
+  lines.push(
+    'These questions have no correct SQL: the data cannot answer them (abstain) or they are ambiguous (clarify). A case is handled when the ' +
+      'product returned no SQL in more than half of its counted repetitions (`declined`); producing SQL is `answered_instead_of_abstain` / ' +
+      '`answered_instead_of_clarify` (model bucket, tagged `not_executed` when the SQL was rejected or failed). The product has no ' +
+      'abstention or clarification channel yet, so today it is expected to fail these. They are not in strict accuracy or the paired comparison.'
+  );
+  lines.push('');
+  lines.push(
+    table(
+      ['Expected behaviour', 'Cases', 'Handled', 'Outcomes (majority)'],
+      Object.entries(behavior.byBehavior).map(([name, entry]) => [
+        name,
+        entry.cases,
+        `${entry.handled}/${entry.counted}`,
+        Object.entries(entry.outcomes)
+          .map(([outcome, count]) => `${outcome} ${count}`)
+          .join(', '),
+      ])
+    )
+  );
+  const cases = report.results.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  lines.push('');
+  lines.push(
+    table(
+      ['Case', 'Question', 'Expects', 'Declined', 'Outcome'],
+      cases.map((record) => [record.id, truncate(record.question, 60), record.expected_behavior, behaviorPassText(record.summary), record.summary?.outcome || record.status])
+    )
+  );
+  return lines.join('\n');
 }
 
 function costSection(report) {
@@ -466,6 +550,10 @@ function verificationSection(report) {
     `Gold and controls: ${verification.cases} case(s) verified on every fixture, ${verification.problems.length} with problems; ` +
       `gates ${verification.gateFailures.length === 0 ? 'passed' : `FAILED (${verification.gateFailures.join('; ')})`}.`
   );
+  if (verification.warnings?.length) {
+    lines.push('');
+    lines.push(`Warnings (npm run verify-dataset fails on these): ${verification.warnings.join('; ')}.`);
+  }
   // Negative controls that are not a verdict, design + held-out. Undecided
   // ones (mapping search cut off) count as not killed; invalid (an SQL error)
   // and unscored (an infrastructure error) ones are problems. A summary
@@ -561,6 +649,7 @@ export function renderReportMarkdown(report) {
     attributionSection(report),
     confusionSection(report),
     report.comparison ? comparisonSection(report.comparison) : '',
+    behaviorSection(report),
     casesSection(report),
     breakdownSection(report),
     costSection(report),
@@ -583,6 +672,10 @@ export function renderHeadline(report) {
     `Attribution (repetitions): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
       `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}) · ` +
       `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
+    ...((stats.bySplit || []).length > 1
+      ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]
+      : []),
+    ...(report.behavior?.cases > 0 ? [`${behaviorLine(report.behavior)} (not in accuracy)`] : []),
     `Cost ${formatUsd(stats.cost.total)} (${formatUsd(stats.cost.perQuestion, 5)}/question, ${formatUsd(stats.cost.perCorrect, 5)}/correct) · ` +
       `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
   ];

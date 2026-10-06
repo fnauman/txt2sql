@@ -40,6 +40,22 @@
 //   expected_sql_error          harness (gold failed; excluded)
 //   harness_error               harness (the runner itself threw; excluded)
 //
+// Behavior cases (expected_behavior 'abstain' or 'clarify': no gold SQL) are
+// never in strict accuracy (counted is always false) and get their own
+// outcomes, reported in their own section:
+//   answered_instead_of_abstain model   (the product produced SQL for a
+//   answered_instead_of_clarify model    question it should have declined or
+//                                        asked about; tagged not_executed when
+//                                        that SQL was rejected or failed)
+//   declined                    pass    (no SQL in any attempt: the model
+//                                        returned empty SQL or refused. The
+//                                        product has no clarification channel
+//                                        yet, so for a clarify case declining
+//                                        is the best it can do today)
+// Outages, timeouts, budget skips and harness errors keep their usual
+// outcomes; `behavior_counted` says whether a repetition counts in the
+// behavior score (excluded outcomes do not).
+//
 // Guardrail-rejected SQL is checked by re-running it: if it passes the layer-1
 // safety check (validateSqlSafety) it runs read-only on every fixture through
 // the oracle (scoreAgainstGold); a match makes the rejection false. A
@@ -71,6 +87,9 @@ export const OUTCOME_BUCKETS = Object.freeze({
   cancelled: 'skipped',
   expected_sql_error: 'harness',
   harness_error: 'harness',
+  answered_instead_of_abstain: 'model',
+  answered_instead_of_clarify: 'model',
+  declined: 'pass',
 });
 
 // Outcomes left out of the strict-accuracy denominator (reported separately).
@@ -94,6 +113,9 @@ export const OUTCOME_ORDER = Object.freeze([
   'harness_error',
   'skipped_budget',
   'cancelled',
+  'answered_instead_of_abstain',
+  'answered_instead_of_clarify',
+  'declined',
 ]);
 
 export const BUCKET_ORDER = Object.freeze(['pass', 'model', 'system', 'infra', 'skipped', 'harness']);
@@ -123,12 +145,55 @@ function isGuardrailRejected(attempt) {
   return attempt?.validation?.ok === false && attempt.validation.layer === 'guardrail';
 }
 
+function producedSql(repetition) {
+  return (repetition?.attempts || []).some((attempt) => String(attempt.generatedSql || '').trim() !== '') || String(repetition?.generated_sql || '').trim() !== '';
+}
+
+// Codes with which a finished product loop returned no SQL on purpose: the
+// model sent an empty query (EMPTY_SQL) or refused (LLM_REFUSED).
+const DECLINE_CODES = new Set(['EMPTY_SQL', 'LLM_REFUSED']);
+
+/**
+ * Attribution of one repetition of an abstain / clarify case: see the file
+ * comment. counted is always false (behavior cases are not in strict
+ * accuracy); behavior_counted is false for excluded outcomes.
+ */
+export function classifyBehaviorRepetition(repetition, testCase) {
+  const behavior = testCase.expected_behavior;
+  const status = repetition?.status;
+  const answered = `answered_instead_of_${behavior}`;
+  let outcome;
+  const tags = [];
+  if (['pass', 'answered', 'result_mismatch', 'retrieval_miss'].includes(status)) {
+    outcome = answered;
+  } else if (['validation_error', 'execution_error', 'llm_error'].includes(status) && !(status === 'llm_error' && isLlmUnavailableCode(repetition.error_code))) {
+    const finalCode = finalAttempt(repetition)?.validation?.code || repetition.error_code || null;
+    if (producedSql(repetition)) {
+      outcome = answered;
+      tags.push('not_executed');
+    } else if (DECLINE_CODES.has(finalCode) || DECLINE_CODES.has(repetition.error_code)) {
+      outcome = 'declined';
+    } else {
+      outcome = 'llm_error';
+    }
+  } else {
+    // Budget, cancellation, outages, deadlines, infrastructure and harness
+    // failures: the usual outcome (no SQL to judge either way).
+    return { ...classifyRepetition(repetition, {}), counted: false, behavior_counted: false };
+  }
+  return { outcome, bucket: OUTCOME_BUCKETS[outcome], counted: false, behavior_counted: true, outcome_tags: tags };
+}
+
 /**
  * Attribution of one repetition (an evaluateQuestion result, possibly with
  * attempts annotated by checkGuardrailRejections). Returns
- * { outcome, bucket, counted, outcome_tags }.
+ * { outcome, bucket, counted, outcome_tags } (plus behavior_counted for an
+ * abstain / clarify case).
  */
 export function classifyRepetition(repetition, testCase = {}) {
+  if (testCase?.expected_behavior && testCase.expected_behavior !== 'answer') {
+    return classifyBehaviorRepetition(repetition, testCase);
+  }
   const status = repetition?.status;
   const tags = [];
   let outcome;
@@ -254,14 +319,29 @@ function pickMajority(outcomes) {
  *   (ties go to the failure listed first in OUTCOME_ORDER), even when 'pass'
  *   is the most frequent single outcome (2 passes against two different
  *   failures is 50%, a failed case);
- * - nothing counted: the most frequent outcome of all repetitions (same ties).
+ * - nothing counted: for an abstain / clarify case with behaviour-scored
+ *   repetitions, 'declined' when most of them declined, else their most
+ *   frequent other outcome (so it agrees with behavior.majorityHandled);
+ *   otherwise the most frequent outcome of all repetitions (same ties).
  */
 export function summarizeCaseRepetitions(repetitions) {
   const list = repetitions || [];
   const counted = list.filter((repetition) => repetition.counted);
   const passes = counted.filter((repetition) => repetition.outcome === 'pass').length;
   const majorityPass = counted.length ? passes * 2 > counted.length : null;
-  const pool = majorityPass === null ? list : majorityPass ? counted.filter((repetition) => repetition.outcome === 'pass') : counted.filter((repetition) => repetition.outcome !== 'pass');
+  const behaviorScored = list.filter((repetition) => repetition.behavior_counted);
+  const behaviorCase = list.some((repetition) => 'behavior_counted' in repetition);
+  const behavior = behaviorCase ? summarizeBehaviorRepetitions(behaviorScored) : null;
+  let pool;
+  if (majorityPass !== null) {
+    pool = counted.filter((repetition) => (repetition.outcome === 'pass') === majorityPass);
+  } else if (behavior && behavior.majorityHandled !== null) {
+    // An abstain / clarify case (never counted): the outcome agrees with
+    // majorityHandled the way an answer case's agrees with majorityPass.
+    pool = behaviorScored.filter((repetition) => (repetition.outcome === 'declined') === behavior.majorityHandled);
+  } else {
+    pool = list;
+  }
   const outcome = pickMajority(pool.map((repetition) => repetition.outcome));
   const representative = pool.find((repetition) => repetition.outcome === outcome) || null;
   const tags = [...new Set(pool.filter((repetition) => repetition.outcome === outcome).flatMap((repetition) => repetition.outcome_tags || []))].sort();
@@ -275,6 +355,51 @@ export function summarizeCaseRepetitions(repetitions) {
     bucket: representative?.bucket || (outcome ? OUTCOME_BUCKETS[outcome] : null),
     tags,
     outcomes: Object.fromEntries(OUTCOME_ORDER.filter((name) => list.some((repetition) => repetition.outcome === name)).map((name) => [name, list.filter((repetition) => repetition.outcome === name).length])),
+    ...(behavior ? { behavior } : {}),
+  };
+}
+
+// Behavior score of one abstain / clarify case: repetitions that declined
+// (no SQL) over the repetitions that count for it; handled when more than
+// half did.
+function summarizeBehaviorRepetitions(scored) {
+  const handled = scored.filter((repetition) => repetition.outcome === 'declined').length;
+  return {
+    counted: scored.length,
+    handled,
+    rate: scored.length ? Number((handled / scored.length).toFixed(4)) : null,
+    majorityHandled: scored.length ? handled * 2 > scored.length : null,
+  };
+}
+
+/**
+ * Behavior section of a report: abstain / clarify cases, how many the
+ * product handled (declined in a majority of its counted repetitions), and
+ * the outcomes per behavior.
+ */
+export function summarizeBehavior(caseRecords) {
+  const records = (caseRecords || []).filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const byBehavior = {};
+  for (const record of records) {
+    const entry = (byBehavior[record.expected_behavior] ||= { cases: 0, handled: 0, counted: 0, outcomes: {} });
+    entry.cases += 1;
+    if (record.summary?.behavior?.counted > 0) {
+      entry.counted += 1;
+      entry.handled += record.summary.behavior.majorityHandled ? 1 : 0;
+    }
+    const outcome = record.summary?.outcome || 'none';
+    entry.outcomes[outcome] = (entry.outcomes[outcome] || 0) + 1;
+  }
+  const counted = records.filter((record) => record.summary?.behavior?.counted > 0);
+  const handled = counted.filter((record) => record.summary.behavior.majorityHandled).length;
+  return {
+    cases: records.length,
+    counted: counted.length,
+    handled,
+    rate: counted.length ? Number((handled / counted.length).toFixed(4)) : null,
+    definition: 'abstain / clarify cases where the product returned no SQL in more than half of the counted repetitions',
+    byBehavior,
+    caseIds: records.map((record) => record.id),
   };
 }
 

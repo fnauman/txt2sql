@@ -122,7 +122,7 @@ test('run statistics treat the case as the unit and cluster by intent', () => {
   const stats = summarizeRunStatistics(records, { resamples: 1000 });
   assert.equal(stats.unit, 'case');
   assert.equal(stats.repeat, 3);
-  assert.deepEqual(stats.cases, { selected: 4, counted: 3, excluded: 1, intents: 2 });
+  assert.deepEqual(stats.cases, { selected: 4, counted: 3, excluded: 1, behavior: 0, intents: 2 });
   // Mean of per-case pass rates (1, 2/3, 0), not pooled passes / attempts.
   assert.equal(stats.strictAccuracy.value, Number(((1 + 2 / 3 + 0) / 3).toFixed(4)));
   assert.equal(stats.strictAccuracy.n, 3);
