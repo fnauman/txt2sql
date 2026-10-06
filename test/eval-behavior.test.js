@@ -498,9 +498,13 @@ test('a rescore\'s --gate coverage counts only answer cases of today\'s suite (b
 });
 
 test('the progress line judges a behavior case on whether it declined, and keeps a timeout a timeout', () => {
-  const line = (result) => formatProgress({ testCase: abstainCase, repetition: 1, result, completed: 1, total: 1, repeat: 1 });
+  // abstainCase is a holdout case: revealed here, hidden by default (below).
+  const line = (result) => formatProgress({ testCase: abstainCase, repetition: 1, result, completed: 1, total: 1, repeat: 1, revealHoldout: true });
   assert.match(line(behaviorRep('validation_error')), /^\[1\/1\] ok {3}hard_abstain_headcount: declined \(expects abstain\)/);
   assert.match(line(behaviorRep('answered')), /FAIL hard_abstain_headcount: answered_instead_of_abstain \(expects abstain\)/);
   assert.match(line({ status: 'aborted', timed_out: true, late_status: 'answered', attempts: [] }), /FAIL hard_abstain_headcount: timeout \(finished late: answered\)/);
   assert.match(line({ status: 'skipped_budget', attempts: [] }), /skip hard_abstain_headcount: skipped_budget/);
+  // By default a holdout case's progress line names neither the case nor its verdict.
+  const hidden = formatProgress({ testCase: abstainCase, repetition: 2, result: behaviorRep('answered'), completed: 3, total: 12, repeat: 3 });
+  assert.equal(hidden, '[ 3/12] done a holdout case rep 2/3 (result hidden: aggregate only)');
 });

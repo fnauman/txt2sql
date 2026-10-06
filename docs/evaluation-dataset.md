@@ -135,6 +135,23 @@ npm run holdout-manifest                                          # check (exit 
 npm run holdout-manifest -- --write --note "<what changed and why>"  # record the reviewed change
 ```
 
+**Holdout policy.**
+
+- Error analysis and experiment design use **dev failures only**. Nobody
+  reads holdout questions, golds or per-case results to decide what to
+  build or how to tune it.
+- The holdout is looked at **in aggregate**: report.md and the console show
+  holdout accuracy by split, never per case and never as a list of flipped
+  cases, unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
+  documented look, for example when retiring a holdout). `report.json` keeps
+  every case for the rescore, the comparison and the gate; opening it is
+  revealing the holdout.
+- **Any change to the holdout** (a case added, removed, reworded, re-scored
+  or moved to dev) requires a manifest update with a note saying what and
+  why; the manifest diff is the reviewable record.
+- A holdout that has been inspected is retired to dev with a tag (as the
+  first one was, `formerly_holdout`), and a new one is authored blind.
+
 Limit: a holdout whose wording avoids the semantic layer mixes two effects,
 unseen intents and unseen vocabulary, so a dev / holdout gap does not say
 which one hurts.
@@ -1049,6 +1066,13 @@ rule).
   false rejection rate; unknown and safety-layer rejections counted apart.
 - **Behaviour cases (abstain / clarify)**: per expected behaviour, cases
   handled, the majority outcomes, and a per-case table.
+- **Holdout in aggregate only** (by default): holdout cases appear in the
+  split line and rows only; the case tables, the behaviour-case table, the
+  comparison's flip and exclusion lists and the console's progress, rescore
+  and flip lines leave them out and count them ("N holdout case(s) not
+  listed"), and the failure-class, difficulty and tag breakdowns cover dev
+  cases. `--reveal-holdout` lists them. See
+  [Splits and the holdout policy](#splits-and-the-holdout-policy).
 - **Cases**: id, question, passes / counted repetitions (declined / counted
   for behaviour cases), the case outcome and its attribution. The case
   outcome agrees with the majority pass: `pass` only when more than half of

@@ -3,6 +3,26 @@
 
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER } from './attribution.js';
+import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
+import { summarizeBreakdowns } from './stats.js';
+
+// Holdout display policy (src/eval/holdout.js): unless `revealHoldout` is
+// set, report.md and the console show holdout results in aggregate only (the
+// split breakdown): no per-case holdout rows, no holdout flip lists and no
+// holdout ids in the comparison's lists. report.json keeps everything.
+
+// The ids report.md and the console must not list: the holdout cases of the
+// report and of its comparison (empty when they are revealed).
+function hiddenIds(report, { revealHoldout = false } = {}) {
+  if (revealHoldout) {
+    return new Set();
+  }
+  return new Set([...holdoutRecordIds(report?.results), ...(report?.comparison?.holdoutCases || [])]);
+}
+
+function comparisonHiddenIds(comparison, { revealHoldout = false } = {}) {
+  return revealHoldout ? new Set() : new Set(comparison?.holdoutCases || []);
+}
 
 const BUCKET_LABELS = {
   pass: 'pass',
@@ -98,7 +118,7 @@ function passRateText(summary) {
   return `${summary.passes}/${summary.counted}`;
 }
 
-function headline(report) {
+function headline(report, hidden = new Set()) {
   const stats = report.stats;
   const strict = stats.strictAccuracy;
   const date = report.generatedAt ? report.generatedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'n/a';
@@ -120,6 +140,14 @@ function headline(report) {
       `By split: ${splits.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases} case${entry.cases === 1 ? '' : 's'})`).join(' · ')}. ` +
         'Dev cases include the wording the prompt rules and the semantic layer were tuned on; holdout cases are new intents whose questions contain ' +
         'no multi-word phrase of the semantic layer and not the tuned word "revenue" (single words such as customer, store or units still match it).'
+    );
+  }
+  const hiddenHoldout = (report.results || []).filter((record) => hidden.has(record.id)).length;
+  if (hiddenHoldout > 0) {
+    lines.push('');
+    lines.push(
+      `Holdout: ${hiddenHoldout} case(s), shown in aggregate only (accuracy by split); error analysis and experiment design use dev ` +
+        'failures only. `--reveal-holdout` lists them.'
     );
   }
   if (report.behavior?.cases > 0) {
@@ -187,20 +215,27 @@ function contingencyOf(comparison) {
   return { bothPass, regressions, improvements, bothFail: comparison.paired - bothPass - regressions - improvements };
 }
 
-function flipList(entries) {
-  if (entries.length === 0) {
-    return 'none';
+function flipList(entries, hidden = new Set()) {
+  const listed = entries.filter((entry) => !hidden.has(entry.id));
+  const holdout = entries.length - listed.length;
+  const holdoutText = holdout > 0 ? `${holdout} holdout case(s) (not listed)` : '';
+  if (listed.length === 0) {
+    return holdoutText || 'none';
   }
-  const shown = entries.slice(0, 12).map((entry) => `${entry.id} (${entry.baseline.outcome} → ${entry.candidate.outcome})`);
-  return `${shown.join(', ')}${entries.length > shown.length ? `, … ${entries.length - shown.length} more (report.md)` : ''}`;
+  const shown = listed.slice(0, 12).map((entry) => `${entry.id} (${entry.baseline.outcome} → ${entry.candidate.outcome})`);
+  return (
+    `${shown.join(', ')}${listed.length > shown.length ? `, … ${listed.length - shown.length} more (report.md)` : ''}` +
+    (holdoutText ? `; ${holdoutText}` : '')
+  );
 }
 
 /**
  * The comparison as a few plain-text lines for the console: the paired 2x2
  * table of majority verdicts, the accuracy change, the exact McNemar p and
- * the flipped cases by id.
+ * the flipped cases by id (holdout flips only counted, unless revealHoldout).
  */
-export function renderComparisonConsole(comparison) {
+export function renderComparisonConsole(comparison, { revealHoldout = false } = {}) {
+  const hidden = comparisonHiddenIds(comparison, { revealHoldout });
   const contingency = contingencyOf(comparison);
   const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
   const row = (label, left, right) => `  ${label.padEnd(15)}${String(left).padStart(14 + width - 4)}${String(right).padStart(16 + width - 4)}`;
@@ -214,8 +249,8 @@ export function renderComparisonConsole(comparison) {
       `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
     `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
       `${VERDICT_TEXT[comparison.verdict] || comparison.verdict}`,
-    `  regressions: ${flipList(comparison.flips.regressions)}`,
-    `  improvements: ${flipList(comparison.flips.improvements)}`,
+    `  regressions: ${flipList(comparison.flips.regressions, hidden)}`,
+    `  improvements: ${flipList(comparison.flips.improvements, hidden)}`,
   ];
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
@@ -362,20 +397,29 @@ function confusionSection(report) {
   return lines.join('\n');
 }
 
-function breakdownSection(report) {
+function breakdownSection(report, hidden = new Set()) {
   const stats = report.stats;
+  // With the holdout in aggregate only, the finer breakdowns cover dev cases
+  // (a small group of holdout cases would show their per-case results).
+  const holdoutHidden = (report.results || []).some((record) => hidden.has(record.id));
+  const finer = holdoutHidden ? summarizeBreakdowns((report.results || []).filter((record) => !hidden.has(record.id))) : stats;
   const rows = [];
   for (const [label, entries] of [
     ['split', stats.bySplit || []],
-    ['failure_class', stats.byFailureClass],
-    ['difficulty', stats.byDifficulty],
-    ['tag', stats.byTag],
+    ['failure_class', finer.byFailureClass || []],
+    ['difficulty', finer.byDifficulty || []],
+    ['tag', finer.byTag || []],
   ]) {
     for (const entry of entries) {
       rows.push([label, entry.key, entry.cases, formatPercent(entry.accuracy), `${entry.majorityPasses}/${entry.cases}`]);
     }
   }
-  return ['## By split, failure class, difficulty and tag', '', table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.'].join('\n');
+  return [
+    '## By split, failure class, difficulty and tag',
+    '',
+    ...(holdoutHidden ? ['Failure class, difficulty and tag rows cover the dev cases only (the holdout is shown in aggregate, by split).', ''] : []),
+    table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.',
+  ].join('\n');
 }
 
 /** "M/N declined" for a behaviour case's summary (its handled repetitions), or "excluded". */
@@ -384,8 +428,9 @@ export function behaviorPassText(summary) {
   return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} declined` : 'excluded';
 }
 
-function casesSection(report) {
-  const rows = report.results.map((record) => {
+function casesSection(report, hidden = new Set()) {
+  const listed = report.results.filter((record) => !hidden.has(record.id));
+  const rows = listed.map((record) => {
     const behavior = record.expected_behavior && record.expected_behavior !== 'answer';
     return [
       record.id,
@@ -395,7 +440,8 @@ function casesSection(report) {
       [behavior ? `expects ${record.expected_behavior}` : null, record.summary?.bucket, ...(record.summary?.tags || [])].filter(Boolean).join(', '),
     ];
   });
-  return ['## Cases', '', table(['Case', 'Question', 'Passes', 'Outcome', 'Attribution'], rows)].join('\n');
+  const note = hiddenHoldoutNote(report.results.length - listed.length);
+  return ['## Cases', '', table(['Case', 'Question', 'Passes', 'Outcome', 'Attribution'], rows) || 'No case listed.', ...(note ? ['', note] : [])].join('\n');
 }
 
 export function behaviorLine(behavior) {
@@ -404,7 +450,7 @@ export function behaviorLine(behavior) {
     '.';
 }
 
-function behaviorSection(report) {
+function behaviorSection(report, hidden = new Set()) {
   const behavior = report.behavior;
   if (!behavior || behavior.cases === 0) {
     return '';
@@ -430,14 +476,22 @@ function behaviorSection(report) {
       ])
     )
   );
-  const cases = report.results.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
-  lines.push('');
-  lines.push(
-    table(
-      ['Case', 'Question', 'Expects', 'Declined', 'Outcome'],
-      cases.map((record) => [record.id, truncate(record.question, 60), record.expected_behavior, behaviorPassText(record.summary), record.summary?.outcome || record.status])
-    )
-  );
+  const behaviorCases = report.results.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const cases = behaviorCases.filter((record) => !hidden.has(record.id));
+  if (cases.length > 0) {
+    lines.push('');
+    lines.push(
+      table(
+        ['Case', 'Question', 'Expects', 'Declined', 'Outcome'],
+        cases.map((record) => [record.id, truncate(record.question, 60), record.expected_behavior, behaviorPassText(record.summary), record.summary?.outcome || record.status])
+      )
+    );
+  }
+  const note = hiddenHoldoutNote(behaviorCases.length - cases.length, 'behaviour case(s)');
+  if (note) {
+    lines.push('');
+    lines.push(note);
+  }
   return lines.join('\n');
 }
 
@@ -473,7 +527,10 @@ function costSection(report) {
   return ['## Cost, latency, retries, tokens', '', table(['Metric', 'Value'], rows)].join('\n');
 }
 
-function comparisonSection(comparison) {
+function comparisonSection(comparison, { revealHoldout = false } = {}) {
+  const hidden = comparisonHiddenIds(comparison, { revealHoldout });
+  const visible = (entries) => entries.filter((entry) => !hidden.has(entry.id));
+  const visibleIds = (ids) => ids.filter((id) => !hidden.has(id));
   const lines = ['## Comparison with the baseline', ''];
   const base = comparison.baseline;
   const cand = comparison.candidate;
@@ -507,11 +564,26 @@ function comparisonSection(comparison) {
   );
   lines.push('');
   lines.push(comparisonLine(comparison));
-  for (const [title, entries] of [
+  const holdoutFlips = [
+    ['regression(s)', comparison.flips.regressions],
+    ['improvement(s)', comparison.flips.improvements],
+    ['pass-rate change(s) without a flip', comparison.rateChanges],
+  ]
+    .map(([label, entries]) => [label, entries.length - visible(entries).length])
+    .filter(([, count]) => count > 0);
+  if (holdoutFlips.length > 0) {
+    lines.push('');
+    lines.push(
+      `Holdout cases in the comparison (aggregate only, not listed below): ${holdoutFlips.map(([label, count]) => `${count} ${label}`).join(', ')}. ` +
+        '`--reveal-holdout` lists them.'
+    );
+  }
+  for (const [title, all] of [
     ['Regressions (baseline majority pass → candidate fail)', comparison.flips.regressions],
     ['Improvements (baseline fail → candidate majority pass)', comparison.flips.improvements],
     ['Pass-rate changes without a flip', comparison.rateChanges],
   ]) {
+    const entries = visible(all);
     if (entries.length === 0) {
       continue;
     }
@@ -531,19 +603,23 @@ function comparisonSection(comparison) {
     );
   }
   const notes = [];
+  // Lists with their holdout ids counted, not named.
+  const named = (count, ids) => (count > ids.length ? `${ids.length ? `${ids.join(', ')}, and ` : ''}${count - ids.length} holdout case(s)` : ids.join(', '));
+  const goldChanged = visible(comparison.excluded.goldChanged);
   if (comparison.excluded.goldChanged.length) {
-    notes.push(`Excluded, gold changed: ${comparison.excluded.goldChanged.map((entry) => `${entry.id} (${entry.reason})`).join(', ')}.`);
+    notes.push(`Excluded, gold changed: ${named(comparison.excluded.goldChanged.length, goldChanged.map((entry) => `${entry.id} (${entry.reason})`))}.`);
   }
+  const notCounted = visible(comparison.excluded.notCounted);
   if (comparison.excluded.notCounted.length) {
     notes.push(
-      `Excluded from the paired test (not counted, or a timeout/infrastructure majority, in one report): ${comparison.excluded.notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`).join(', ')}.`
+      `Excluded from the paired test (not counted, or a timeout/infrastructure majority, in one report): ${named(comparison.excluded.notCounted.length, notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`))}.`
     );
   }
   if (comparison.newCases.length) {
-    notes.push(`New cases (not in the baseline): ${comparison.newCases.join(', ')}.`);
+    notes.push(`New cases (not in the baseline): ${named(comparison.newCases.length, visibleIds(comparison.newCases))}.`);
   }
   if (comparison.removedCases.length) {
-    notes.push(`Baseline cases not in this run: ${comparison.removedCases.length} (${truncate(comparison.removedCases.join(', '), 300)}).`);
+    notes.push(`Baseline cases not in this run: ${comparison.removedCases.length} (${truncate(named(comparison.removedCases.length, visibleIds(comparison.removedCases)), 300)}).`);
   }
   if (notes.length) {
     lines.push('');
@@ -660,18 +736,22 @@ function legacySection(report) {
   ].join('\n');
 }
 
-/** Renders report.json as Markdown. */
-export function renderReportMarkdown(report) {
+/**
+ * Renders report.json as Markdown. Holdout results are shown in aggregate
+ * only unless `revealHoldout` (see the holdout display policy above).
+ */
+export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
+  const hidden = hiddenIds(report, { revealHoldout });
   const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${report.model}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
   const sections = [
     title,
-    headline(report),
+    headline(report, hidden),
     attributionSection(report),
     confusionSection(report),
-    report.comparison ? comparisonSection(report.comparison) : '',
-    behaviorSection(report),
-    casesSection(report),
-    breakdownSection(report),
+    report.comparison ? comparisonSection(report.comparison, { revealHoldout }) : '',
+    behaviorSection(report, hidden),
+    casesSection(report, hidden),
+    breakdownSection(report, hidden),
     costSection(report),
     verificationSection(report),
     provenanceSection(report),
@@ -680,8 +760,8 @@ export function renderReportMarkdown(report) {
   return `${sections.join('\n\n')}\n`;
 }
 
-/** Short console headline (a few lines). */
-export function renderHeadline(report) {
+/** Short console headline (a few lines); holdout flips only counted unless `revealHoldout`. */
+export function renderHeadline(report, { revealHoldout = false } = {}) {
   const stats = report.stats;
   const attribution = report.attribution;
   const buckets = attribution.repetitions.byBucket;
@@ -704,7 +784,7 @@ export function renderHeadline(report) {
     lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);
   }
   if (report.comparison) {
-    lines.push(renderComparisonConsole(report.comparison));
+    lines.push(renderComparisonConsole(report.comparison, { revealHoldout }));
   }
   return lines.join('\n');
 }

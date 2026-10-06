@@ -173,6 +173,21 @@ function breakdown(records, keysOf) {
     .sort((left, right) => String(left.key).localeCompare(String(right.key)));
 }
 
+/**
+ * Accuracy breakdowns over case records (those with a counted repetition):
+ * by split, failure class, tag and difficulty. report.md recomputes the
+ * last three over dev cases when holdout results are shown in aggregate only.
+ */
+export function summarizeBreakdowns(caseRecords) {
+  const counted = (caseRecords || []).filter((record) => record.summary?.counted > 0);
+  return {
+    bySplit: breakdown(counted, (record) => [record.split || 'dev']),
+    byFailureClass: breakdown(counted, (record) => [record.failure_class || '(none)']),
+    byTag: breakdown(counted, (record) => (record.tags?.length ? record.tags : ['(none)'])),
+    byDifficulty: breakdown(counted, (record) => [record.difficulty || '(none)']),
+  };
+}
+
 // Repetitions that actually asked the model (skipped and gold-error
 // repetitions made no call; a cancelled one only if it got that far).
 function isExecuted(repetition) {
@@ -278,10 +293,7 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
       },
       perIntent,
     },
-    bySplit: breakdown(counted, (record) => [record.split || 'dev']),
-    byFailureClass: breakdown(counted, (record) => [record.failure_class || '(none)']),
-    byTag: breakdown(counted, (record) => (record.tags?.length ? record.tags : ['(none)'])),
-    byDifficulty: breakdown(counted, (record) => [record.difficulty || '(none)']),
+    ...summarizeBreakdowns(counted),
     cost: {
       currency: 'USD',
       total: round(totalCost, 6),

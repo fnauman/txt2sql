@@ -16,6 +16,7 @@ import {
   parseEvalArgs,
   providerConfigRejection,
   runEval,
+  USAGE,
   validateBaselineReport,
   verificationRefusal,
   writesDefaultBaseline,
@@ -53,6 +54,10 @@ test('flags parse lists and numbers; the benchmark profile keeps the old behavio
     assert.deepEqual([benchmark.docker, benchmark.seed, benchmark.verify, benchmark.failOnAnyFailure], [false, false, false, true]);
   }
   assert.deepEqual(parseEvalArgs(['--dataset-file', 'x.json'], { profile: 'benchmark', env: {} }).datasetNames, []);
+  // Holdout results are aggregate-only unless revealed on purpose.
+  assert.equal(options.revealHoldout, false);
+  assert.equal(parseEvalArgs(['--reveal-holdout'], { env: {} }).revealHoldout, true);
+  assert.match(USAGE, /--reveal-holdout {12}list holdout cases one by one/);
 });
 
 test('bad usage is a harness error (exit 2)', () => {
