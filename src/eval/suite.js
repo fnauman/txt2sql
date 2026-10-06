@@ -194,6 +194,19 @@ export function suiteName({ datasetNames = [], datasetFiles = [] } = {}) {
 }
 
 /**
+ * A dropped duplicate's id selects the case kept in its place (live runs and
+ * rescores alike). Returns { caseIds (resolved, de-duplicated),
+ * aliasedCaseIds: [{ id, keptAs }] }.
+ */
+export function resolveCaseIdAliases(caseIds = [], duplicates = []) {
+  const keptAs = new Map(duplicates.filter((duplicate) => duplicate.id !== duplicate.keptAs).map((duplicate) => [duplicate.id, duplicate.keptAs]));
+  return {
+    caseIds: [...new Set(caseIds.map((id) => keptAs.get(id) || id))],
+    aliasedCaseIds: caseIds.filter((id) => keptAs.has(id)).map((id) => ({ id, keptAs: keptAs.get(id) })),
+  };
+}
+
+/**
  * Loads, de-duplicates and filters a suite. Throws on dataset conflicts and on
  * an empty selection (both are dataset/harness failures).
  */
@@ -209,10 +222,8 @@ export async function selectSuite({ datasetsDir = DEFAULT_DATASETS_DIR, datasetN
     throw error;
   }
   const filters = { split, caseIds, tags, intents };
-  // A dropped duplicate's id selects the case kept in its place.
-  const keptAs = new Map(duplicates.filter((duplicate) => duplicate.id !== duplicate.keptAs).map((duplicate) => [duplicate.id, duplicate.keptAs]));
-  const aliasedCaseIds = caseIds.filter((id) => keptAs.has(id)).map((id) => ({ id, keptAs: keptAs.get(id) }));
-  const selected = filterSuiteEntries(entries, { ...filters, caseIds: [...new Set(caseIds.map((id) => keptAs.get(id) || id))] });
+  const { caseIds: resolvedCaseIds, aliasedCaseIds } = resolveCaseIdAliases(caseIds, duplicates);
+  const selected = filterSuiteEntries(entries, { ...filters, caseIds: resolvedCaseIds });
   if (selected.length === 0) {
     const error = new Error(`No cases matched the selection (${describeFilters(filters) || 'no filters'}).`);
     error.code = 'EMPTY_SELECTION';

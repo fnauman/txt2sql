@@ -46,7 +46,7 @@ import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
-import { describeFilters, filterSuiteEntries, parseList, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
+import { describeFilters, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { calculateCost } from '../src/pricing.js';
@@ -1069,8 +1069,13 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const currentCases = new Map(selection.entries.map((entry) => [entry.testCase.id, entry.testCase]));
   // The selection filters pick which recorded cases are rescored (judged on
-  // today's case definition when there is one).
-  const filters = { split: options.split, caseIds: options.caseIds, tags: options.tags, intents: options.intents };
+  // today's case definition when there is one). As in a live run, a dropped
+  // duplicate's id selects the case kept in its place.
+  const { caseIds, aliasedCaseIds } = resolveCaseIdAliases(options.caseIds, selection.duplicates);
+  for (const alias of aliasedCaseIds) {
+    cli.log(`  note: --case-id ${alias.id} is a duplicate of ${alias.keptAs} (same question and gold), which is rescored in its place.`);
+  }
+  const filters = { split: options.split, caseIds, tags: options.tags, intents: options.intents };
   let source = recorded;
   if (describeFilters(filters)) {
     const kept = new Set(

@@ -519,3 +519,21 @@ test('--gate on a rescore exits 2 when the recorded report does not cover today\
   const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-full-suite');
   assert.equal(full.code, 0, full.stdout + full.stderr);
 });
+
+test('--rescore --case-id with a dropped duplicate\'s id rescores the kept case, as a live run would run it', { skip }, async () => {
+  assert.ok(first, 'needs the first run');
+  const datasetsDir = path.join(outputRoot, 'aliased-datasets');
+  await fs.mkdir(datasetsDir, { recursive: true });
+  for (const name of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
+    await fs.copyFile(path.join(REPO_ROOT, 'datasets', `${name}.json`), path.join(datasetsDir, `${name}.json`));
+  }
+  const core = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets/core-public.json'), 'utf8'));
+  const original = core.find((testCase) => testCase.id === 'core_public_001');
+  await fs.writeFile(path.join(datasetsDir, 'zz-alias.json'), JSON.stringify([{ ...original, id: 'zz_alias_001' }]));
+
+  const run = await runEval(['--rescore', first.reportPath, '--skip-verify', '--datasets-dir', datasetsDir, '--case-id', 'zz_alias_001'], 'rescore-alias');
+  assert.equal(run.code, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /note: --case-id zz_alias_001 is a duplicate of core_public_001 \(same question and gold\), which is rescored in its place/);
+  const { report } = await findReport(run.outputDir);
+  assert.deepEqual(report.results.map((record) => record.id), ['core_public_001']);
+});

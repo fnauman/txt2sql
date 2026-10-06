@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
-import { caseSplit, dedupeSuiteCases, filterSuiteEntries, parseList, scoringFingerprint, selectSuite, suiteName } from '../src/eval/suite.js';
+import { caseSplit, dedupeSuiteCases, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, suiteName } from '../src/eval/suite.js';
 
 const makeCase = (id, question, sql, extra = {}) => normalizeBenchmarkCase({ id, question, expected_sql: sql, ...extra });
 
@@ -127,6 +127,20 @@ test('the same question and gold scored differently is a separate case; a droppe
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('resolveCaseIdAliases maps a dropped duplicate\'s id to the kept case (what a rescore filters with)', () => {
+  const duplicates = [
+    { id: 'zz_alias_001', keptAs: 'core_public_001' },
+    { id: 'core_public_002', keptAs: 'core_public_002' }, // same id in two datasets: not an alias
+  ];
+  assert.deepEqual(resolveCaseIdAliases(['zz_alias_001', 'core_public_003'], duplicates), {
+    caseIds: ['core_public_001', 'core_public_003'],
+    aliasedCaseIds: [{ id: 'zz_alias_001', keptAs: 'core_public_001' }],
+  });
+  assert.deepEqual(resolveCaseIdAliases(['zz_alias_001', 'core_public_001'], duplicates).caseIds, ['core_public_001'], 'de-duplicated');
+  assert.deepEqual(resolveCaseIdAliases(['core_public_002'], duplicates), { caseIds: ['core_public_002'], aliasedCaseIds: [] });
+  assert.deepEqual(resolveCaseIdAliases(), { caseIds: [], aliasedCaseIds: [] });
 });
 
 test('an id dropped as a question duplicate is still registered: reusing it for another question is a conflict', async () => {
