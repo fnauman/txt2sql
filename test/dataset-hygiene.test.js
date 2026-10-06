@@ -419,6 +419,11 @@ test('controls: every templated intent and every hard case with controls resolve
 test('known validator rejections are real and current; every other new gold and positive control passes the validator', async () => {
   const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
   const validate = createValidatorProbe({ schema });
+  // Every flag was measured with hints version 1's prompts (the A/B control
+  // arm). The dev flag (METRIC_COLUMN) is a gap of version 1 that version 2
+  // (the default) closes; the fresh holdout's flags are only checked to be
+  // real under version 1 and consistent under version 2.
+  const validateV1 = validate.forHintsVersion(1);
   const index = await loadControlsIndex();
   const flaggedBy = {};
   for (const name of ['templated-public', 'hard-cases-public', FRESH_HOLDOUT]) {
@@ -429,8 +434,20 @@ test('known validator rejections are real and current; every other new gold and 
       const known = testCase.known_validator_rejection;
       if (known) {
         flaggedBy[name] += 1;
-        assert.ok(rejections.some((rejection) => rejection?.code === known), `${testCase.id} is flagged ${known} but every gold variant passes`);
-        assert.ok(rejections.every((rejection) => !rejection || rejection.code === known), `${testCase.id}: ${rejections.map((rejection) => rejection?.code).join(', ')}`);
+        const v1Rejections = await Promise.all(variants.map((sql) => validateV1(testCase.question, sql)));
+        assert.ok(v1Rejections.some((rejection) => rejection?.code === known), `${testCase.id} is flagged ${known} but every gold variant passes under hints version 1`);
+        assert.ok(v1Rejections.every((rejection) => !rejection || rejection.code === known), `${testCase.id}: ${v1Rejections.map((rejection) => rejection?.code).join(', ')}`);
+        if (name === FRESH_HOLDOUT) {
+          // Under version 2 a holdout flag is either still current or closed
+          // and kept by version 1 (a verify-dataset note); which one is not
+          // pinned: nothing is tuned on the holdout.
+          assert.ok(
+            rejections.every((rejection) => !rejection || rejection.code === known),
+            `${testCase.id} under hints version 2: ${rejections.map((rejection) => rejection?.code).join(', ')}`
+          );
+        } else {
+          rejections.forEach((rejection, position) => assert.equal(rejection, null, `${name}/${testCase.id} variant ${position} under hints version 2: ${rejection?.code} ${rejection?.message}`));
+        }
       } else {
         rejections.forEach((rejection, position) => assert.equal(rejection, null, `${name}/${testCase.id} variant ${position}: ${rejection?.code} ${rejection?.message}`));
       }

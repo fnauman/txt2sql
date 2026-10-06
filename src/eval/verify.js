@@ -33,7 +33,10 @@
 // the flag is stale, which is a problem for verify-dataset (so it is removed)
 // and only a warning for the in-process verification of `npm run eval`
 // (`staleKnownRejection: 'warning'`), so a product change that closes the gap
-// can still be measured before the dataset is updated.
+// can still be measured before the dataset is updated. A flag the configured
+// hints version no longer needs but another supported one (HINTS_VERSION, an
+// A/B switch) still does is not stale: the dataset must stay valid for both
+// arms, so it is a note naming the version that keeps it.
 // Abstain / clarify cases (expected_behavior) have no gold and no controls:
 // nothing is executed for them.
 
@@ -46,7 +49,7 @@ import {
   runSignalChecks,
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
-import { normalizeHintsVersion } from '../hints-version.js';
+import { HINTS_VERSIONS, normalizeHintsVersion } from '../hints-version.js';
 import { buildOptimizedPrompt, buildSemanticPlan, resolveEffectiveSchemaScope, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { resolveCaseControls } from './controls.js';
@@ -150,6 +153,15 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
   validate.promptFor = promptFor;
   validate.schemaScope = effectiveScope;
   validate.hintsVersion = version;
+  // The same probe (schema, connection, scope) under another hints version.
+  const siblings = new Map([[version, validate]]);
+  validate.forHintsVersion = (otherVersion) => {
+    const other = normalizeHintsVersion(otherVersion);
+    if (!siblings.has(other)) {
+      siblings.set(other, createValidatorProbe({ schema, connection, statementTimeoutMs, schemaScope, hintsVersion: other }));
+    }
+    return siblings.get(other);
+  };
   return validate;
 }
 
@@ -207,6 +219,26 @@ function checkComparisonColumns(testCase, rows, label, fixture) {
     }
   }
   return problems;
+}
+
+// The other supported hints versions under which the validator still rejects
+// a gold variant of `testCase` with `code` (a probe without forHintsVersion,
+// e.g. a test double, has none).
+async function hintsVersionsKeepingRejection(testCase, variants, validate, code) {
+  if (typeof validate.forHintsVersion !== 'function') {
+    return [];
+  }
+  const kept = [];
+  for (const version of HINTS_VERSIONS.filter((candidate) => candidate !== validate.hintsVersion)) {
+    const other = validate.forHintsVersion(version);
+    for (const variant of variants) {
+      if ((await other(testCase.question, variant.sql))?.code === code) {
+        kept.push(version);
+        break;
+      }
+    }
+  }
+  return kept;
 }
 
 /**
@@ -291,8 +323,16 @@ export async function verifyCase(testCase, {
     }
   }
   if (validate && knownRejection && knownRejectionsSeen === 0 && scopeMasked === 0 && !goldFailed) {
-    const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
-    (staleKnownRejection === 'warning' ? warnings : problems).push(message);
+    const keptBy = await hintsVersionsKeepingRejection(testCase, variants, validate, knownRejection);
+    if (keptBy.length > 0) {
+      notes.push(
+        `known_validator_rejection ${knownRejection}: the validator accepts the gold under hints version ${validate.hintsVersion}, ` +
+          `but still rejects it under HINTS_VERSION=${keptBy.join(', ')}, which keeps the flag`
+      );
+    } else {
+      const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
+      (staleKnownRejection === 'warning' ? warnings : problems).push(message);
+    }
   }
 
   let controls = null;

@@ -19,7 +19,9 @@
 // used. The validator check follows the product configuration
 // (SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS, src/schema-scope.js, and
 // HINTS_VERSION, src/hints-version.js); the datasets'
-// known_validator_rejection flags describe the default configuration.
+// known_validator_rejection flags describe the default configuration, or
+// another supported hints version that still has the gap (a note then, not a
+// stale flag: both arms of the HINTS_VERSION A/B must verify).
 //
 // Usage:
 //   npm run verify-dataset                           # all datasets in datasets/

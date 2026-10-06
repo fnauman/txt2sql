@@ -667,6 +667,32 @@ function addDerivedMetrics(metrics, semanticLayer) {
   return derivedMetrics;
 }
 
+// Metrics measured on ledger postings (the debit and credit metrics).
+const LEDGER_METRIC_GRAINS = new Set(['accounting_posting']);
+
+/**
+ * Hints version 2: in a question about ledger postings (a debit or credit
+ * metric matched), a sales metric is not what the question measures: its
+ * words name an account ("account 4000 (Sales Revenue)") or a document
+ * filter ("postings of sales dated ..."). Such a sales metric stays a prompt
+ * hint but no longer enforces (enforcementReason 'ledger_metric_context'), so
+ * the METRIC_COLUMN guardrail cannot reject every correct ledger answer
+ * (tpl_revenue_credits_monthly_q1_2026_e1b20a, flagged
+ * known_validator_rejection: METRIC_COLUMN under version 1). The derived
+ * line-level metric inherits the demotion.
+ */
+function withLedgerContextArbitration(metrics, matches) {
+  const grainOf = new Map(matches.filter((match) => match.kind === 'metric').map((match) => [match.entry.name, match.entry.grain || null]));
+  if (!metrics.some((metric) => LEDGER_METRIC_GRAINS.has(grainOf.get(metric.name)))) {
+    return metrics;
+  }
+  return metrics.map((metric) =>
+    metric.enforcement === 'enforced' && !LEDGER_METRIC_GRAINS.has(grainOf.get(metric.name))
+      ? { ...metric, enforcement: 'advisory', enforcementReason: 'ledger_metric_context' }
+      : metric
+  );
+}
+
 /**
  * Hints version 2: an entity whose every matched word lies inside the span of
  * a matched metric measured at that entity's grain names the metric's grain,
@@ -792,6 +818,9 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
       ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
       ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
     }));
+  if (version !== 1) {
+    metrics = withLedgerContextArbitration(metrics, matches);
+  }
   const filterHints = matches
     .filter((match) => match.kind === 'filter')
     .map((match) => [match.entry, removeSubsumedAliasMatches(match.matchedSynonyms, match.matchEntry.aliasOnlyValues)])
@@ -1374,9 +1403,13 @@ function advisoryMetricNote(metric, hintsVersion) {
   if (hintsVersion === 1) {
     return ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)';
   }
-  return metric.enforcementReason === 'count_or_existence_intent'
-    ? ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)'
-    : ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
+  if (metric.enforcementReason === 'count_or_existence_intent') {
+    return ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)';
+  }
+  if (metric.enforcementReason === 'ledger_metric_context') {
+    return ' (weak match: the question is about ledger postings, so these words name an account or a filter; use this measure only if the question also asks for it)';
+  }
+  return ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
 }
 
 function formatSemanticHints(semanticPlan, { hintsVersion = 1 } = {}) {

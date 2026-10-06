@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 import fs from 'node:fs';
 
+import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { BUSINESS_RULES, BUSINESS_RULES_V2, businessRulesFor, DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
+import { createValidatorProbe, verifyCase } from '../src/eval/verify.js';
 import {
   buildOptimizedPrompt,
   buildQuestionContext,
@@ -389,4 +391,71 @@ test('v2 retrieval: "account" is no Customer alias, so ledger questions do not r
   assert.ok(score(2).lexicalScore < score(1).lexicalScore);
   assert.ok(score(2).semanticScore < score(1).semanticScore, 'and the customer entity no longer matches');
   assert.deepEqual(retrieveRelevantTables(schema, question, { hintsVersion: 2 }).initialTableNames.slice(0, 2), ['LedgerAccount', 'AccountingPosting']);
+});
+
+// --- METRIC_COLUMN: sales metrics do not enforce in a ledger question --------
+// "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026."
+// enforced net_sales on "revenue", so the guardrail rejected the gold, every
+// alternative and the positive control (tpl_revenue_credits_monthly_q1_2026_e1b20a,
+// known_validator_rejection: METRIC_COLUMN); the retry then added NetAmount
+// and hit FAN_OUT.
+
+const LEDGER_QUESTION = 'Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026.';
+const LEDGER_GOLD =
+  "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m') ORDER BY posting_month";
+
+function validateUnder(question, sql, hintsVersion) {
+  const prompt = buildOptimizedPrompt(schema, question, { hintsVersion });
+  try {
+    validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), {
+      promptContext: prompt.context,
+      response: { sql, tables_used: validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName)).tablesUsed },
+    });
+    return null;
+  } catch (error) {
+    return error.code;
+  }
+}
+
+test('v2 METRIC_COLUMN: in a ledger question a sales metric is a hint, the ledger metric still enforces', () => {
+  assert.equal(metricOf(v1Plan(LEDGER_QUESTION), 'net_sales').enforcement, 'enforced');
+  const sales = metricOf(v2Plan(LEDGER_QUESTION), 'net_sales');
+  assert.deepEqual([sales.enforcement, sales.enforcementReason], ['advisory', 'ledger_metric_context']);
+  assert.equal(metricOf(v2Plan(LEDGER_QUESTION), 'credit_amount').enforcement, 'enforced');
+  assert.match(buildOptimizedPrompt(schema, LEDGER_QUESTION).user, /Metric "net_sales" matched sales, sale, revenue \(weak match: the question is about ledger postings, so these words name an account or a filter/);
+
+  assert.equal(validateUnder(LEDGER_QUESTION, LEDGER_GOLD, 1), 'METRIC_COLUMN');
+  assert.equal(validateUnder(LEDGER_QUESTION, LEDGER_GOLD, 2), null);
+  // Leaving out the ledger measure is still rejected.
+  const noCredit = "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE a.AccountCode = '4000'";
+  assert.equal(validateUnder(LEDGER_QUESTION, noCredit, 2), 'METRIC_COLUMN');
+  // Without a ledger metric, an explicit sales phrase still enforces.
+  assert.equal(metricOf(v2Plan('Which products brought in the most revenue in March 2026?'), 'net_sales').enforcement, 'enforced');
+});
+
+test('verification: a flag the default hints version no longer needs but version 1 does is a note, not a stale flag', async () => {
+  const fixture = { name: 'seed', database: 'demo_retail', connection: { async query() { return [[{ posting_month: '2026-01', total_credit: 1 }]]; } } };
+  const testCase = normalizeBenchmarkCase({ id: 'ledger_case', question: LEDGER_QUESTION, expected_sql: LEDGER_GOLD, known_validator_rejection: 'METRIC_COLUMN' });
+  const verify = (hintsVersion) => verifyCase(testCase, { connections: [fixture], validate: createValidatorProbe({ schema, hintsVersion }), checkControls: false });
+
+  const v1 = await verify(1);
+  assert.deepEqual(v1.problems, []);
+  assert.ok(v1.notes.includes('expected_sql: known validator rejection (METRIC_COLUMN)'));
+
+  const v2 = await verify(2);
+  assert.deepEqual(v2.problems, []);
+  assert.deepEqual(v2.warnings, []);
+  assert.ok(
+    v2.notes.includes('known_validator_rejection METRIC_COLUMN: the validator accepts the gold under hints version 2, but still rejects it under HINTS_VERSION=1, which keeps the flag'),
+    v2.notes.join('; ')
+  );
+
+  // A flag no supported version needs is stale, as before.
+  const stale = normalizeBenchmarkCase({ ...testCase, known_validator_rejection: 'FAN_OUT' });
+  const result = await verifyCase(stale, { connections: [fixture], validate: createValidatorProbe({ schema }), checkControls: false });
+  assert.match(result.problems.join('\n'), /known_validator_rejection is FAN_OUT, but the production validator accepts the gold now: remove the flag/);
+  const probe = createValidatorProbe({ schema });
+  assert.equal(probe.forHintsVersion(2), probe);
+  assert.equal(probe.forHintsVersion(1).hintsVersion, 1);
+  assert.equal(probe.forHintsVersion(1), probe.forHintsVersion('1'));
 });

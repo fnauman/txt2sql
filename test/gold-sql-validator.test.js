@@ -70,21 +70,39 @@ test('the gold corpus has the expected size (245 + 147 unique question/SQL pairs
   assert.equal(fresh.filter((testCase) => testCase.known_validator_rejection).length, 4);
 });
 
+// The flags describe hints version 1 (HINTS_VERSION=1, the A/B control arm,
+// still supported). The suite's flag: the net-sales guardrail misreads
+// "(Sales Revenue)"; hints version 2 (the default) demotes sales metrics in a
+// ledger question, so it admits every variant (verify-dataset notes the flag
+// as kept by version 1 instead of stale). The fresh holdout's flags must be
+// real under version 1; under version 2 each is either still current or
+// closed (then kept by version 1), which one is not pinned: nothing is tuned
+// on the holdout.
 for (const testCase of GOLD.filter((entry) => entry.known_validator_rejection)) {
-  test(`known validator rejection is still real: ${testCase.id} (${testCase.dataset}) ${testCase.known_validator_rejection}`, () => {
-    const semanticPlan = buildSemanticPlan(testCase.question);
-    const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan });
-    const allowedTables = prompt.tables.map((table) => table.tableName);
-    const codes = [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].map((sql) => {
-      try {
-        validateReadOnlySql(sql, allowedTables, { promptContext: prompt.context, response: { sql, tables_used: validateReadOnlySql(sql, ALL_TABLES).tablesUsed } });
-        return null;
-      } catch (error) {
-        return error.code;
-      }
-    });
+  const closedByV2 = !isFreshHoldout(testCase);
+  test(`known validator rejection is still real under hints version 1${closedByV2 ? ', and closed by version 2' : ''}: ${testCase.id} (${testCase.dataset}) ${testCase.known_validator_rejection}`, () => {
+    const codesUnder = (hintsVersion) => {
+      const semanticPlan = buildSemanticPlan(testCase.question, { hintsVersion });
+      const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan });
+      const allowedTables = prompt.tables.map((table) => table.tableName);
+      return [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].map((sql) => {
+        try {
+          validateReadOnlySql(sql, allowedTables, { promptContext: prompt.context, response: { sql, tables_used: validateReadOnlySql(sql, ALL_TABLES).tablesUsed } });
+          return null;
+        } catch (error) {
+          return error.code;
+        }
+      });
+    };
+    const codes = codesUnder(1);
     assert.ok(codes.includes(testCase.known_validator_rejection), `every variant passes now (${codes.join(', ')}): remove known_validator_rejection`);
     assert.ok(codes.every((code) => code === null || code === testCase.known_validator_rejection), codes.join(', '));
+    const codesV2 = codesUnder(2);
+    if (closedByV2) {
+      assert.deepEqual(codesV2, codes.map(() => null));
+    } else {
+      assert.ok(codesV2.every((code) => code === null || code === testCase.known_validator_rejection), codesV2.join(', '));
+    }
     // The basic path (no prompt context, every table allowed) admits it.
     assert.doesNotThrow(() => validateReadOnlySql(testCase.expected_sql, ALL_TABLES));
   });
