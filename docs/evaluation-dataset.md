@@ -470,6 +470,13 @@ Oracle rules (`scoreAgainstGold`):
   intersected across fixtures, partial mappings pruned by their row tuples);
   no common mapping is `inconsistent_assignment`, and a search cut off by its
   step bound fails closed as `assignment_search_exhausted`, never a pass.
+- **Ties at the cut-off**: per gold variant and fixture, a gold that returned
+  as many rows as its own outermost `LIMIT` lets its rows tied at the last
+  ranking value match by value (see [the comparison
+  spec](#comparison-spec-value-aware-scoring)), so the verdict never depends
+  on which tied item MariaDB returned. Every gold with a `LIMIT` orders by a
+  tiebreak after its metric, so the gold itself is deterministic (a dataset
+  hygiene test checks it).
 - **Gold runs with its own timeout** (`GOLD_STATEMENT_TIMEOUT_MS`, 30 s), cached
   per fixture; a failing gold is `expected_sql_error`, never a model error.
 - **The prediction runs as the read-only query user** through
@@ -559,6 +566,28 @@ comparison: {
   must be monotonic in `order` (tie reordering by label is tolerated; NULL
   metrics sort last). The default ranking column is the first truly numeric
   gold column, never a numeric-looking code string.
+- **Ties at the cut-off** (ranked only): when a gold variant returns as many
+  rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), its
+  **boundary** rows (those whose ranking values, every `value_columns` entry,
+  equal its last row's, NULL included) are interchangeable with any other
+  item of that value. They pair with prediction rows by their ranking values
+  only: the number of boundary-valued rows and their values must agree, their
+  labels may differ. Every row above the boundary still pairs by its full
+  tuple, and the ranking must still hold. A `LIMIT` that cuts through tied
+  items keeps whichever its tiebreak puts first; a model's SQL without the
+  gold's tiebreak keeps whichever its execution plan puts first, so without
+  this rule the same SQL could pass or fail between runs (it did:
+  `tpl_product_qty_top5_feb_2026_8a9dc1`, where 'Herbal Tea Variety Pack' and
+  'Spring Water 24 Pack' tie at 34 units at position 5 on v3). Values compare
+  as everywhere else (`decimals`, `tolerance`, `null_as_zero`); with
+  `value_columns` naming several columns a tie is equality on all of them.
+  A gold that returns fewer rows than its `LIMIT`, or has none, already holds
+  every item of its last value, so another label there is an item that does
+  not belong: such a gold stays strict (a full ranking whose last count of 1
+  is shared by several customers must still name them). Limits: a `LIMIT`
+  inside a subquery or CTE does not count, a gold whose exactly-N rows were
+  all there is is treated as cut, and an `OFFSET`'s first boundary stays
+  strict. Scalar and rowset comparisons never relax.
 - **Name pinning**: when exactly one prediction column has a gold column's name
   (ignoring case and punctuation), only that column may carry that gold column,
   and it carries no other; a column named like the gold must hold the gold's
@@ -688,6 +717,11 @@ Kinds of wrong SQL the oracle is known to let through:
 - **Grouping by a unique name**: equivalent by construction on this master
   data, so it is not a control.
 - **Label-only swaps of unrelated names** in the gold's column positions.
+- **Items tied at a cut-off**: where a gold's `LIMIT` cuts its ranking, a
+  boundary row passes with any label that has the boundary value, so a wrong
+  filter that swaps in an item with exactly that value passes on that fixture
+  (see ties at the cut-off in the comparison spec); another fixture has to
+  separate it. No control was killed only that way when the rule came in.
 - **Readings no fixture separates yet**: a new mistake family is caught only by
   chance; add a fixture row and a control when one is found.
 
