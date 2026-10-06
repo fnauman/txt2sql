@@ -407,8 +407,13 @@ function pivotQuery(spec, m = {}) {
   const dateColumn = `d.${m.dateColumn || 'DocumentDate'}`;
   const inWindow = (window) => windowPredicates(window, dateColumn, { boundary: m.boundary }).join(' AND ');
   const column = m.metricColumn || metric.column;
+  // groupByCancel (mutant): the cancel filter moved into each CASE and
+  // IsCanceled added to GROUP BY, so a customer with a canceled document gets
+  // a second, all-zero row next to its real one.
+  const caseCancel = m.groupByCancel ? `${CANCEL} AND ` : '';
   const pieces = (m.swapColumns ? [second, first] : [first, second]).map(
-    (window, index) => `ROUND(SUM(CASE WHEN ${inWindow(window)} THEN COALESCE(${column}, 0) ELSE 0 END), 2) AS ${spec.columns[index]}`
+    (window, index) =>
+      `ROUND(SUM(CASE WHEN ${caseCancel}${inWindow(window)} THEN COALESCE(${column}, 0) ELSE 0 END), 2) AS ${spec.columns[index]}`
   );
   const contiguous = first.end === second.start;
   const range = contiguous
@@ -429,8 +434,8 @@ function pivotQuery(spec, m = {}) {
     select: [...(dim ? [dim.name] : []), ...pieces],
     from: 'SalesDocument d',
     joins: dim ? dim.joins : [],
-    where: [...(m.dropCancel ? [] : [CANCEL]), ...range],
-    groupBy: dim ? [dim.key, dim.name] : [],
+    where: [...(m.dropCancel || m.groupByCancel ? [] : [CANCEL]), ...range],
+    groupBy: dim ? [dim.key, dim.name, ...(m.groupByCancel ? ['d.IsCanceled'] : [])] : [],
     orderBy: dim ? [`${dim.name} ASC`] : [],
     limit: null,
   });
@@ -1840,6 +1845,11 @@ function mutationsFor(intent) {
     add('date_boundary', 'the day after each window included', { boundary: 'end' });
     add('metric', 'gross instead of net', { metricColumn: 'd.GrossAmount' });
     add('shape', 'the two window columns swapped', { swapColumns: true });
+    if (intent.dim === 'customer') {
+      // ignore_all_zero_rows is set on these pivots: a second, all-zero row for
+      // a customer the answer already lists must still fail.
+      add('group_by', 'cancel filter moved into the CASE and IsCanceled added to GROUP BY: a second 0/0 row for a customer with a canceled document', { groupByCancel: true });
+    }
   } else if (intent.template === 'ledger') {
     const documentMode = intent.dateMode === 'document';
     if (intent.manualOnly) {

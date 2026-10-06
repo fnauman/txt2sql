@@ -315,6 +315,39 @@ test('ties at the cut-off: a gold cut by its LIMIT without a tie still checks th
   }
 });
 
+test('ignore_all_zero_rows: a second 0/0 row for a listed customer fails; extra customers with 0/0 still pass', { skip }, async () => {
+  // The relaxed customer pivots ignore surplus all-zero rows only for
+  // customers absent from the gold. A pivot grouped one level too fine (by
+  // YEAR without the window, or by IsCanceled) lists a customer's real row and
+  // a 0/0 row next to it: a wrong answer. The negative controls below pin it
+  // (the kill-rate gate's 95% floor would let one survive unnoticed); the
+  // positive controls rp7 / rp8 (extra customers with 0/0) must still pass.
+  const readControls = async (name) => JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets', 'controls', `${name}.json`), 'utf8'));
+  const edge = await readControls('edge-cases-public');
+  const templated = await readControls('templated-public');
+  const control = (controls, caseId, kind, id) => controls[caseId][kind].find((entry) => entry.id === id).sql;
+  const edgeCase = 'edge_public_008_customer_month_columns_jan_feb_2026';
+  const tplCase = 'tpl_customer_net_sales_q1_2025_vs_q1_2026_1479d7';
+  const checks = [
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'negative', 'r5'), match: false },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'negative', 'r6'), match: false },
+    { datasetName: 'templated-public', caseId: tplCase, sql: control(templated, tplCase, 'negative', 'n7'), match: false },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'positive', 'rp7'), match: true },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'positive', 'rp8'), match: true },
+  ];
+  const connections = await openFixtureConnections({ env });
+  try {
+    for (const { datasetName, caseId, sql, match } of checks) {
+      const [testCase] = (await loadBenchmarkDataset({ datasetName, caseId })).cases;
+      assert.equal(testCase.comparison.ignore_all_zero_rows, true, caseId);
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, match, `${caseId}: ${sql}`);
+    }
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
 test('the seed-fixtures and verify-dataset scripts succeed end to end', { skip }, async () => {
   requireAdmin();
   const seeded = await execFileAsync(process.execPath, [path.join(REPO_ROOT, 'scripts/seed-fixtures.js')], { env: scriptEnv, cwd: REPO_ROOT });

@@ -685,6 +685,18 @@
         "type": "filter",
         "note": "review: invented c.IsActive = 1 filter",
         "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE c.IsActive = 1 AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "r5",
+        "type": "group_by",
+        "note": "review: also grouped by YEAR(DocumentDate) without the Jan/Feb 2026 window: a second 0/0 row for a customer next to its real one (must fail under ignore_all_zero_rows)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName, YEAR(d.DocumentDate) ORDER BY c.CustomerName"
+      },
+      {
+        "id": "r6",
+        "type": "group_by",
+        "note": "review: cancel filter moved into the CASE and IsCanceled added to GROUP BY: a second 0/0 row for a customer with a canceled document (must fail under ignore_all_zero_rows)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName, d.IsCanceled ORDER BY c.CustomerName"
       }
     ],
     "positive": [

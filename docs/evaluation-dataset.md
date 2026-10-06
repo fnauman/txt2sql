@@ -749,7 +749,8 @@ The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
   same answer, as long as each extra customer is listed once and is not a
   customer the gold lists: a pivot grouped one level too fine (by year
   without the window, or by `IsCanceled`) that adds a 0/0 row next to a
-  customer's real row still fails. The oracle used to accept only the gold's customer set or
+  customer's real row still fails (negative controls on both pivots guard
+  this). The oracle used to accept only the gold's customer set or
   every customer (the LEFT JOIN alternative), so such an answer matched one
   reading on one fixture and the other on another, and failed. The review
   controls that encoded that rejection (`edge_public_008/r3` and `r4`) are
@@ -921,11 +922,13 @@ rate is below `--min-kill-rate` (default 0.95). The original controls:
 - **Audit controls** (`m*`, `h*`, `a*`): 108 design mutants, 28 held-out
   mutants (written after the v2 fixture was frozen), 32 of the 35 correct
   alternatives, plus 5 positives for the alternative readings.
-- **Review controls** (`r*`, `rp*`): 42 design negatives for the families the
+- **Review controls** (`r*`, `rp*`): 44 design negatives for the families the
   oracle review found surviving (MONTH() without YEAR(), SUM(DISTINCT ...),
   invented IsActive filters, hedged answers, one-sided cancel filters, ...)
   and 36 correct alternatives (`edge_public_008/rp7` and `rp8` were the
-  negatives `r3` and `r4` until the `ignore_all_zero_rows` relaxation). `core_public_004/rp4` is flagged
+  negatives `r3` and `r4` until the `ignore_all_zero_rows` relaxation; its
+  `r5` and `r6`, pivots grouped by year or by `IsCanceled` as well, are the
+  duplicate 0/0 rows the relaxation must still reject). `core_public_004/rp4` is flagged
   `validator_known_false_rejection` (the FAN_OUT guardrail rejects a boolean
   header aggregate that cannot fan out).
 - **Templated controls** (`n*` design, `h*` held-out, `p*` positive):
@@ -938,8 +941,8 @@ each distinct control once ("alone" = the oracle with that single fixture):
 
 | Design negatives | Seed alone | v2 alone | v3 alone | All three fixtures |
 |---|---|---|---|---|
-| 150 original (edge suite, audit + review) | 57 (38.0%) | 149 (99.3%) | 137 (91.3%) | **150 (100%)** |
-| 745 templated | 168 (22.6%) | 605 (81.2%) | 651 (87.4%) | **745 (100%)** |
+| 152 original (edge suite, audit + review) | 57 (37.5%) | 151 (99.3%) | 139 (91.4%) | **152 (100%)** |
+| 746 templated | 169 (22.7%) | 606 (81.2%) | 652 (87.4%) | **746 (100%)** |
 | 126 resolved by the hard cases (57 hand-written) | 45 (35.7%) | 117 (92.9%) | 111 (88.1%) | **126 (100%)** |
 | 398 fresh holdout (v2), after triage (see [Fresh holdout (v2)](#fresh-holdout-v2)) | 127 (31.9%) | 350 (87.9%) | 341 (85.7%) | **398 (100%)** |
 
@@ -957,7 +960,7 @@ controls all match on every fixture (73 original, 29 templated, 26 resolved by
 the hard cases); every one passes the validator except `core_public_004/rp4`
 and those of questions flagged `known_validator_rejection` (rejected with the
 same code, a note). Per dataset the gate counts each control once per case
-that resolves it: templated design 1502/1502 (held-out 185/236), hard cases
+that resolves it: templated design 1504/1504 (held-out 185/236), hard cases
 design 140/140 (held-out 15/19); the design gate (>= 0.95) passes for every
 dataset, and held-out rates are reported, not gated (`--min-heldout-kill-rate`
 defaults to 0).
