@@ -77,6 +77,7 @@ test('v2 temporal: a month phrase that is fully understood still resolves exactl
     'top 10 Products with good sales in Feb, 26 but zero sale in Mar, 26',
     'Monthly net sales from Online Order documents for December 2025.',
     'Show sales on March 12 and returns due Feb 29',
+    'Show the top 10 March 2026 customers by net sales.',
   ]) {
     assert.deepEqual(extractTemporalReferences(question, { hintsVersion: 2 }), extractTemporalReferences(question, { hintsVersion: 1 }), question);
   }

@@ -307,6 +307,8 @@ const PARTIAL_AFTER_PATTERNS = [
   // To-date and open-ended phrases: "March 2026 to date", "March 2026 onwards".
   /^\s*(?:to date|so far|onwards?|and later|or later|and earlier|or earlier)\b/i,
 ];
+// "top 10 March 2026 customers": the number is a ranking size, not a day.
+const RANKING_SIZE_BEFORE_PATTERN = /\b(?:top|bottom|first|last|best|worst)\s+\d{1,2}\s+$/i;
 const BETWEEN_START_PATTERN = new RegExp(
   `^\\s*and\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\b`,
   'i'
@@ -315,7 +317,11 @@ const BETWEEN_START_PATTERN = new RegExp(
 function isPartialMonthReference(text, startIndex, matchedText) {
   const before = text.slice(0, startIndex);
   const after = text.slice(startIndex + matchedText.length);
-  if (PARTIAL_BEFORE_PATTERNS.some((pattern) => pattern.test(before))) {
+  const [dayBefore, ...otherBefore] = PARTIAL_BEFORE_PATTERNS;
+  if (dayBefore.test(before) && !RANKING_SIZE_BEFORE_PATTERN.test(before)) {
+    return true;
+  }
+  if (otherBefore.some((pattern) => pattern.test(before))) {
     return true;
   }
   if (PARTIAL_AFTER_PATTERNS.some((pattern) => pattern.test(after))) {
