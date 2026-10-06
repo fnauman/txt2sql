@@ -17,7 +17,9 @@ known coverage limits.
 | Fixture seeding | `scripts/seed-fixtures.js` (`npm run seed-fixtures`) |
 | Fixture drift check (re-hashes every row) | `checkFixtureContent` in `src/eval/fixture-seeder.js` |
 | Dataset verifier | `scripts/verify-dataset.js` (`npm run verify-dataset`) |
-| Benchmark | `scripts/evaluate.js` (`npm run benchmark`) |
+| Evaluation runner (one command) | `scripts/eval.js` (`npm run eval`), see [Running evaluations](#running-evaluations) |
+| Per-case scoring through the product loop | `evaluateQuestion` in `scripts/evaluate.js` (`npm run benchmark` = the runner's benchmark profile) |
+| Attribution, statistics, comparison, rescore | `src/eval/attribution.js`, `stats.js`, `compare.js`, `rescore.js` |
 | Edge-dataset generator | `scripts/build-edge-dataset.mjs` |
 | Demo seed | `scripts/seed-public-db.js` (the `seed` fixture) |
 
@@ -153,8 +155,11 @@ The benchmark status depends on values only: `pass`, `result_mismatch`, or
 `retrieval_miss` (no match and an expected table was not retrieved); a failed
 product loop reports `llm_error`, `validation_error`, `execution_error`,
 `infra_error` or `aborted` from its `errorStage`; a broken gold is
-`expected_sql_error`. `low_signal_success` and `disallowed_column_used` are no
-longer failure statuses. They are warning flags on a result:
+`expected_sql_error`; the runner adds `skipped_budget` and `evaluation_error`.
+The status says where the product loop stopped; the attribution outcome built on
+it says who caused it (see [Reading report.md](#reading-reportmd)).
+`low_signal_success` and `disallowed_column_used` are no longer failure
+statuses. They are warning flags on a result:
 
 - **Signal checks** (`signal_checks`) are resolved through the comparator's
   column assignment (gold column names mapped to the prediction's columns), and
@@ -432,28 +437,362 @@ Report changes compared with the previous benchmark (for consumers of
 
 The committed datasets are intentionally small and cover a limited set of
 intents — treat their numbers as **smoke signals, not a reliability claim**. No
-fixed pass-rate is committed, on purpose: generation is non-deterministic, so a
-single `accuracy: 1.0` is a lucky sample, not evidence. Measure reliability with
-repeated runs and report the honest lower bound:
-
-```bash
-npm run benchmark -- --dataset core-public --repeat 10
-```
-
-In `--repeat` mode the report adds a `reliability` block with per-run min/mean/max
-accuracy, the overall pass-rate, per-case pass rates, and a **Wilson 95% lower
-bound** on the true pass-rate (`wilsonLowerBound`, z = 1.96, in
-`scripts/evaluate.js`). The Wilson lower bound is the headline number: 6/6 on one
-run has a lower bound near 0.6, not 1.0. Reliability mode is a measurement and
-never fails the process on expected run-to-run variance. Grow `datasets/` with
-execution-verified gold queries before making any reliability claim. Pass rates
-measured before this oracle (one seed, alias-keyed signal checks) are not
-comparable with the three-fixture numbers.
+pass-rate is committed yet: generation is non-deterministic, so a single
+`accuracy: 1.0` is a lucky sample, not evidence. Measure with repeated runs
+(`npm run eval -- --repeat 3`) and read the case-level headline with its
+confidence interval (see [Statistics](#statistics)), not the pooled
+`reliability` block, which treats correlated repetitions as independent and is
+kept only for older report consumers. Grow `datasets/` with execution-verified
+gold queries before making any reliability claim. Pass rates measured before
+this oracle (one seed, alias-keyed signal checks) are not comparable with the
+three-fixture numbers.
 
 The few-shot examples in the prompt (`FEW_SHOT_EXAMPLES` in `src/constants.js`)
 no longer contain any dataset question or gold SQL;
 `test/few-shot-leakage.test.js` keeps it that way (no equal question, no equal
 SQL, token Jaccard < 0.8 with every gold).
+
+## Running evaluations
+
+### One command
+
+```bash
+npm run eval                                        # the whole suite, once
+npm run eval -- --repeat 3                          # three repetitions per case
+npm run eval -- --dataset edge-cases-public --tag join_path
+npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
+npm run eval -- --rescore generated/runs/<run>/all/gpt-4o-mini/report.json
+npm run eval -- --offline                           # no LLM: setup, verify, rescore the baseline
+npm run eval -- --help                              # every flag
+```
+
+`npm run eval` (`scripts/eval.js`) does, in order:
+
+1. **Database preflight.** Connects as the query user. When nothing answers at
+   a local `DB_HOST` and Docker is available, it runs
+   `docker compose up -d --wait --no-recreate mariadb` and waits (up to 2
+   minutes) until the query user can connect; `--no-docker` turns that off.
+   Compose needs `DB_PASSWORD` (the read-only user's password); a missing or
+   inconsistent setting is reported before anything starts, and so is a
+   missing admin password when seeding may be needed (a fresh volume always
+   needs it; its root password is the first of `DB_ADMIN_PASSWORD`,
+   `MARIADB_ROOT_PASSWORD` and `DB_PASSWORD`). If the compose `mariadb`
+   service is already running but does not answer at `DB_HOST:DB_PORT` (e.g.
+   a mistyped `DB_PORT`), nothing is started or recreated: the run stops and
+   says to check the setting. A database the run started keeps running
+   afterwards; `docker compose stop` stops it.
+2. **Fixtures.** Every fixture database is re-hashed (`checkFixtureContent`).
+   Missing, stale or drifted ones, and any whose master data differs, are
+   seeded (`seedFixture`, which also creates the database and tables) with the
+   admin role: `DB_ADMIN_PASSWORD` (and `DB_ADMIN_USER` if it is not `root`) or
+   `MARIADB_ROOT_PASSWORD`. Without admin credentials the run stops and says
+   which fixture needs what. `--no-seed` never writes and stops instead.
+3. **Verification.** Every gold query and every control of the suite's
+   datasets, in process, with the `verify-dataset` gates: no case problem
+   (an invalid or unscored negative control is one: a control that does not
+   execute is never a kill), and each dataset's design kill rate at least
+   `--min-kill-rate` (0.95; held-out floor `--min-heldout-kill-rate`, default
+   0; undecided controls count as not killed). A missing or empty controls
+   directory, or one whose controls apply to none of the datasets, stops the
+   run too. A failure stops the run with exit 2 before any LLM call;
+   `--skip-verify` runs anyway, `--skip-controls` verifies the gold only.
+4. **The run** (needs `OPENAI_API_KEY`; `OPENAI_BASE_URL` for an
+   OpenAI-compatible endpoint; `MODEL_NAME` or `--model`). Every selected case
+   goes through the product loop (`evaluateQuestion` -> `runOptimizedQuestion`)
+   on `--concurrency` workers (default 4), each repetition under a deadline
+   (`--case-timeout-ms`, default 120000) that covers the whole repetition:
+   the gold runs, the product loop and the multi-fixture scoring. Its
+   AbortSignal reaches all three (it stops the in-flight LLM call and stops
+   waiting for a query, which ends at its statement timeout), and a result
+   that arrives after the deadline, a late pass included, is a `timeout`
+   (`late_status` names what it would have been; its attempts and cost are
+   kept), so a slow case never counts as a pass. `--repeat N` keeps every repetition. `--budget-usd X`
+   stops starting new cases once the LLM cost of finished cases reaches X; the
+   rest are `skipped_budget`. Cases already started finish their repetitions,
+   so the overshoot is at most the cases in flight. A provider answer of HTTP
+   401 or 403 (wrong key), 404 (wrong `OPENAI_BASE_URL` path or model) or an
+   unknown model (`model_not_found`, also as a 400) stops the run at once
+   instead of failing every case: that repetition is an `llm_outage`
+   (excluded from accuracy), the rest are `cancelled` and the run exits 2. Ctrl-C
+   (SIGINT, or SIGTERM as in a cancelled CI job) aborts the cases in flight,
+   writes a partial report (`stopped` in report.json, a note in report.md)
+   and exits 130; a second Ctrl-C a second later exits at once without a
+   report.
+5. **Attribution, statistics, comparison, report.** Guardrail rejections are
+   re-run on the fixtures (below), every repetition gets an outcome, and
+   `report.json`, `report.md` and `trace.jsonl` are written to
+   `generated/runs/<timestamp>/<suite>/<model>/`. The console ends with a short
+   headline and the paths.
+
+The suite defaults to every dataset in `datasets/` de-duplicated: by case id
+(the edge suite repeats the 9 core cases, which run once) and by identical
+question and gold SQL scored the same way (same alternatives and comparison
+spec; the same question and gold scored differently stays a separate case).
+Today that is 26 cases over 17 intents. `--case-id` with the id of a dropped
+duplicate selects the case kept in its place (the console says so). A case id with a
+different question or gold in two datasets is a dataset conflict (exit 2),
+also when its first appearance was dropped as a duplicate of another id.
+Filters: `--dataset a,b` or `--dataset-file`, `--split dev|holdout|all` (a case
+without a `split` field is dev; default all), `--case-id`, `--tag` (any of),
+`--intent`. `--fixtures` scores on a subset (it must include `seed`).
+Flags are checked strictly: an unknown flag (with a "did you mean"), a flag
+that needs a value but has none (or an empty one, or another flag), or a
+stray argument stops with exit 2 before anything starts, so a typo cannot
+silently drop `--budget-usd` or turn a `--rescore` into a paid run. A live run
+also checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price)
+before the database is started or seeded.
+
+`npm run benchmark` and `npm run evaluate` (and `node scripts/evaluate.js`) run
+the same runner with `--profile benchmark`: one dataset (default `core-public`),
+no Docker start, no seeding (stale or drifted fixtures only warn; a missing
+fixture or other master data still stops it), no verification, and exit 1 when
+any case fails in a single-repetition run, as before. Every other flag works
+there too.
+
+### Reading report.md
+
+- **Headline**: strict accuracy with its 95% CI, the number of counted cases
+  and intents, repetitions, model and date; then majority-pass cases with a
+  Wilson interval and the intent-clustered accuracy; the comparison line when
+  there is a baseline.
+- **Attribution**: who caused each outcome, per repetition and per case
+  (majority outcome):
+
+  | Outcome | Bucket | In accuracy | Meaning |
+  |---|---|---|---|
+  | `pass` | pass | counted | matched the gold on every fixture |
+  | `wrong_result` | model | counted | ran, the oracle rejects it |
+  | `guardrail_true_rejection` | model | counted | a guardrail rejected SQL that is wrong (caught) |
+  | `safety_rejection` | model | counted | the safety layer rejected it (never executed) |
+  | `execution_error` | model | counted | MariaDB rejected the final SQL |
+  | `llm_error` | model | counted | truncated, refused or unusable output |
+  | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a repetition that would otherwise be a model failure (a repetition that ended in an outage or timeout keeps that outcome and is tagged `guardrail_false_rejection`) |
+  | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not retrieved, so it was not allowed |
+  | `timeout` / `aborted` | infra | counted | the case deadline fired |
+  | `infra_error` | infra | excluded | the database failed: in the product loop, in a gold query, or while re-checking a guardrail rejection of an otherwise model-bucket failure (tagged `guardrail_unverified`: it might have been a false rejection) |
+  | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/404/429/5xx, unknown model (`LLM_MODEL_NOT_FOUND`) |
+  | `skipped_budget` | skipped | excluded | not run, budget spent |
+  | `cancelled` | skipped | excluded | the run was stopped (Ctrl-C, or the provider rejected the key) before this repetition finished |
+  | `expected_sql_error` | harness | excluded | the gold failed (no LLM call was made) |
+  | `harness_error` | harness | excluded | the runner itself threw |
+
+  To decide a guardrail rejection, its SQL must first pass the safety layer
+  (`validateSqlSafety`); then it runs read-only on every fixture through the
+  oracle. A match makes it a false rejection. Safety-layer rejections are never
+  executed; a guardrail-rejected SQL that fails the safety layer today stays
+  the model's (tagged `guardrail_unsafe`). A re-check that fails because the
+  database did is never resolved against the model (see `infra_error`); one
+  that fails for another reason is `harness_error`. The Bucket column splits
+  an outcome whose repetitions moved, e.g. `model 3 / system 1` when one was
+  tagged `retrieval_miss`. A timeout counts as a failure on purpose, so slow
+  cases cannot inflate accuracy; but any timeout also makes the run exit 2,
+  and a case whose majority outcome is a timeout is left out of the paired
+  comparison, because a slow or hung provider is not a model or system
+  change.
+- **Guardrail confusion matrix**, over every attempt including retries:
+  rejected and incorrect (caught), rejected and correct (false rejection),
+  accepted and incorrect (missed; an accepted attempt that failed at execution
+  counts here), accepted and correct; with precision, recall and the false
+  rejection rate. Attempts of unknown correctness (rejected SQL that fails the
+  safety layer today, a failed re-check, a database failure, a run cut short)
+  and safety-layer rejections are counted separately, with the reason.
+- **Cases**: id, question, passes / counted repetitions, the case outcome
+  and its attribution. The case outcome agrees with the majority pass: `pass`
+  only when more than half of the counted repetitions passed, otherwise the
+  most frequent failing outcome (ties: the order of the table above), even
+  when `pass` is the most frequent single outcome (2 passes against two
+  different failures is a failed case).
+- **By failure class, difficulty and tag**: cases, accuracy, majority passes.
+- **Cost, latency, retries, tokens**: total cost, cost per question and per
+  correct answer, p50/p95 wall time per question (the product loop alone:
+  master data, prompt, LLM, validation, execution, retries) and per LLM call,
+  the same per question including the harness's gold runs and scoring, the
+  share of questions that needed a retry, prompt (cached) and completion
+  tokens, and the budget. Questions that used tokens without a known price
+  (the total is then a lower bound) and questions that completed no LLM call
+  (a timeout or outage) are counted separately.
+- **Verification**: fixture status, the kill rates per dataset, and the
+  undecided, invalid and unscored negative controls (counts per dataset, ids
+  below the table).
+- **Provenance**: git sha (and whether the tree was dirty), prompt version
+  (sha256 of the optimized system prompt, `BUSINESS_RULES`,
+  `FEW_SHOT_EXAMPLES` and the request options), semantic-layer version (sha256
+  of `metadata/semantic-layer.json`), schema, fixture, dataset and controls
+  hashes, model, the LLM endpoint host (never keys), Node and the runner
+  flags (every parsed option, in `runner.flags`; the raw argv is in the
+  trace's `run.started`). The same short versions are stamped on every trace
+  line.
+
+### Statistics
+
+The case is the unit. Repetitions of one case are strongly correlated (at
+temperature 0 the audit saw 16 of 17 edge cases at 0% or 100% across three
+repeats), so pooling them as independent trials overstates confidence.
+
+- **Strict accuracy** = the mean over counted cases of each case's pass rate
+  (passes / counted repetitions). Its 95% CI is a percentile case bootstrap
+  (10,000 resamples, fixed seed 20261005), so the same report always gives the
+  same interval.
+- **Majority pass**: a case passes when more than half of its counted
+  repetitions passed; Wilson 95% interval over cases.
+- **Intent-clustered accuracy**: the mean over intents of the intent's mean
+  case pass rate (paraphrases of one intent are not independent evidence),
+  with a cluster bootstrap that resamples intents.
+- The old `reliability` block (pooled pass rate and pooled Wilson bound) is
+  still in `report.json`, labelled as pooled and correlated.
+
+### Rescore (no LLM calls)
+
+`--rescore <report.json>` re-judges recorded generations with today's
+validator, fixtures and oracle. Per repetition it replays the recorded
+attempts: each SQL is re-validated in the real prompt context (master-data
+candidates re-resolved from the primary fixture, the response's recorded
+`tables_used`), and the first accepted one is re-executed and re-scored on
+every fixture. Attempts after it are not part of the replay, as the product
+loop would have stopped there, but their SQL is still re-validated and, when
+accepted, re-scored; those verdicts are recorded in `rescore.laterAttempts`
+and do not change the outcome. Every recorded attempt stays in `attempts`:
+the replayed ones are marked `replay: "reached"`, the others
+`replay: "not_reached"` with their SQL and LLM details as recorded (their
+recorded validation and execution under `recorded`), so a later rescore can
+still replay them, and `attempt_count`, the retry rate and the LLM-call
+latencies stay those of the original run, like its cost and tokens. If no recorded attempt is accepted any more
+although the original run ended with an executed answer, the retry the
+product would have made cannot be replayed; that repetition is tagged
+`replay_truncated`. Recorded verdicts are not reused: every attempt that a
+guardrail rejects today is re-checked against the fixtures, and an attempt
+that is now accepted, or now rejected by the safety layer, loses the old
+false-rejection verdict. The case definition is
+today's dataset case with the same id (so a fixed gold is rescored with the
+fix), else the recorded one. Cost, latency and tokens stay the original run's.
+Rescoring the same report twice gives identical results (durations are not
+re-measured; every statistic is seeded). The new report links back with
+`rescoredFrom` and compares with the source report by default.
+
+The selection filters (`--split`, `--case-id`, `--tag`, `--intent`) pick
+which recorded cases are rescored; `--dataset` picks today's case
+definitions and what is verified.
+
+`--offline` runs the preflight, fixtures and verification, then rescores
+`eval/baselines/<model>.json` when it exists, or says there is none and exits 0
+(exit 2 with `--gate`, which then has nothing to check).
+Outcomes a rescore could not re-check (a recorded provider outage, a run that
+was cut short) are kept, flagged `rescore.inherited`, and do not count as a
+harness failure today.
+
+### Compare and gate
+
+`--compare <report.json>` (default: `eval/baselines/<model>.json` when present;
+`--no-baseline` turns that off) aligns cases by id. A case whose gold
+fingerprint changed (or, between two new reports, its alternatives or
+comparison spec) is excluded and listed, as are cases one report did not count
+or whose majority outcome in one report is a timeout (or another
+infrastructure outcome);
+new and removed cases are listed too. Per paired case the verdict is the
+majority over repetitions: regressions (baseline pass, candidate fail) and
+improvements feed an **exact two-sided McNemar test**, and a paired case
+bootstrap gives a 95% CI for the change in strict accuracy. Pass-rate changes
+without a flip are listed separately. Reports written before this runner are
+read too. The console prints the paired 2x2 table of majority verdicts, the
+accuracy change with its CI, the McNemar p and verdict, and the regressed and
+improved case ids:
+
+```text
+Paired comparison with eval/baselines/gpt-4o-mini.json: 26 paired case(s)
+                 candidate pass  candidate fail
+  baseline pass              18               6
+  baseline fail               0               2
+  strict accuracy (paired cases) 92.3% → 69.2%: Δ −23.1 pts (95% CI …)
+  exact McNemar p = 0.031 (6 regression(s), 0 improvement(s)) → significantly WORSE than the baseline
+  regressions: paraphrase_public_001 (pass → wrong_result), …
+  improvements: none
+```
+
+report.md has the same table plus the flipped cases with their questions.
+
+With `--gate` the run exits 1 when the candidate is significantly worse (p <
+0.05 and more regressions than improvements) or, with `--min-accuracy X`,
+when strict accuracy is below X. `--gate` with no baseline to compare with
+(no `--compare` and no `eval/baselines/<model>.json`, or `--no-baseline`)
+stops with exit 2 before anything starts, instead of passing silently; with
+`--min-accuracy` it only warns and gates on accuracy. A baseline that is
+loaded must be an evaluation report (a non-empty `results[]` of cases with
+ids, a known `reportVersion`), else exit 2. And `--gate` exits 2, not 0, when
+the comparison pairs no case (an unrelated or empty baseline, renamed ids,
+changed gold for every shared case) or fewer than half of the run's cases
+(`MIN_GATE_PAIRED_FRACTION` = 0.5 in scripts/eval.js): the regression gate has
+then not tested the run, and a baseline that pairs less than half the suite is
+stale, so refresh it. On a rescore (`--offline --gate`, `--rescore`) the same
+floor applies to today's suite: a rescore re-judges the recorded cases, so
+the gate also counts how many of today's (filtered) suite cases are paired
+(same id, same gold and scoring, counted in both); none, or fewer than half,
+exits 2, e.g. after every case id was renamed or with a baseline of a subset.
+`--min-accuracy` does not stand in for a comparison that was asked for. With 26 cases a significant change needs at
+least 6 unanimous flips in one direction (p = 0.031); 5 give p = 0.0625.
+
+Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
+case); 2 harness, dataset or infrastructure failure: unreachable database,
+fixtures that cannot be seeded, failed verification, bad flags, and any
+repetition that ended as `expected_sql_error`, `harness_error`, `infra_error`,
+`llm_outage`, `timeout`, `aborted` or `cancelled`, a run stopped early, or a
+run with no counted case; 130 when interrupted (the report is still
+written). Any provider outage left after the SDK's own retries makes the run
+exit 2 even when the other cases ran: the report is complete for what ran,
+but its accuracy leaves those repetitions out, so it is not used for gating
+or as a baseline without a look. Exit 2
+wins over 1: a run that hit the deadline is never reported as "significantly
+worse".
+
+### Baselines
+
+The committed baseline for a model lives at `eval/baselines/<model>.json`: a
+plain report of the whole default suite (see `eval/baselines/README.md`).
+`npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree.
+It is only written when the run exits 0 with no case skipped by the budget;
+otherwise the console says why and the existing file is left alone. A
+filtered or partial run (filters, fewer fixtures, or a case set that differs
+from the default suite) is refused before it starts; `--baseline-file <path>`
+saves such a subset somewhere else, never inside `eval/baselines/`: every file
+there is a model's default baseline, so a `--baseline-file` in it must be the
+run's own `<model>.json` and gets the same full-suite checks.
+
+### CI
+
+`.github/workflows/ci.yml`:
+
+- **test** (Node 22.18 and 24): `npm test`, `web:typecheck`, `web:build`,
+  `web:test`.
+- **db**: MariaDB from `docker compose` with dummy credentials, then
+  `bootstrap-db`, `seed-fixtures`, `verify-dataset` (kill-rate gate), the
+  opt-in real-database tests (including `npm run eval` against the OpenAI
+  stand-in), `npm run eval -- --offline` (with `--gate` once
+  `eval/baselines/<model>.json` is committed, so a guardrail, oracle or
+  fixture change that makes the baseline's recorded SQL score significantly
+  worse fails the job; without a baseline it notes that there is none) and
+  `evaluate-retrieval`. No LLM call.
+- **eval-paid**: only on a manual dispatch (input `budget`, default 1 USD) or
+  a pull request labelled `run-eval`, and skipped with a notice when the
+  `OPENAI_API_KEY` secret is not available (e.g. pull requests from forks).
+  Runs `npm run eval -- --budget-usd <budget>`, uploads `generated/runs` as an
+  artifact (named with the run id and attempt) and appends `report.md` to the
+  job summary. Once a pull request carries `run-eval`, every push to it runs
+  the paid evaluation again (each capped by the budget); remove the label to
+  stop. Only the two steps that need `OPENAI_API_KEY` get it (not `npm ci`).
+  A one-off provider error left after the SDK's retries fails this job (exit
+  2); re-run it.
+
+Adding any other label to a pull request starts no job and cancels nothing;
+superseded pull-request runs are cancelled, pushes to `main` and manual runs
+are not.
+
+### Cost
+
+LLM cost is small: the audit's paid baseline on gpt-4o-mini cost about
+$0.0005 per question (one question = one case repetition, up to two LLM
+calls), so one repetition of the 26-case suite is about a cent and `--repeat 3`
+a few cents. `--budget-usd` caps it (it needs a price for the model in
+`src/pricing.js` or `MODEL_PRICING_OVERRIDES`). Rescoring and `--offline` cost
+nothing.
 
 ## Coverage limits
 
@@ -478,9 +817,10 @@ Known gaps, verified in code — do not read more into the suite than it tests:
   rejected as JOIN_PATH (no dataset case needs one); FAN_OUT rejects a boolean
   header aggregate over line-joined headers (`core_public_004/rp4`).
 
-## Running it
+## Verifying the dataset without the LLM
 
-Run locally after starting MariaDB (`docker compose up -d mariadb`; the init
+`npm run eval` runs this verification itself before any LLM call. To run the
+pieces by hand, start MariaDB (`docker compose up -d mariadb`; the init
 script creates the SELECT-only query user). Seed every fixture, then validate
 every gold query and the oracle **without spending any LLM calls** (run this
 after schema/data changes to separate dataset rot from model regressions):
@@ -514,5 +854,13 @@ the seeding tests also need the admin password and FAIL with that message
 ```bash
 TEST_MARIADB_PORT=3306 TEST_MARIADB_PASSWORD=<DB_PASSWORD> \
 TEST_MARIADB_ADMIN_PASSWORD=<root password> \
-  node --test test/eval-fixtures.integration.test.js test/mariadb.integration.test.js
+  node --test --test-concurrency=1 test/mariadb.integration.test.js \
+    test/eval-fixtures.integration.test.js test/eval-runner.integration.test.js
 ```
+
+Run the files one at a time (`--test-concurrency=1`): the fixture tests edit
+and re-seed the fixture databases that the evaluation tests read.
+`test/eval-runner.integration.test.js` runs `npm run eval` end to end against a
+local OpenAI stand-in (concurrency, repetitions, attribution of a guardrail
+false rejection and a wrong answer, `--rescore`, `--compare --gate`, the budget
+and the deadline).

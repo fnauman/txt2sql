@@ -17,7 +17,7 @@ This repo is intentionally narrow:
 
 - **Node.js 22.18 or newer** (`engines` in `package.json`; `.nvmrc` pins 24). 22.18 is the first 22.x release that runs the web app's `.ts` tests under `node --test` without flags.
 - **Docker with Compose v2** (`docker compose`) for the local database, which uses the **`mariadb:10.6`** image (pulled on the first `docker compose up`).
-- An **OpenAI API key** (or an OpenAI-compatible endpoint) for anything that generates SQL: `basic`, `optimized`, `benchmark` and web queries.
+- An **OpenAI API key** (or an OpenAI-compatible endpoint) for anything that generates SQL: `basic`, `optimized`, `eval` / `benchmark` and web queries.
 
 `npm test` needs neither a database nor an API key.
 
@@ -32,7 +32,7 @@ Most text-to-SQL demos stop at "dump the schema into the prompt, parse whatever 
 | "Read-only" assumed | **Read-only checked, then enforced by grants**: a validator built on one MariaDB-faithful tokenizer allows a single `SELECT`/`WITH` statement with no comments and no `WITH RECURSIVE`, rejects cross-database and metadata-schema references, and denylists DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@` variables and timing/exfiltration functions. By default the query then runs as a `SELECT`-only user under a statement timeout |
 | Entity names guessed by the model | **Bounded master-data resolution**: ambiguous product terms are resolved against whitelisted columns *before* generation, and only the top candidate rows are passed to the prompt — the full product master never enters the context |
 | Dates left to the model | **Temporal normalization** rewrites phrases like "March 2026" into explicit half-open ranges before the model sees them, so date logic is deterministic |
-| "It got the right answer once" | **Reliability measurement**: a value-aware comparator matches results on values rather than column names, and `--repeat N` reports min/mean/max accuracy with a Wilson 95% lower bound instead of one lucky run |
+| "It got the right answer once" | **Evaluation you can trust**: a value-aware comparator scores every answer on three fixture databases; `npm run eval` reports case-level accuracy with confidence intervals over repeated runs, says whether each failure was the model's, the guardrails' or the infrastructure's, and compares runs with a paired McNemar test |
 | Cost ignored | **Cache-aware prompt layout** plus per-call token/cost accounting, with an offline prompt-cache-prefix estimator |
 
 The guiding idea: the LLM proposes, but a small, testable, deterministic layer disposes. Retrieval is *enforced* (optimized SQL may only use the retrieved tables), and safety is *checked* in the application and *enforced* by the database grants, not assumed.
@@ -280,7 +280,7 @@ npm run benchmark -- --dataset edge-cases-public          # public edge-case sui
 npm run benchmark -- --dataset edge-cases-public --tag join_path
 ```
 
-`npm run evaluate` is kept as an alias for the same benchmark runner. The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
+`npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run. The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
 
 ### Edge-case suite and the scoring oracle
 
@@ -324,16 +324,50 @@ the variance instead of one run:
 npm run benchmark -- --dataset core-public --repeat 10
 ```
 
-In reliability mode the report adds a `reliability` block with the per-run
-accuracies (min/mean/max), the overall pass-rate, the fraction of runs in which
-every case passed, per-case pass rates, and a Wilson 95% lower bound on the true
-pass-rate. The Wilson lower bound is the honest headline number: for example
-6/6 on a single run has a lower bound near 0.6, not 1.0. Reliability mode is a
-measurement and never fails the process on expected run-to-run variance.
+Every repetition of every case is kept. The headline is the **strict
+accuracy**: the mean over cases of each case's pass rate across repetitions,
+with a 95% confidence interval from a case bootstrap. The case is the unit
+because repetitions of one case are strongly correlated (failures at
+temperature 0 are systematic), so pooling them as independent trials overstates
+confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
+still written for older consumers, labelled as such. A repeated run is a
+measurement and does not fail the process on run-to-run variance.
 
 The committed datasets are intentionally small and cover a limited set of
 intents; treat their numbers as smoke signals and grow `datasets/` (with
 execution-verified `expected_sql`) before making any reliability claim.
+
+## Evaluation
+
+One command runs the whole evaluation:
+
+```bash
+npm run eval
+```
+
+It makes sure MariaDB is up (starting the docker-compose database when it is
+local and down), seeds the three fixture databases with the admin role when
+they are missing or drifted, verifies every gold query and the oracle controls
+(no LLM call happens if that fails), runs every unique case of every dataset in
+`datasets/` through the product loop with 4 cases in flight and a per-case
+deadline, and writes `generated/runs/<timestamp>/all/<model>/`:
+
+- `report.md`: strict accuracy with a 95% confidence interval, who caused each
+  failure (model, guardrail false rejection, retrieval miss, infrastructure),
+  the guardrail confusion matrix, a per-case table, cost / latency / retries /
+  tokens, and the provenance (git sha, prompt, semantic-layer, fixture and
+  dataset hashes);
+- `report.json` (everything, every repetition) and `trace.jsonl`.
+
+With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
+when committed) it adds a paired comparison with an exact McNemar test;
+`--gate` makes a significantly worse run exit 1. Harness, database and
+provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
+a partial report. `--rescore <report.json>` and `--offline` re-validate,
+re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
+`--case-id`, `--split`. A full run of the 26 unique cases costs a few cents on
+gpt-4o-mini. Setup, flags, how to read the report, and the CI jobs are in
+[docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 
 ## Web App
 
@@ -529,7 +563,7 @@ Every rejection is a `SqlValidationError` with a stable `error.code` (such as `S
 - Every path (web, CLIs, benchmark, `verify-dataset`, master-data lookups) runs the statement under `SET STATEMENT max_statement_time=...` from `QUERY_STATEMENT_TIMEOUT_MS` (default 8000 ms; `0` disables; the web server can override it with `WEB_QUERY_STATEMENT_TIMEOUT_MS`).
 - The web server also caps rows server-side with `sql_select_limit` (which applies only to the outermost result, so subqueries, window functions and `GROUP BY` are unaffected) and stops reading at the cap even when the SQL has a larger explicit `LIMIT`. A capped result reports `truncated: true` and `totalRowCount: null`, and the UI shows "N+ rows".
 - When a web request is cancelled (Stop button, client disconnect or the request deadline), the OpenAI call is aborted and a running query is stopped with `KILL QUERY` over a separate connection.
-- The OpenAI client uses `OPENAI_TIMEOUT_MS` (default 60000) per attempt and `OPENAI_MAX_RETRIES` (default 1) transport retries. A response cut off at the token limit fails as `LLM_TRUNCATED`, and a content-filter block or refusal as `LLM_REFUSED`, instead of being parsed. Provider failures are classified as `LLM_TIMEOUT`, `LLM_CONNECTION_ERROR` or `HTTP_<status>`; outages (timeouts, connection errors, HTTP 401/403/429 and 5xx) fail fast without an app-level retry.
+- The OpenAI client uses `OPENAI_TIMEOUT_MS` (default 60000) per attempt and `OPENAI_MAX_RETRIES` (default 1) transport retries. A response cut off at the token limit fails as `LLM_TRUNCATED`, and a content-filter block or refusal as `LLM_REFUSED`, instead of being parsed. Provider failures are classified as `LLM_TIMEOUT`, `LLM_CONNECTION_ERROR`, `LLM_MODEL_NOT_FOUND` (an unknown model or deployment, sent as 404 or 400) or `HTTP_<status>`; outages (timeouts, connection errors, HTTP 401/403/404/429 and 5xx, unknown models) fail fast without an app-level retry.
 
 **Known gaps.** The validator is defense in depth, and these are not covered by it:
 
@@ -550,7 +584,8 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - [scripts/evaluate-retrieval.js](scripts/evaluate-retrieval.js): measures table recall and prompt width for retrieval without making model calls
 - [scripts/resolve-master-data.js](scripts/resolve-master-data.js): runs the product master-data resolver against the configured database for one question
 - [scripts/measure-prompt-cache.js](scripts/measure-prompt-cache.js): estimates optimized prompt cache-prefix size across benchmark datasets without model calls
-- [scripts/evaluate.js](scripts/evaluate.js): runs named benchmark datasets, applies signal checks, and writes `report.json` plus `trace.jsonl` under `generated/runs/`
+- [scripts/eval.js](scripts/eval.js): the one-command evaluation (`npm run eval`): database preflight, fixture seeding, gold and controls verification, the run, failure attribution, statistics, baseline comparison, and `report.json` + `report.md` + `trace.jsonl` under `generated/runs/`; `--rescore` / `--offline` re-judge recorded runs with no LLM calls
+- [scripts/evaluate.js](scripts/evaluate.js): scores one case through the product loop and the multi-fixture oracle (`evaluateQuestion`); its CLI (`npm run benchmark` / `npm run evaluate`) is `scripts/eval.js` with the benchmark profile
 - [scripts/verify-dataset.js](scripts/verify-dataset.js): validates every dataset's gold `expected_sql` against the public demo database (no LLM) and checks gold-vs-gold self-consistency under each case's `comparison` spec
 - [scripts/build-edge-dataset.mjs](scripts/build-edge-dataset.mjs): regenerates the public edge-case benchmark dataset (`datasets/edge-cases-public.json`) from the core public cases plus the inline edge cases (`npm run build-edge-dataset`)
 - [scripts/seed-public-db.js](scripts/seed-public-db.js): seeds the `demo_retail` database with the bundled synthetic retail data (`npm run seed-demo`)

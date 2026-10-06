@@ -74,7 +74,7 @@ const PASS_THROUGH_CODES = new Set(['QUESTION_TOO_LONG', 'QUESTION_REQUIRED']);
 
 // Provider-side LLM outages (mirrors isLlmUnavailableCode in src/query-service.js).
 function isLlmUnavailableCode(code: string): boolean {
-  return ['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_429'].includes(code) || /^HTTP_5\d\d$/.test(code);
+  return ['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND', 'HTTP_429'].includes(code) || /^HTTP_5\d\d$/.test(code);
 }
 
 function classifyByCode(code: string, message: string): string | null {

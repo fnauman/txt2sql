@@ -1,0 +1,1012 @@
+{
+  "reportVersion": 2,
+  "mode": "run",
+  "generatedAt": "2026-10-05T12:00:00.000Z",
+  "runTimestamp": "2026-10-05T12-00-00.000Z",
+  "model": "gpt-4o-mini",
+  "gitSha": "0000000000000000000000000000000000000000",
+  "suite": {
+    "name": "recorded-fixture",
+    "datasets": [
+      {
+        "name": "recorded-fixture",
+        "path": "test/fixtures/eval-recorded-report.json",
+        "caseCount": 4
+      }
+    ],
+    "totalCaseCount": 4,
+    "uniqueCaseCount": 4,
+    "selectedCaseCount": 4,
+    "duplicates": [],
+    "filters": {
+      "split": "all",
+      "caseIds": [],
+      "tags": [],
+      "intents": []
+    }
+  },
+  "oracle": {
+    "fixtures": [
+      {
+        "name": "seed",
+        "database": "demo_retail",
+        "status": "current"
+      },
+      {
+        "name": "v2",
+        "database": "demo_retail_v2",
+        "status": "current"
+      }
+    ],
+    "maxRetries": 1,
+    "statementTimeoutMs": 8000,
+    "goldTimeoutMs": 30000
+  },
+  "runner": {
+    "profile": "eval",
+    "repeat": 2,
+    "concurrency": 2,
+    "caseTimeoutMs": 120000,
+    "budgetUsd": 0.001,
+    "maxRetries": 1,
+    "statementTimeoutMs": 8000
+  },
+  "provenance": {
+    "git": {
+      "sha": "0000000000000000000000000000000000000000",
+      "dirty": false
+    },
+    "promptVersion": "recorded-prompt-version"
+  },
+  "budget": {
+    "limitUsd": 0.001,
+    "spentUsd": 0.001435,
+    "exhausted": true,
+    "skippedCases": [
+      "rec_skipped"
+    ]
+  },
+  "results": [
+    {
+      "id": "rec_active_customers",
+      "intentId": "active_customer_count",
+      "question": "How many active customers do we have?",
+      "canonicalQuestion": "How many active customers do we have?",
+      "expected_sql": "SELECT COUNT(*) AS active_customer_count FROM Customer WHERE IsActive = 1",
+      "alternative_expected_sql": [],
+      "expected_tables": [
+        "Customer"
+      ],
+      "expected_columns": [],
+      "disallowed_columns": [],
+      "signal_checks": null,
+      "comparison": {
+        "mode": "scalar"
+      },
+      "difficulty": "easy",
+      "tags": [
+        "customer",
+        "count"
+      ],
+      "failure_class": null,
+      "split": "dev",
+      "datasets": [
+        "recorded-fixture"
+      ],
+      "status": "pass",
+      "warnings": [],
+      "generated_sql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1",
+      "explanation": "recorded",
+      "assumptions": [],
+      "tables_used": [
+        "Customer"
+      ],
+      "retrieved_tables": [
+        "Campaign",
+        "Customer",
+        "CustomerProductPrice",
+        "Product",
+        "SalesDocument"
+      ],
+      "master_data_candidates": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "retry": false,
+          "generatedSql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1",
+          "llm": {
+            "ok": true,
+            "durationMs": 1300,
+            "usage": {
+              "prompt_tokens": 2000,
+              "completion_tokens": 100,
+              "total_tokens": 2100,
+              "prompt_tokens_details": {
+                "cached_tokens": 1024
+              }
+            },
+            "cost": {
+              "currency": "USD",
+              "inputCost": 0.000227,
+              "outputCost": 0.00006,
+              "totalCost": 0.000287
+            },
+            "model": "gpt-4o-mini",
+            "finishReason": "stop",
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "validation": {
+            "ok": true,
+            "durationMs": 0.8,
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "execution": {
+            "ok": true,
+            "durationMs": 1.2,
+            "rowCount": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "attempt_count": 1,
+      "oracle": null,
+      "signal_warnings": [],
+      "disallowed_column_warnings": [],
+      "expected_rows_preview": [],
+      "actual_rows_preview": [],
+      "llm_usage": {
+        "prompt_tokens": 2000,
+        "completion_tokens": 100,
+        "total_tokens": 2100,
+        "prompt_tokens_details": {
+          "cached_tokens": 1024
+        }
+      },
+      "llm_cost": {
+        "currency": "USD",
+        "inputCost": 0.000227,
+        "outputCost": 0.00006,
+        "totalCost": 0.000287
+      },
+      "timings": {
+        "totalMs": 1500,
+        "llmMs": 1400,
+        "validationMs": 1,
+        "executionMs": 1
+      },
+      "repetitions": [
+        {
+          "repetition": 1,
+          "status": "pass",
+          "warnings": [],
+          "generated_sql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1",
+          "explanation": "recorded",
+          "assumptions": [],
+          "tables_used": [
+            "Customer"
+          ],
+          "retrieved_tables": [
+            "Campaign",
+            "Customer",
+            "CustomerProductPrice",
+            "Product",
+            "SalesDocument"
+          ],
+          "master_data_candidates": [],
+          "attempts": [
+            {
+              "attempt": 1,
+              "retry": false,
+              "generatedSql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1",
+              "llm": {
+                "ok": true,
+                "durationMs": 1300,
+                "usage": {
+                  "prompt_tokens": 2000,
+                  "completion_tokens": 100,
+                  "total_tokens": 2100,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 1024
+                  }
+                },
+                "cost": {
+                  "currency": "USD",
+                  "inputCost": 0.000227,
+                  "outputCost": 0.00006,
+                  "totalCost": 0.000287
+                },
+                "model": "gpt-4o-mini",
+                "finishReason": "stop",
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "validation": {
+                "ok": true,
+                "durationMs": 0.8,
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "execution": {
+                "ok": true,
+                "durationMs": 1.2,
+                "rowCount": 1,
+                "truncated": false
+              }
+            }
+          ],
+          "attempt_count": 1,
+          "oracle": null,
+          "signal_warnings": [],
+          "disallowed_column_warnings": [],
+          "expected_rows_preview": [],
+          "actual_rows_preview": [],
+          "llm_usage": {
+            "prompt_tokens": 2000,
+            "completion_tokens": 100,
+            "total_tokens": 2100,
+            "prompt_tokens_details": {
+              "cached_tokens": 1024
+            }
+          },
+          "llm_cost": {
+            "currency": "USD",
+            "inputCost": 0.000227,
+            "outputCost": 0.00006,
+            "totalCost": 0.000287
+          },
+          "timings": {
+            "totalMs": 1500,
+            "llmMs": 1400,
+            "validationMs": 1,
+            "executionMs": 1
+          },
+          "outcome": "pass",
+          "bucket": "pass",
+          "counted": true,
+          "outcome_tags": []
+        },
+        {
+          "repetition": 2,
+          "status": "result_mismatch",
+          "warnings": [],
+          "generated_sql": "SELECT COUNT(*) AS active_customers FROM Customer",
+          "explanation": "recorded",
+          "assumptions": [],
+          "tables_used": [
+            "Customer"
+          ],
+          "retrieved_tables": [
+            "Campaign",
+            "Customer",
+            "CustomerProductPrice",
+            "Product",
+            "SalesDocument"
+          ],
+          "master_data_candidates": [],
+          "attempts": [
+            {
+              "attempt": 1,
+              "retry": false,
+              "generatedSql": "SELECT COUNT(*) AS active_customers FROM Customer",
+              "llm": {
+                "ok": true,
+                "durationMs": 1500,
+                "usage": {
+                  "prompt_tokens": 2000,
+                  "completion_tokens": 100,
+                  "total_tokens": 2100,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 1024
+                  }
+                },
+                "cost": {
+                  "currency": "USD",
+                  "inputCost": 0.000227,
+                  "outputCost": 0.00006,
+                  "totalCost": 0.000287
+                },
+                "model": "gpt-4o-mini",
+                "finishReason": "stop",
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "validation": {
+                "ok": true,
+                "durationMs": 0.8,
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "execution": {
+                "ok": true,
+                "durationMs": 1.2,
+                "rowCount": 1,
+                "truncated": false
+              }
+            }
+          ],
+          "attempt_count": 1,
+          "oracle": null,
+          "signal_warnings": [],
+          "disallowed_column_warnings": [],
+          "expected_rows_preview": [],
+          "actual_rows_preview": [],
+          "llm_usage": {
+            "prompt_tokens": 2000,
+            "completion_tokens": 100,
+            "total_tokens": 2100,
+            "prompt_tokens_details": {
+              "cached_tokens": 1024
+            }
+          },
+          "llm_cost": {
+            "currency": "USD",
+            "inputCost": 0.000227,
+            "outputCost": 0.00006,
+            "totalCost": 0.000287
+          },
+          "timings": {
+            "totalMs": 1500,
+            "llmMs": 1400,
+            "validationMs": 1,
+            "executionMs": 1
+          },
+          "outcome": "wrong_result",
+          "bucket": "model",
+          "counted": true,
+          "outcome_tags": []
+        }
+      ],
+      "outcome": "pass",
+      "bucket": "pass",
+      "counted": true,
+      "outcome_tags": [],
+      "summary": {
+        "repetitions": 2,
+        "counted": 2,
+        "passes": 1,
+        "passRate": 0.5,
+        "majorityPass": false,
+        "outcome": "wrong_result",
+        "bucket": "model",
+        "tags": [],
+        "outcomes": {
+          "wrong_result": 1,
+          "pass": 1
+        }
+      }
+    },
+    {
+      "id": "rec_customers_old_rule",
+      "intentId": "customer_count",
+      "question": "How many customers do we have?",
+      "canonicalQuestion": "How many customers do we have?",
+      "expected_sql": "SELECT COUNT(*) AS customer_count FROM Customer",
+      "alternative_expected_sql": [],
+      "expected_tables": [
+        "Customer"
+      ],
+      "expected_columns": [],
+      "disallowed_columns": [],
+      "signal_checks": null,
+      "comparison": {
+        "mode": "scalar"
+      },
+      "difficulty": "easy",
+      "tags": [
+        "customer",
+        "count"
+      ],
+      "failure_class": null,
+      "split": "dev",
+      "datasets": [
+        "recorded-fixture"
+      ],
+      "status": "result_mismatch",
+      "warnings": [],
+      "generated_sql": "SELECT COUNT(*) AS customer_count FROM Customer WHERE IsActive = 1",
+      "explanation": "recorded",
+      "assumptions": [],
+      "tables_used": [
+        "Customer"
+      ],
+      "retrieved_tables": [
+        "Campaign",
+        "Customer",
+        "CustomerProductPrice",
+        "Product",
+        "SalesDocument"
+      ],
+      "master_data_candidates": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "retry": false,
+          "generatedSql": "SELECT COUNT(*) AS customer_count FROM Customer",
+          "llm": {
+            "ok": true,
+            "durationMs": 1200,
+            "usage": {
+              "prompt_tokens": 2000,
+              "completion_tokens": 100,
+              "total_tokens": 2100,
+              "prompt_tokens_details": {
+                "cached_tokens": 1024
+              }
+            },
+            "cost": {
+              "currency": "USD",
+              "inputCost": 0.000227,
+              "outputCost": 0.00006,
+              "totalCost": 0.000287
+            },
+            "model": "gpt-4o-mini",
+            "finishReason": "stop",
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "validation": {
+            "ok": false,
+            "durationMs": 0.7,
+            "code": "OLD_RULE",
+            "layer": "guardrail",
+            "message": "OLD_RULE: rejected by the validator of the recorded run"
+          },
+          "execution": null
+        },
+        {
+          "attempt": 2,
+          "retry": true,
+          "generatedSql": "SELECT COUNT(*) AS customer_count FROM Customer WHERE IsActive = 1",
+          "llm": {
+            "ok": true,
+            "durationMs": 1800,
+            "usage": {
+              "prompt_tokens": 2000,
+              "completion_tokens": 100,
+              "total_tokens": 2100,
+              "prompt_tokens_details": {
+                "cached_tokens": 1024
+              }
+            },
+            "cost": {
+              "currency": "USD",
+              "inputCost": 0.000227,
+              "outputCost": 0.00006,
+              "totalCost": 0.000287
+            },
+            "model": "gpt-4o-mini",
+            "finishReason": "stop",
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "validation": {
+            "ok": true,
+            "durationMs": 0.8,
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "execution": {
+            "ok": true,
+            "durationMs": 1.2,
+            "rowCount": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "attempt_count": 2,
+      "oracle": null,
+      "signal_warnings": [],
+      "disallowed_column_warnings": [],
+      "expected_rows_preview": [],
+      "actual_rows_preview": [],
+      "llm_usage": {
+        "prompt_tokens": 4000,
+        "completion_tokens": 200,
+        "total_tokens": 4200,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        }
+      },
+      "llm_cost": {
+        "currency": "USD",
+        "inputCost": 0.000454,
+        "outputCost": 0.00012,
+        "totalCost": 0.000574
+      },
+      "timings": {
+        "totalMs": 3000,
+        "llmMs": 2800,
+        "validationMs": 1,
+        "executionMs": 1
+      },
+      "repetitions": [
+        {
+          "repetition": 1,
+          "status": "result_mismatch",
+          "warnings": [],
+          "generated_sql": "SELECT COUNT(*) AS customer_count FROM Customer WHERE IsActive = 1",
+          "explanation": "recorded",
+          "assumptions": [],
+          "tables_used": [
+            "Customer"
+          ],
+          "retrieved_tables": [
+            "Campaign",
+            "Customer",
+            "CustomerProductPrice",
+            "Product",
+            "SalesDocument"
+          ],
+          "master_data_candidates": [],
+          "attempts": [
+            {
+              "attempt": 1,
+              "retry": false,
+              "generatedSql": "SELECT COUNT(*) AS customer_count FROM Customer",
+              "llm": {
+                "ok": true,
+                "durationMs": 1200,
+                "usage": {
+                  "prompt_tokens": 2000,
+                  "completion_tokens": 100,
+                  "total_tokens": 2100,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 1024
+                  }
+                },
+                "cost": {
+                  "currency": "USD",
+                  "inputCost": 0.000227,
+                  "outputCost": 0.00006,
+                  "totalCost": 0.000287
+                },
+                "model": "gpt-4o-mini",
+                "finishReason": "stop",
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "validation": {
+                "ok": false,
+                "durationMs": 0.7,
+                "code": "OLD_RULE",
+                "layer": "guardrail",
+                "message": "OLD_RULE: rejected by the validator of the recorded run"
+              },
+              "execution": null
+            },
+            {
+              "attempt": 2,
+              "retry": true,
+              "generatedSql": "SELECT COUNT(*) AS customer_count FROM Customer WHERE IsActive = 1",
+              "llm": {
+                "ok": true,
+                "durationMs": 1800,
+                "usage": {
+                  "prompt_tokens": 2000,
+                  "completion_tokens": 100,
+                  "total_tokens": 2100,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 1024
+                  }
+                },
+                "cost": {
+                  "currency": "USD",
+                  "inputCost": 0.000227,
+                  "outputCost": 0.00006,
+                  "totalCost": 0.000287
+                },
+                "model": "gpt-4o-mini",
+                "finishReason": "stop",
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "validation": {
+                "ok": true,
+                "durationMs": 0.8,
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "execution": {
+                "ok": true,
+                "durationMs": 1.2,
+                "rowCount": 1,
+                "truncated": false
+              }
+            }
+          ],
+          "attempt_count": 2,
+          "oracle": null,
+          "signal_warnings": [],
+          "disallowed_column_warnings": [],
+          "expected_rows_preview": [],
+          "actual_rows_preview": [],
+          "llm_usage": {
+            "prompt_tokens": 4000,
+            "completion_tokens": 200,
+            "total_tokens": 4200,
+            "prompt_tokens_details": {
+              "cached_tokens": 2048
+            }
+          },
+          "llm_cost": {
+            "currency": "USD",
+            "inputCost": 0.000454,
+            "outputCost": 0.00012,
+            "totalCost": 0.000574
+          },
+          "timings": {
+            "totalMs": 3000,
+            "llmMs": 2800,
+            "validationMs": 1,
+            "executionMs": 1
+          },
+          "outcome": "wrong_result",
+          "bucket": "model",
+          "counted": true,
+          "outcome_tags": []
+        }
+      ],
+      "outcome": "wrong_result",
+      "bucket": "model",
+      "counted": true,
+      "outcome_tags": [],
+      "summary": {
+        "repetitions": 1,
+        "counted": 1,
+        "passes": 0,
+        "passRate": 0,
+        "majorityPass": false,
+        "outcome": "wrong_result",
+        "bucket": "model",
+        "tags": [],
+        "outcomes": {
+          "wrong_result": 1
+        }
+      }
+    },
+    {
+      "id": "rec_commented_pass",
+      "intentId": "active_customer_count",
+      "question": "How many active customers do we have?",
+      "canonicalQuestion": "How many active customers do we have?",
+      "expected_sql": "SELECT COUNT(*) AS active_customer_count FROM Customer WHERE IsActive = 1",
+      "alternative_expected_sql": [],
+      "expected_tables": [
+        "Customer"
+      ],
+      "expected_columns": [],
+      "disallowed_columns": [],
+      "signal_checks": null,
+      "comparison": {
+        "mode": "scalar"
+      },
+      "difficulty": "easy",
+      "tags": [
+        "customer",
+        "count"
+      ],
+      "failure_class": null,
+      "split": "dev",
+      "datasets": [
+        "recorded-fixture"
+      ],
+      "status": "pass",
+      "warnings": [],
+      "generated_sql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1 -- active only",
+      "explanation": "recorded",
+      "assumptions": [],
+      "tables_used": [
+        "Customer"
+      ],
+      "retrieved_tables": [
+        "Campaign",
+        "Customer",
+        "CustomerProductPrice",
+        "Product",
+        "SalesDocument"
+      ],
+      "master_data_candidates": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "retry": false,
+          "generatedSql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1 -- active only",
+          "llm": {
+            "ok": true,
+            "durationMs": 1100,
+            "usage": {
+              "prompt_tokens": 2000,
+              "completion_tokens": 100,
+              "total_tokens": 2100,
+              "prompt_tokens_details": {
+                "cached_tokens": 1024
+              }
+            },
+            "cost": {
+              "currency": "USD",
+              "inputCost": 0.000227,
+              "outputCost": 0.00006,
+              "totalCost": 0.000287
+            },
+            "model": "gpt-4o-mini",
+            "finishReason": "stop",
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "validation": {
+            "ok": true,
+            "durationMs": 0.8,
+            "tablesUsed": [
+              "Customer"
+            ]
+          },
+          "execution": {
+            "ok": true,
+            "durationMs": 1.2,
+            "rowCount": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "attempt_count": 1,
+      "oracle": null,
+      "signal_warnings": [],
+      "disallowed_column_warnings": [],
+      "expected_rows_preview": [],
+      "actual_rows_preview": [],
+      "llm_usage": {
+        "prompt_tokens": 2000,
+        "completion_tokens": 100,
+        "total_tokens": 2100,
+        "prompt_tokens_details": {
+          "cached_tokens": 1024
+        }
+      },
+      "llm_cost": {
+        "currency": "USD",
+        "inputCost": 0.000227,
+        "outputCost": 0.00006,
+        "totalCost": 0.000287
+      },
+      "timings": {
+        "totalMs": 1500,
+        "llmMs": 1400,
+        "validationMs": 1,
+        "executionMs": 1
+      },
+      "repetitions": [
+        {
+          "repetition": 1,
+          "status": "pass",
+          "warnings": [],
+          "generated_sql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1 -- active only",
+          "explanation": "recorded",
+          "assumptions": [],
+          "tables_used": [
+            "Customer"
+          ],
+          "retrieved_tables": [
+            "Campaign",
+            "Customer",
+            "CustomerProductPrice",
+            "Product",
+            "SalesDocument"
+          ],
+          "master_data_candidates": [],
+          "attempts": [
+            {
+              "attempt": 1,
+              "retry": false,
+              "generatedSql": "SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1 -- active only",
+              "llm": {
+                "ok": true,
+                "durationMs": 1100,
+                "usage": {
+                  "prompt_tokens": 2000,
+                  "completion_tokens": 100,
+                  "total_tokens": 2100,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 1024
+                  }
+                },
+                "cost": {
+                  "currency": "USD",
+                  "inputCost": 0.000227,
+                  "outputCost": 0.00006,
+                  "totalCost": 0.000287
+                },
+                "model": "gpt-4o-mini",
+                "finishReason": "stop",
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "validation": {
+                "ok": true,
+                "durationMs": 0.8,
+                "tablesUsed": [
+                  "Customer"
+                ]
+              },
+              "execution": {
+                "ok": true,
+                "durationMs": 1.2,
+                "rowCount": 1,
+                "truncated": false
+              }
+            }
+          ],
+          "attempt_count": 1,
+          "oracle": null,
+          "signal_warnings": [],
+          "disallowed_column_warnings": [],
+          "expected_rows_preview": [],
+          "actual_rows_preview": [],
+          "llm_usage": {
+            "prompt_tokens": 2000,
+            "completion_tokens": 100,
+            "total_tokens": 2100,
+            "prompt_tokens_details": {
+              "cached_tokens": 1024
+            }
+          },
+          "llm_cost": {
+            "currency": "USD",
+            "inputCost": 0.000227,
+            "outputCost": 0.00006,
+            "totalCost": 0.000287
+          },
+          "timings": {
+            "totalMs": 1500,
+            "llmMs": 1400,
+            "validationMs": 1,
+            "executionMs": 1
+          },
+          "outcome": "pass",
+          "bucket": "pass",
+          "counted": true,
+          "outcome_tags": []
+        }
+      ],
+      "outcome": "pass",
+      "bucket": "pass",
+      "counted": true,
+      "outcome_tags": [],
+      "summary": {
+        "repetitions": 1,
+        "counted": 1,
+        "passes": 1,
+        "passRate": 1,
+        "majorityPass": true,
+        "outcome": "pass",
+        "bucket": "pass",
+        "tags": [],
+        "outcomes": {
+          "pass": 1
+        }
+      }
+    },
+    {
+      "id": "rec_skipped",
+      "intentId": "customer_count",
+      "question": "How many customers do we have?",
+      "canonicalQuestion": "How many customers do we have?",
+      "expected_sql": "SELECT COUNT(*) AS customer_count FROM Customer",
+      "alternative_expected_sql": [],
+      "expected_tables": [
+        "Customer"
+      ],
+      "expected_columns": [],
+      "disallowed_columns": [],
+      "signal_checks": null,
+      "comparison": {
+        "mode": "scalar"
+      },
+      "difficulty": "easy",
+      "tags": [
+        "customer",
+        "count"
+      ],
+      "failure_class": null,
+      "split": "dev",
+      "datasets": [
+        "recorded-fixture"
+      ],
+      "status": "skipped_budget",
+      "warnings": [],
+      "generated_sql": "",
+      "explanation": "recorded",
+      "assumptions": [],
+      "tables_used": [
+        "Customer"
+      ],
+      "retrieved_tables": [
+        "Campaign",
+        "Customer",
+        "CustomerProductPrice",
+        "Product",
+        "SalesDocument"
+      ],
+      "master_data_candidates": [],
+      "attempts": [],
+      "attempt_count": 0,
+      "oracle": null,
+      "signal_warnings": [],
+      "disallowed_column_warnings": [],
+      "expected_rows_preview": [],
+      "actual_rows_preview": [],
+      "llm_usage": null,
+      "llm_cost": null,
+      "error": "Not run: the LLM budget of $0.001 was reached before this case started.",
+      "error_code": "BUDGET_EXHAUSTED",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "status": "skipped_budget",
+          "warnings": [],
+          "generated_sql": "",
+          "explanation": "recorded",
+          "assumptions": [],
+          "tables_used": [
+            "Customer"
+          ],
+          "retrieved_tables": [
+            "Campaign",
+            "Customer",
+            "CustomerProductPrice",
+            "Product",
+            "SalesDocument"
+          ],
+          "master_data_candidates": [],
+          "attempts": [],
+          "attempt_count": 0,
+          "oracle": null,
+          "signal_warnings": [],
+          "disallowed_column_warnings": [],
+          "expected_rows_preview": [],
+          "actual_rows_preview": [],
+          "llm_usage": null,
+          "llm_cost": null,
+          "error": "Not run: the LLM budget of $0.001 was reached before this case started.",
+          "error_code": "BUDGET_EXHAUSTED",
+          "outcome": "skipped_budget",
+          "bucket": "skipped",
+          "counted": false,
+          "outcome_tags": []
+        }
+      ],
+      "outcome": "skipped_budget",
+      "bucket": "skipped",
+      "counted": false,
+      "outcome_tags": [],
+      "summary": {
+        "repetitions": 1,
+        "counted": 0,
+        "passes": 0,
+        "passRate": null,
+        "majorityPass": null,
+        "outcome": "skipped_budget",
+        "bucket": "skipped",
+        "tags": [],
+        "outcomes": {
+          "skipped_budget": 1
+        }
+      }
+    }
+  ]
+}

@@ -78,7 +78,12 @@ function isSdkError(error, ErrorClass) {
 // shapes that arrive without a code. OpenAI SDK errors map to LLM_TIMEOUT /
 // LLM_CONNECTION_ERROR / LLM_ABORTED, and provider HTTP errors to
 // HTTP_<status> (the provider's own body code, e.g. invalid_api_key, stays in
-// the message).
+// the message), except an unknown model or deployment (body code
+// model_not_found / DeploymentNotFound, which OpenAI sends with 404 and some
+// OpenAI-compatible servers with 400): LLM_MODEL_NOT_FOUND, so a wrong
+// MODEL_NAME is never mistaken for a bad request about the question.
+const MODEL_NOT_FOUND_BODY_CODES = new Set(['modelnotfound', 'deploymentnotfound']);
+
 export function errorCodeOf(error) {
   if (!error) {
     return null;
@@ -96,6 +101,9 @@ export function errorCodeOf(error) {
     return 'LLM_CONNECTION_ERROR';
   }
   if (isSdkError(error, APIError) && Number.isInteger(error.status)) {
+    if (typeof error.code === 'string' && MODEL_NOT_FOUND_BODY_CODES.has(error.code.toLowerCase().replace(/[^a-z]/g, ''))) {
+      return 'LLM_MODEL_NOT_FOUND';
+    }
     return `HTTP_${error.status}`;
   }
 
@@ -123,12 +131,14 @@ export function errorCodeOf(error) {
 }
 
 // Provider-side LLM failures that say nothing about the prompt: the provider
-// timed out, was unreachable, rejected the key, rate-limited us or failed
-// (5xx). The SDK has already retried these at the transport level
-// (OPENAI_MAX_RETRIES), so they fail fast instead of paying for another app
-// attempt, and the web API answers them as gateway errors (502/503/504), not
-// as an unprocessable question (422).
-const LLM_UNAVAILABLE_CODES = new Set(['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_429']);
+// timed out, was unreachable, rejected the key, does not serve the model or
+// the endpoint path (404, LLM_MODEL_NOT_FOUND: a wrong MODEL_NAME or
+// OPENAI_BASE_URL), rate-limited us or failed (5xx). The SDK has already
+// retried the transient ones at the transport level (OPENAI_MAX_RETRIES), so
+// they fail fast instead of paying for another app attempt, and the web API
+// answers them as gateway errors (502/503/504), not as an unprocessable
+// question (422).
+const LLM_UNAVAILABLE_CODES = new Set(['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND', 'HTTP_429']);
 
 export function isLlmUnavailableCode(code) {
   return LLM_UNAVAILABLE_CODES.has(code) || /^HTTP_5\d\d$/.test(String(code || ''));

@@ -445,6 +445,22 @@ test('errorCodeOf classifies real OpenAI SDK errors by class', () => {
   }
 });
 
+test('a wrong model name or endpoint is a provider configuration outage, not a failed question', () => {
+  // A wrong OPENAI_BASE_URL path, or a model the endpoint does not serve.
+  assert.equal(errorCodeOf(APIError.generate(404, undefined, '404 page not found', {})), 'HTTP_404');
+  const notServed = { error: { message: 'The model `nope` does not exist or you do not have access to it.', type: 'invalid_request_error', code: 'model_not_found' } };
+  assert.equal(errorCodeOf(APIError.generate(404, notServed, 'x', {})), 'LLM_MODEL_NOT_FOUND');
+  // Some OpenAI-compatible servers answer 400 for an unknown model.
+  assert.equal(errorCodeOf(APIError.generate(400, notServed, 'x', {})), 'LLM_MODEL_NOT_FOUND');
+  assert.equal(errorCodeOf(APIError.generate(404, { error: { code: 'DeploymentNotFound', message: 'no deployment' } }, 'x', {})), 'LLM_MODEL_NOT_FOUND');
+  for (const code of ['HTTP_404', 'LLM_MODEL_NOT_FOUND']) {
+    assert.equal(isLlmUnavailableCode(code), true, code);
+  }
+  // Any other 400 (context too long, a bad parameter) stays a failure of the question.
+  assert.equal(errorCodeOf(APIError.generate(400, { error: { code: 'context_length_exceeded', message: 'too long' } }, 'x', {})), 'HTTP_400');
+  assert.equal(isLlmUnavailableCode('HTTP_400'), false);
+});
+
 test('a provider outage fails fast as "llm" with a typed code instead of a second app attempt', async () => {
   const outages = [
     [new APIConnectionTimeoutError(), 'LLM_TIMEOUT'],

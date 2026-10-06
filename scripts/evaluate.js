@@ -1,45 +1,24 @@
+// The benchmark's per-case evaluation (evaluateQuestion) and the legacy
+// helpers older callers import. The runner itself (case selection,
+// concurrency, deadlines, repetitions, budget, attribution, statistics,
+// reports) is scripts/eval.js; this file's CLI is that runner with the
+// benchmark profile (see main below).
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import {
-  classifyBenchmarkStatus,
-  collectBenchmarkWarnings,
-  createBenchmarkRunPaths,
-  DEFAULT_DATASET_NAME,
-  DEFAULT_DATASETS_DIR,
-  DEFAULT_RUNS_DIR,
-  listGoldVariants,
-  loadBenchmarkDataset,
-  summarizeBenchmarkResults,
-} from '../src/benchmark.js';
+import { classifyBenchmarkStatus, collectBenchmarkWarnings, listGoldVariants } from '../src/benchmark.js';
 import { createCaseTraceLogger, extractAttempts } from '../src/eval/case-trace.js';
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
-import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
-import {
-  closeFixtureConnections,
-  createGoldCache,
-  executeGoldSql,
-  GOLD_STATEMENT_TIMEOUT_MS,
-  openFixtureConnections,
-  scoreAgainstGold,
-} from '../src/eval/oracle.js';
-import { resolveGitSha } from '../src/git.js';
-import {
-  createOpenAiClient,
-  describeMariaDbConnectionTarget,
-  describeSchema,
-  loadNarrowSchema,
-  resolveStatementTimeoutMs,
-  writeJsonFile,
-} from '../src/pipeline.js';
-import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
-import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
+import { PRIMARY_FIXTURE } from '../src/eval/fixtures.js';
+import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, scoreAgainstGold } from '../src/eval/oracle.js';
+import { isEvalInfraError } from '../src/eval/infra-errors.js';
+import { runOptimizedQuestion } from '../src/query-service.js';
+import { createTimer, serializeError } from '../src/trace.js';
+
+// Legacy pooled reliability helpers, now in src/eval/stats.js.
+export { summarizeReliability, wilsonLowerBound } from '../src/eval/stats.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const MODELS_DIR = path.resolve(__dirname, '../models');
-const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
 // The product loop fetches at most this many rows (plus one, to detect
 // truncation); the oracle re-runs the final SQL on every fixture anyway.
@@ -58,6 +37,30 @@ export function applyEvaluationFailureExitCode(failed, processLike = process) {
   if (failed > 0) {
     processLike.exitCode = 1;
   }
+}
+
+function abortCode(signal) {
+  return typeof signal?.reason?.code === 'string' ? signal.reason.code : 'QUERY_ABORTED';
+}
+
+function stopReason(signal) {
+  return signal?.reason?.message || 'the case was aborted';
+}
+
+// A case whose signal fired before the product loop ran (during the gold runs).
+function abortedResult(signal, extra = {}) {
+  return {
+    status: 'aborted',
+    warnings: [],
+    error: `Stopped during the gold runs: ${stopReason(signal)}.`,
+    error_stage: 'aborted',
+    error_code: abortCode(signal),
+    attempts: [],
+    attempt_count: 0,
+    llm_usage: null,
+    llm_cost: null,
+    ...extra,
+  };
 }
 
 function sumDurations(attempts, step) {
@@ -81,6 +84,12 @@ function sumDurations(attempts, step) {
  *   every event, tagged with the case, to `trace`.
  * - Gold runs first (with its own timeout), so a broken gold costs no LLM call
  *   and is reported as 'expected_sql_error', never as a model failure.
+ * - `signal` (optional AbortSignal, e.g. the runner's per-case deadline) is
+ *   passed to the gold runs, the product loop (which stops the in-flight LLM
+ *   call and kills a running query on a pool) and the oracle's scoring. A
+ *   case whose signal fired before it finished is reported as 'aborted' (with
+ *   whatever it recorded): a gold run or a scoring cut short is neither a
+ *   broken gold nor a verdict.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  */
@@ -98,6 +107,7 @@ export async function evaluateQuestion({
   maxRetries = undefined,
   statementTimeoutMs = null,
   goldTimeoutMs = GOLD_STATEMENT_TIMEOUT_MS,
+  signal = null,
   dependencies = {},
 }) {
   const { runQuestion = runOptimizedQuestion, scorePrediction = scoreAgainstGold } = dependencies;
@@ -122,7 +132,7 @@ export async function evaluateQuestion({
   try {
     for (const variant of listGoldVariants(testCase)) {
       for (const fixtureConnection of fixtureConnections) {
-        const rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label });
+        const rows = await executeGoldSql(fixtureConnection, variant.sql, { goldCache, timeoutMs: goldTimeoutMs, label: variant.label, signal });
         await trace.emit('expected_sql.executed', {
           ...caseContext,
           fixture: fixtureConnection.name,
@@ -133,6 +143,12 @@ export async function evaluateQuestion({
       }
     }
   } catch (error) {
+    if (signal?.aborted) {
+      // The deadline (or a stop) cut the gold run short: not a broken gold.
+      const result = abortedResult(signal, { timings: { totalMs: caseTimer.stop().durationMs } });
+      await trace.emit('case.completed', { ...caseContext, success: false, status: result.status, error: result.error, attempts: 0 });
+      return result;
+    }
     await trace.emit('expected_sql.failed', {
       ...caseContext,
       ...goldTimer.stop(),
@@ -146,6 +162,9 @@ export async function evaluateQuestion({
       error: error.message,
       error_stage: 'gold',
       error_code: error.cause?.code || error.code || null,
+      // The database going away is not a broken gold (mysql2's fatal errors
+      // carry no code, so the code alone cannot tell).
+      error_infra: isEvalInfraError(error.cause || error),
       attempts: [],
       attempt_count: 0,
       llm_usage: null,
@@ -162,6 +181,9 @@ export async function evaluateQuestion({
   }
 
   const caseTrace = createCaseTraceLogger({ forwardTo: trace, context: caseContext });
+  // The product loop's own wall time: what a user waits for, without the
+  // harness's gold runs and multi-fixture scoring.
+  const questionTimer = createTimer();
   const run = await runQuestion({
     client,
     connection: primaryConnection,
@@ -174,7 +196,9 @@ export async function evaluateQuestion({
     rowLimit: EVAL_ROW_LIMIT,
     includeInsights: false,
     statementTimeoutMs,
+    signal,
   });
+  const questionMs = questionTimer.stop().durationMs;
   const attempts = extractAttempts(caseTrace.events);
   const promptEvent = caseTrace.events.find((entry) => entry.event === 'prompt.built');
   const retrievedTables = Array.isArray(run.promptTables) ? run.promptTables : [];
@@ -186,15 +210,31 @@ export async function evaluateQuestion({
   let score = null;
   const oracleTimer = createTimer();
   if (run.success) {
-    score = await scorePrediction({
-      testCase,
-      predictedSql: run.sql,
-      connections: fixtureConnections,
-      goldCache,
-      timeoutMs: statementTimeoutMs,
-      goldTimeoutMs,
-      schema,
-    });
+    try {
+      score = await scorePrediction({
+        testCase,
+        predictedSql: run.sql,
+        connections: fixtureConnections,
+        goldCache,
+        timeoutMs: statementTimeoutMs,
+        goldTimeoutMs,
+        schema,
+        signal,
+      });
+    } catch (error) {
+      // Scoring cut short by the signal is handled below; anything else is
+      // the runner's evaluation_error.
+      if (!signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+  // The signal fired while the fixtures were being scored: whatever the
+  // oracle returned (or threw) is not a verdict.
+  const abortedWhileScoring = run.success && Boolean(signal?.aborted);
+  if (abortedWhileScoring) {
+    status = 'aborted';
+  } else if (run.success) {
     status = score.match
       ? 'pass'
       : score.infraError
@@ -226,7 +266,9 @@ export async function evaluateQuestion({
   const disallowedWarnings = score?.disallowedWarnings || [];
   const warnings = collectBenchmarkWarnings({ rowsMatch: status === 'pass', signalWarnings, disallowedColumnsUsed: disallowedWarnings });
   const timings = {
+    // totalMs includes the gold runs and the oracle; questionMs is the product loop alone.
     totalMs: caseTimer.stop().durationMs,
+    questionMs,
     llmMs: sumDurations(attempts, 'llm'),
     validationMs: sumDurations(attempts, 'validation'),
     executionMs: sumDurations(attempts, 'execution'),
@@ -244,13 +286,19 @@ export async function evaluateQuestion({
     master_data_candidates: run.masterDataCandidates || [],
     attempts,
     attempt_count: run.attemptCount ?? attempts.length,
-    ...(run.success
-      ? {}
-      : {
-          error: run.error?.message || 'Unknown error',
-          error_stage: run.errorStage || null,
-          error_code: run.errorCode || null,
-        }),
+    ...(abortedWhileScoring
+      ? {
+          error: `Stopped while scoring on the fixtures: ${stopReason(signal)}.`,
+          error_stage: 'aborted',
+          error_code: abortCode(signal),
+        }
+      : run.success
+        ? {}
+        : {
+            error: run.error?.message || 'Unknown error',
+            error_stage: run.errorStage || null,
+            error_code: run.errorCode || null,
+          }),
     oracle: score
       ? {
           matched_gold: score.matchedGold,
@@ -284,123 +332,6 @@ export async function evaluateQuestion({
 
   return result;
 }
-
-function buildResultRecord(testCase, extra) {
-  return {
-    id: testCase.id,
-    intentId: testCase.intentId,
-    question: testCase.question,
-    canonicalQuestion: testCase.canonicalQuestion,
-    expected_sql: testCase.expected_sql,
-    alternative_expected_sql: testCase.alternative_expected_sql,
-    expected_tables: testCase.expected_tables,
-    expected_columns: testCase.expected_columns,
-    disallowed_columns: testCase.disallowed_columns,
-    signal_checks: testCase.signal_checks,
-    difficulty: testCase.difficulty,
-    tags: testCase.tags,
-    failure_class: testCase.failure_class,
-    ...extra,
-  };
-}
-
-async function runDatasetOnce({ cli, datasetInfo, repetition, repeat, ...shared }) {
-  const results = [];
-
-  for (const [index, testCase] of datasetInfo.cases.entries()) {
-    if (repeat > 1) {
-      cli.write(`(rep ${repetition}/${repeat}) `);
-    }
-    cli.write(`#${testCase.id} ${testCase.question} `);
-
-    try {
-      const result = await evaluateQuestion({
-        ...shared,
-        testCase,
-        caseIndex: index + 1,
-        datasetName: datasetInfo.datasetName,
-      });
-
-      results.push(buildResultRecord(testCase, result));
-      const warningNote = result.warnings?.length ? ` (warnings: ${result.warnings.join(', ')})` : '';
-      cli.write(result.status === 'pass' ? `✅${warningNote}\n` : `❌ ${result.status}${warningNote}\n`);
-    } catch (error) {
-      results.push(buildResultRecord(testCase, { status: 'evaluation_error', error: error.message }));
-      cli.write('❌ evaluation_error\n');
-    }
-  }
-
-  return results;
-}
-
-// Lower bound of the Wilson score interval for a binomial proportion. Reported
-// alongside raw pass-rate so a small, noisy sample is not mistaken for proof of
-// reliability (e.g. 6/6 has a 95% lower bound near 0.6, not 1.0).
-export function wilsonLowerBound(passes, attempts, z = 1.96) {
-  if (attempts <= 0) {
-    return 0;
-  }
-
-  const phat = passes / attempts;
-  const z2 = z * z;
-  const denominator = 1 + z2 / attempts;
-  const center = phat + z2 / (2 * attempts);
-  const margin = z * Math.sqrt((phat * (1 - phat) + z2 / (4 * attempts)) / attempts);
-  return Number(Math.max(0, (center - margin) / denominator).toFixed(4));
-}
-
-export function summarizeReliability(perRepetition, repeat) {
-  const accuracies = perRepetition.map((entry) => entry.accuracy);
-  const perCase = new Map();
-
-  for (const entry of perRepetition) {
-    for (const caseResult of entry.results) {
-      const current = perCase.get(caseResult.id) || {
-        id: caseResult.id,
-        intentId: caseResult.intentId,
-        question: caseResult.question,
-        attempts: 0,
-        passes: 0,
-        statuses: {},
-      };
-      current.attempts += 1;
-      if (caseResult.status === 'pass') {
-        current.passes += 1;
-      }
-      current.statuses[caseResult.status] = (current.statuses[caseResult.status] || 0) + 1;
-      perCase.set(caseResult.id, current);
-    }
-  }
-
-  const totalAttempts = perRepetition.reduce((sum, entry) => sum + entry.total, 0);
-  const totalPasses = perRepetition.reduce((sum, entry) => sum + entry.passed, 0);
-  const fullPassReps = perRepetition.filter((entry) => entry.total > 0 && entry.passed === entry.total).length;
-
-  return {
-    repeat,
-    perRepetition: perRepetition.map((entry) => ({
-      repetition: entry.repetition,
-      total: entry.total,
-      passed: entry.passed,
-      failed: entry.failed,
-      accuracy: entry.accuracy,
-      statusCounts: entry.statusCounts,
-    })),
-    meanAccuracy: accuracies.length ? Number((accuracies.reduce((sum, value) => sum + value, 0) / accuracies.length).toFixed(4)) : 0,
-    minAccuracy: accuracies.length ? Math.min(...accuracies) : 0,
-    maxAccuracy: accuracies.length ? Math.max(...accuracies) : 0,
-    allCasesPassedRate: perRepetition.length ? Number((fullPassReps / perRepetition.length).toFixed(4)) : 0,
-    totalAttempts,
-    totalPasses,
-    passRate: totalAttempts ? Number((totalPasses / totalAttempts).toFixed(4)) : 0,
-    wilsonLower95: wilsonLowerBound(totalPasses, totalAttempts),
-    perCase: [...perCase.values()].map((entry) => ({
-      ...entry,
-      passRate: entry.attempts ? Number((entry.passes / entry.attempts).toFixed(4)) : 0,
-    })),
-  };
-}
-
 
 // Deep fixture check (checkFixtureContent re-hashes every row): status
 // 'current' | 'drifted' | 'stale' | 'missing' (or 'unknown' when the check
@@ -442,327 +373,19 @@ export function assertSharedMasterData(fixtureStatus) {
   }
 }
 
-export async function main() {
-  const argv = process.argv.slice(2);
-  const envInfo = await loadEnvironment(argv);
-  const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
-  const traceOptions = resolveTraceOptions(argv);
-  const datasetPathOption = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
-  const datasetName = getOptionValue(argv, '--dataset') || (datasetPathOption ? null : DEFAULT_DATASET_NAME);
-  const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
-  const caseId = getOptionValue(argv, '--case-id');
-  const tag = getOptionValue(argv, '--tag');
-  const repeat = Math.max(1, Math.trunc(Number(getOptionValue(argv, '--repeat')) || 1));
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
-  // One retry budget and one statement timeout for every entry point: the
-  // benchmark reads the same settings as the web app and the optimized CLI
-  // (WEB_QUERY_MAX_RETRIES, default 1 retry = 2 attempts;
-  // QUERY_STATEMENT_TIMEOUT_MS, default 8000). Validated up front.
-  const maxRetries = resolveMaxRetries();
-  const statementTimeoutMs = resolveStatementTimeoutMs();
-  const fixtures = resolveFixtures(getOptionValue(argv, '--fixtures'));
-  if (fixtures[0]?.name !== PRIMARY_FIXTURE.name) {
-    throw new Error(
-      `--fixtures must include the primary fixture "${PRIMARY_FIXTURE.name}": the product loop runs there, so the model's master-data context comes from it.`
-    );
-  }
-
-  const datasetTimer = createTimer();
-  let datasetInfo;
-  try {
-    datasetInfo = await loadBenchmarkDataset({
-      datasetName,
-      datasetPath: datasetPathOption,
-      datasetsDir,
-      caseId,
-      tag,
-    });
-  } catch (error) {
-    throw new Error(`Failed to load benchmark dataset: ${error.message}`);
-  }
-
-  const outputDir = path.resolve(getOptionValue(argv, '--output-dir') || DEFAULT_RUNS_DIR);
-  const traceDir = path.resolve(getOptionValue(argv, '--trace-dir') || outputDir);
-  const runPaths = createBenchmarkRunPaths({
-    datasetName: datasetInfo.datasetName,
-    model,
-    outputDir,
-    traceDir,
-  });
-  const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || runPaths.reportPath);
-  const traceFilePath = path.resolve(getOptionValue(argv, '--trace-file') || runPaths.tracePath);
-  const gitSha = await resolveGitSha(path.resolve(__dirname, '..'));
-  const trace = await createTraceLogger({
-    enabled: true,
-    logToStdout: traceOptions.logToStdout,
-    filePath: traceFilePath,
-    pipeline: 'evaluate',
-    metadata: {
-      script: 'scripts/evaluate.js',
-      datasetName: datasetInfo.datasetName,
-      promptVersion: null,
-      semanticLayerVersion: null,
-      dbProfileVersion: null,
-      gitSha,
-    },
-  });
-  const cli = createCliOutput({
-    traceToStdout: traceOptions.logToStdout,
-  });
-
-  await trace.emit('run.started', {
-    argv,
-    environment: envInfo,
-    model,
-    refreshSchema,
-    modelsDir: MODELS_DIR,
-    schemaPath: SCHEMA_PATH,
-    datasetPath: datasetInfo.datasetPath,
-    datasetCaseCount: datasetInfo.cases.length,
-    totalDatasetCases: datasetInfo.totalCases,
-    filters: datasetInfo.filters,
-    resultsPath,
-    outputDir,
-    traceDir,
-    runTimestamp: runPaths.timestamp,
-    openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
-    traceToStdout: traceOptions.logToStdout,
-    traceFile: trace.filePath,
-    maxRetries,
-    statementTimeoutMs,
-    goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
-    fixtures: fixtures.map(({ name, database }) => ({ name, database })),
-  });
-
-  await trace.emit('benchmark_dataset.loaded', {
-    ...datasetTimer.stop(),
-    datasetPath: datasetInfo.datasetPath,
-    datasetCaseCount: datasetInfo.cases.length,
-    totalDatasetCases: datasetInfo.totalCases,
-    filters: datasetInfo.filters,
-  });
-
-  let schema;
-  const schemaTimer = createTimer();
-  try {
-    schema = await loadNarrowSchema({
-      modelsDir: MODELS_DIR,
-      schemaPath: SCHEMA_PATH,
-      refreshSchema,
-    });
-  } catch (error) {
-    await trace.emit('schema.load_failed', {
-      ...schemaTimer.stop(),
-      schemaPath: SCHEMA_PATH,
-      error: serializeError(error),
-    });
-    throw error;
-  }
-
-  await trace.emit('schema.loaded', {
-    ...schemaTimer.stop(),
-    schemaPath: SCHEMA_PATH,
-    schema: describeSchema(schema),
-  });
-
-  let client;
-  try {
-    client = createOpenAiClient();
-  } catch (error) {
-    await trace.emit('openai.client_failed', {
-      model,
-      openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
-      error: serializeError(error),
-    });
-    throw error;
-  }
-
-  await trace.emit('openai.client_ready', {
-    model,
-    openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
-  });
-
-  const connectionTimer = createTimer();
-  let fixtureConnections;
-  try {
-    fixtureConnections = await openFixtureConnections({ fixtures });
-  } catch (error) {
-    await trace.emit('database.connection_failed', {
-      ...connectionTimer.stop(),
-      target: describeMariaDbConnectionTarget({ includeDatabase: false }),
-      fixtures: fixtures.map(({ name, database }) => ({ name, database })),
-      error: serializeError(error),
-    });
-    throw error;
-  }
-
-  const fixtureStatus = await describeFixtureStatus(fixtureConnections);
-  await trace.emit('database.connected', {
-    ...connectionTimer.stop(),
-    target: describeMariaDbConnectionTarget({ includeDatabase: false }),
-    fixtures: fixtureStatus,
-  });
-  try {
-    assertSharedMasterData(fixtureStatus);
-  } catch (error) {
-    await trace.emit('fixtures.master_data_mismatch', { fixtures: fixtureStatus, error: serializeError(error) });
-    await closeFixtureConnections(fixtureConnections);
-    throw error;
-  }
-
-  const perRepetition = [];
-
-  cli.log(`Model: ${model}`);
-  cli.log(`Schema file: ${SCHEMA_PATH}`);
-  cli.log(`Dataset: ${datasetInfo.datasetName}`);
-  cli.log(`Dataset file: ${datasetInfo.datasetPath}`);
-  cli.log(`Environment: ${envInfo.path || 'not found'}`);
-  cli.log(`Cases: ${datasetInfo.cases.length}/${datasetInfo.totalCases}`);
-  cli.log(`Retry budget: ${maxRetries} (WEB_QUERY_MAX_RETRIES); statement timeout: ${statementTimeoutMs} ms; gold timeout: ${GOLD_STATEMENT_TIMEOUT_MS} ms`);
-  cli.log(`Fixtures: ${fixtureStatus.map((entry) => `${entry.name}=${entry.database} (${entry.status})`).join(', ')}`);
-  for (const entry of fixtureStatus.filter((status) => status.status !== 'current')) {
-    cli.log(`  warning: fixture ${entry.name} is ${entry.status}; run "npm run seed-fixtures" so its content matches the pins.`);
-  }
-  if (process.env.DB_NAME && !FIXTURES.some((fixture) => fixture.database === process.env.DB_NAME)) {
-    cli.log(
-      `  note: DB_NAME is ${process.env.DB_NAME}; the benchmark runs the product loop on ${PRIMARY_FIXTURE.database} ` +
-        `and scores on ${fixtureStatus.map((entry) => entry.database).join(', ')}, not on DB_NAME.`
-    );
-  }
-  if (repeat > 1) {
-    cli.log(`Repetitions: ${repeat} (reliability mode)`);
-  }
-  if (datasetInfo.filters.caseId || datasetInfo.filters.tag) {
-    cli.log(
-      `Filters: ${[
-        datasetInfo.filters.caseId ? `case-id=${datasetInfo.filters.caseId}` : null,
-        datasetInfo.filters.tag ? `tag=${datasetInfo.filters.tag}` : null,
-      ]
-        .filter(Boolean)
-        .join(', ')}`
-    );
-  }
-  cli.log(`Report file: ${resultsPath}`);
-  cli.log(`Trace file: ${trace.filePath}\n`);
-
-  const goldCache = createGoldCache();
-  try {
-    for (let repetition = 1; repetition <= repeat; repetition += 1) {
-      const repetitionResults = await runDatasetOnce({
-        client,
-        connections: fixtureConnections,
-        schema,
-        model,
-        trace,
-        goldCache,
-        maxRetries,
-        statementTimeoutMs,
-        cli,
-        datasetInfo,
-        repetition,
-        repeat,
-      });
-      const repetitionSummary = summarizeBenchmarkResults(repetitionResults);
-      perRepetition.push({
-        repetition,
-        results: repetitionResults,
-        total: repetitionSummary.total,
-        passed: repetitionSummary.passed,
-        failed: repetitionSummary.failed,
-        statusCounts: repetitionSummary.statusCounts,
-        accuracy: repetitionSummary.total === 0 ? 0 : Number((repetitionSummary.passed / repetitionSummary.total).toFixed(4)),
-      });
-    }
-  } finally {
-    const closeTimer = createTimer();
-    await closeFixtureConnections(fixtureConnections);
-    await trace.emit('database.closed', {
-      ...closeTimer.stop(),
-    });
-  }
-
-  // The representative per-case detail comes from the first repetition so the
-  // report's `results` shape is unchanged; `reliability` carries the full
-  // multi-run picture so a single lucky run is never reported as "accuracy 1.0".
-  const results = perRepetition[0]?.results || [];
-  const summary = summarizeBenchmarkResults(results);
-  const reliability = summarizeReliability(perRepetition, repeat);
-  const warningCounts = results.reduce((counts, result) => {
-    for (const warning of result.warnings || []) {
-      counts[warning] = (counts[warning] || 0) + 1;
-    }
-    return counts;
-  }, {});
-  await writeJsonFile(resultsPath, {
-    generatedAt: new Date().toISOString(),
-    runTimestamp: runPaths.timestamp,
-    model,
-    gitSha,
-    schemaPath: SCHEMA_PATH,
-    dataset: {
-      name: datasetInfo.datasetName,
-      path: datasetInfo.datasetPath,
-      selectedCaseCount: datasetInfo.cases.length,
-      totalCaseCount: datasetInfo.totalCases,
-      filters: datasetInfo.filters,
-    },
-    oracle: {
-      fixtures: fixtureStatus,
-      maxRetries,
-      statementTimeoutMs,
-      goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
-    },
-    total: summary.total,
-    passed: summary.passed,
-    failed: summary.failed,
-    accuracy: summary.total === 0 ? 0 : Number((summary.passed / summary.total).toFixed(4)),
-    // Tells machine consumers what the top-level total/passed/failed/accuracy
-    // describe: a single run, or just the first of several repetitions. When
-    // repeat > 1 the aggregate across all runs lives in `reliability.passRate`.
-    accuracyScope: repeat > 1 ? 'first-repetition' : 'single-run',
-    aggregateAccuracy: repeat > 1 ? reliability.passRate : null,
-    statusCounts: summary.statusCounts,
-    warningCounts,
-    reliability,
-    traceFile: trace.filePath,
-    results,
-  });
-
-  cli.log('\nSummary');
-  cli.log(`Passed: ${summary.passed}/${summary.total} (first repetition; a pass must match the gold on ${fixtureStatus.length} fixture(s))`);
-  cli.log(`Failed: ${summary.failed}`);
-  cli.log(`Status counts: ${JSON.stringify(summary.statusCounts)}`);
-  if (Object.keys(warningCounts).length > 0) {
-    cli.log(`Warnings (not failures): ${JSON.stringify(warningCounts)}`);
-  }
-  if (repeat > 1) {
-    cli.log(
-      `Reliability over ${repeat} runs: pass-rate ${reliability.passRate} ` +
-        `(mean acc ${reliability.meanAccuracy}, range ${reliability.minAccuracy}-${reliability.maxAccuracy}, ` +
-        `Wilson 95% lower ${reliability.wilsonLower95}, all-pass runs ${reliability.allCasesPassedRate})`
-    );
-  }
-
-  await trace.emit('run.completed', {
-    success: summary.failed === 0,
-    total: summary.total,
-    passed: summary.passed,
-    failed: summary.failed,
-    statusCounts: summary.statusCounts,
-    warningCounts,
-    reliability,
-    resultsPath,
-  });
-
-  // Single-run mode keeps the original pass/fail exit semantics. Reliability
-  // mode (repeat > 1) is a measurement, not a gate, so it does not fail the
-  // process on expected run-to-run variance.
-  applyEvaluationFailureExitCode(repeat > 1 ? 0 : summary.failed);
+// `node scripts/evaluate.js` and `npm run benchmark` / `npm run evaluate` are
+// the evaluation runner (scripts/eval.js) with the benchmark profile: one
+// dataset (default core-public), no Docker start, no fixture seeding (stale
+// fixtures only warn), no gold/controls verification, and exit code 1 when any
+// case fails in a single-repetition run. Every eval flag also works here
+// (--repeat, --concurrency, --case-timeout-ms, --budget-usd, --compare, ...).
+export async function main(argv = process.argv.slice(2)) {
+  const { main: runEvaluation } = await import('./eval.js');
+  return runEvaluation(argv, { profile: 'benchmark' });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  main().catch((error) => {
-    console.error(`Evaluation failed: ${error.message}`);
-    process.exitCode = 1;
+  main().then((code) => {
+    process.exitCode = code;
   });
 }

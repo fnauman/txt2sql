@@ -1,0 +1,177 @@
+name: CI
+
+# test:      unit tests, web typecheck/build/tests on Node 22.18 and 24.
+# db:        a real MariaDB (docker compose): schema, fixtures, gold + oracle
+#            verification with the kill-rate gate, the opt-in real-DB tests,
+#            an offline evaluation (rescore of the committed baseline, no LLM
+#            calls) and the retrieval evaluation. Costs nothing.
+# eval-paid: the full evaluation with real LLM calls under a budget; only on a
+#            manual dispatch or a pull request labelled `run-eval` (every push
+#            to such a pull request runs it again; remove the label to stop),
+#            and only when the OPENAI_API_KEY secret is available. The key is
+#            given to the two steps that need it, never to npm ci.
+#
+# Adding a label other than run-eval to a pull request starts a run whose jobs
+# are all skipped, in a concurrency group of its own, so it never cancels the
+# run in progress (or a paid evaluation).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: LLM budget in USD for the paid evaluation (no new case starts once it is spent)
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  # One group per event and ref, so a push to main never cancels a manual
+  # paid evaluation; a label other than run-eval gets a throwaway group.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ (github.event.action == 'labeled' && github.event.label.name != 'run-eval') && format('-label-{0}', github.run_id) || '' }}
+  # Only superseded pull-request runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    if: github.event.action != 'labeled' || github.event.label.name == 'run-eval'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run web:typecheck
+      - run: npm run web:build
+      - run: npm run web:test
+
+  db:
+    name: db (MariaDB, fixtures, verify, offline eval)
+    if: github.event.action != 'labeled' || github.event.label.name == 'run-eval'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Dummy credentials for the throwaway CI database. docker-compose.yml
+      # creates root with DB_ADMIN_PASSWORD and the SELECT-only demo_readonly
+      # user with DB_PASSWORD.
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: demo_retail
+      DB_USER: demo_readonly
+      DB_PASSWORD: ci-readonly-password
+      DB_ADMIN_USER: root
+      DB_ADMIN_PASSWORD: ci-admin-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Start MariaDB
+        run: docker compose up -d --wait mariadb
+      - name: Bootstrap the schema
+        run: npm run bootstrap-db
+      - name: Seed the evaluation fixtures
+        run: npm run seed-fixtures
+      - name: Verify every gold query and the oracle controls (kill-rate gate)
+        run: npm run verify-dataset
+      - name: Real-database tests
+        # One file at a time: the fixture tests deliberately edit and re-seed
+        # the fixture databases that the evaluation tests read.
+        env:
+          TEST_MARIADB_PORT: '3306'
+          TEST_MARIADB_PASSWORD: ci-readonly-password
+          TEST_MARIADB_ADMIN_PASSWORD: ci-admin-password
+        run: node --test --test-concurrency=1 test/mariadb.integration.test.js test/eval-fixtures.integration.test.js test/eval-runner.integration.test.js
+      - name: Offline evaluation (rescore the committed baseline; no LLM calls)
+        # With a committed baseline, a guardrail, oracle or fixture change that
+        # makes its recorded SQL score significantly worse fails the job.
+        run: |
+          if [ -f "eval/baselines/${MODEL_NAME:-gpt-4o-mini}.json" ]; then
+            npm run eval -- --offline --gate
+          else
+            npm run eval -- --offline
+          fi
+      - name: Retrieval evaluation
+        run: npm run evaluate-retrieval
+      - name: Add the offline report to the job summary
+        if: always()
+        run: |
+          report=$(find generated/runs -name report.md 2>/dev/null | sort | tail -n 1)
+          if [ -n "$report" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+
+  eval-paid:
+    name: eval (paid, budget-capped)
+    needs: [test, db]
+    if: >-
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-eval'))) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'run-eval')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BUDGET_USD: ${{ inputs.budget || '1' }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: demo_retail
+      DB_USER: demo_readonly
+      DB_PASSWORD: ci-readonly-password
+      DB_ADMIN_USER: root
+      DB_ADMIN_PASSWORD: ci-admin-password
+    steps:
+      - name: Check for the OpenAI key
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::notice title=eval-paid::OPENAI_API_KEY is not available to this run; skipping the paid evaluation."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+        if: steps.key.outputs.present == 'true'
+      - name: Evaluate (starts MariaDB, seeds, verifies, runs, reports)
+        if: steps.key.outputs.present == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npm run eval -- --budget-usd "$BUDGET_USD"
+      - name: Upload the run
+        if: always() && steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-runs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: generated/runs
+          if-no-files-found: warn
+      - name: Add report.md to the job summary
+        if: always() && steps.key.outputs.present == 'true'
+        run: |
+          report=$(find generated/runs -name report.md 2>/dev/null | sort | tail -n 1)
+          if [ -n "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report.md was written; see the Evaluate step log." >> "$GITHUB_STEP_SUMMARY"
+          fi

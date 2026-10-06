@@ -551,3 +551,86 @@ test('a cancelled read that overflows the cap after a failed KILL is dropped, ne
   assert.deepEqual(events, ['destroy'], 'a still-streaming thread must not go back to the pool');
   core.stopped = true;
 });
+
+// mysql2 reports a fatal error of a callback-less command (the server killed or
+// dropped the connection) on the core connection, not on the query; a capped
+// read must settle on it instead of hanging until the event loop drains.
+function createDroppingCore({ rowsBeforeDrop = 1, how = 'error' } = {}) {
+  const core = new EventEmitter();
+  core.statements = [];
+  core.query = (sql) => {
+    core.statements.push(sql);
+    const query = new EventEmitter();
+    let index = 0;
+    const next = () => {
+      if (index === rowsBeforeDrop) {
+        if (how === 'error') {
+          core.emit('error', Object.assign(new Error('Connection lost: The server closed the connection.'), { code: 'PROTOCOL_CONNECTION_LOST', fatal: true }));
+        } else {
+          core.emit('end');
+        }
+        return; // the query itself never emits 'error' or 'end'
+      }
+      index += 1;
+      query.emit('result', { n: index });
+      setImmediate(next);
+    };
+    setImmediate(next);
+    return query;
+  };
+  return core;
+}
+
+test('a capped read rejects when the connection is lost mid-read (error or end on the core connection)', async () => {
+  for (const how of ['error', 'end']) {
+    const core = createDroppingCore({ how });
+    await assert.rejects(
+      settlesWithin(executeReadOnlySql({ connection: core, query: () => assert.fail('must stream') }, 'SELECT SLEEP(3)', { timeoutMs: 0, maxRows: 5 }), 1000),
+      { code: 'PROTOCOL_CONNECTION_LOST' },
+      how
+    );
+    assert.equal(core.listenerCount('error'), 0, `${how}: connection listeners removed`);
+    assert.equal(core.listenerCount('end'), 0);
+
+    // On a pool connection too, and the connection is not handed back.
+    const pool = createStreamingPool(createDroppingCore({ how }));
+    await assert.rejects(settlesWithin(executeReadOnlySql(pool, 'SELECT SLEEP(3)', { timeoutMs: 0, maxRows: 5 }), 1000), { code: 'PROTOCOL_CONNECTION_LOST' }, how);
+  }
+});
+
+test('a capped read on a connection that is already dead rejects at once, without sending the statement', async () => {
+  const fatal = Object.assign(new Error('Connection lost: The server closed the connection.'), { code: 'PROTOCOL_CONNECTION_LOST', fatal: true });
+  for (const [label, state, code] of [
+    ['fatal error', { _fatalError: fatal }, 'PROTOCOL_CONNECTION_LOST'],
+    ['protocol error', { _protocolError: fatal }, 'PROTOCOL_CONNECTION_LOST'],
+    ['closing', { _closing: true }, 'PROTOCOL_CONNECTION_LOST'],
+    ['socket destroyed', { stream: { destroyed: true } }, 'PROTOCOL_CONNECTION_LOST'],
+  ]) {
+    const core = Object.assign(createDroppingCore(), state);
+    await assert.rejects(
+      settlesWithin(executeReadOnlySql({ connection: core, query: () => assert.fail('must stream') }, 'SELECT 1', { timeoutMs: 0, maxRows: 5 }), 1000),
+      { code },
+      label
+    );
+    assert.deepEqual(core.statements, [], `${label}: nothing sent`);
+  }
+
+  // A core query() that throws synchronously rejects too.
+  const throwing = new EventEmitter();
+  throwing.query = () => {
+    throw Object.assign(new Error("Can't add new command when connection is in closed state"), { fatal: true });
+  };
+  await assert.rejects(settlesWithin(executeReadOnlySql({ connection: throwing }, 'SELECT 1', { timeoutMs: 0, maxRows: 5 }), 1000), /closed state/);
+  assert.equal(throwing.listenerCount('error'), 0);
+});
+
+test('a completed capped read leaves no listener on the connection', async () => {
+  const core = Object.assign(new EventEmitter(), createStreamingCore({ total: 2 }));
+  for (let index = 0; index < 20; index += 1) {
+    const local = createStreamingCore({ total: 2 });
+    core.query = local.query;
+    assert.equal((await executeReadOnlySql({ connection: core }, 'SELECT n FROM r', { timeoutMs: 0, maxRows: 5 })).length, 2);
+  }
+  assert.equal(core.listenerCount('error'), 0);
+  assert.equal(core.listenerCount('end'), 0);
+});

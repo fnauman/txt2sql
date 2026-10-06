@@ -35,6 +35,9 @@ test('friendlyError classifies on the error code first', () => {
   assert.match(friendlyError('x', { code: 'LLM_REFUSED', stage: 'llm' }), /declined/i);
   assert.match(friendlyError('x', { code: 'LLM_TIMEOUT', stage: 'llm' }), /not responding/i);
   assert.match(friendlyError('x', { code: 'HTTP_503', stage: 'llm' }), /not responding/i);
+  // Mirrors isLlmUnavailableCode: a wrong endpoint or model name.
+  assert.match(friendlyError('x', { code: 'HTTP_404', stage: 'llm' }), /not responding/i);
+  assert.match(friendlyError('x', { code: 'LLM_MODEL_NOT_FOUND', stage: 'llm' }), /not responding/i);
   assert.match(friendlyError('x', { code: 'ER_STATEMENT_TIMEOUT', stage: 'execution' }), /took too long/i);
   assert.match(friendlyError('x', { code: 'REQUEST_TIMEOUT', stage: 'aborted' }), /longer than the server allows/i);
   assert.match(friendlyError('x', { code: 'QUERY_ABORTED', stage: 'aborted' }), /cancelled/i);

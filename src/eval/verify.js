@@ -27,7 +27,8 @@ import {
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
-import { resolveCaseControls } from './controls.js';
+import { isEvalInfraError } from './infra-errors.js';
+import { goldFingerprint, resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 
@@ -35,40 +36,55 @@ import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlErro
  * Validates SQL the way the product does for `question`: master-data
  * candidates from the primary fixture, the optimized prompt's table set and
  * context, and a response whose tables_used lists the SQL's own tables (what a
- * consistent model returns). Returns null when accepted, else the error.
+ * consistent model returns) unless `options.tablesUsed` gives the response's
+ * own list (rescore passes the recorded one). Returns null when accepted, else
+ * the error. `validate.promptFor(question)` exposes the cached prompt context
+ * ({ context, allowedTables, masterDataCandidates }).
+ *
+ * Master-data lookup failures are handled like the product loop handles them:
+ * an infrastructure failure (the database went away) is thrown, not hidden
+ * behind an empty candidate list, because the prompt context, and so every
+ * guardrail decision, would silently differ; other lookup failures (e.g. a
+ * statement timeout) degrade to no candidates. The lookup runs under
+ * `statementTimeoutMs` like the product's.
  */
-export function createValidatorProbe({ schema, connection = null }) {
+export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null }) {
   const prompts = new Map();
   const promptFor = async (question) => {
     if (!prompts.has(question)) {
-      prompts.set(
-        question,
-        (async () => {
-          const semanticPlan = buildSemanticPlan(question);
-          let masterDataCandidates = [];
-          if (connection) {
-            try {
-              masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan });
-            } catch {
-              masterDataCandidates = [];
+      const pending = (async () => {
+        const semanticPlan = buildSemanticPlan(question);
+        let masterDataCandidates = [];
+        if (connection) {
+          try {
+            masterDataCandidates = await resolveMasterDataCandidates({ connection, semanticPlan, statementTimeoutMs });
+          } catch (error) {
+            if (isEvalInfraError(error)) {
+              throw error;
             }
+            masterDataCandidates = [];
           }
-          const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
-          return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName) };
-        })()
-      );
+        }
+        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan });
+        return { context: prompt.context, allowedTables: prompt.tables.map((table) => table.tableName), masterDataCandidates };
+      })();
+      prompts.set(question, pending);
+      // A failed lookup is not cached: the next call tries again.
+      pending.catch(() => prompts.delete(question));
     }
     return prompts.get(question);
   };
 
-  return async function validate(question, sql) {
+  const validate = async function validate(question, sql, { tablesUsed: declaredTables = null } = {}) {
     const { context, allowedTables } = await promptFor(question);
     try {
-      let tablesUsed = [];
-      try {
-        tablesUsed = validateSqlSafety(sql, allowedTables).tablesUsed;
-      } catch {
-        tablesUsed = [];
+      let tablesUsed = Array.isArray(declaredTables) ? declaredTables : [];
+      if (!Array.isArray(declaredTables)) {
+        try {
+          tablesUsed = validateSqlSafety(sql, allowedTables).tablesUsed;
+        } catch {
+          tablesUsed = [];
+        }
       }
       validateReadOnlySql(sql, allowedTables, { promptContext: context, response: { sql, tables_used: tablesUsed } });
       return null;
@@ -76,6 +92,8 @@ export function createValidatorProbe({ schema, connection = null }) {
       return { code: error.code || null, layer: error.layer || null, message: error.message };
     }
   };
+  validate.promptFor = promptFor;
+  return validate;
 }
 
 /**
@@ -94,6 +112,12 @@ export const NEGATIVE_STATUS = Object.freeze({
 });
 
 const EXHAUSTED = 'assignment_search_exhausted';
+
+// A recorded negative control's status (results from before the statuses
+// carry only `killed`).
+function negativeStatusOf(control) {
+  return control.status ?? (control.killed ? NEGATIVE_STATUS.killed : NEGATIVE_STATUS.survived);
+}
 
 // Some part of the oracle's verdict came from a search that gave up.
 function restsOnExhaustedSearch(score) {
@@ -263,7 +287,7 @@ export function summarizeControls(caseResults, { fixtureNames = [], primaryFixtu
     }
   }
 
-  const statusOf = (control) => control.status ?? (control.killed ? NEGATIVE_STATUS.killed : NEGATIVE_STATUS.survived);
+  const statusOf = negativeStatusOf;
   const describe = (control) => `${control.caseId}/${control.id} (${control.type}${control.note ? `: ${control.note}` : ''})`;
   const describeErrors = (control) =>
     `${control.caseId}/${control.id} (${(control.errors || []).map((error) => `${error.fixture}: ${error.code}`).join(', ') || control.executionError?.code || 'error'})`;
@@ -409,4 +433,72 @@ export function pinWriteRefusal(checks) {
     `--write-pins refused, no pins written: ${reasons.join('; ')}. ` +
     'Run "npm run seed-fixtures" (admin credentials) so every fixture holds the generated content, then rerun with --write-pins.'
   );
+}
+
+/**
+ * In-process verify-dataset for an evaluation run (scripts/eval.js): every
+ * case of every dataset is verified once (a case shared by two datasets, like
+ * the core cases in the edge suite, is checked once and counted in both), and
+ * the same gates apply: no case problem, and each dataset's design (and
+ * held-out) kill rate at or above the floors. `datasets` are
+ * [{ name, cases }] of normalized cases. Returns { cases, problems: [{ id,
+ * datasets, problems }], notes, gateFailures, controlStatus: { undecided,
+ * invalid, unscored }, datasets: [{ name, cases, failures, controls }] }.
+ * controlStatus lists (as caseId/controlId, each verified case once) the
+ * negative controls that are not a verdict: invalid and unscored controls are
+ * problems (the run must not start), undecided ones count as not killed.
+ */
+export async function verifySuite({
+  datasets,
+  connections,
+  goldCache = createGoldCache(),
+  validate = null,
+  controlsIndex = null,
+  checkControls = true,
+  minKillRate = 0.95,
+  minHeldoutKillRate = 0,
+  fixtureNames = connections.map((entry) => entry.name),
+  verify = verifyCase,
+} = {}) {
+  const verified = new Map();
+  const problems = [];
+  const notes = [];
+  const gateFailures = [];
+  const datasetSummaries = [];
+  for (const dataset of datasets) {
+    const results = [];
+    for (const testCase of dataset.cases) {
+      const key = `${testCase.id}\u0000${goldFingerprint(testCase.expected_sql)}`;
+      let entry = verified.get(key);
+      if (!entry) {
+        const result = await verify(testCase, { connections, goldCache, validate, controlsIndex, checkControls });
+        entry = { id: testCase.id, result, datasets: [] };
+        verified.set(key, entry);
+        if (result.problems.length > 0) {
+          problems.push({ id: testCase.id, datasets: entry.datasets, problems: result.problems });
+        }
+        notes.push(...result.notes.map((note) => `${testCase.id}: ${note}`));
+      }
+      entry.datasets.push(dataset.name);
+      results.push(entry.result);
+    }
+    const summary = checkControls ? summarizeControls(results, { fixtureNames }) : null;
+    const hasControls = summary && summary.design.total + summary.heldout.total + summary.positive.total > 0;
+    if (hasControls) {
+      gateFailures.push(...killRateGateFailures(summary, { datasetName: dataset.name, minKillRate, minHeldoutKillRate }));
+    }
+    datasetSummaries.push({
+      name: dataset.name,
+      cases: results.length,
+      failures: results.filter((result) => result.problems.length > 0).length,
+      controls: hasControls ? summary : null,
+    });
+  }
+  const controlStatus = { undecided: [], invalid: [], unscored: [] };
+  for (const entry of verified.values()) {
+    for (const control of entry.result.controls?.negative || []) {
+      controlStatus[negativeStatusOf(control)]?.push(`${entry.id}/${control.id}`);
+    }
+  }
+  return { cases: verified.size, problems, notes, gateFailures, controlStatus, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
 }
