@@ -20,6 +20,7 @@ import {
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import {
   applySemanticLayerOverlay,
+  clearSemanticLayerCache,
   DEFAULT_SEMANTIC_LAYER_PATH,
   HINTS_V2_SEMANTIC_LAYER_OVERLAY_PATH,
   loadSemanticLayerForHintsVersion,
@@ -202,6 +203,17 @@ test('overlay mechanics: an entry replaces the same-named base entry in place, a
   assert.throws(() => applySemanticLayerOverlay(base, { metric: [] }), /unknown keys: metric/);
   assert.throws(() => applySemanticLayerOverlay(base, { metrics: [{ synonyms: ['z'] }] }), /entry without a name/);
   assert.throws(() => applySemanticLayerOverlay(base, { metrics: {} }), /"metrics" must be an array/);
+
+  // Cached per file pair; clearing either file (or everything, as a schema
+  // refresh does) re-reads the merged layer.
+  const cached = loadSemanticLayerForHintsVersion(2);
+  assert.equal(loadSemanticLayerForHintsVersion(2), cached);
+  clearSemanticLayerCache(HINTS_V2_SEMANTIC_LAYER_OVERLAY_PATH);
+  const reread = loadSemanticLayerForHintsVersion(2);
+  assert.notEqual(reread, cached);
+  assert.deepEqual(reread, cached);
+  clearSemanticLayerCache(DEFAULT_SEMANTIC_LAYER_PATH);
+  assert.notEqual(loadSemanticLayerForHintsVersion(2), reread);
 });
 
 test('version 1 reads semantic-layer.json alone (identical to its template); version 2 changes only the overlay entries', () => {
