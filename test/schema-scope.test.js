@@ -9,6 +9,7 @@ import {
   buildOptimizedPrompt,
   buildSemanticPlan,
   estimateFullSchemaTokens,
+  rankedTableNames,
   resolveEffectiveSchemaScope,
   tablesToWidenFor,
   validateReadOnlySql,
@@ -337,7 +338,16 @@ test('full scope in the product loop: the same SQL is accepted at once, and the 
   assert.equal(client.requests.length, 1);
   assert.deepEqual(result.promptTables, ALL_TABLES);
   assert.equal(result.schemaScope.effective, 'full');
-  assert.deepEqual(result.rankedTables, promptFor(OUTLET_QUESTION, 'retrieved').context.retrieval.expandedTableNames);
+  // Nothing matched this question: retrieval's default selection is not a
+  // ranking, so no ranked tables are reported (the prompt's hint says so too).
+  assert.equal(promptFor(OUTLET_QUESTION, 'full').context.retrieval.fallbackToDefaultSelection, true);
+  assert.ok(promptFor(OUTLET_QUESTION, 'full').context.retrieval.expandedTableNames.length > 0);
+  assert.deepEqual(result.rankedTables, []);
+  assert.deepEqual(rankedTableNames(promptFor(OUTLET_QUESTION, 'full').context.retrieval), []);
+  const matched = promptFor('Show the top customers by total net sales amount in March 2026.', 'full').context.retrieval;
+  assert.equal(matched.fallbackToDefaultSelection, false);
+  assert.deepEqual(rankedTableNames(matched), matched.expandedTableNames);
+  assert.ok(rankedTableNames(matched).includes('Customer'));
 
   // Without an explicit setting the product loop reads SCHEMA_SCOPE (unset: auto).
   const saved = process.env.SCHEMA_SCOPE;

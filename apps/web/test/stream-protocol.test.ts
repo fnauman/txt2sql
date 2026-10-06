@@ -45,6 +45,15 @@ test('a stage frame marks earlier stages done and the arrived stage active', () 
   assert.equal(state.stages.shaping, 'idle');
 });
 
+test('the sql frame carries the allow-list and the ranking separately', () => {
+  const state = apply([
+    { event: '@start', data: { question: 'q' } },
+    { event: 'sql', data: { sql: 'SELECT 1', promptTables: ['Customer', 'Product'], rankedTables: ['Customer'] } },
+  ]);
+  assert.deepEqual(state.result.promptTables, ['Customer', 'Product']);
+  assert.deepEqual(state.result.rankedTables, ['Customer']);
+});
+
 test('the happy path assembles a complete result and ends done', () => {
   const state = apply([
     { event: '@start', data: { question: 'q' } },

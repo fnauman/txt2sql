@@ -147,6 +147,9 @@ function publicResult(result, trace, includeDebug, dataResidency) {
     assumptions: response.assumptions || [],
     tablesUsed: response.tables_used || [],
     promptTables: result.promptTables || [],
+    // Retrieval's ranking (empty when nothing matched): in the full scope
+    // promptTables is every in-scope table, so this is the only ranking.
+    rankedTables: result.rankedTables || [],
     visualizations: result.visualizations || [],
     insights: result.insights || [],
     llmUsage: result.llmUsage || null,
@@ -284,6 +287,7 @@ function streamResultFrames(res, payload, includeDebug, cacheHit) {
       tablesUsed: payload.tablesUsed,
       assumptions: payload.assumptions,
       promptTables: payload.promptTables,
+      rankedTables: payload.rankedTables,
       attempt: payload.attemptCount,
       final: true,
       cacheHit,

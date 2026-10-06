@@ -1456,6 +1456,20 @@ function questionMatchedColumns(table, questionTokens) {
 }
 
 /**
+ * The tables retrieval ranked for the question (picked tables, then their
+ * join-path connectors), as shown to people (web debug panel, CLI, eval
+ * records). Empty when nothing matched the question: retrieval then falls back
+ * to a default selection, which is not a ranking (the prompt's hint says no
+ * table matched).
+ */
+export function rankedTableNames(retrieval) {
+  if (!retrieval || retrieval.fallbackToDefaultSelection) {
+    return [];
+  }
+  return [...(retrieval.expandedTableNames || [])];
+}
+
+/**
  * The full scope's relevance hint: the tables retrieval ranked highest (score
  * order, then the join-path connectors it added) with the columns whose names
  * match the question. Returns { text, tables: [{ tableName, columns, connector }] }.

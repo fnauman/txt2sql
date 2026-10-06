@@ -12,6 +12,7 @@ import {
   executeReadOnlySql,
   generateOptimizedResponse,
   loadNarrowSchema,
+  rankedTableNames,
   resolveEffectiveSchemaScope,
   tablesToWidenFor,
   validateReadOnlySql,
@@ -518,7 +519,7 @@ export async function runOptimizedQuestion({
   // full scope, the retrieved tables (plus any widened ones) otherwise.
   let allowedTables = (prompt.tables || schema.tables).map((table) => table.tableName);
   let promptTables = prompt.tables.map((table) => table.tableName);
-  const rankedTables = prompt.context.retrieval?.expandedTableNames || [];
+  const rankedTables = rankedTableNames(prompt.context.retrieval);
   let widenedTables = [];
   // Set when the prompt was widened after a TABLE_SCOPE rejection: the retry
   // is told the table was added instead of "outside the allowed table set".

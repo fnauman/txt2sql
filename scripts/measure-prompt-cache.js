@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
 import { getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { selectSuite } from '../src/eval/suite.js';
-import { buildOptimizedPrompt, loadNarrowSchema, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
+import { buildOptimizedPrompt, loadNarrowSchema, rankedTableNames, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
 import { SCHEMA_SCOPES, describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -93,7 +93,7 @@ export function measureScope(schema, testCases, schemaScope) {
       intentId: testCase.intentId || null,
       question: testCase.question,
       prompt_tables: prompt.tables.map((table) => table.tableName),
-      ranked_tables: prompt.context.retrieval.expandedTableNames,
+      ranked_tables: rankedTableNames(prompt.context.retrieval),
       prompt_cache: promptCache,
       cacheable_prefix_hash: stableHash(cacheablePrefixText(prompt)),
     };

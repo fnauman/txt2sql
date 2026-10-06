@@ -54,7 +54,7 @@
 // re-measured (null), and all statistics are seeded.
 
 import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
-import { tablesToWidenFor, validateSqlSafety } from '../pipeline.js';
+import { rankedTableNames, tablesToWidenFor, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 import { withoutCaseFields } from './runner.js';
@@ -409,7 +409,7 @@ export async function rescoreRepetition(repetition, {
   const base = {
     ...recorded,
     retrieved_tables: prompt.allowedTables,
-    ...(prompt.context?.retrieval?.expandedTableNames ? { ranked_tables: prompt.context.retrieval.expandedTableNames } : {}),
+    ...(prompt.context?.retrieval ? { ranked_tables: rankedTableNames(prompt.context.retrieval) } : {}),
     master_data_candidates: prompt.masterDataCandidates || [],
     attempts: [...replayed.map((attempt) => ({ ...attempt, replay: 'reached' })), ...notReached],
     // The original run's attempts (and LLM calls); the replay's are counted in

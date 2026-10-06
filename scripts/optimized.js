@@ -176,7 +176,7 @@ async function main() {
       }
       if (result.schemaScope?.effective === 'full') {
         cli.log(`Allowed tables: all ${result.promptTables.length} in-scope tables (full schema scope)`);
-        cli.log(`Ranked tables (hint): ${(result.rankedTables || []).join(', ') || '(none)'}`);
+        cli.log(`Ranked tables (hint): ${(result.rankedTables || []).join(', ') || '(none: no table matched the question)'}`);
       } else {
         cli.log(`Retrieved tables: ${result.promptTables.join(', ')}`);
       }

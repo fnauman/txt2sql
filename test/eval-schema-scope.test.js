@@ -85,7 +85,7 @@ test('a rescore re-judges recorded TABLE_SCOPE rejections with today\'s schema s
   assert.equal(full.rescore.replayedAttemptCount, 1);
   assert.deepEqual(full.attempts.map((attempt) => attempt.replay), ['reached', 'not_reached']);
   assert.ok(full.retrieved_tables.includes('StoreLocation'));
-  assert.ok(Array.isArray(full.ranked_tables) && !full.ranked_tables.includes('StoreLocation'), 'ranked_tables is what retrieval picked');
+  assert.deepEqual(full.ranked_tables, [], 'nothing matched the question: no ranking, not the fallback selection');
 
   // Retrieved with widen-on-demand: the product would have widened the
   // retry's prompt, so the recorded retry is judged against the widened one.
