@@ -70,6 +70,20 @@
         "spend",
         "spent"
       ],
+      "advisory_when_mentioned": [
+        "gross",
+        "tax included",
+        "including tax",
+        "incl tax",
+        "with tax",
+        "tax inclusive",
+        "inclusive of tax",
+        "bill total",
+        "billed total",
+        "net payable",
+        "payable amount",
+        "subtotal"
+      ],
       "preferred_expression": "COALESCE(SalesDocument.NetAmount, 0)",
       "preferred_columns": [
         "SalesDocument.NetAmount"
@@ -237,6 +251,23 @@
         "average order value",
         "order value"
       ],
+      "advisory_synonyms": [
+        "order value"
+      ],
+      "advisory_when_mentioned": [
+        "gross",
+        "tax included",
+        "including tax",
+        "incl tax",
+        "with tax",
+        "tax inclusive",
+        "inclusive of tax",
+        "bill total",
+        "billed total",
+        "net payable",
+        "payable amount",
+        "subtotal"
+      ],
       "preferred_expression": "AVG(COALESCE(SalesDocument.NetAmount, 0))",
       "preferred_columns": [
         "SalesDocument.NetAmount"
@@ -272,6 +303,12 @@
       "preferred_expression": "COALESCE(SalesDocument.BalanceAmount, 0)",
       "preferred_columns": [
         "SalesDocument.BalanceAmount"
+      ],
+      "alternative_column_sets": [
+        [
+          "SalesDocument.NetPayableAmount",
+          "SalesDocument.PaidAmount"
+        ]
       ],
       "grain": "sales_document",
       "preferred_tables": [

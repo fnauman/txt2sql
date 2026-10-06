@@ -336,6 +336,57 @@ test('v2 layer: average order value and open amounts get a metric, enforced on t
   assert.doesNotThrow(() => validate("SELECT ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0"));
 });
 
+test('v2 layer: a question naming another amount, or an equivalent open-amount formula, is not rejected', () => {
+  // Review finding: "order value" and "open amount" enforced NetAmount /
+  // BalanceAmount even where rule 10 asks for GrossAmount, and rejected an
+  // open amount computed as NetPayableAmount - PaidAmount (equal to
+  // BalanceAmount on every fixture row).
+  const rejects = (question, sql, hintsVersion = 2) => {
+    const prompt = buildOptimizedPrompt(schema, question, { hintsVersion });
+    try {
+      validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const march = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+  for (const question of [
+    'What was the average gross order value in March 2026?',
+    'Average order value including tax in March 2026.',
+    'Average order value, tax included, in March 2026.',
+  ]) {
+    const metric = metricOf(v2Plan(question), 'average_order_value');
+    assert.equal(metric.enforcement, 'advisory', question);
+    assert.equal(rejects(question, `SELECT ROUND(AVG(COALESCE(d.GrossAmount,0)),2) AS aov ${march}`), null, question);
+  }
+  assert.equal(metricOf(v2Plan('Average order value including tax in March 2026.'), 'average_order_value').enforcementReason, 'other_amount_named');
+  assert.match(
+    buildOptimizedPrompt(schema, 'Average order value including tax in March 2026.').user,
+    /Metric "average_order_value" matched [^\n]*\(weak match: the question names another amount/
+  );
+  // "order value" alone is a hint; "average order value" enforces.
+  assert.equal(metricOf(v2Plan('Show the order value of each document in March 2026.'), 'average_order_value').enforcement, 'advisory');
+  assert.equal(rejects('What was the average order value in March 2026?', `SELECT ROUND(AVG(COALESCE(d.BillTotalAmount,0)),2) AS aov ${march}`), 'METRIC_COLUMN');
+  // "excluding tax" / "net of tax" name no other amount.
+  assert.equal(metricOf(v2Plan('Average order value excluding tax in March 2026.'), 'average_order_value').enforcement, 'enforced');
+  // The same guard for net sales: "revenue including tax" is gross, "net sales" stays enforced.
+  assert.equal(metricOf(v2Plan('What was our revenue including tax in March 2026?'), 'net_sales').enforcement, 'advisory');
+  assert.equal(metricOf(v1Plan('What was our revenue including tax in March 2026?'), 'net_sales').enforcement, 'enforced');
+  assert.equal(metricOf(v2Plan('Net sales and gross amount in March 2026.'), 'net_sales').enforcement, 'enforced');
+
+  // Open amount: BalanceAmount, or NetPayableAmount together with PaidAmount.
+  const open = 'Total open amount on documents with a due date in April 2026.';
+  const april = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
+  assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.NetPayableAmount,0) - COALESCE(d.PaidAmount,0)),2) AS open_amount ${april}`), null);
+  assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.BalanceAmount,0)),2) AS open_amount ${april}`), null);
+  assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.NetPayableAmount,0)),2) AS open_amount ${april}`), 'METRIC_COLUMN');
+  assert.equal(rejects(open, `SELECT ROUND(SUM(COALESCE(d.BillTotalAmount,0) - COALESCE(d.PaidAmount,0)),2) AS open_amount ${april}`), 'METRIC_COLUMN');
+  // Version 1 plans never carry the alternative column sets.
+  assert.ok(!('alternativeColumnSets' in (metricOf(v1Plan('Show net sales in March 2026.'), 'net_sales') || {})));
+  assert.ok(!('alternativeColumnSets' in metricOf(v2Plan('Show net sales in March 2026.'), 'net_sales')));
+});
+
 test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
   const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
   assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);

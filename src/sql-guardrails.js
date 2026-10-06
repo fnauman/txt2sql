@@ -1157,13 +1157,19 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     if (preferredColumns.length === 0) {
       continue;
     }
+    // All columns of one alternative set together also satisfy the metric
+    // ("NetPayableAmount - PaidAmount" is the open balance).
+    const alternativeColumnSets = Array.isArray(metric.alternativeColumnSets) ? metric.alternativeColumnSets.filter(Array.isArray) : [];
 
     checkedMetrics.push({
       name: metric.name,
       preferredColumns,
       enforcement: metricEnforcement(metric),
       enforcementReason: metric.enforcementReason || null,
-      satisfied: preferredColumns.some((column) => columnMentioned(sqlText, column)),
+      satisfied:
+        preferredColumns.some((column) => columnMentioned(sqlText, column)) ||
+        alternativeColumnSets.some((columns) => columns.length > 0 && columns.every((column) => columnMentioned(sqlText, column))),
+      ...(alternativeColumnSets.length > 0 ? { alternativeColumnSets } : {}),
     });
   }
 
@@ -1171,7 +1177,9 @@ function validateMetricGuardrails(sql, promptContext = {}) {
   if (metric) {
     throw guardrailError(
       'METRIC_COLUMN',
-      `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
+      `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}${
+        metric.alternativeColumnSets ? metric.alternativeColumnSets.map((columns) => `; or ${columns.join(' with ')}`).join('') : ''
+      }).`,
       { metric: metric.name, preferredColumns: metric.preferredColumns }
     );
   }

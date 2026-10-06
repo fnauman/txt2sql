@@ -585,7 +585,7 @@ export function detectCountOrExistenceIntent(question) {
  * Every other synonym is an explicit metric phrase ("net sales", "revenue",
  * "units sold") and enforces in every kind of question.
  */
-function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
+function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, questionWords = null) {
   const advisory = new Set(uniqueStrings(entry.advisory_synonyms).map(normalizedPhrase));
   const countAdvisory = new Set(uniqueStrings(entry.count_advisory_synonyms).map(normalizedPhrase));
   const advisoryMatches = matchedSynonyms.filter((synonym) => advisory.has(normalizedPhrase(synonym)));
@@ -593,6 +593,19 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
 
   if (explicitMatches.length === 0) {
     return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
+  }
+  // `advisory_when_mentioned` (hints-v2 overlay): the question names another
+  // amount ("average gross order value", "revenue including tax"), so the
+  // metric's column is not what it measures. An explicit "net" phrase ("net
+  // sales") still enforces.
+  const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
+  if (
+    otherAmounts.length > 0 &&
+    questionWords &&
+    findSynonymSpans(otherAmounts, questionWords).length > 0 &&
+    !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
+  ) {
+    return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }
   if (countIntent && explicitMatches.every((synonym) => countAdvisory.has(normalizedPhrase(synonym)))) {
     return { enforcement: 'advisory', enforcementReason: 'count_or_existence_intent', explicitMatches, advisoryMatches };
@@ -612,6 +625,10 @@ function summarizeSemanticEntry(entry, matchedSynonyms) {
     displayColumns: entry.display_columns || [],
     preferredColumns: entry.preferred_columns || [],
     preferredExpression: entry.preferred_expression || null,
+    // Hints-v2 overlay only (absent from every version-1 plan): column sets
+    // that, all used together, satisfy the metric guardrail as well
+    // ("NetPayableAmount - PaidAmount" for the open balance).
+    ...(entry.alternative_column_sets ? { alternativeColumnSets: entry.alternative_column_sets } : {}),
     defaultFilters: entry.default_filters || [],
     notes: entry.notes || [],
     score: semanticMatchScore(matchedSynonyms),
@@ -844,6 +861,7 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
   const layer = semanticLayer ?? loadSemanticLayerForHintsVersion(version);
   const context = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
+  const questionWords = buildQuestionWordIndex(context);
   const { matches, activeSpans, suppressedMatches } = matchSemanticLayer(layer, context, { hintsVersion: version });
   let entities = matches
     .filter((match) => match.kind === 'entity')
@@ -855,7 +873,7 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     .filter((match) => match.kind === 'metric')
     .map((match) => ({
       ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
-      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
+      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent, questionWords),
     }));
   const filterHints = matches
     .filter((match) => match.kind === 'filter')
@@ -1441,6 +1459,9 @@ function advisoryMetricNote(metric, hintsVersion) {
   }
   if (metric.enforcementReason === 'count_or_existence_intent') {
     return ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)';
+  }
+  if (metric.enforcementReason === 'other_amount_named') {
+    return ' (weak match: the question names another amount, such as gross, tax included or a named total; use the amount it names)';
   }
   return ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
 }
