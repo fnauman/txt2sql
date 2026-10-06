@@ -31,7 +31,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
+import { CASE_SPLITS, DEFAULT_DATASETS_DIR, findInvalidSplits, loadBenchmarkDataset } from '../src/benchmark.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
@@ -180,11 +180,22 @@ export async function main(argv = process.argv.slice(2)) {
   const controlsDir = path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR);
   const controlsIndex = checkControls ? await loadControlsIndex({ controlsDir }) : null;
   const targets = await resolveDatasetTargets(argv);
-  const datasetInfos = [];
+  // Each dataset is loaded up front (the controls coverage check needs its
+  // cases). Unknown split values are read from the raw cases first, so every
+  // one of them is named (loading would stop at the first): such a dataset
+  // is reported case by case and not verified further.
+  const datasetEntries = [];
   for (const target of targets) {
-    datasetInfos.push(await loadBenchmarkDataset(target));
+    const datasetPath = target.datasetPath || path.resolve(target.datasetsDir, `${target.datasetName}.json`);
+    const invalidSplits = findInvalidSplits(JSON.parse(await fs.readFile(datasetPath, 'utf8')));
+    datasetEntries.push(
+      invalidSplits.length > 0
+        ? { invalid: { datasetName: target.datasetName, datasetPath, invalidSplits } }
+        : { info: await loadBenchmarkDataset(target) }
+    );
   }
-  const coverageFailure = controlsCoverageFailure(datasetInfos, controlsIndex, { controlsDir });
+  const datasetInfos = datasetEntries.filter((entry) => entry.info).map((entry) => entry.info);
+  const coverageFailure = datasetInfos.length > 0 ? controlsCoverageFailure(datasetInfos, controlsIndex, { controlsDir }) : null;
   if (coverageFailure) {
     throw new Error(coverageFailure);
   }
@@ -235,7 +246,19 @@ export async function main(argv = process.argv.slice(2)) {
       throw new Error(refusal);
     }
 
-    for (const info of datasetInfos) {
+    for (const { info, invalid } of datasetEntries) {
+      if (invalid) {
+        // Unknown split values are per-case problems: every one is named and
+        // the dataset is not verified further.
+        console.log(`\n# ${invalid.datasetName}: ${invalid.invalidSplits.length} case(s) with an unknown split (not verified further)`);
+        for (const entry of invalid.invalidSplits) {
+          totalCases += 1;
+          totalFailures += 1;
+          console.log(`  ✗ ${entry.id}\n      -> split "${entry.split}" is not one of ${CASE_SPLITS.join(', ')}`);
+        }
+        report.datasets.push({ name: invalid.datasetName, path: invalid.datasetPath, cases: [], invalidSplits: invalid.invalidSplits, controls: null });
+        continue;
+      }
       console.log(`\n# ${info.datasetName} (${info.cases.length} cases, fixtures: ${fixtureNames.join(', ')})`);
       const caseResults = [];
       for (const testCase of info.cases) {

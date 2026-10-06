@@ -73,6 +73,20 @@ export function isBehaviorCase(testCase) {
   return Boolean(testCase?.expected_behavior) && testCase.expected_behavior !== 'answer';
 }
 
+/**
+ * Every raw (not yet normalized) case whose split is not one of CASE_SPLITS,
+ * as [{ id, split }], so a verifier can name them all instead of stopping at
+ * the first one normalizeBenchmarkCase throws on.
+ */
+export function findInvalidSplits(rawCases) {
+  return (Array.isArray(rawCases) ? rawCases : [])
+    .filter((testCase) => {
+      const value = testCase?.split;
+      return !(value === undefined || value === null || value === '') && !CASE_SPLITS.includes(String(value).trim().toLowerCase());
+    })
+    .map((testCase) => ({ id: String(testCase?.id ?? '?'), split: testCase.split }));
+}
+
 function normalizeSplit(value, id) {
   if (value === undefined || value === null || value === '') {
     return 'dev';

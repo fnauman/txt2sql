@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getOptionValue, hasOptionFlag } from '../src/env.js';
-import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
+import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, isBehaviorCase, loadBenchmarkDataset } from '../src/benchmark.js';
 import { extractTablesFromSql, loadNarrowSchema, retrieveRelevantTables, writeJsonFile } from '../src/pipeline.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -49,7 +49,10 @@ async function main() {
   });
   const nameToTableName = new Map(schema.tables.map((table) => [table.name, table.tableName]));
 
-  const cases = datasetInfo.cases.map((testCase) => {
+  // Abstain / clarify cases have no gold, so no expected tables: 0 of 0 would
+  // read as full recall. They are left out (and counted in the summary).
+  const behaviorCases = datasetInfo.cases.filter(isBehaviorCase);
+  const cases = datasetInfo.cases.filter((testCase) => !isBehaviorCase(testCase)).map((testCase) => {
     const retrieval = retrieveRelevantTables(schema, testCase.question);
     const expectedTables = testCase.expected_tables?.length > 0 ? testCase.expected_tables : extractTablesFromSql(testCase.expected_sql);
     const baseTables = retrieval.initialTableNames.map((name) => nameToTableName.get(name) || name);
@@ -77,6 +80,7 @@ async function main() {
 
   const summary = {
     case_count: cases.length,
+    behavior_cases_skipped: behaviorCases.length,
     base_full_recall_count: cases.filter((entry) => entry.base_full_recall).length,
     expanded_full_recall_count: cases.filter((entry) => entry.expanded_full_recall).length,
     average_base_recall: average(cases.map((entry) => entry.base_recall)),
@@ -115,7 +119,7 @@ async function main() {
 
   console.log(`Retrieval evaluation written to ${resultsPath}`);
   console.log(`Dataset: ${datasetInfo.datasetName}`);
-  console.log(`Cases: ${summary.case_count}`);
+  console.log(`Cases: ${summary.case_count}${behaviorCases.length ? ` (${behaviorCases.length} abstain/clarify case(s) skipped: no gold tables)` : ''}`);
   console.log(`Base full recall: ${summary.base_full_recall_count}/${summary.case_count}`);
   console.log(`Expanded full recall: ${summary.expanded_full_recall_count}/${summary.case_count}`);
   console.log(`Average expanded table count: ${summary.average_expanded_table_count.toFixed(2)}`);
