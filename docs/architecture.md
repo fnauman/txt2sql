@@ -56,11 +56,13 @@ in-scope schema the prompt shows and which tables the validator allows:
 
 The reason is measured, not assumed (`docs/experiments/01-schema-scope.md`). On
 the 13-table demo schema (about 2,300 estimated tokens in full) the retrieved
-scope saved no tokens (it printed its tables twice, once stable and once ranked)
-and made every retrieval miss unrecoverable: the allow-list was the retrieved
-set and retries never widened it, which capped accuracy at 86.5% even with
-perfect SQL. The full scope removes that failure class (ceiling 99.6%) at about
-the same prompt size. Retrieval matters again when the schema does not fit: an
+scope saved only about 8% of uncached prompt tokens (it printed its tables
+twice, once stable and once ranked), split the cacheable prefix 48 ways, and
+cost more than the full scope once prompt caching is counted. It also made
+every retrieval miss unrecoverable: the allow-list was the retrieved set and
+retries never widened it, which capped accuracy at 86.5% even with perfect
+SQL. The full scope removes that failure class (ceiling 99.6%) for about 8.6%
+more uncached prompt tokens. Retrieval matters again when the schema does not fit: an
 ERP with hundreds of tables keeps the retrieved scope, and widen-on-demand turns
 its misses back into a retry instead of a dead end.
 

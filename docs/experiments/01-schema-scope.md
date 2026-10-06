@@ -4,8 +4,8 @@
 `full` (what the new default `auto` resolves to on the 13-table demo schema).
 **Status:** offline measurements done; live run pending.
 Audit findings: EVAL-RET-2 / D1 (a retrieval miss is an unrecoverable
-failure), EVAL-RET-9 / D8 (pruning saves no tokens at 13 tables and prints the
-schema twice).
+failure), EVAL-RET-9 / D8 (at 13 tables pruning buys little: measured below,
+about 8% of uncached prompt tokens, and it prints the schema twice).
 
 ## Hypothesis
 
@@ -95,18 +95,24 @@ of a live full-scope run is one of the numbers to read.
 case with its gold SQL (and its gold tables in `tables_used`), 1 repetition,
 no verification:
 
-| Scope | Strict accuracy | dev / holdout | System failures | Retry rate |
+| Scope | Strict accuracy | dev / holdout | System failures | Retry rate, answer cases (all cases¹) |
 |---|---|---|---|---|
-| `retrieved`, no widening (the baseline's loop) | 86.5% (212/245) | 89.3% / 80.5% | 33 (retrieval misses 32, guardrail false rejection 1) | 16.9% |
-| `retrieved` + widen-on-demand | 99.6% (244/245) | 100% / 98.7% | 1 (guardrail false rejection) | 16.9% |
-| `full` (= `auto`) | 99.6% (244/245) | 100% / 98.7% | 1 (guardrail false rejection) | 4.3% |
+| `retrieved`, no widening (the baseline's loop) | 86.5% (212/245) | 89.3% / 80.5% | 33 (retrieval misses 32, guardrail false rejection 1) | 13.5% (16.9%) |
+| `retrieved` + widen-on-demand | 99.6% (244/245) | 100% / 98.7% | 1 (guardrail false rejection) | 13.5% (16.9%) |
+| `full` (= `auto`) | 99.6% (244/245) | 100% / 98.7% | 1 (guardrail false rejection) | 0.4% (4.3%) |
+
+¹ The all-cases rate includes the 10 behaviour cases, which the stand-in
+answers with empty SQL, so each of them retries once; that is the stand-in,
+not the product. The retry rates describe a model that writes gold SQL, not
+gpt-4o-mini. A reviewer's stand-in that reports the SQL's own tables in
+`tables_used` (instead of the gold's) got the same accuracies and answer-case
+retry rates of 13.3% / 13.3% / 0.8%.
 
 The one case left is `tpl_revenue_credits_monthly_q1_2026_e1b20a` (the
 account name "Sales Revenue" trips the net-sales metric guardrail,
-`METRIC_COLUMN`), the only `known_validator_rejection` still flagged. The
-retries in the full scope are that case and the 10 behaviour cases (the
-stand-in returns no SQL for them); widen-on-demand recovers all 32 retrieval
-misses, but only on the retry.
+`METRIC_COLUMN`), the only `known_validator_rejection` still flagged; it is the
+one answer-case retry in the full scope. Widen-on-demand recovers all 32
+retrieval misses, but only on the retry.
 
 ### Rescore of the committed baseline under each scope
 
@@ -117,29 +123,58 @@ re-validates, re-executes and re-scores the recorded SQL (`npm run eval --
 | Scope | Strict accuracy | Majority passes | System failures (repetitions) | Paired vs baseline |
 |---|---|---|---|---|
 | `retrieved`, no widening | 68.8% (dev 72.6%, holdout 60.6%) | 169/245 | 92 (all retrieval misses) | identical: 0 flips |
-| `retrieved` + widen-on-demand | 68.8% | 169/245 | 61 (retrieval misses 58, guardrail false rejections 3) | 0 flips |
-| `full` (= `auto`) | 69.8% (dev 73.6%, holdout 61.5%; 95% CI 64.1%–75.5%) | 172/245 | 3 (guardrail false rejections 3, retrieval misses 0) | 3 improvements, 0 regressions; Δ +0.9 pts (95% CI +0.0 to +2.2); McNemar p = 0.250 |
+| `retrieved` + widen-on-demand | 68.8% | 169/245 | 61 (retrieval misses 58, guardrail false rejections 3²) | 0 flips |
+| `full` (= `auto`) | 69.8% (dev 73.6%, holdout 61.5%; 95% CI 64.1%–75.5%) | 172/245 | 3 (guardrail false rejections 3², retrieval misses 0) | 3 improvements³, 0 regressions; Δ +0.9 pts (95% CI +0.0 to +2.2); McNemar p = 0.250 |
 
+² Oracle artefacts, mostly (see below): all 3 under retrieved + widening and 2
+of the 3 under full are repetitions of the two `hard_zero_harbor_kiosk_*`
+cases, where the oracle cannot tell right SQL from wrong. The one genuine
+false rejection is `tpl_category_net_sales_apr_2026_ce5e82` repetition 2.
+
+³ Two are real (`hard_sv_products_most_units_mar_2026`,
+`hard_vocab_receivables_by_outlet_mar_2026`). The third,
+`hard_zero_harbor_kiosk_products_mar_2026`, is an oracle false positive.
+
+**Zero-answer cases the oracle cannot judge.** Two of the formerly flagged
+cases have a gold answer that is empty or zero on every fixture:
+
+- `hard_zero_harbor_kiosk_products_mar_2026` ("Which products did Harbor Kiosk
+  buy in March 2026?"): the gold returns no rows on seed, v2 and v3.
+- `hard_zero_harbor_kiosk_credit_notes_2026`: the gold counts 0 on all three.
+
+Any SQL that also returns nothing matches. The recorded SQL for the first
+reads the customer price list (`CustomerProductPrice` by `EffectiveDate`)
+instead of sales, and Harbor Kiosk has no price rows on any fixture, so it
+"passes". The recorded SQL for the second filters
+`sd.CustomerId IN (SELECT CustomerId FROM StoreLocation ...)`: `StoreLocation`
+has no `CustomerId`, so the name resolves to the outer table, and the count is
+0 everywhere. Both are wrong SQL that the oracle scores as right. Until a
+fixture gives these cases a non-empty answer (outside this experiment), read
+their passes, in the rescore and in the live run, as unknown.
 The baseline's 92 system repetitions (31 cases, every one of them among the 33
 formerly flagged) are mostly not rejections: 73 are wrong results the model
 wrote around the missing table, 14 guardrail and 5 safety rejections. Only 44
 attempts (40 repetitions of 14 cases) were rejected with `TABLE_SCOPE`. Under
 the full scope those 44 recorded attempts become:
 
-| Today's verdict on the 44 recorded `TABLE_SCOPE` attempts | Attempts |
-|---|---|
-| Accepted, executed and correct | 8 (3 cases: `hard_sv_products_most_units_mar_2026` 3/3, `hard_zero_harbor_kiosk_products_mar_2026` 3/3, `hard_vocab_receivables_by_outlet_mar_2026` 2/3) |
-| Accepted and wrong | 0 |
-| Rejected by `RESPONSE_TABLES`, but correct (guardrail false rejection) | 6 |
-| Rejected by `RESPONSE_TABLES`, wrong | 20 (+2 later attempts not reached, also rejected) |
-| Rejected by `UNKNOWN_COLUMN` / `UNKNOWN_TABLE_ALIAS`, wrong | 6 / 2 |
+| Today's verdict on the 44 recorded `TABLE_SCOPE` attempts | Attempts | Of which oracle false positives (zero-answer cases) |
+|---|---|---|
+| Accepted, executed and scored correct | 8 (`hard_sv_products_most_units_mar_2026` 3/3, `hard_vocab_receivables_by_outlet_mar_2026` 2/3, `hard_zero_harbor_kiosk_products_mar_2026` 3/3) | 3 (`hard_zero_harbor_kiosk_products_mar_2026`) |
+| Accepted and wrong | 0 | |
+| Rejected by `RESPONSE_TABLES`, scored correct (guardrail false rejection) | 6 (`hard_zero_harbor_kiosk_credit_notes_2026` 3, `tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_af98b0` 2, `tpl_category_net_sales_apr_2026_ce5e82` 1) | 3 (`hard_zero_harbor_kiosk_credit_notes_2026`) |
+| Not reached (a later attempt after an accepted one), scored correct | 2 (`hard_zero_harbor_kiosk_products_mar_2026`) | 2 |
+| Rejected by `RESPONSE_TABLES`, wrong | 20 | |
+| Rejected by `UNKNOWN_COLUMN` / `UNKNOWN_TABLE_ALIAS`, wrong | 6 / 2 | |
 
-So 14 of the 44 are correct SQL: 8 pass today and 6 are thrown away by the
-response-table contract (`tables_used` must list every table the SQL uses).
-The recorded responses left the table out of `tables_used`: the model had been
-told it was outside the allowed set. That is an artefact of replaying
+By the oracle 16 of the 44 are correct SQL, but 8 of those come from the two
+zero-answer cases and are wrong SQL. That leaves 8 genuinely correct: 5 pass
+today and at most 3 are thrown away by the response-table contract
+(`tables_used` must list every table the SQL uses). In those 3 the recorded
+responses left the table out of `tables_used`, because the model had been told
+it was outside the allowed set. That is an artefact of replaying
 retrieved-scope answers, not something a full-scope prompt asks for, so the
-rescore understates the full scope here. The other way round, it cannot show
+rescore slightly understates the full scope here (by at most 3 attempts). The
+other way round, it cannot show
 regressions: on cases where retrieval was right the recorded SQL is the same
 and only re-validated, so whether 13 tables in the prompt distract the model
 (for example toward the `CustomerProductPrice` price list) only the live run
@@ -147,9 +182,11 @@ can tell.
 
 On the 33 formerly flagged cases the baseline passed 7 of 99 repetitions (2
 majority passes); the full-scope rescore passes 14 (5 majority passes); the
-ceiling is 33/33. The guardrail confusion matrix moves from precision 100%,
-recall 26.4% to precision 94.0%, recall 31.8% (the 6 `RESPONSE_TABLES` false
-rejections above; the 44 safety-layer rejections become guardrail decisions).
+ceiling is 33/33. Without the zero-answer oracle false positives that is 6 → 11
+repetitions (2 → 4 majority passes). The guardrail confusion matrix moves from
+precision 100%, recall 26.4% to precision 94.0%, recall 31.8% (the 6
+`RESPONSE_TABLES` false rejections above, 3 of them oracle artefacts; the 44
+safety-layer rejections become guardrail decisions).
 
 ### Verification and dataset flags
 
@@ -198,6 +235,10 @@ paired automatically against `eval/baselines/gpt-4o-mini.json`.
 | Cost per correct answer | $0.00073 | |
 | Prompt tokens per call / cached share | 3,407 / 72% | |
 | Latency p50 / p95, retry rate | 2.41 s / 5.39 s, 11.5% | |
+
+When reading the flips, treat the two `hard_zero_harbor_kiosk_*` cases as
+unscored: their gold is empty or zero on every fixture, so wrong SQL that
+also returns nothing passes (see the rescore above).
 
 Optional second arm, retrieved + widening (not the baseline):
 `SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1` with the same command. It
