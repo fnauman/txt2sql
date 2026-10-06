@@ -99,11 +99,11 @@
     }
   },
   {
-    "id": "tpl_customer_net_sales_top5_q1_2026_3af0d9",
+    "id": "tpl_customer_net_sales_top5_q1_2026_483331",
     "intentId": "customer_net_sales_top5_q1_2026",
     "split": "holdout",
-    "question": "Who were our top 5 customers by net revenue in Q1 2026?",
-    "canonicalQuestion": "Who were our top 5 customers by net revenue in Q1 2026?",
+    "question": "Who were our top 5 customers by turnover in Q1 2026?",
+    "canonicalQuestion": "Who were our top 5 customers by turnover in Q1 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -133,11 +133,11 @@
     }
   },
   {
-    "id": "tpl_customer_net_sales_top5_q1_2026_72c6b0",
+    "id": "tpl_customer_net_sales_top5_q1_2026_e88290",
     "intentId": "customer_net_sales_top5_q1_2026",
     "split": "holdout",
-    "question": "Rank customers by net revenue for January through March 2026 and show the top five.",
-    "canonicalQuestion": "Who were our top 5 customers by net revenue in Q1 2026?",
+    "question": "Rank customers by net amount billed for January through March 2026 and show the top five.",
+    "canonicalQuestion": "Who were our top 5 customers by turnover in Q1 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -167,11 +167,11 @@
     }
   },
   {
-    "id": "tpl_customer_net_sales_apr_2026_3f4384",
+    "id": "tpl_customer_net_sales_apr_2026_71a102",
     "intentId": "customer_net_sales_apr_2026",
     "split": "holdout",
-    "question": "Net revenue per customer in April 2026.",
-    "canonicalQuestion": "Net revenue per customer in April 2026.",
+    "question": "Net takings per customer in April 2026.",
+    "canonicalQuestion": "Net takings per customer in April 2026.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -191,16 +191,16 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
-      "v3": 7
+      "v2": 5,
+      "v3": 8
     }
   },
   {
-    "id": "tpl_customer_net_sales_apr_2026_7ebc71",
+    "id": "tpl_customer_net_sales_apr_2026_db0b51",
     "intentId": "customer_net_sales_apr_2026",
     "split": "holdout",
-    "question": "How much net revenue did each customer bring in during April 2026?",
-    "canonicalQuestion": "Net revenue per customer in April 2026.",
+    "question": "How much did each customer spend with us in April 2026, excluding tax?",
+    "canonicalQuestion": "Net takings per customer in April 2026.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -220,8 +220,8 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
-      "v3": 7
+      "v2": 5,
+      "v3": 8
     }
   },
   {
@@ -291,11 +291,11 @@
     }
   },
   {
-    "id": "tpl_customer_net_sales_rank_nov_2025_6287e5",
+    "id": "tpl_customer_net_sales_rank_nov_2025_3b56b4",
     "intentId": "customer_net_sales_rank_nov_2025",
     "split": "dev",
-    "question": "Rank all customers by net revenue for November 2025.",
-    "canonicalQuestion": "Rank all customers by net revenue for November 2025.",
+    "question": "Rank the customers who bought from us in November 2025 by net revenue.",
+    "canonicalQuestion": "Rank the customers who bought from us in November 2025 by net revenue.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -324,11 +324,11 @@
     }
   },
   {
-    "id": "tpl_customer_net_sales_rank_nov_2025_392850",
+    "id": "tpl_customer_net_sales_rank_nov_2025_e23a54",
     "intentId": "customer_net_sales_rank_nov_2025",
     "split": "dev",
-    "question": "List customers from highest to lowest net amount invoiced in November 2025.",
-    "canonicalQuestion": "Rank all customers by net revenue for November 2025.",
+    "question": "List the November 2025 buyers from highest to lowest net amount, all document types included.",
+    "canonicalQuestion": "Rank the customers who bought from us in November 2025 by net revenue.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -357,11 +357,11 @@
     }
   },
   {
-    "id": "tpl_doctype_net_sales_q1_2026_f42a7c",
+    "id": "tpl_doctype_net_sales_q1_2026_c03c7d",
     "intentId": "doctype_net_sales_q1_2026",
     "split": "holdout",
-    "question": "Net revenue by type of document for Q1 2026.",
-    "canonicalQuestion": "Net revenue by type of document for Q1 2026.",
+    "question": "Turnover by type of document for Q1 2026.",
+    "canonicalQuestion": "Turnover by type of document for Q1 2026.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -387,11 +387,11 @@
     }
   },
   {
-    "id": "tpl_doctype_net_sales_q1_2026_7328a2",
+    "id": "tpl_doctype_net_sales_q1_2026_f92ec1",
     "intentId": "doctype_net_sales_q1_2026",
     "split": "holdout",
-    "question": "Break down first-quarter 2026 net revenue by the type of document it was booked on.",
-    "canonicalQuestion": "Net revenue by type of document for Q1 2026.",
+    "question": "Break down first-quarter 2026 net takings by kind of document.",
+    "canonicalQuestion": "Turnover by type of document for Q1 2026.",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -513,10 +513,10 @@
     }
   },
   {
-    "id": "tpl_total_net_sales_feb_2026_af1726",
+    "id": "tpl_total_net_sales_feb_2026_09daf2",
     "intentId": "total_net_sales_feb_2026",
     "split": "dev",
-    "question": "How much net revenue did we book in February 2026?",
+    "question": "How much net revenue did we make in February 2026?",
     "canonicalQuestion": "What were total net sales in February 2026?",
     "difficulty": "easy",
     "tags": [
@@ -667,11 +667,11 @@
     }
   },
   {
-    "id": "tpl_total_net_sales_feb15_mar15_2026_a19a0f",
+    "id": "tpl_total_net_sales_feb15_mar15_2026_40ae9d",
     "intentId": "total_net_sales_feb15_mar15_2026",
     "split": "holdout",
-    "question": "What was net revenue from 15 February 2026 through 15 March 2026, both days included?",
-    "canonicalQuestion": "What was net revenue from 15 February 2026 through 15 March 2026, both days included?",
+    "question": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
+    "canonicalQuestion": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
     "difficulty": "easy",
     "tags": [
       "templated",
@@ -698,11 +698,11 @@
     }
   },
   {
-    "id": "tpl_total_net_sales_feb15_mar15_2026_4531dc",
+    "id": "tpl_total_net_sales_feb15_mar15_2026_ad37a4",
     "intentId": "total_net_sales_feb15_mar15_2026",
     "split": "holdout",
-    "question": "Net revenue between Feb 15 and Mar 15, 2026 (inclusive).",
-    "canonicalQuestion": "What was net revenue from 15 February 2026 through 15 March 2026, both days included?",
+    "question": "Net takings between Feb 15 and Mar 15, 2026 (inclusive).",
+    "canonicalQuestion": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
     "difficulty": "easy",
     "tags": [
       "templated",
@@ -729,11 +729,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_monthly_q1_2026_035391",
+    "id": "tpl_net_sales_monthly_q1_2026_561627",
     "intentId": "net_sales_monthly_q1_2026",
     "split": "holdout",
-    "question": "Show net revenue month by month for Q1 2026.",
-    "canonicalQuestion": "Show net revenue month by month for Q1 2026.",
+    "question": "Show turnover month by month for Q1 2026.",
+    "canonicalQuestion": "Show turnover month by month for Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -742,12 +742,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -763,11 +765,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_monthly_q1_2026_7e5f1a",
+    "id": "tpl_net_sales_monthly_q1_2026_1fff6f",
     "intentId": "net_sales_monthly_q1_2026",
     "split": "holdout",
-    "question": "Monthly net revenue for January to March 2026.",
-    "canonicalQuestion": "Show net revenue month by month for Q1 2026.",
+    "question": "Monthly net takings for January to March 2026.",
+    "canonicalQuestion": "Show turnover month by month for Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -776,12 +778,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -797,11 +801,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_monthly_nov_2025_feb_2026_112012",
+    "id": "tpl_net_sales_monthly_nov_2025_feb_2026_23a39e",
     "intentId": "net_sales_monthly_nov_2025_feb_2026",
     "split": "holdout",
-    "question": "Net revenue per month from November 2025 through February 2026.",
-    "canonicalQuestion": "Net revenue per month from November 2025 through February 2026.",
+    "question": "Turnover per month from November 2025 through February 2026.",
+    "canonicalQuestion": "Turnover per month from November 2025 through February 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -810,11 +814,13 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
-      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -830,11 +836,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_monthly_nov_2025_feb_2026_71ab0a",
+    "id": "tpl_net_sales_monthly_nov_2025_feb_2026_14397f",
     "intentId": "net_sales_monthly_nov_2025_feb_2026",
     "split": "holdout",
-    "question": "How did monthly net revenue develop between November 2025 and February 2026?",
-    "canonicalQuestion": "Net revenue per month from November 2025 through February 2026.",
+    "question": "How did monthly takings, net of tax, develop between November 2025 and February 2026?",
+    "canonicalQuestion": "Turnover per month from November 2025 through February 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -843,11 +849,13 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
-      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -889,7 +897,7 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
+      "v2": 4,
       "v3": 2
     }
   },
@@ -920,7 +928,7 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
+      "v2": 4,
       "v3": 2
     }
   },
@@ -1019,11 +1027,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_march_2025_vs_march_2026_7185b7",
+    "id": "tpl_net_sales_march_2025_vs_march_2026_f34a42",
     "intentId": "net_sales_march_2025_vs_march_2026",
     "split": "holdout",
-    "question": "Show March 2025 and March 2026 net revenue side by side.",
-    "canonicalQuestion": "Show March 2025 and March 2026 net revenue side by side.",
+    "question": "Show March 2025 and March 2026 turnover side by side.",
+    "canonicalQuestion": "Show March 2025 and March 2026 turnover side by side.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -1056,11 +1064,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_march_2025_vs_march_2026_4f9303",
+    "id": "tpl_net_sales_march_2025_vs_march_2026_423088",
     "intentId": "net_sales_march_2025_vs_march_2026",
     "split": "holdout",
-    "question": "Put total net revenue for March 2025 next to March 2026 in one row.",
-    "canonicalQuestion": "Show March 2025 and March 2026 net revenue side by side.",
+    "question": "Put total net takings for March 2025 next to March 2026 in one row.",
+    "canonicalQuestion": "Show March 2025 and March 2026 turnover side by side.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -1157,11 +1165,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_south_store_mar_2026_c41b69",
+    "id": "tpl_net_sales_south_store_mar_2026_ff1f77",
     "intentId": "net_sales_south_store_mar_2026",
     "split": "holdout",
-    "question": "What was net revenue at the South Store in March 2026?",
-    "canonicalQuestion": "What was net revenue at the South Store in March 2026?",
+    "question": "What was turnover at the South Store in March 2026?",
+    "canonicalQuestion": "What was turnover at the South Store in March 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -1190,11 +1198,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_south_store_mar_2026_1dc41c",
+    "id": "tpl_net_sales_south_store_mar_2026_4dd0d0",
     "intentId": "net_sales_south_store_mar_2026",
     "split": "holdout",
-    "question": "How much net revenue did South Store take in March 2026?",
-    "canonicalQuestion": "What was net revenue at the South Store in March 2026?",
+    "question": "How much did South Store take in March 2026, net of tax?",
+    "canonicalQuestion": "What was turnover at the South Store in March 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -1301,12 +1309,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument",
@@ -1318,7 +1328,7 @@
     },
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
+      "v2": 4,
       "v3": 5
     }
   },
@@ -1337,12 +1347,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Online Order%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument",
@@ -1355,7 +1367,7 @@
     "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 1,
-      "v2": 3,
+      "v2": 4,
       "v3": 5
     }
   },
@@ -1393,10 +1405,10 @@
     }
   },
   {
-    "id": "tpl_net_sales_metro_online_store_q1_2026_d737b0",
+    "id": "tpl_net_sales_metro_online_store_q1_2026_87a58f",
     "intentId": "net_sales_metro_online_store_q1_2026",
     "split": "holdout",
-    "question": "Net revenue from Metro Online Store for the first quarter of 2026.",
+    "question": "Turnover from Metro Online Store for the first quarter of 2026.",
     "canonicalQuestion": "How much did Metro Online Store buy from us (net) in Q1 2026?",
     "difficulty": "medium",
     "tags": [
@@ -1426,11 +1438,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_by_customer_and_store_mar_2026_f69914",
+    "id": "tpl_net_sales_by_customer_and_store_mar_2026_7ea991",
     "intentId": "net_sales_by_customer_and_store_mar_2026",
     "split": "holdout",
-    "question": "Net revenue by customer and store location for March 2026.",
-    "canonicalQuestion": "Net revenue by customer and store location for March 2026.",
+    "question": "Turnover by customer and store location for March 2026.",
+    "canonicalQuestion": "Turnover by customer and store location for March 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -1457,11 +1469,11 @@
     }
   },
   {
-    "id": "tpl_net_sales_by_customer_and_store_mar_2026_7128f2",
+    "id": "tpl_net_sales_by_customer_and_store_mar_2026_c04623",
     "intentId": "net_sales_by_customer_and_store_mar_2026",
     "split": "holdout",
-    "question": "Split March 2026 net revenue by customer and by the location that served them.",
-    "canonicalQuestion": "Net revenue by customer and store location for March 2026.",
+    "question": "Split March 2026 net takings by customer and by the location that served them.",
+    "canonicalQuestion": "Turnover by customer and store location for March 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -1485,6 +1497,72 @@
       "seed": 4,
       "v2": 9,
       "v3": 19
+    }
+  },
+  {
+    "id": "tpl_customer_net_sales_top3_jan_2026_e2fa20",
+    "intentId": "customer_net_sales_top3_jan_2026",
+    "split": "dev",
+    "question": "Top 3 customers by net sales for January 2026.",
+    "canonicalQuestion": "Top 3 customers by net sales for January 2026.",
+    "difficulty": "medium",
+    "tags": [
+      "templated",
+      "net_sales",
+      "customer",
+      "ranking",
+      "single_month"
+    ],
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "decimals": 2,
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 3,
+      "v3": 3
+    }
+  },
+  {
+    "id": "tpl_customer_net_sales_top3_jan_2026_83a22a",
+    "intentId": "customer_net_sales_top3_jan_2026",
+    "split": "dev",
+    "question": "Which three customers spent the most with us, net of tax, in January 2026?",
+    "canonicalQuestion": "Top 3 customers by net sales for January 2026.",
+    "difficulty": "medium",
+    "tags": [
+      "templated",
+      "net_sales",
+      "customer",
+      "ranking",
+      "single_month"
+    ],
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 3",
+    "expected_tables": [
+      "SalesDocument",
+      "Customer"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "decimals": 2,
+      "value_columns": [
+        "total_net_amount"
+      ],
+      "order": "desc"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 3,
+      "v3": 3
     }
   },
   {
@@ -1648,10 +1726,10 @@
     }
   },
   {
-    "id": "tpl_store_gross_feb_2026_9ee889",
+    "id": "tpl_store_gross_feb_2026_dcaf7e",
     "intentId": "store_gross_feb_2026",
     "split": "holdout",
-    "question": "How much gross revenue (incl. tax) did each store record in February 2026?",
+    "question": "How much gross turnover (incl. tax) did each store record in February 2026?",
     "canonicalQuestion": "Gross amount by store location for February 2026.",
     "difficulty": "medium",
     "tags": [
@@ -1671,7 +1749,6 @@
       "mode": "rowset",
       "decimals": 2
     },
-    "known_validator_rejection": "METRIC_COLUMN",
     "expected_row_counts": {
       "seed": 1,
       "v2": 3,
@@ -1692,12 +1769,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -1708,7 +1787,7 @@
     },
     "expected_row_counts": {
       "seed": 0,
-      "v2": 5,
+      "v2": 7,
       "v3": 5
     }
   },
@@ -1726,12 +1805,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2026-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -1742,7 +1823,7 @@
     },
     "expected_row_counts": {
       "seed": 0,
-      "v2": 5,
+      "v2": 7,
       "v3": 5
     }
   },
@@ -1777,10 +1858,10 @@
     }
   },
   {
-    "id": "tpl_doctype_gross_dec_2025_4d95f0",
+    "id": "tpl_doctype_gross_dec_2025_ec84b1",
     "intentId": "doctype_gross_dec_2025",
     "split": "dev",
-    "question": "For December 2025, what was the gross value booked on each type of document?",
+    "question": "For December 2025, what was the gross value of each type of document?",
     "canonicalQuestion": "Gross amount by document type in December 2025.",
     "difficulty": "medium",
     "tags": [
@@ -1951,11 +2032,11 @@
     }
   },
   {
-    "id": "tpl_product_net_sales_rank_dec_2025_56f5b0",
+    "id": "tpl_product_net_sales_rank_dec_2025_af0d37",
     "intentId": "product_net_sales_rank_dec_2025",
     "split": "holdout",
-    "question": "Rank products by net revenue for December 2025.",
-    "canonicalQuestion": "Rank products by net revenue for December 2025.",
+    "question": "Rank products by turnover for December 2025.",
+    "canonicalQuestion": "Rank products by turnover for December 2025.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -1980,6 +2061,7 @@
       ],
       "order": "desc"
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 0,
       "v2": 5,
@@ -1987,11 +2069,11 @@
     }
   },
   {
-    "id": "tpl_product_net_sales_rank_dec_2025_65ecc3",
+    "id": "tpl_product_net_sales_rank_dec_2025_6f2136",
     "intentId": "product_net_sales_rank_dec_2025",
     "split": "holdout",
-    "question": "Order every product we sold in December 2025 by its net revenue, highest first.",
-    "canonicalQuestion": "Rank products by net revenue for December 2025.",
+    "question": "Order every product we sold in December 2025 by its net takings, highest first.",
+    "canonicalQuestion": "Rank products by turnover for December 2025.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2089,11 +2171,11 @@
     }
   },
   {
-    "id": "tpl_brand_net_sales_top3_q1_2026_6a6ade",
+    "id": "tpl_brand_net_sales_top3_q1_2026_025f70",
     "intentId": "brand_net_sales_top3_q1_2026",
     "split": "holdout",
-    "question": "Top 3 brands by net revenue in Q1 2026.",
-    "canonicalQuestion": "Top 3 brands by net revenue in Q1 2026.",
+    "question": "Top 3 brands by turnover in Q1 2026.",
+    "canonicalQuestion": "Top 3 brands by turnover in Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2119,6 +2201,7 @@
       ],
       "order": "desc"
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 3,
       "v2": 3,
@@ -2126,11 +2209,11 @@
     }
   },
   {
-    "id": "tpl_brand_net_sales_top3_q1_2026_e5e62e",
+    "id": "tpl_brand_net_sales_top3_q1_2026_d343eb",
     "intentId": "brand_net_sales_top3_q1_2026",
     "split": "holdout",
-    "question": "Which three brands generated the most net revenue from January to March 2026?",
-    "canonicalQuestion": "Top 3 brands by net revenue in Q1 2026.",
+    "question": "Which three brands brought in the most money, net of tax, from January to March 2026?",
+    "canonicalQuestion": "Top 3 brands by turnover in Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2156,6 +2239,7 @@
       ],
       "order": "desc"
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 3,
       "v2": 3,
@@ -2177,12 +2261,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -2217,12 +2303,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND b.BrandName LIKE '%Sunvale Foods%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -2243,11 +2331,11 @@
     }
   },
   {
-    "id": "tpl_category_net_sales_apr_2026_47d16d",
+    "id": "tpl_category_net_sales_apr_2026_864bce",
     "intentId": "category_net_sales_apr_2026",
     "split": "holdout",
-    "question": "Net revenue by category in April 2026.",
-    "canonicalQuestion": "Net revenue by category in April 2026.",
+    "question": "Turnover by category in April 2026.",
+    "canonicalQuestion": "Turnover by category in April 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2269,18 +2357,19 @@
       "decimals": 2,
       "tolerance": 0.01
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 1,
-      "v2": 1,
+      "v2": 4,
       "v3": 4
     }
   },
   {
-    "id": "tpl_category_net_sales_apr_2026_7c9ac4",
+    "id": "tpl_category_net_sales_apr_2026_ce5e82",
     "intentId": "category_net_sales_apr_2026",
     "split": "holdout",
-    "question": "Revenue per category for April 2026.",
-    "canonicalQuestion": "Net revenue by category in April 2026.",
+    "question": "Net takings per category for April 2026.",
+    "canonicalQuestion": "Turnover by category in April 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2302,9 +2391,10 @@
       "decimals": 2,
       "tolerance": 0.01
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 1,
-      "v2": 1,
+      "v2": 4,
       "v3": 4
     }
   },
@@ -2383,11 +2473,11 @@
     }
   },
   {
-    "id": "tpl_category_net_sales_q1_2025_e66a9b",
+    "id": "tpl_category_net_sales_q1_2025_4b171c",
     "intentId": "category_net_sales_q1_2025",
     "split": "holdout",
-    "question": "Net revenue by category in Q1 2025.",
-    "canonicalQuestion": "Net revenue by category in Q1 2025.",
+    "question": "Turnover by category in Q1 2025.",
+    "canonicalQuestion": "Turnover by category in Q1 2025.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2409,6 +2499,7 @@
       "decimals": 2,
       "tolerance": 0.01
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 0,
       "v2": 3,
@@ -2416,11 +2507,11 @@
     }
   },
   {
-    "id": "tpl_category_net_sales_q1_2025_80132e",
+    "id": "tpl_category_net_sales_q1_2025_de597f",
     "intentId": "category_net_sales_q1_2025",
     "split": "holdout",
-    "question": "Break down first-quarter 2025 revenue by category.",
-    "canonicalQuestion": "Net revenue by category in Q1 2025.",
+    "question": "Break down first-quarter 2025 net takings by category.",
+    "canonicalQuestion": "Turnover by category in Q1 2025.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2442,6 +2533,7 @@
       "decimals": 2,
       "tolerance": 0.01
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 0,
       "v2": 3,
@@ -2449,11 +2541,11 @@
     }
   },
   {
-    "id": "tpl_campaign_net_sales_q1_2026_8522ac",
+    "id": "tpl_campaign_net_sales_q1_2026_918652",
     "intentId": "campaign_net_sales_q1_2026",
     "split": "holdout",
-    "question": "Net revenue by campaign for Q1 2026.",
-    "canonicalQuestion": "Net revenue by campaign for Q1 2026.",
+    "question": "Turnover by campaign for Q1 2026.",
+    "canonicalQuestion": "Turnover by campaign for Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2475,6 +2567,7 @@
       "decimals": 2,
       "tolerance": 0.01
     },
+    "known_validator_rejection": "TABLE_SCOPE",
     "expected_row_counts": {
       "seed": 3,
       "v2": 3,
@@ -2482,11 +2575,11 @@
     }
   },
   {
-    "id": "tpl_campaign_net_sales_q1_2026_425eb2",
+    "id": "tpl_campaign_net_sales_q1_2026_0be558",
     "intentId": "campaign_net_sales_q1_2026",
     "split": "holdout",
-    "question": "How much revenue did each promotion generate in January–March 2026?",
-    "canonicalQuestion": "Net revenue by campaign for Q1 2026.",
+    "question": "How much did each promotion take in, net of tax, in January–March 2026?",
+    "canonicalQuestion": "Turnover by campaign for Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2529,12 +2622,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -2568,12 +2663,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign cp ON p.CampaignId = cp.CampaignId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND cp.CampaignName LIKE '%Weekend Pantry%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -2775,10 +2872,10 @@
     }
   },
   {
-    "id": "tpl_category_net_sales_by_store_mar_2026_9aacb3",
+    "id": "tpl_category_net_sales_by_store_mar_2026_9fb06f",
     "intentId": "category_net_sales_by_store_mar_2026",
     "split": "dev",
-    "question": "For March 2026, show revenue for every combination of category and store.",
+    "question": "For March 2026, show revenue for each category and store combination that had sales.",
     "canonicalQuestion": "Net sales by product category and store location in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -2882,11 +2979,11 @@
     }
   },
   {
-    "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_bc69ac",
+    "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_a36878",
     "intentId": "herbal_tea_net_sales_monthly_nov_2025_feb_2026",
     "split": "holdout",
-    "question": "Monthly net revenue of Herbal Tea Variety Pack from November 2025 to February 2026.",
-    "canonicalQuestion": "Monthly net revenue of Herbal Tea Variety Pack from November 2025 to February 2026.",
+    "question": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
+    "canonicalQuestion": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2896,11 +2993,13 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
-      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -2920,11 +3019,11 @@
     }
   },
   {
-    "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_950ec8",
+    "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_af98b0",
     "intentId": "herbal_tea_net_sales_monthly_nov_2025_feb_2026",
     "split": "holdout",
-    "question": "How much revenue did the Herbal Tea Variety Pack make in each month between November 2025 and February 2026?",
-    "canonicalQuestion": "Monthly net revenue of Herbal Tea Variety Pack from November 2025 to February 2026.",
+    "question": "How much did the Herbal Tea Variety Pack take, net of tax, in each month between November 2025 and February 2026?",
+    "canonicalQuestion": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -2934,11 +3033,13 @@
       "date_range"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
-      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-11-01' AND d.DocumentDate < '2026-03-01' AND p.ProductName LIKE '%Herbal Tea Variety Pack%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -3075,6 +3176,74 @@
       "single_month"
     ],
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 3",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "decimals": 3,
+      "value_columns": [
+        "total_qty"
+      ],
+      "order": "desc"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 3,
+      "v3": 3
+    }
+  },
+  {
+    "id": "tpl_product_qty_top3_jan_2026_e4d59c",
+    "intentId": "product_qty_top3_jan_2026",
+    "split": "dev",
+    "question": "Which three products sold the most units in January 2026?",
+    "canonicalQuestion": "Which three products sold the most units in January 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "templated",
+      "quantity",
+      "product",
+      "ranking",
+      "single_month"
+    ],
+    "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 3",
+    "expected_tables": [
+      "SalesDocumentLine",
+      "SalesDocument",
+      "Product"
+    ],
+    "comparison": {
+      "mode": "ranked",
+      "decimals": 3,
+      "value_columns": [
+        "total_qty"
+      ],
+      "order": "desc"
+    },
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 3,
+      "v3": 3
+    }
+  },
+  {
+    "id": "tpl_product_qty_top3_jan_2026_d8b0a4",
+    "intentId": "product_qty_top3_jan_2026",
+    "split": "dev",
+    "question": "Top 3 products by quantity sold, January 2026.",
+    "canonicalQuestion": "Which three products sold the most units in January 2026?",
+    "difficulty": "hard",
+    "tags": [
+      "templated",
+      "quantity",
+      "product",
+      "ranking",
+      "single_month"
+    ],
+    "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 3",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3367,12 +3536,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -3404,12 +3575,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND p.ProductName LIKE '%Cane Sugar 2kg%' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocumentLine",
@@ -3440,7 +3613,8 @@
       "aggregation",
       "single_month"
     ],
-    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, s.LocationName ASC",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, s.LocationName ASC",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3470,7 +3644,8 @@
       "aggregation",
       "single_month"
     ],
-    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, s.LocationName ASC",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, s.LocationName ASC",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3501,7 +3676,8 @@
       "quarter"
     ],
     "failure_class": "time_window",
-    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, c.CustomerName ASC LIMIT 3",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, c.CustomerName ASC LIMIT 3",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3536,7 +3712,8 @@
       "quarter"
     ],
     "failure_class": "time_window",
-    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, c.CustomerName ASC LIMIT 3",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, c.CustomerName ASC LIMIT 3",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument",
@@ -3569,7 +3746,8 @@
       "scalar",
       "single_month"
     ],
-    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01'",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' AND l.ProductId IS NOT NULL",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument"
@@ -3600,7 +3778,8 @@
       "scalar",
       "single_month"
     ],
-    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01'",
+    "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-12-01' AND d.DocumentDate < '2026-01-01' AND l.ProductId IS NOT NULL",
     "expected_tables": [
       "SalesDocumentLine",
       "SalesDocument"
@@ -3648,10 +3827,10 @@
     }
   },
   {
-    "id": "tpl_store_document_count_q1_2026_0879de",
+    "id": "tpl_store_document_count_q1_2026_89c42b",
     "intentId": "store_document_count_q1_2026",
     "split": "holdout",
-    "question": "How many documents did each store issue in January–March 2026?",
+    "question": "How many documents came from each store in January–March 2026?",
     "canonicalQuestion": "Number of documents per store location in Q1 2026.",
     "difficulty": "medium",
     "tags": [
@@ -3677,11 +3856,11 @@
     }
   },
   {
-    "id": "tpl_document_count_may_2026_42d720",
+    "id": "tpl_document_count_may_2026_7afacb",
     "intentId": "document_count_may_2026",
     "split": "holdout",
-    "question": "How many documents were issued in May 2026?",
-    "canonicalQuestion": "How many documents were issued in May 2026?",
+    "question": "How many documents did we have in May 2026?",
+    "canonicalQuestion": "How many documents did we have in May 2026?",
     "difficulty": "easy",
     "tags": [
       "templated",
@@ -3707,7 +3886,7 @@
     "intentId": "document_count_may_2026",
     "split": "holdout",
     "question": "Number of documents dated May 2026.",
-    "canonicalQuestion": "How many documents were issued in May 2026?",
+    "canonicalQuestion": "How many documents did we have in May 2026?",
     "difficulty": "easy",
     "tags": [
       "templated",
@@ -3742,12 +3921,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -3775,12 +3956,14 @@
       "year"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -3795,11 +3978,11 @@
     }
   },
   {
-    "id": "tpl_doctype_document_count_q1_2026_d80afd",
+    "id": "tpl_doctype_document_count_q1_2026_09b038",
     "intentId": "doctype_document_count_q1_2026",
     "split": "dev",
-    "question": "How many documents of each document type did we issue in Q1 2026?",
-    "canonicalQuestion": "How many documents of each document type did we issue in Q1 2026?",
+    "question": "How many documents of each document type were there in Q1 2026?",
+    "canonicalQuestion": "How many documents of each document type were there in Q1 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -3828,7 +4011,7 @@
     "intentId": "doctype_document_count_q1_2026",
     "split": "dev",
     "question": "Count first-quarter 2026 documents by type of document.",
-    "canonicalQuestion": "How many documents of each document type did we issue in Q1 2026?",
+    "canonicalQuestion": "How many documents of each document type were there in Q1 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -3853,11 +4036,11 @@
     }
   },
   {
-    "id": "tpl_store_receipt_count_2026_17d6b0",
+    "id": "tpl_store_receipt_count_2026_f470c5",
     "intentId": "store_receipt_count_2026",
     "split": "holdout",
-    "question": "How many store receipts were issued in 2026?",
-    "canonicalQuestion": "How many store receipts were issued in 2026?",
+    "question": "How many store receipts were there in 2026?",
+    "canonicalQuestion": "How many store receipts were there in 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -3886,7 +4069,7 @@
     "intentId": "store_receipt_count_2026",
     "split": "holdout",
     "question": "Number of Store Receipt documents dated in 2026.",
-    "canonicalQuestion": "How many store receipts were issued in 2026?",
+    "canonicalQuestion": "How many store receipts were there in 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -4025,11 +4208,11 @@
     }
   },
   {
-    "id": "tpl_documents_posted_feb_2026_95c3ed",
+    "id": "tpl_documents_posted_feb_2026_b4d3f2",
     "intentId": "documents_posted_feb_2026",
     "split": "holdout",
-    "question": "How many documents were posted in February 2026?",
-    "canonicalQuestion": "How many documents were posted in February 2026?",
+    "question": "How many documents have a posting date in February 2026?",
+    "canonicalQuestion": "How many documents have a posting date in February 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -4057,7 +4240,7 @@
     "intentId": "documents_posted_feb_2026",
     "split": "holdout",
     "question": "Count the documents whose posting date falls in February 2026.",
-    "canonicalQuestion": "How many documents were posted in February 2026?",
+    "canonicalQuestion": "How many documents have a posting date in February 2026?",
     "difficulty": "medium",
     "tags": [
       "templated",
@@ -4262,12 +4445,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -4295,12 +4480,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -4629,12 +4816,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -4664,12 +4853,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -5077,12 +5268,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -5111,12 +5304,14 @@
       "quarter"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM').",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
     "expected_sql": "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY sales_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(d.DocumentDate, '%Y-%m-01') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%Y-%m-01') ORDER BY sales_month ASC",
       "SELECT MONTH(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTH(d.DocumentDate) ORDER BY sales_month ASC",
-      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC"
+      "SELECT MONTHNAME(d.DocumentDate) AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY MONTHNAME(d.DocumentDate) ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%b %Y') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%b %Y') ORDER BY sales_month ASC",
+      "SELECT DATE_FORMAT(d.DocumentDate, '%M %Y') AS sales_month, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY DATE_FORMAT(d.DocumentDate, '%M %Y') ORDER BY sales_month ASC"
     ],
     "expected_tables": [
       "SalesDocument"
@@ -5194,11 +5389,11 @@
     }
   },
   {
-    "id": "tpl_account_debit_credit_q1_2026_ef1fc3",
+    "id": "tpl_account_debit_credit_q1_2026_96b9de",
     "intentId": "account_debit_credit_q1_2026",
     "split": "holdout",
-    "question": "Debit and credit totals by account for sales dated in Q1 2026.",
-    "canonicalQuestion": "Debit and credit totals by account for sales dated in Q1 2026.",
+    "question": "Debit and credit totals by account name for sales dated in Q1 2026.",
+    "canonicalQuestion": "Debit and credit totals by account name for sales dated in Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5207,7 +5402,7 @@
       "credit",
       "quarter"
     ],
-    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases.",
+    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "expected_tables": [
       "AccountingPosting",
@@ -5230,11 +5425,11 @@
     }
   },
   {
-    "id": "tpl_account_debit_credit_q1_2026_496d30",
+    "id": "tpl_account_debit_credit_q1_2026_a36558",
     "intentId": "account_debit_credit_q1_2026",
     "split": "holdout",
-    "question": "For sales dated January to March 2026, show total debits and credits per GL code.",
-    "canonicalQuestion": "Debit and credit totals by account for sales dated in Q1 2026.",
+    "question": "For sales dated January to March 2026, list each account by name with its total debits and credits.",
+    "canonicalQuestion": "Debit and credit totals by account name for sales dated in Q1 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5243,7 +5438,7 @@
       "credit",
       "quarter"
     ],
-    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases.",
+    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "expected_tables": [
       "AccountingPosting",
@@ -5266,11 +5461,11 @@
     }
   },
   {
-    "id": "tpl_account_debit_credit_posted_apr_2026_0fc37e",
+    "id": "tpl_account_debit_credit_posted_apr_2026_2218ff",
     "intentId": "account_debit_credit_posted_apr_2026",
     "split": "holdout",
-    "question": "Show debits and credits per GL code for postings dated April 2026.",
-    "canonicalQuestion": "Show debits and credits per GL code for postings dated April 2026.",
+    "question": "List each account by name with its debits and credits for postings dated April 2026.",
+    "canonicalQuestion": "List each account by name with its debits and credits for postings dated April 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5281,7 +5476,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
@@ -5306,11 +5501,11 @@
     }
   },
   {
-    "id": "tpl_account_debit_credit_posted_apr_2026_603034",
+    "id": "tpl_account_debit_credit_posted_apr_2026_b2a856",
     "intentId": "account_debit_credit_posted_apr_2026",
     "split": "holdout",
-    "question": "Using the posting date, what were the total debits and credits on each account in April 2026?",
-    "canonicalQuestion": "Show debits and credits per GL code for postings dated April 2026.",
+    "question": "Using the posting date, what were the total debits and credits on each account in April 2026? Show the account names.",
+    "canonicalQuestion": "List each account by name with its debits and credits for postings dated April 2026.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5321,7 +5516,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-04-01' AND p.PostingDate < '2026-05-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
@@ -5346,11 +5541,11 @@
     }
   },
   {
-    "id": "tpl_account_net_movement_feb_2026_3657fb",
+    "id": "tpl_account_net_movement_feb_2026_b8ae99",
     "intentId": "account_net_movement_feb_2026",
     "split": "dev",
-    "question": "Net movement (debits minus credits) per ledger account for February 2026 sales documents.",
-    "canonicalQuestion": "Net movement (debits minus credits) per ledger account for February 2026 sales documents.",
+    "question": "Net movement (debits minus credits) per ledger account name for February 2026 sales documents.",
+    "canonicalQuestion": "Net movement (debits minus credits) per ledger account name for February 2026 sales documents.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5358,7 +5553,7 @@
       "net_movement",
       "single_month"
     ],
-    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases.",
+    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0) - COALESCE(p.CreditAmount, 0)), 2) AS net_movement FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "expected_tables": [
       "AccountingPosting",
@@ -5380,11 +5575,11 @@
     }
   },
   {
-    "id": "tpl_account_net_movement_feb_2026_d99f54",
+    "id": "tpl_account_net_movement_feb_2026_c1256b",
     "intentId": "account_net_movement_feb_2026",
     "split": "dev",
-    "question": "For each account, what is debit minus credit on postings of sales dated February 2026?",
-    "canonicalQuestion": "Net movement (debits minus credits) per ledger account for February 2026 sales documents.",
+    "question": "For each account, by name, what is debit minus credit on postings of sales dated February 2026?",
+    "canonicalQuestion": "Net movement (debits minus credits) per ledger account name for February 2026 sales documents.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5392,7 +5587,7 @@
       "net_movement",
       "single_month"
     ],
-    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases.",
+    "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0) - COALESCE(p.CreditAmount, 0)), 2) AS net_movement FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "expected_tables": [
       "AccountingPosting",
@@ -5429,12 +5624,14 @@
       "posting_date"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
     "expected_sql": "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m') ORDER BY posting_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m-01') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m-01') ORDER BY posting_month ASC",
       "SELECT MONTH(p.PostingDate) AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY MONTH(p.PostingDate) ORDER BY posting_month ASC",
       "SELECT MONTHNAME(p.PostingDate) AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY MONTHNAME(p.PostingDate) ORDER BY posting_month ASC",
+      "SELECT DATE_FORMAT(p.PostingDate, '%b %Y') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%b %Y') ORDER BY posting_month ASC",
+      "SELECT DATE_FORMAT(p.PostingDate, '%M %Y') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%M %Y') ORDER BY posting_month ASC",
       "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m') ORDER BY posting_month ASC"
     ],
     "expected_tables": [
@@ -5468,12 +5665,14 @@
       "posting_date"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number or with the month name (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
     "expected_sql": "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m') ORDER BY posting_month ASC",
     "alternative_expected_sql": [
       "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m-01') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m-01') ORDER BY posting_month ASC",
       "SELECT MONTH(p.PostingDate) AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY MONTH(p.PostingDate) ORDER BY posting_month ASC",
       "SELECT MONTHNAME(p.PostingDate) AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY MONTHNAME(p.PostingDate) ORDER BY posting_month ASC",
+      "SELECT DATE_FORMAT(p.PostingDate, '%b %Y') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%b %Y') ORDER BY posting_month ASC",
+      "SELECT DATE_FORMAT(p.PostingDate, '%M %Y') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%M %Y') ORDER BY posting_month ASC",
       "SELECT DATE_FORMAT(p.PostingDate, '%Y-%m') AS posting_month, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-01-01' AND p.PostingDate < '2026-04-01' AND a.AccountCode = '4000' GROUP BY DATE_FORMAT(p.PostingDate, '%Y-%m') ORDER BY posting_month ASC"
     ],
     "expected_tables": [
@@ -5579,14 +5778,10 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
-    "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
-    "alternative_expected_sql": [
-      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
-    ],
+    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL",
     "expected_tables": [
-      "AccountingPosting",
-      "LedgerAccount"
+      "AccountingPosting"
     ],
     "comparison": {
       "mode": "scalar",
@@ -5596,9 +5791,9 @@
       ]
     },
     "expected_row_counts": {
-      "seed": 0,
-      "v2": 2,
-      "v3": 2
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
     }
   },
   {
@@ -5616,14 +5811,10 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
-    "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
-    "alternative_expected_sql": [
-      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
-    ],
+    "notes": "Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account.",
+    "expected_sql": "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p WHERE p.PostingDate >= '2026-01-01' AND p.PostingDate < '2027-01-01' AND p.SalesDocumentId IS NULL",
     "expected_tables": [
-      "AccountingPosting",
-      "LedgerAccount"
+      "AccountingPosting"
     ],
     "comparison": {
       "mode": "scalar",
@@ -5633,17 +5824,17 @@
       ]
     },
     "expected_row_counts": {
-      "seed": 0,
-      "v2": 2,
-      "v3": 2
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
     }
   },
   {
-    "id": "tpl_account_posting_count_mar_2026_2003ea",
+    "id": "tpl_account_posting_count_mar_2026_9b1a49",
     "intentId": "account_posting_count_mar_2026",
     "split": "dev",
-    "question": "How many postings hit each ledger account in March 2026 (by posting date)?",
-    "canonicalQuestion": "How many postings hit each ledger account in March 2026 (by posting date)?",
+    "question": "How many postings hit each ledger account in March 2026 (by posting date)? Name the accounts.",
+    "canonicalQuestion": "How many postings hit each ledger account in March 2026 (by posting date)? Name the accounts.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5653,7 +5844,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, COUNT(*) AS posting_count FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, COUNT(*) AS posting_count FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
@@ -5677,11 +5868,11 @@
     }
   },
   {
-    "id": "tpl_account_posting_count_mar_2026_2d1131",
+    "id": "tpl_account_posting_count_mar_2026_20e22f",
     "intentId": "account_posting_count_mar_2026",
     "split": "dev",
-    "question": "Count the journal lines per account posted in March 2026.",
-    "canonicalQuestion": "How many postings hit each ledger account in March 2026 (by posting date)?",
+    "question": "Count the journal lines per account name posted in March 2026.",
+    "canonicalQuestion": "How many postings hit each ledger account in March 2026 (by posting date)? Name the accounts.",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5691,7 +5882,7 @@
       "posting_date"
     ],
     "failure_class": "wrong_date_column",
-    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
+    "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, COUNT(*) AS posting_count FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, COUNT(*) AS posting_count FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId LEFT JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY a.AccountCode ASC"
@@ -5844,7 +6035,11 @@
       "customer",
       "date"
     ],
+    "notes": "Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).",
     "expected_sql": "SELECT c.CustomerName, MAX(d.DocumentDate) AS last_purchase_date FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, MAX(d.DocumentDate) AS last_purchase_date FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -5876,7 +6071,11 @@
       "customer",
       "date"
     ],
+    "notes": "Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).",
     "expected_sql": "SELECT c.CustomerName, MAX(d.DocumentDate) AS last_purchase_date FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, MAX(d.DocumentDate) AS last_purchase_date FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -5895,11 +6094,11 @@
     }
   },
   {
-    "id": "tpl_largest_document_mar_2026_69afc2",
+    "id": "tpl_largest_document_mar_2026_9fc4f8",
     "intentId": "largest_document_mar_2026",
     "split": "dev",
-    "question": "Which sales document had the highest net amount in March 2026?",
-    "canonicalQuestion": "Which sales document had the highest net amount in March 2026?",
+    "question": "Which sales document had the highest net amount in March 2026, and what was that amount?",
+    "canonicalQuestion": "Which sales document had the highest net amount in March 2026, and what was that amount?",
     "difficulty": "hard",
     "tags": [
       "templated",
@@ -5930,7 +6129,7 @@
     "intentId": "largest_document_mar_2026",
     "split": "dev",
     "question": "What was our single biggest document by net value in March 2026, and its number?",
-    "canonicalQuestion": "Which sales document had the highest net amount in March 2026?",
+    "canonicalQuestion": "Which sales document had the highest net amount in March 2026, and what was that amount?",
     "difficulty": "hard",
     "tags": [
       "templated",

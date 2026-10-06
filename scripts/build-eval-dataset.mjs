@@ -214,7 +214,7 @@ const DIMS = {
   customer: { grain: 'header', joins: ['JOIN Customer c ON d.CustomerId = c.CustomerId'], key: 'c.CustomerId', name: 'c.CustomerName', column: 'CustomerName', uniqueNames: false, tag: 'customer' },
   store: { grain: 'header', joins: ['JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId'], key: 's.StoreLocationId', name: 's.LocationName', column: 'LocationName', uniqueNames: true, tag: 'store_location' },
   doctype: { grain: 'header', joins: ['JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId'], key: 't.DocumentTypeId', name: 't.DocumentTypeName', column: 'DocumentTypeName', uniqueNames: true, tag: 'document_type' },
-  product: { grain: 'line', joins: [PRODUCT_JOIN], key: 'p.ProductId', name: 'p.ProductName', column: 'ProductName', uniqueNames: true, tag: 'product' },
+  product: { grain: 'line', joins: [PRODUCT_JOIN], key: 'p.ProductId', name: 'p.ProductName', column: 'ProductName', uniqueNames: true, tag: 'product', heldoutSnapshot: 'l.ProductNameSnapshot' },
   brand: { grain: 'line', joins: [PRODUCT_JOIN, 'JOIN Brand b ON p.BrandId = b.BrandId'], key: 'b.BrandId', name: 'b.BrandName', column: 'BrandName', uniqueNames: true, tag: 'brand', snapshot: 'l.BrandNameSnapshot' },
   category: { grain: 'line', joins: [PRODUCT_JOIN, 'JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId'], key: 'pc.ProductCategoryId', name: 'pc.CategoryName', column: 'CategoryName', uniqueNames: true, tag: 'product_category', snapshot: 'l.CategoryNameSnapshot' },
   campaign: { grain: 'line', joins: [PRODUCT_JOIN, 'JOIN Campaign cp ON p.CampaignId = cp.CampaignId'], key: 'cp.CampaignId', name: 'cp.CampaignName', column: 'CampaignName', uniqueNames: true, tag: 'campaign' },
@@ -286,6 +286,10 @@ function filterPredicate(filter) {
   return `${dim.name} LIKE ${sqlString(`%${filter.value}%`)}`;
 }
 
+// The line snapshot column a filter on a line-grain dimension could
+// (wrongly) use instead of the master data (held-out mutants).
+const FILTER_SNAPSHOTS = { brand: 'l.BrandNameSnapshot', category: 'l.CategoryNameSnapshot', product: 'l.ProductNameSnapshot' };
+
 function windowPredicates(window, column = 'd.DocumentDate', { boundary = null } = {}) {
   return [
     `${column} ${boundary === 'start' ? '>' : '>='} ${sqlString(window.start)}`,
@@ -293,13 +297,29 @@ function windowPredicates(window, column = 'd.DocumentDate', { boundary = null }
   ];
 }
 
+// A quarter written as QUARTER() alone, without the year (held-out mutant).
+function quarterOnlyPredicate(window, column) {
+  const month = Number(window.start.slice(5, 7));
+  return `QUARTER(${column}) = ${Math.floor((month - 1) / 3) + 1}`;
+}
+
+function isQuarterWindow(window) {
+  const [startYear, startMonth] = window.start.split('-').map(Number);
+  const [endYear, endMonth] = window.end.split('-').map(Number);
+  return window.start.endsWith('-01') && window.end.endsWith('-01') && (startMonth - 1) % 3 === 0 &&
+    (endYear * 12 + endMonth) - (startYear * 12 + startMonth) === 3;
+}
+
 // Month label expressions for series: the gold and the accepted alternatives
-// (a month can be labelled '2026-01', '2026-01-01', 1 or 'January').
+// (a month can be labelled '2026-01', '2026-01-01', 1, 'January', 'Jan 2026'
+// or 'January 2026').
 const MONTH_LABELS = {
   ym: (column) => `DATE_FORMAT(${column}, '%Y-%m')`,
   ymd: (column) => `DATE_FORMAT(${column}, '%Y-%m-01')`,
   num: (column) => `MONTH(${column})`,
   name: (column) => `MONTHNAME(${column})`,
+  abbrYear: (column) => `DATE_FORMAT(${column}, '%b %Y')`,
+  nameYear: (column) => `DATE_FORMAT(${column}, '%M %Y')`,
 };
 
 /**
@@ -325,7 +345,7 @@ function factQuery(spec, m = {}) {
     joins.push(...(m.wrongJoin === dim.dimKey ? WRONG_JOINS[dim.dimKey].joins : dim.joins));
   }
   filters.forEach((filter, index) => {
-    if (m.dropFilter !== index) {
+    if (m.dropFilter !== index && m.snapshotFilter !== index) {
       joins.push(...DIMS[filter.dim].joins);
     }
   });
@@ -345,42 +365,59 @@ function factQuery(spec, m = {}) {
 
   const select = [];
   const groupBy = [];
+  const snapshotOf = (dim) => dim.snapshot || dim.heldoutSnapshot;
   for (const dim of dims) {
     if (m.snapshot === dim.dimKey) {
-      select.push(`${dim.snapshot} AS ${dim.column}`);
-      groupBy.push(dim.snapshot);
+      select.push(`${snapshotOf(dim)} AS ${dim.column}`);
+      groupBy.push(snapshotOf(dim));
     } else {
       select.push(dim.name);
-      groupBy.push(...(m.groupByName === dim.dimKey ? [dim.name] : [dim.key, dim.name]));
+      if (m.dropGroupKey !== dim.dimKey) {
+        groupBy.push(...(m.groupByName === dim.dimKey ? [dim.name] : [dim.key, dim.name]));
+      }
     }
   }
   let label = null;
   if (spec.series) {
     label = MONTH_LABELS[m.monthLabel || 'ym'](dateColumn === 'd.DocumentDate' ? 'd.DocumentDate' : dateColumn);
     select.push(`${label} AS sales_month`);
-    groupBy.push(label);
+    if (m.dropGroupKey !== 'month') {
+      groupBy.push(label);
+    }
   }
   select.push(projected(metric, metricExpression));
 
-  const where = m.dropCancel ? [] : [CANCEL];
+  const where = m.dropCancel || m.havingCancel ? [] : [CANCEL];
   if (m.monthOnly) {
     where.push(`MONTH(${dateColumn}) = ${window.month}`);
+  } else if (m.quarterOnly) {
+    where.push(quarterOnlyPredicate(window, dateColumn));
   } else {
     where.push(...windowPredicates(window, dateColumn, { boundary: m.boundary }));
   }
   filters.forEach((filter, index) => {
-    if (m.dropFilter !== index) {
+    if (m.snapshotFilter === index) {
+      where.push(`${FILTER_SNAPSHOTS[filter.dim]} LIKE ${sqlString(`%${filter.value}%`)}`);
+    } else if (m.dropFilter !== index) {
       where.push(filterPredicate(filter));
     }
   });
+  // Units are product units: without a product, brand, category or campaign
+  // join (which drops them), the gold leaves out the NULL-ProductId
+  // delivery-fee lines (Quantity 1) explicitly.
+  const productJoined = dims.some((dim) => dim.grain === 'line') || filterDims.some((dim) => dim.grain === 'line');
+  if (spec.metric === 'qty' && !productJoined && !m.feeLines) {
+    where.push('l.ProductId IS NOT NULL');
+  }
 
   const orderBy = [];
   const ranked = spec.shape === 'top' || spec.shape === 'rank';
+  const orderExpression = m.orderColumn ? aggregate(metric, { column: m.orderColumn }) : metricExpression;
   if (spec.series) {
     orderBy.push(...dims.map((dim) => `${dim.name} ASC`), 'sales_month ASC');
   } else if (dims.length > 0) {
     if (ranked || spec.shape === 'breakdown') {
-      orderBy.push(`${metricExpression} ${m.orderAsc ? 'ASC' : 'DESC'}`, ...dims.map((dim) => (m.snapshot === dim.dimKey ? `${dim.snapshot} ASC` : `${dim.name} ASC`)));
+      orderBy.push(`${orderExpression} ${m.orderAsc ? 'ASC' : 'DESC'}`, ...dims.map((dim) => (m.snapshot === dim.dimKey ? `${snapshotOf(dim)} ASC` : `${dim.name} ASC`)));
     }
   }
 
@@ -390,6 +427,7 @@ function factQuery(spec, m = {}) {
     joins: uniqueJoins(joins),
     where,
     groupBy,
+    having: m.havingCancel ? `MAX(${CANCEL.replace(' = 0', '')}) = 0` : null,
     orderBy,
     limit: spec.shape === 'top' && !m.noLimit ? spec.limit : null,
   });
@@ -456,10 +494,16 @@ function ledgerQuery(spec, m = {}) {
     let expression = measure.expression;
     if (m.swapDebitCredit) {
       expression = expression.replace(/DebitAmount/g, '\u0000').replace(/CreditAmount/g, 'DebitAmount').replace(/\u0000/g, 'CreditAmount');
+    } else if (m.netMovement && name === 'debit') {
+      expression = LEDGER_MEASURES.net_movement.expression;
+    } else if (m.netMovement && name === 'credit') {
+      expression = 'SUM(COALESCE(p.CreditAmount, 0) - COALESCE(p.DebitAmount, 0))';
     }
     return measure.decimals != null ? `ROUND(${expression}, ${measure.decimals}) AS ${measure.alias}` : `${expression} AS ${measure.alias}`;
   });
-  const byAccount = !spec.accountCode;
+  // One account (a code filter) or the manual journals as a whole are one
+  // total; otherwise a row per account.
+  const byAccount = !spec.accountCode && !spec.manualOnly;
   const select = [];
   const groupBy = [];
   if (byAccount) {
@@ -473,11 +517,15 @@ function ledgerQuery(spec, m = {}) {
   if (spec.series) {
     label = MONTH_LABELS[m.monthLabel || 'ym'](dateColumn);
     select.push(`${label} AS posting_month`);
-    groupBy.push(label);
+    if (m.dropGroupKey !== 'month') {
+      groupBy.push(label);
+    }
   }
   select.push(...measures);
 
-  const joins = ['JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId'];
+  // The account join is needed for a per-account breakdown or an account
+  // filter; a manual-journal total reads AccountingPosting alone.
+  const joins = byAccount || spec.accountCode ? ['JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId'] : [];
   const where = [];
   if (documentMode || useDocumentDate || m.innerJoinCancel) {
     joins.push('JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId');
@@ -490,6 +538,8 @@ function ledgerQuery(spec, m = {}) {
   }
   if (m.monthOnly) {
     where.push(`MONTH(${dateColumn}) = ${window.month}`);
+  } else if (m.quarterOnly) {
+    where.push(quarterOnlyPredicate(window, dateColumn));
   } else {
     where.push(...windowPredicates(window, dateColumn, { boundary: m.boundary }));
   }
@@ -533,18 +583,31 @@ const CUSTOM = {
   // Customers with a non-canceled document in one month but not the next.
   customers_lost_between(spec, m = {}) {
     const [first, second] = spec.windows.map((key) => WINDOWS[key]);
-    const cancel = m.dropCancel ? '' : `${CANCEL} AND `;
+    const cancel = m.dropCancel || m.dropCancelFirst ? '' : `${CANCEL} AND `;
     const secondCancel = m.dropCancelSecond || m.dropCancel ? '' : `${CANCEL} AND `;
     const range = (window, boundary) => windowPredicates(window, `d.${m.dateColumn || 'DocumentDate'}`, { boundary }).join(' AND ');
-    const count = m.countStar ? 'COUNT(*)' : 'COUNT(DISTINCT f.CustomerId)';
+    // countDocs: the DISTINCT forgotten in the first month's set, so COUNT(*)
+    // counts that month's documents of the lost customers.
+    const count = m.countDocs ? 'COUNT(*)' : 'COUNT(DISTINCT f.CustomerId)';
     return (
-      `WITH firstMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE ${cancel}${range(first, m.boundary)}), ` +
+      `WITH firstMonth AS (SELECT ${m.countDocs ? '' : 'DISTINCT '}d.CustomerId FROM SalesDocument d WHERE ${cancel}${range(first, m.boundary)}), ` +
       `secondMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE ${secondCancel}${range(second, m.boundary)}) ` +
       `SELECT ${count} AS customer_count FROM firstMonth f LEFT JOIN secondMonth s ON s.CustomerId = f.CustomerId WHERE s.CustomerId IS NULL`
     );
   },
   // Latest non-canceled document date per customer (all time).
   last_purchase_date(spec, m = {}) {
+    if (m.everyCustomer) {
+      return render({
+        select: ['c.CustomerName', 'MAX(d.DocumentDate) AS last_purchase_date'],
+        from: 'Customer c',
+        joins: [`LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND ${CANCEL}`],
+        where: [],
+        groupBy: ['c.CustomerId', 'c.CustomerName'],
+        orderBy: ['c.CustomerName ASC'],
+        limit: null,
+      });
+    }
     return render({
       select: ['c.CustomerName', `${m.minDate ? 'MIN' : 'MAX'}(d.${m.dateColumn || 'DocumentDate'}) AS last_purchase_date`],
       from: 'SalesDocument d',
@@ -565,7 +628,7 @@ const CUSTOM = {
       joins: [],
       where: [...(m.dropCancel ? [] : [CANCEL]), ...windowPredicates(window, `d.${m.dateColumn || 'DocumentDate'}`, { boundary: m.boundary })],
       groupBy: [],
-      orderBy: [`COALESCE(${column}, 0) ${m.orderAsc ? 'ASC' : 'DESC'}`, 'd.DocumentNo ASC'],
+      orderBy: [`COALESCE(${m.orderColumn || column}, 0) ${m.orderAsc ? 'ASC' : 'DESC'}`, 'd.DocumentNo ASC'],
       limit: 1,
     });
   },
@@ -623,15 +686,15 @@ const INTENTS = [
   {
     intentId: 'customer_net_sales_top5_q1_2026', template: 'fact', metric: 'net', dims: ['customer'], window: 'q1-2026', shape: 'top', limit: 5,
     phrasings: [
-      'Who were our top 5 customers by net revenue in Q1 2026?',
-      'Rank customers by net revenue for January through March 2026 and show the top five.',
+      'Who were our top 5 customers by turnover in Q1 2026?',
+      'Rank customers by net amount billed for January through March 2026 and show the top five.',
     ],
   },
   {
     intentId: 'customer_net_sales_apr_2026', template: 'fact', metric: 'net', dims: ['customer'], window: '2026-04', shape: 'breakdown',
     phrasings: [
-      'Net revenue per customer in April 2026.',
-      'How much net revenue did each customer bring in during April 2026?',
+      'Net takings per customer in April 2026.',
+      'How much did each customer spend with us in April 2026, excluding tax?',
     ],
   },
   {
@@ -644,15 +707,15 @@ const INTENTS = [
   {
     intentId: 'customer_net_sales_rank_nov_2025', template: 'fact', metric: 'net', dims: ['customer'], window: '2025-11', shape: 'rank',
     phrasings: [
-      'Rank all customers by net revenue for November 2025.',
-      'List customers from highest to lowest net amount invoiced in November 2025.',
+      'Rank the customers who bought from us in November 2025 by net revenue.',
+      'List the November 2025 buyers from highest to lowest net amount, all document types included.',
     ],
   },
   {
     intentId: 'doctype_net_sales_q1_2026', template: 'fact', metric: 'net', dims: ['doctype'], window: 'q1-2026', shape: 'breakdown',
     phrasings: [
-      'Net revenue by type of document for Q1 2026.',
-      'Break down first-quarter 2026 net revenue by the type of document it was booked on.',
+      'Turnover by type of document for Q1 2026.',
+      'Break down first-quarter 2026 net takings by kind of document.',
     ],
   },
   {
@@ -666,7 +729,7 @@ const INTENTS = [
     intentId: 'total_net_sales_feb_2026', template: 'fact', metric: 'net', window: '2026-02', shape: 'scalar',
     phrasings: [
       'What were total net sales in February 2026?',
-      'How much net revenue did we book in February 2026?',
+      'How much net revenue did we make in February 2026?',
     ],
   },
   {
@@ -686,22 +749,22 @@ const INTENTS = [
   {
     intentId: 'total_net_sales_feb15_mar15_2026', template: 'fact', metric: 'net', window: 'feb15-mar15', shape: 'scalar',
     phrasings: [
-      'What was net revenue from 15 February 2026 through 15 March 2026, both days included?',
-      'Net revenue between Feb 15 and Mar 15, 2026 (inclusive).',
+      'What was our turnover from 15 February 2026 through 15 March 2026, both days included?',
+      'Net takings between Feb 15 and Mar 15, 2026 (inclusive).',
     ],
   },
   {
     intentId: 'net_sales_monthly_q1_2026', template: 'fact', metric: 'net', window: 'q1-2026', series: true,
     phrasings: [
-      'Show net revenue month by month for Q1 2026.',
-      'Monthly net revenue for January to March 2026.',
+      'Show turnover month by month for Q1 2026.',
+      'Monthly net takings for January to March 2026.',
     ],
   },
   {
     intentId: 'net_sales_monthly_nov_2025_feb_2026', template: 'fact', metric: 'net', window: 'nov25-feb26', series: true,
     phrasings: [
-      'Net revenue per month from November 2025 through February 2026.',
-      'How did monthly net revenue develop between November 2025 and February 2026?',
+      'Turnover per month from November 2025 through February 2026.',
+      'How did monthly takings, net of tax, develop between November 2025 and February 2026?',
     ],
   },
   {
@@ -725,8 +788,8 @@ const INTENTS = [
     intentId: 'net_sales_march_2025_vs_march_2026', template: 'pivot', metric: 'net', windows: ['2025-03', '2026-03'],
     columns: ['mar_2025_net_amount', 'mar_2026_net_amount'],
     phrasings: [
-      'Show March 2025 and March 2026 net revenue side by side.',
-      'Put total net revenue for March 2025 next to March 2026 in one row.',
+      'Show March 2025 and March 2026 turnover side by side.',
+      'Put total net takings for March 2025 next to March 2026 in one row.',
     ],
   },
   {
@@ -741,8 +804,8 @@ const INTENTS = [
     intentId: 'net_sales_south_store_mar_2026', template: 'fact', metric: 'net', window: '2026-03', shape: 'scalar',
     filters: [{ dim: 'store', value: 'South Store' }],
     phrasings: [
-      'What was net revenue at the South Store in March 2026?',
-      'How much net revenue did South Store take in March 2026?',
+      'What was turnover at the South Store in March 2026?',
+      'How much did South Store take in March 2026, net of tax?',
     ],
   },
   {
@@ -766,14 +829,21 @@ const INTENTS = [
     filters: [{ dim: 'customer', value: 'Metro Online Store' }],
     phrasings: [
       'How much did Metro Online Store buy from us (net) in Q1 2026?',
-      'Net revenue from Metro Online Store for the first quarter of 2026.',
+      'Turnover from Metro Online Store for the first quarter of 2026.',
     ],
   },
   {
     intentId: 'net_sales_by_customer_and_store_mar_2026', template: 'fact', metric: 'net', dims: ['customer', 'store'], window: '2026-03', shape: 'breakdown',
     phrasings: [
-      'Net revenue by customer and store location for March 2026.',
-      'Split March 2026 net revenue by customer and by the location that served them.',
+      'Turnover by customer and store location for March 2026.',
+      'Split March 2026 net takings by customer and by the location that served them.',
+    ],
+  },
+  {
+    intentId: 'customer_net_sales_top3_jan_2026', template: 'fact', metric: 'net', dims: ['customer'], window: '2026-01', shape: 'top', limit: 3,
+    phrasings: [
+      'Top 3 customers by net sales for January 2026.',
+      'Which three customers spent the most with us, net of tax, in January 2026?',
     ],
   },
   // ---- gross amount ----
@@ -795,7 +865,7 @@ const INTENTS = [
     intentId: 'store_gross_feb_2026', template: 'fact', metric: 'gross', dims: ['store'], window: '2026-02', shape: 'breakdown',
     phrasings: [
       'Gross amount by store location for February 2026.',
-      { q: 'How much gross revenue (incl. tax) did each store record in February 2026?', knownRejection: 'METRIC_COLUMN' },
+      'How much gross turnover (incl. tax) did each store record in February 2026?',
     ],
   },
   {
@@ -809,7 +879,7 @@ const INTENTS = [
     intentId: 'doctype_gross_dec_2025', template: 'fact', metric: 'gross', dims: ['doctype'], window: '2025-12', shape: 'breakdown',
     phrasings: [
       'Gross amount by document type in December 2025.',
-      'For December 2025, what was the gross value booked on each type of document?',
+      'For December 2025, what was the gross value of each type of document?',
     ],
   },
   // ---- line-level net sales ----
@@ -830,8 +900,8 @@ const INTENTS = [
   {
     intentId: 'product_net_sales_rank_dec_2025', template: 'fact', metric: 'line_net', dims: ['product'], window: '2025-12', shape: 'rank',
     phrasings: [
-      'Rank products by net revenue for December 2025.',
-      'Order every product we sold in December 2025 by its net revenue, highest first.',
+      { q: 'Rank products by turnover for December 2025.', knownRejection: 'TABLE_SCOPE' },
+      'Order every product we sold in December 2025 by its net takings, highest first.',
     ],
   },
   {
@@ -844,8 +914,8 @@ const INTENTS = [
   {
     intentId: 'brand_net_sales_top3_q1_2026', template: 'fact', metric: 'line_net', dims: ['brand'], window: 'q1-2026', shape: 'top', limit: 3,
     phrasings: [
-      'Top 3 brands by net revenue in Q1 2026.',
-      'Which three brands generated the most net revenue from January to March 2026?',
+      { q: 'Top 3 brands by turnover in Q1 2026.', knownRejection: 'TABLE_SCOPE' },
+      { q: 'Which three brands brought in the most money, net of tax, from January to March 2026?', knownRejection: 'TABLE_SCOPE' },
     ],
   },
   {
@@ -859,8 +929,8 @@ const INTENTS = [
   {
     intentId: 'category_net_sales_apr_2026', template: 'fact', metric: 'line_net', dims: ['category'], window: '2026-04', shape: 'breakdown',
     phrasings: [
-      'Net revenue by category in April 2026.',
-      'Revenue per category for April 2026.',
+      { q: 'Turnover by category in April 2026.', knownRejection: 'TABLE_SCOPE' },
+      { q: 'Net takings per category for April 2026.', knownRejection: 'TABLE_SCOPE' },
     ],
   },
   {
@@ -873,15 +943,15 @@ const INTENTS = [
   {
     intentId: 'category_net_sales_q1_2025', template: 'fact', metric: 'line_net', dims: ['category'], window: 'q1-2025', shape: 'breakdown',
     phrasings: [
-      'Net revenue by category in Q1 2025.',
-      'Break down first-quarter 2025 revenue by category.',
+      { q: 'Turnover by category in Q1 2025.', knownRejection: 'TABLE_SCOPE' },
+      { q: 'Break down first-quarter 2025 net takings by category.', knownRejection: 'TABLE_SCOPE' },
     ],
   },
   {
     intentId: 'campaign_net_sales_q1_2026', template: 'fact', metric: 'line_net', dims: ['campaign'], window: 'q1-2026', shape: 'breakdown',
     phrasings: [
-      'Net revenue by campaign for Q1 2026.',
-      'How much revenue did each promotion generate in January–March 2026?',
+      { q: 'Turnover by campaign for Q1 2026.', knownRejection: 'TABLE_SCOPE' },
+      'How much did each promotion take in, net of tax, in January–March 2026?',
     ],
   },
   {
@@ -912,7 +982,7 @@ const INTENTS = [
     intentId: 'category_net_sales_by_store_mar_2026', template: 'fact', metric: 'line_net', dims: ['category', 'store'], window: '2026-03', shape: 'breakdown',
     phrasings: [
       'Net sales by product category and store location in March 2026.',
-      'For March 2026, show revenue for every combination of category and store.',
+      'For March 2026, show revenue for each category and store combination that had sales.',
     ],
   },
   {
@@ -927,8 +997,8 @@ const INTENTS = [
     intentId: 'herbal_tea_net_sales_monthly_nov_2025_feb_2026', template: 'fact', metric: 'line_net', window: 'nov25-feb26', series: true,
     filters: [{ dim: 'product', value: 'Herbal Tea Variety Pack' }],
     phrasings: [
-      { q: 'Monthly net revenue of Herbal Tea Variety Pack from November 2025 to February 2026.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'How much revenue did the Herbal Tea Variety Pack make in each month between November 2025 and February 2026?', knownRejection: 'TABLE_SCOPE' },
+      { q: 'Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.', knownRejection: 'TABLE_SCOPE' },
+      { q: 'How much did the Herbal Tea Variety Pack take, net of tax, in each month between November 2025 and February 2026?', knownRejection: 'TABLE_SCOPE' },
     ],
   },
   // ---- quantity ----
@@ -944,6 +1014,13 @@ const INTENTS = [
     phrasings: [
       { q: 'Top 3 items by units in April 2026.', knownRejection: 'TABLE_SCOPE' },
       'Which three products sold the highest number of units in April 2026?',
+    ],
+  },
+  {
+    intentId: 'product_qty_top3_jan_2026', template: 'fact', metric: 'qty', dims: ['product'], window: '2026-01', shape: 'top', limit: 3,
+    phrasings: [
+      'Which three products sold the most units in January 2026?',
+      'Top 3 products by quantity sold, January 2026.',
     ],
   },
   {
@@ -1009,13 +1086,13 @@ const INTENTS = [
     intentId: 'store_document_count_q1_2026', template: 'fact', metric: 'docs', dims: ['store'], window: 'q1-2026', shape: 'breakdown',
     phrasings: [
       'Number of documents per store location in Q1 2026.',
-      'How many documents did each store issue in January–March 2026?',
+      'How many documents came from each store in January–March 2026?',
     ],
   },
   {
     intentId: 'document_count_may_2026', template: 'fact', metric: 'docs', window: '2026-05', shape: 'scalar',
     phrasings: [
-      'How many documents were issued in May 2026?',
+      'How many documents did we have in May 2026?',
       'Number of documents dated May 2026.',
     ],
   },
@@ -1029,7 +1106,7 @@ const INTENTS = [
   {
     intentId: 'doctype_document_count_q1_2026', template: 'fact', metric: 'docs', dims: ['doctype'], window: 'q1-2026', shape: 'breakdown',
     phrasings: [
-      'How many documents of each document type did we issue in Q1 2026?',
+      'How many documents of each document type were there in Q1 2026?',
       'Count first-quarter 2026 documents by type of document.',
     ],
   },
@@ -1037,7 +1114,7 @@ const INTENTS = [
     intentId: 'store_receipt_count_2026', template: 'fact', metric: 'docs', window: 'y2026', shape: 'scalar',
     filters: [{ dim: 'doctype', value: 'Store Receipt' }],
     phrasings: [
-      'How many store receipts were issued in 2026?',
+      'How many store receipts were there in 2026?',
       'Number of Store Receipt documents dated in 2026.',
     ],
   },
@@ -1060,7 +1137,7 @@ const INTENTS = [
     intentId: 'documents_posted_feb_2026', template: 'fact', metric: 'docs', window: '2026-02', shape: 'scalar', dateColumn: 'PostingDate',
     failure_class: 'wrong_date_column',
     phrasings: [
-      'How many documents were posted in February 2026?',
+      'How many documents have a posting date in February 2026?',
       'Count the documents whose posting date falls in February 2026.',
     ],
   },
@@ -1200,22 +1277,22 @@ const INTENTS = [
   {
     intentId: 'account_debit_credit_q1_2026', template: 'ledger', measures: ['debit', 'credit'], window: 'q1-2026', dateMode: 'document',
     phrasings: [
-      'Debit and credit totals by account for sales dated in Q1 2026.',
-      'For sales dated January to March 2026, show total debits and credits per GL code.',
+      'Debit and credit totals by account name for sales dated in Q1 2026.',
+      'For sales dated January to March 2026, list each account by name with its total debits and credits.',
     ],
   },
   {
     intentId: 'account_debit_credit_posted_apr_2026', template: 'ledger', measures: ['debit', 'credit'], window: '2026-04', dateMode: 'posting',
     phrasings: [
-      'Show debits and credits per GL code for postings dated April 2026.',
-      'Using the posting date, what were the total debits and credits on each account in April 2026?',
+      'List each account by name with its debits and credits for postings dated April 2026.',
+      'Using the posting date, what were the total debits and credits on each account in April 2026? Show the account names.',
     ],
   },
   {
     intentId: 'account_net_movement_feb_2026', template: 'ledger', measures: ['net_movement'], window: '2026-02', dateMode: 'document',
     phrasings: [
-      'Net movement (debits minus credits) per ledger account for February 2026 sales documents.',
-      'For each account, what is debit minus credit on postings of sales dated February 2026?',
+      'Net movement (debits minus credits) per ledger account name for February 2026 sales documents.',
+      'For each account, by name, what is debit minus credit on postings of sales dated February 2026?',
     ],
   },
   {
@@ -1242,15 +1319,15 @@ const INTENTS = [
   {
     intentId: 'account_posting_count_mar_2026', template: 'ledger', measures: ['postings'], window: '2026-03', dateMode: 'posting',
     phrasings: [
-      'How many postings hit each ledger account in March 2026 (by posting date)?',
-      'Count the journal lines per account posted in March 2026.',
+      'How many postings hit each ledger account in March 2026 (by posting date)? Name the accounts.',
+      'Count the journal lines per account name posted in March 2026.',
     ],
   },
   // ---- other shapes ----
   {
     intentId: 'active_customers_without_sales_q1_2026', template: 'active_customers_without_sales', window: 'q1-2026', shape: 'breakdown', boundary: 'end',
     comparison: { mode: 'rowset', compare_columns: ['CustomerName'] },
-    mutants: ['cancel', 'date_col', 'date_boundary', 'active'],
+    mutants: ['cancel', 'date_col', 'date_boundary', 'date_boundary_other', 'active'],
     difficulty: 'hard', tags: ['anti_join'],
     phrasings: [
       'Which active customers had no sales in Q1 2026?',
@@ -1260,7 +1337,13 @@ const INTENTS = [
   {
     intentId: 'customers_bought_feb_not_mar_2026', template: 'customers_lost_between', windows: ['2026-02', '2026-03'], shape: 'scalar',
     comparison: { mode: 'scalar' },
-    mutants: ['cancel', 'cancel_second', 'date_col', 'date_boundary'],
+    mutants: ['cancel', 'cancel_first', 'cancel_second', 'count_docs', 'date_col', 'date_boundary', 'date_boundary_other'],
+    notEmitted: {
+      count:
+        "COUNT(*) over the first month's SELECT DISTINCT set equals COUNT(DISTINCT CustomerId): the CTE already yields distinct customers (forgetting that DISTINCT is the count control)",
+      group_by:
+        'COUNT(DISTINCT CustomerName), which merges the two Summit Grocers: fixture limit, both namesakes buy in March 2026 on v2 and v3 (and only C-005 trades on seed), so no fixture can separate it without removing designed March rows (a known blind spot)',
+    },
     difficulty: 'hard', tags: ['anti_join', 'comparison'],
     phrasings: [
       'How many customers bought in February 2026 but not in March 2026?',
@@ -1280,17 +1363,18 @@ const INTENTS = [
   {
     intentId: 'largest_document_mar_2026', template: 'largest_document', window: '2026-03', shape: 'top',
     comparison: { mode: 'rowset', compare_columns: ['DocumentNo', 'net_amount'], decimals: 2 },
-    mutants: ['cancel', 'date_col', 'date_boundary', 'metric', 'order'],
+    mutants: ['cancel', 'date_col', 'date_boundary', 'date_boundary_other', 'metric', 'order'],
+    heldoutMutants: ['order_gross'],
     tags: ['sales_document', 'ranking'],
     phrasings: [
-      'Which sales document had the highest net amount in March 2026?',
+      'Which sales document had the highest net amount in March 2026, and what was that amount?',
       'What was our single biggest document by net value in March 2026, and its number?',
     ],
   },
   {
     intentId: 'canceled_document_count_q1_2026', template: 'canceled_documents', window: 'q1-2026', shape: 'scalar',
     comparison: { mode: 'scalar' },
-    mutants: ['cancel_inverted', 'cancel_dropped', 'date_col', 'date_boundary'],
+    mutants: ['cancel_inverted', 'cancel_dropped', 'date_col', 'date_boundary', 'date_boundary_other'],
     tags: ['sales_document', 'canceled', 'count'],
     phrasings: [
       'How many sales documents were canceled in Q1 2026?',
@@ -1300,7 +1384,7 @@ const INTENTS = [
   {
     intentId: 'store_canceled_value_q1_2026', template: 'canceled_documents', window: 'q1-2026', shape: 'breakdown', dim: 'store', withValue: true,
     comparison: { mode: 'rowset', compare_columns: ['LocationName', 'document_count', 'canceled_net_amount'], decimals: 2 },
-    mutants: ['cancel_inverted', 'date_col', 'date_boundary', 'metric'],
+    mutants: ['cancel_inverted', 'date_col', 'date_boundary', 'date_boundary_other', 'metric'],
     tags: ['sales_document', 'canceled', 'store_location'],
     phrasings: [
       'Number and net value of canceled documents by store location in Q1 2026.',
@@ -1313,9 +1397,32 @@ export const INTENT_CATALOGUE = INTENTS;
 
 // Per-intent mutation families that are not emitted, with the reason: the
 // mutant cannot change this intent's answer (semantically equivalent here), or
-// a documented fixture limit. Template-wide rules live in mutationsFor and are
-// recorded the same way in the controls file (`not_emitted`).
-export const NOT_EMITTED = {};
+// a documented fixture limit (no fixture row separates it, and adding one
+// would break another designed property). Keys are `<type>:<note>` of the
+// mutant. Template-wide rules live in mutationsFor and are recorded the same
+// way in the controls file (`not_emitted`).
+// The note of the 'end' off-by-one mutant (BOUNDARY_NOTES.end, defined with the mutants).
+const DAY_AFTER = 'day after the window included (<= instead of <)';
+const NO_JUNE_2026 =
+  'fixture limit: no fixture has a document on 2026-06-01, and June 2026 must stay empty on every fixture (the zero-row case hard_zero_customers_jun_2026)';
+const NO_2027 =
+  'fixture limit: no fixture has data after May 2026, so nothing is dated 2027-01-01 (a future-dated document would leak into every all-time question)';
+export const NOT_EMITTED = {
+  doctype_net_sales_top1_may_2026: { [`date_boundary:${DAY_AFTER}`]: NO_JUNE_2026 },
+  document_count_may_2026: { [`date_boundary:${DAY_AFTER}`]: NO_JUNE_2026 },
+  net_sales_online_orders_monthly_2026: { [`date_boundary:${DAY_AFTER}`]: NO_2027 },
+  document_count_monthly_2026: { [`date_boundary:${DAY_AFTER}`]: NO_2027 },
+  store_receipt_count_2026: { [`date_boundary:${DAY_AFTER}`]: NO_2027 },
+  manual_journal_debits_2026: { [`date_boundary:${DAY_AFTER}`]: NO_2027 },
+  household_net_sales_feb_2026: {
+    [`date_boundary:${DAY_AFTER}`]:
+      "fixture limit: no Household line is dated 2026-03-01: v2 cannot sell a tenth product in non-canceled March 2026 (the top-10 LEFT JOIN rule of core_public_002), and v3's March totals are held by its customer tie and top-10 cut-off",
+  },
+  active_customers_without_sales_q1_2026: {
+    'date_boundary:first day of the window excluded (> instead of >=)':
+      'fixture limit: every active customer with a Q1 2026 sale on v2 and v3 also buys after 1 January, and seed has no 1 January document; making 1 January some customer\'s only Q1 sale would undo the rows the other controls of this intent need',
+  },
+};
 
 // Positive controls for a sample of intents: every POSITIVE_EVERY-th intent
 // of the fact and ledger templates, rotating CTE / derived table / alias.
@@ -1343,20 +1450,35 @@ function metricOf(intent) {
   return intent.metric ? METRICS[intent.metric] : null;
 }
 
+// True for a quantity intent without a product, brand, category or campaign
+// dimension or filter: its gold leaves out the delivery-fee lines explicitly
+// (l.ProductId IS NOT NULL), so dropping that filter counts them as units.
+function unitsNeedProductJoinOnly(intent) {
+  const lineDims = [...(intent.dims || []), ...(intent.filters || []).map((filter) => filter.dim)].filter((dim) => DIMS[dim].grain === 'line');
+  return intent.template === 'fact' && intent.metric === 'qty' && lineDims.length === 0;
+}
+
+function seriesLabels(intent) {
+  return ['ymd', 'num', ...(windowSpansYears(WINDOWS[intent.window]) ? [] : ['name']), 'abbrYear', 'nameYear'];
+}
+
 function alternativesFor(intent) {
   const alternatives = [];
   if (intent.series) {
-    const window = WINDOWS[intent.window];
-    const labels = ['ymd', 'num', ...(windowSpansYears(window) ? [] : ['name'])];
-    for (const monthLabel of labels) {
+    for (const monthLabel of seriesLabels(intent)) {
       alternatives.push(buildQuery(intent, { monthLabel }));
     }
   }
   if (intent.template === 'pivot' && intent.dim === 'customer') {
     alternatives.push(pivotQuery(intent, { everyCustomer: true }));
   }
-  if (intent.template === 'ledger' && intent.dateMode === 'posting') {
+  // Manual journals have no sales document, so leaving out the postings of
+  // canceled documents changes nothing there (no alternative).
+  if (intent.template === 'ledger' && intent.dateMode === 'posting' && !intent.manualOnly) {
     alternatives.push(ledgerQuery(intent, { leftJoinCancel: true }));
+  }
+  if (intent.template === 'last_purchase_date') {
+    alternatives.push(CUSTOM.last_purchase_date(intent, { everyCustomer: true }));
   }
   return alternatives;
 }
@@ -1364,9 +1486,10 @@ function alternativesFor(intent) {
 function notesFor(intent) {
   const notes = [];
   if (intent.series) {
+    const spans = windowSpansYears(WINDOWS[intent.window]);
     notes.push(
       'A month can be labelled several ways; alternative_expected_sql accepts the same series labelled ' +
-        `'YYYY-MM-01', with the month number${windowSpansYears(WINDOWS[intent.window]) ? '' : ' or with the month name'} (the gold uses 'YYYY-MM').`
+        `'YYYY-MM-01', with the month number${spans ? '' : ', with the month name'}, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').`
     );
   }
   if (intent.template === 'pivot' && intent.dim === 'customer') {
@@ -1376,13 +1499,30 @@ function notesFor(intent) {
   } else if (intent.template === 'pivot') {
     notes.push('column_order keeps the earlier window first unless the columns are named like the gold columns.');
   }
-  if (intent.template === 'ledger' && intent.dateMode === 'posting') {
+  if (intent.template === 'ledger' && intent.manualOnly) {
+    notes.push(
+      'Manual journals are the postings with no sales document (AccountingPosting.SalesDocumentId IS NULL), selected by PostingDate; the answer is one total over every account.'
+    );
+  } else if (intent.template === 'ledger' && intent.dateMode === 'posting') {
     notes.push(
       'Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).'
     );
   }
   if (intent.template === 'ledger' && intent.dateMode === 'document') {
     notes.push('Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases.');
+  }
+  if (intent.template === 'ledger' && !intent.accountCode && !intent.manualOnly && !intent.series) {
+    notes.push('Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).');
+  }
+  if (unitsNeedProductJoinOnly(intent)) {
+    notes.push(
+      'Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.'
+    );
+  }
+  if (intent.template === 'last_purchase_date') {
+    notes.push(
+      'Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).'
+    );
   }
   return notes.join(' ');
 }
@@ -1559,14 +1699,42 @@ function tablesOf(sql) {
 
 // --- negative controls --------------------------------------------------------------------
 
+const BOUNDARY_NOTES = {
+  start: 'first day of the window excluded (> instead of >=)',
+  end: 'day after the window included (<= instead of <)',
+};
+
+// Both off-by-one sides, the window's designated side first (the side every
+// fixture separates for that window; the other side may be listed in
+// NOT_EMITTED with the fixture limit that lets it survive).
+function boundaryMutants(add, designated) {
+  for (const side of designated === 'end' ? ['end', 'start'] : ['start', 'end']) {
+    add('date_boundary', BOUNDARY_NOTES[side], { boundary: side });
+  }
+}
+
+// The amount a ranking could wrongly be ordered by while still showing the
+// asked metric (held-out family).
+const ORDER_SWAPS = {
+  net: { column: 'd.GrossAmount', note: 'ranked by the gross amount while showing net' },
+  gross: { column: 'd.NetAmount', note: 'ranked by the net amount while showing gross' },
+  aov: { column: 'd.GrossAmount', note: 'ranked by the average gross amount while showing the net average' },
+  line_net: { column: 'l.TotalAmount', note: 'ranked by line TotalAmount while showing line NetAmount' },
+  qty: { column: 'l.NetAmount', note: 'ranked by line net amount while showing units' },
+};
+
 /**
  * The negative controls (mutants) for an intent: [{ type, note, m }] for the
- * builder, plus the families deliberately not emitted, with the reason.
+ * builder (design controls), the held-out mutants (families the fixtures were
+ * not extended against; reported apart and not gated), plus the families
+ * deliberately not emitted, with the reason.
  */
 function mutationsFor(intent) {
   const mutants = [];
+  const heldout = [];
   const skipped = [];
   const add = (type, note, m) => mutants.push({ type, note, m });
+  const addHeldout = (type, note, m) => heldout.push({ type, note, m });
   const skip = (type, reason) => skipped.push({ type, reason });
   const window = intent.window ? WINDOWS[intent.window] : null;
 
@@ -1581,10 +1749,7 @@ function mutationsFor(intent) {
     } else {
       add('date_col', `DocumentDate instead of ${dateColumn}`, { dateColumn: 'DocumentDate' });
     }
-    const boundary = intent.boundary || window.boundary;
-    add('date_boundary', boundary === 'start' ? 'first day of the window excluded (> instead of >=)' : 'day after the window included (<= instead of <)', {
-      boundary,
-    });
+    boundaryMutants(add, intent.boundary || window.boundary);
     if (window.prior) {
       add('date_filter', 'MONTH() without YEAR(): the same month of the previous year is included', { monthOnly: true });
     }
@@ -1597,6 +1762,9 @@ function mutationsFor(intent) {
     }
     if (intent.metric === 'qty') {
       add('count', 'number of lines instead of the quantity', { countStar: true });
+    }
+    if (unitsNeedProductJoinOnly(intent)) {
+      add('filter', 'the NULL-ProductId delivery-fee lines counted as units (no product filter)', { feeLines: true });
     }
     if (intent.metric === 'docs') {
       skip('count', 'COUNT(*) over SalesDocument counts each document once, the same as COUNT(DISTINCT SalesDocumentId); counting lines is the grain control');
@@ -1618,6 +1786,13 @@ function mutationsFor(intent) {
     } else if (dims.length > 0) {
       skip('group_by', 'the dimension names are unique, so grouping by the name alone gives the same groups');
     }
+    if (dims.length > 1) {
+      const [first, second] = dims;
+      add('group_by', `the ${second} key dropped from GROUP BY (its name still selected): one arbitrary ${second} per ${first}`, { dropGroupKey: second });
+    }
+    if (intent.series) {
+      add('group_by', 'the month dropped from GROUP BY: one row for the whole window under an arbitrary month label', { dropGroupKey: 'month' });
+    }
     if (intent.shape === 'top' || intent.shape === 'rank') {
       add('order_limit', 'sorted ascending instead of descending', { orderAsc: true });
     }
@@ -1633,30 +1808,62 @@ function mutationsFor(intent) {
         add('join_path', WRONG_JOINS[dim].note, { wrongJoin: dim });
       }
     }
+
+    // Held-out families.
+    filters.forEach((filter, index) => {
+      if (FILTER_SNAPSHOTS[filter.dim]) {
+        addHeldout('stale_snapshot', `filter on the line snapshot ${FILTER_SNAPSHOTS[filter.dim]} instead of the ${filter.dim} master data`, { snapshotFilter: index });
+      }
+    });
+    for (const dim of dims) {
+      if (DIMS[dim].heldoutSnapshot) {
+        addHeldout('stale_snapshot', `grouped by the stale ${DIMS[dim].heldoutSnapshot} instead of the ${dim} master data`, { snapshot: dim });
+      }
+    }
+    if (isQuarterWindow(window)) {
+      addHeldout('date_filter', 'QUARTER() without YEAR(): the same quarter of every year is included', { quarterOnly: true });
+    }
+    if (dims.length > 0 || intent.series) {
+      addHeldout('cancel', 'cancel filter written as HAVING MAX(IsCanceled) = 0: drops every group with a canceled document instead of the canceled documents', { havingCancel: true });
+    }
+    if ((intent.shape === 'top' || intent.shape === 'rank') && ORDER_SWAPS[intent.metric]) {
+      addHeldout('order_limit', ORDER_SWAPS[intent.metric].note, { orderColumn: ORDER_SWAPS[intent.metric].column });
+    }
   } else if (intent.template === 'pivot') {
     add('cancel', 'canceled documents not excluded', { dropCancel: true });
     add('date_col', 'PostingDate instead of DocumentDate', { dateColumn: 'PostingDate' });
     add('date_boundary', 'first day of each window excluded', { boundary: 'start' });
+    add('date_boundary', 'the day after each window included', { boundary: 'end' });
     add('metric', 'gross instead of net', { metricColumn: 'd.GrossAmount' });
     add('shape', 'the two window columns swapped', { swapColumns: true });
   } else if (intent.template === 'ledger') {
     const documentMode = intent.dateMode === 'document';
-    if (documentMode) {
+    if (intent.manualOnly) {
+      skip('cancel', 'manual journals have no sales document, so there is no canceled document to exclude');
+      skip('date_col', 'manual journals have no sales document, so there is no document date to read instead of PostingDate');
+    } else if (documentMode) {
       add('cancel', 'postings of canceled documents not excluded', { dropCancel: true });
       add('date_col', 'AccountingPosting.PostingDate instead of SalesDocument.DocumentDate', { otherDateColumn: true });
     } else {
       skip('cancel', 'both readings (with and without postings of canceled documents) are accepted');
       add('date_col', 'SalesDocument.DocumentDate instead of AccountingPosting.PostingDate', { otherDateColumn: true });
     }
-    const boundary = intent.boundary || window.boundary;
-    add('date_boundary', boundary === 'start' ? 'first day of the window excluded' : 'day after the window included', { boundary });
+    boundaryMutants(add, intent.boundary || window.boundary);
     if (window.prior) {
       add('date_filter', 'MONTH() without YEAR()', { monthOnly: true });
     }
-    if (!intent.measures.every((name) => name === 'postings')) {
+    if (intent.manualOnly) {
+      skip('metric', 'debit and credit swapped: every manual journal is a balanced pair (double entry), so total debits equal total credits and the swap cannot change this total');
+    } else if (!intent.measures.every((name) => name === 'postings')) {
       add('metric', 'debit and credit swapped', { swapDebitCredit: true });
     }
-    if (!documentMode && !intent.accountCode) {
+    if (intent.accountCode || intent.manualOnly) {
+      const measure = intent.measures[0];
+      add('metric', measure === 'credit' ? 'credits minus debits instead of the credits' : 'debits minus credits instead of the debits', { netMovement: true });
+    }
+    if (intent.manualOnly) {
+      skip('join_type', 'an inner join to SalesDocument contradicts the manual-journal filter itself (no posting survives); dropping the filter is the control');
+    } else if (!documentMode && !intent.accountCode) {
       add('join_type', 'inner join to SalesDocument drops manual journals', { innerJoinCancel: true });
     }
     if (intent.accountCode) {
@@ -1665,17 +1872,25 @@ function mutationsFor(intent) {
     if (intent.manualOnly) {
       add('filter', 'manual-journal filter dropped (all postings)', { dropFilter: true });
     }
+    if (intent.series) {
+      add('group_by', 'the month dropped from GROUP BY: one row for the whole window under an arbitrary month label', { dropGroupKey: 'month' });
+    }
+    if (isQuarterWindow(window)) {
+      addHeldout('date_filter', 'QUARTER() without YEAR(): the same quarter of every year is included', { quarterOnly: true });
+    }
   } else {
+    const designated = intent.boundary || 'start';
+    const other = designated === 'start' ? 'end' : 'start';
     const knobs = {
       cancel: ['cancel', 'canceled documents not excluded', { dropCancel: true }],
       cancel_second: ['cancel', 'cancel filter applied to the first month only', { dropCancelSecond: true }],
+      cancel_first: ['cancel', 'cancel filter applied to the second month only', { dropCancelFirst: true }],
       cancel_inverted: ['cancel', 'non-canceled documents counted instead of canceled ones', { invertCancel: true }],
       cancel_dropped: ['cancel', 'every document counted, canceled or not', { dropCancel: true }],
+      count_docs: ['count', 'DISTINCT forgotten in the first month: COUNT(*) counts the lost customers\' February documents', { countDocs: true }],
       date_col: ['date_col', 'PostingDate instead of DocumentDate', { dateColumn: 'PostingDate' }],
-      date_boundary:
-        (intent.boundary || 'start') === 'start'
-          ? ['date_boundary', 'first day of the window excluded', { boundary: 'start' }]
-          : ['date_boundary', 'day after the window included', { boundary: 'end' }],
+      date_boundary: ['date_boundary', BOUNDARY_NOTES[designated], { boundary: designated }],
+      date_boundary_other: ['date_boundary', BOUNDARY_NOTES[other], { boundary: other }],
       active: ['filter', 'IsActive filter dropped (the inactive customer is listed)', { dropActive: true }],
       min: ['metric', 'MIN instead of MAX (first purchase)', { minDate: true }],
       group_by: ['group_by', 'grouped by CustomerName only: the two customers named Summit Grocers are merged', { groupByName: true }],
@@ -1690,15 +1905,26 @@ function mutationsFor(intent) {
       const [type, note, m] = knobs[name];
       add(type, note, m);
     }
+    const heldoutKnobs = {
+      order_gross: ['order_limit', 'ranked by the gross amount while showing net', { orderColumn: 'd.GrossAmount' }],
+    };
+    for (const name of intent.heldoutMutants || []) {
+      const [type, note, m] = heldoutKnobs[name];
+      addHeldout(type, note, m);
+    }
+    for (const [type, reason] of Object.entries(intent.notEmitted || {})) {
+      skip(type, reason);
+    }
   }
   for (const [type, reason] of Object.entries(NOT_EMITTED[intent.intentId] || {})) {
     const index = mutants.findIndex((mutant) => `${mutant.type}:${mutant.note}` === type || mutant.type === type);
-    if (index !== -1) {
-      skipped.push({ type: mutants[index].type, note: mutants[index].note, reason });
-      mutants.splice(index, 1);
+    if (index === -1) {
+      throw new Error(`${intent.intentId}: NOT_EMITTED names ${type}, which is not one of its mutants`);
     }
+    skipped.push({ type: mutants[index].type, note: mutants[index].note, reason });
+    mutants.splice(index, 1);
   }
-  return { mutants, skipped };
+  return { mutants, heldout, skipped };
 }
 
 // --- positive controls ---------------------------------------------------------------------
@@ -1843,18 +2069,21 @@ export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
       });
     }
 
-    const { mutants, skipped } = mutationsFor(intent);
+    const { mutants, heldout, skipped } = mutationsFor(intent);
     const negative = [];
     const seenSql = new Set([expectedSql, ...alternatives]);
-    mutants.forEach((mutant) => {
+    const emit = (mutant, prefix, extra) => {
       const sql = buildQuery(intent, mutant.m);
       if (seenSql.has(sql)) {
         problems.push(`${intent.intentId}: mutant "${mutant.note}" equals the gold or another control`);
         return;
       }
       seenSql.add(sql);
-      negative.push({ id: `n${negative.length + 1}`, type: mutant.type, sql, note: mutant.note });
-    });
+      const count = negative.filter((control) => control.id.startsWith(prefix)).length;
+      negative.push({ id: `${prefix}${count + 1}`, type: mutant.type, sql, note: mutant.note, ...extra });
+    };
+    mutants.forEach((mutant) => emit(mutant, 'n', {}));
+    heldout.forEach((mutant) => emit(mutant, 'h', { heldout: true }));
     controls[ids[0]] = {
       intentId: intent.intentId,
       gold_fingerprint: goldFingerprint(expectedSql),
