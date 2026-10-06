@@ -44,7 +44,9 @@ in-scope schema the prompt shows and which tables the validator allows:
   Retrieval only adds a one-line hint ("most relevant tables/columns for this
   question: ...") to the question part.
 - **retrieved**: the retrieved tables (plus their foreign-key paths) are both
-  the schema shown and the allow-list. With **widen-on-demand** (default on), a
+  the schema shown and the allow-list. With **widen-on-demand** (on by default
+  when auto falls back to retrieved; off for an explicit `SCHEMA_SCOPE=retrieved`,
+  which is exactly the behaviour before scopes existed), a
   `TABLE_SCOPE` rejection of a table that is in scope but was not retrieved
   rebuilds the prompt with that table and its join path for the retry, within
   the same retry budget (`prompt.widened` in the trace). A table outside the

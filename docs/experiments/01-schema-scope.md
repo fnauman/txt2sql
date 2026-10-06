@@ -36,13 +36,16 @@ demo schema's block is 2,258. Tables outside the in-scope schema (other
 databases, metadata schemas, tables not in `DEFAULT_INCLUDED_TABLES`) are
 rejected in every scope.
 
-`retrieved` keeps widen-on-demand as an option for large schemas
-(`SCHEMA_WIDEN_ON_DEMAND`, default on): a `TABLE_SCOPE` rejection of an
-in-scope table rebuilds the prompt with that table and its FK path for the
-retry, within the same retry budget, and tells the model the table was added
-(trace event `prompt.widened`). `SCHEMA_SCOPE=retrieved
-SCHEMA_WIDEN_ON_DEMAND=0` is the baseline's product loop: the same prompt, byte
-for byte, for all 255 suite questions, and the same prompt version.
+`retrieved` has widen-on-demand for large schemas (`SCHEMA_WIDEN_ON_DEMAND`):
+a `TABLE_SCOPE` rejection of an in-scope table rebuilds the prompt with that
+table and its FK path for the retry, within the same retry budget, and tells
+the model the table was added (trace event `prompt.widened`). It is on by
+default when `auto` falls back to `retrieved` (a schema over the budget) and
+off by default for an explicit `SCHEMA_SCOPE=retrieved`, which is therefore
+the baseline's product loop with one variable: the same prompt, byte for byte,
+for all 255 suite questions, the same prompt version and the same retries.
+`SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1` selects retrieved +
+widening explicitly.
 
 **The comparison:** a paid `--repeat 3` run with the default setting, paired
 against the committed baseline (gpt-4o-mini, 3 repetitions, retrieved scope,
@@ -166,8 +169,8 @@ the default one.
 # prompt size
 npm run measure-prompt-cache -- --suite --schema-scope all
 # rescore per scope (fixtures seeded; no LLM calls)
-SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=0 npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
 SCHEMA_SCOPE=retrieved npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
+SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1 npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
 npm run eval -- --offline --gate
 # ceiling: point OPENAI_BASE_URL at a local server that answers each case's gold SQL, then
 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval -- --skip-verify --no-baseline
@@ -196,8 +199,11 @@ paired automatically against `eval/baselines/gpt-4o-mini.json`.
 | Prompt tokens per call / cached share | 3,407 / 72% | |
 | Latency p50 / p95, retry rate | 2.41 s / 5.39 s, 11.5% | |
 
-Optional second arm (`SCHEMA_SCOPE=retrieved`, widen-on-demand on): separates
-the allow-list from the prompt layout.
+Optional second arm, retrieved + widening (not the baseline):
+`SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1` with the same command. It
+keeps the retrieved prompt and widens the allow-list only on a retry, so it
+separates part of the allow-list effect from the prompt layout.
+`SCHEMA_SCOPE=retrieved` alone would re-run the baseline's configuration.
 
 ## Decision
 

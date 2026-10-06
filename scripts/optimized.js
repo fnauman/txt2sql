@@ -27,7 +27,7 @@ const USAGE = `Usage: npm run optimized -- [question] [--refresh-schema] [--trac
 ${ENV_USAGE}
 Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).
 Schema scope: SCHEMA_SCOPE=auto|full|retrieved (default auto), SCHEMA_FULL_MAX_TOKENS (default 8000),
-SCHEMA_WIDEN_ON_DEMAND (default 1).`;
+SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).`;
 
 async function main() {
   const argv = process.argv.slice(2);

@@ -66,7 +66,13 @@ function rescoreUnder(schemaScope) {
 }
 
 test('a rescore re-judges recorded TABLE_SCOPE rejections with today\'s schema scope', async () => {
-  // The baseline's own configuration (retrieved, no widening): still rejected.
+  // The baseline's own configuration (retrieved, no widening, which is what
+  // an explicit 'retrieved' means): still rejected.
+  for (const scope of [{ schemaScope: 'retrieved', widenOnDemand: false }, 'retrieved']) {
+    const plain = await rescoreUnder(scope);
+    assert.equal(plain.status, 'validation_error');
+    assert.equal(plain.widened_tables, undefined);
+  }
   const asRecorded = await rescoreUnder({ schemaScope: 'retrieved', widenOnDemand: false });
   assert.equal(asRecorded.status, 'validation_error');
   assert.equal(asRecorded.error_code, 'TABLE_SCOPE');
@@ -83,7 +89,7 @@ test('a rescore re-judges recorded TABLE_SCOPE rejections with today\'s schema s
 
   // Retrieved with widen-on-demand: the product would have widened the
   // retry's prompt, so the recorded retry is judged against the widened one.
-  const widened = await rescoreUnder('retrieved');
+  const widened = await rescoreUnder({ schemaScope: 'retrieved', widenOnDemand: true });
   assert.equal(widened.status, 'pass');
   assert.equal(widened.rescore.replayedAttemptCount, 2);
   assert.deepEqual(widened.widened_tables, ['StoreLocation']);
@@ -94,7 +100,7 @@ test('a rescore re-judges recorded TABLE_SCOPE rejections with today\'s schema s
 
   // The last recorded attempt has no retry after it: nothing to widen for.
   const single = { ...recordedMiss, attempt_count: 1, attempts: recordedMiss.attempts.slice(0, 1) };
-  const validate = createValidatorProbe({ schema, schemaScope: 'retrieved' });
+  const validate = createValidatorProbe({ schema, schemaScope: { schemaScope: 'retrieved', widenOnDemand: true } });
   const lone = await rescoreRepetition(single, { testCase: outletCase, connections: [], goldCache: createGoldCache(), schema, validate, score: matchingScore });
   assert.equal(lone.status, 'validation_error');
   assert.equal(lone.widened_tables, undefined);

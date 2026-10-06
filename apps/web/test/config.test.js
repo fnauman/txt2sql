@@ -185,6 +185,9 @@ test('loadWebConfig reads the schema scope with the shared resolver and reports 
   const retrieved = loadWebConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_FULL_MAX_TOKENS: '3000', SCHEMA_WIDEN_ON_DEMAND: '0' });
   assert.deepEqual({ ...retrieved.schemaScope }, { schemaScope: 'retrieved', fullSchemaMaxTokens: 3000, widenOnDemand: false });
   assert.ok(Object.isFrozen(retrieved.schemaScope));
+  // An explicit retrieved scope does not widen unless asked for (the old behaviour).
+  assert.equal(loadWebConfig({ SCHEMA_SCOPE: 'retrieved' }).schemaScope.widenOnDemand, false);
+  assert.equal(loadWebConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_WIDEN_ON_DEMAND: 'on' }).schemaScope.widenOnDemand, true);
   assert.match(describeWebConfig(retrieved), /schemaScope=retrieved\(fullMaxTokens=3000,widen=off\)/);
   assert.match(describeWebConfig(loadWebConfig({ SCHEMA_SCOPE: 'full' })), / schemaScope=full$/);
 

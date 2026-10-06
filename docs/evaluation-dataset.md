@@ -985,8 +985,9 @@ rejection of an in-scope table is accepted and the SQL runs; under the
 retrieved scope with widen-on-demand the attempt after such a rejection is
 judged against the widened prompt (`widened_tables`, `rescore.widenedTables`),
 as the product loop would have widened it. The console and report.md say when
-the recording ran another scope. `SCHEMA_SCOPE=retrieved
-SCHEMA_WIDEN_ON_DEMAND=0` re-judges a pre-scope report exactly as it ran.
+the recording ran another scope or another widen-on-demand setting.
+`SCHEMA_SCOPE=retrieved` (widen-on-demand is off by default for an explicit
+retrieved scope) re-judges a pre-scope report exactly as it ran.
 
 `--offline` runs the preflight, fixtures and verification, then rescores
 `eval/baselines/<model>.json` when it exists, or says there is none and exits 0
@@ -1074,9 +1075,9 @@ purpose.
 api.openai.com, prompt version `0c314451d4b7`, fixtures seed `094282546fe5` /
 v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default suite (255 unique
 cases), compact file 1.33 MB. It predates `SCHEMA_SCOPE`: it ran the retrieved
-scope without widen-on-demand (`SCHEMA_SCOPE=retrieved
-SCHEMA_WIDEN_ON_DEMAND=0` reproduces its prompt version and, rescored, its
-numbers exactly).
+scope without widen-on-demand (`SCHEMA_SCOPE=retrieved`, whose widen-on-demand
+is off by default, reproduces its prompt version and, rescored, its numbers
+exactly).
 
 | Measure | Result |
 |---|---|

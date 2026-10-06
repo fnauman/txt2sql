@@ -3,11 +3,11 @@
 //
 // - 'retrieved': the prompt shows the tables retrieval picked (plus join-path
 //   connectors) and the validator allows exactly those. A retrieval miss is a
-//   TABLE_SCOPE rejection. With widen-on-demand (the default) a TABLE_SCOPE
-//   rejection of an in-scope table rebuilds the prompt with that table for the
-//   retry; SCHEMA_WIDEN_ON_DEMAND=0 turns it off, which reproduces the product
+//   TABLE_SCOPE rejection. An explicit SCHEMA_SCOPE=retrieved is the product
 //   loop as it was before schema scopes existed (and so the committed
-//   baseline).
+//   baseline): widen-on-demand is off unless SCHEMA_WIDEN_ON_DEMAND=1. With
+//   widen-on-demand a TABLE_SCOPE rejection of an in-scope table rebuilds the
+//   prompt with that table for the retry.
 // - 'full': the prompt shows every in-scope table in one stable schema block
 //   (the same for every question, so it caches as one prefix), retrieval output
 //   is only a one-line relevance hint, and the validator allows every in-scope
@@ -15,7 +15,8 @@
 // - 'auto' (default): 'full' when the full schema block fits
 //   SCHEMA_FULL_MAX_TOKENS estimated tokens (default 8000; about 4 characters
 //   per token), else 'retrieved'. A small schema (the demo's 13 tables) gets
-//   'full'; a large ERP schema keeps retrieval with widen-on-demand.
+//   'full'; a large ERP schema falls back to retrieval with widen-on-demand
+//   (on by default when 'auto' resolves to 'retrieved').
 //
 // Tables outside the in-scope schema (other databases, metadata schemas,
 // tables not in DEFAULT_INCLUDED_TABLES) are rejected in every mode.
@@ -28,10 +29,21 @@ export const DEFAULT_SCHEMA_SCOPE = 'auto';
 export const DEFAULT_SCHEMA_FULL_MAX_TOKENS = 8000;
 const MAX_SCHEMA_FULL_MAX_TOKENS = 1_000_000;
 
+/**
+ * Widen-on-demand when SCHEMA_WIDEN_ON_DEMAND is unset: on for 'auto' (the
+ * large-schema fallback to 'retrieved' should recover from retrieval misses),
+ * off for an explicit 'retrieved' (today's behaviour exactly, so the committed
+ * baseline reproduces with one variable). 'full' never widens; the value only
+ * matters if the scope resolves to 'retrieved'.
+ */
+export function defaultWidenOnDemand(schemaScope) {
+  return schemaScope !== 'retrieved';
+}
+
 export const DEFAULT_SCHEMA_SCOPE_CONFIG = Object.freeze({
   schemaScope: DEFAULT_SCHEMA_SCOPE,
   fullSchemaMaxTokens: DEFAULT_SCHEMA_FULL_MAX_TOKENS,
-  widenOnDemand: true,
+  widenOnDemand: defaultWidenOnDemand(DEFAULT_SCHEMA_SCOPE),
 });
 
 function configError(message) {
@@ -82,12 +94,15 @@ function parseBoolean(raw, name) {
  * on a bad value, so a typo never silently runs another configuration.
  */
 export function resolveSchemaScopeConfig(env = process.env) {
+  const schemaScope = isBlank(env.SCHEMA_SCOPE) ? DEFAULT_SCHEMA_SCOPE : parseScope(env.SCHEMA_SCOPE, 'SCHEMA_SCOPE');
   return Object.freeze({
-    schemaScope: isBlank(env.SCHEMA_SCOPE) ? DEFAULT_SCHEMA_SCOPE : parseScope(env.SCHEMA_SCOPE, 'SCHEMA_SCOPE'),
+    schemaScope,
     fullSchemaMaxTokens: isBlank(env.SCHEMA_FULL_MAX_TOKENS)
       ? DEFAULT_SCHEMA_FULL_MAX_TOKENS
       : parseMaxTokens(env.SCHEMA_FULL_MAX_TOKENS, 'SCHEMA_FULL_MAX_TOKENS'),
-    widenOnDemand: isBlank(env.SCHEMA_WIDEN_ON_DEMAND) ? true : parseBoolean(env.SCHEMA_WIDEN_ON_DEMAND, 'SCHEMA_WIDEN_ON_DEMAND'),
+    widenOnDemand: isBlank(env.SCHEMA_WIDEN_ON_DEMAND)
+      ? defaultWidenOnDemand(schemaScope)
+      : parseBoolean(env.SCHEMA_WIDEN_ON_DEMAND, 'SCHEMA_WIDEN_ON_DEMAND'),
   });
 }
 
@@ -101,16 +116,18 @@ export function normalizeSchemaScopeConfig(option) {
     return DEFAULT_SCHEMA_SCOPE_CONFIG;
   }
   if (typeof option === 'string') {
-    return Object.freeze({ ...DEFAULT_SCHEMA_SCOPE_CONFIG, schemaScope: parseScope(option, 'schemaScope') });
+    const schemaScope = parseScope(option, 'schemaScope');
+    return Object.freeze({ ...DEFAULT_SCHEMA_SCOPE_CONFIG, schemaScope, widenOnDemand: defaultWidenOnDemand(schemaScope) });
   }
   if (typeof option !== 'object') {
     throw configError(`schemaScope must be a scope name or a config object; got ${typeof option}.`);
   }
+  const schemaScope = option.schemaScope === undefined ? DEFAULT_SCHEMA_SCOPE : parseScope(option.schemaScope, 'schemaScope');
   return Object.freeze({
-    schemaScope: option.schemaScope === undefined ? DEFAULT_SCHEMA_SCOPE : parseScope(option.schemaScope, 'schemaScope'),
+    schemaScope,
     fullSchemaMaxTokens:
       option.fullSchemaMaxTokens === undefined ? DEFAULT_SCHEMA_FULL_MAX_TOKENS : parseMaxTokens(option.fullSchemaMaxTokens, 'fullSchemaMaxTokens'),
-    widenOnDemand: option.widenOnDemand === undefined ? true : parseBoolean(option.widenOnDemand, 'widenOnDemand'),
+    widenOnDemand: option.widenOnDemand === undefined ? defaultWidenOnDemand(schemaScope) : parseBoolean(option.widenOnDemand, 'widenOnDemand'),
   });
 }
 

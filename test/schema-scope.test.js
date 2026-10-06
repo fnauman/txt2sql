@@ -63,6 +63,10 @@ function cacheablePrefix(prompt) {
 
 test('resolveSchemaScopeConfig: auto, 8000 tokens and widen-on-demand by default; every value validated', () => {
   assert.deepEqual({ ...resolveSchemaScopeConfig({}) }, { schemaScope: 'auto', fullSchemaMaxTokens: 8000, widenOnDemand: true });
+  // An explicit 'retrieved' is today's behaviour exactly: no widening unless asked for.
+  assert.deepEqual({ ...resolveSchemaScopeConfig({ SCHEMA_SCOPE: 'retrieved' }) }, { schemaScope: 'retrieved', fullSchemaMaxTokens: 8000, widenOnDemand: false });
+  assert.equal(resolveSchemaScopeConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_WIDEN_ON_DEMAND: '1' }).widenOnDemand, true);
+  assert.equal(resolveSchemaScopeConfig({ SCHEMA_SCOPE: 'auto', SCHEMA_WIDEN_ON_DEMAND: '0' }).widenOnDemand, false);
   assert.deepEqual(
     { ...resolveSchemaScopeConfig({ SCHEMA_SCOPE: ' Retrieved ', SCHEMA_FULL_MAX_TOKENS: '1200', SCHEMA_WIDEN_ON_DEMAND: 'off' }) },
     { schemaScope: 'retrieved', fullSchemaMaxTokens: 1200, widenOnDemand: false }
@@ -79,6 +83,10 @@ test('resolveSchemaScopeConfig: auto, 8000 tokens and widen-on-demand by default
   }
   assert.deepEqual({ ...normalizeSchemaScopeConfig('full') }, { schemaScope: 'full', fullSchemaMaxTokens: DEFAULT_SCHEMA_FULL_MAX_TOKENS, widenOnDemand: true });
   assert.deepEqual({ ...normalizeSchemaScopeConfig({ widenOnDemand: false }) }, { schemaScope: 'auto', fullSchemaMaxTokens: 8000, widenOnDemand: false });
+  assert.equal(normalizeSchemaScopeConfig('retrieved').widenOnDemand, false);
+  assert.equal(normalizeSchemaScopeConfig({ schemaScope: 'retrieved' }).widenOnDemand, false);
+  assert.equal(normalizeSchemaScopeConfig({ schemaScope: 'retrieved', widenOnDemand: true }).widenOnDemand, true);
+  assert.equal(normalizeSchemaScopeConfig({}).widenOnDemand, true);
   assert.throws(() => normalizeSchemaScopeConfig('narrow'), { code: 'INVALID_CONFIG' });
 });
 
@@ -245,6 +253,10 @@ function fakeConnection() {
   };
 }
 
+// Retrieved scope with widen-on-demand switched on (SCHEMA_SCOPE=retrieved
+// SCHEMA_WIDEN_ON_DEMAND=1).
+const RETRIEVED_WIDENING = Object.freeze({ schemaScope: 'retrieved', widenOnDemand: true });
+
 async function runOutlet({ sqls, schemaScope, maxRetries = 1, onSchema = schema }) {
   const client = scriptedClient(sqls);
   const connection = fakeConnection();
@@ -254,7 +266,7 @@ async function runOutlet({ sqls, schemaScope, maxRetries = 1, onSchema = schema 
 }
 
 test('widen-on-demand: a TABLE_SCOPE rejection of an in-scope table retries with that table in the prompt, within the retry budget', async () => {
-  const { result, client, connection, trace } = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: 'retrieved' });
+  const { result, client, connection, trace } = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: RETRIEVED_WIDENING });
 
   assert.equal(result.success, true, result.error?.message);
   assert.equal(result.attemptCount, 2);
@@ -280,26 +292,42 @@ test('widen-on-demand: a TABLE_SCOPE rejection of an in-scope table retries with
 
 test('widen-on-demand never widens past the retry budget, a table outside the schema, or when it is off', async () => {
   // No retry left: fails as before, nothing widened.
-  const noBudget = await runOutlet({ sqls: [OUTLET_GOLD], schemaScope: 'retrieved', maxRetries: 0 });
+  const noBudget = await runOutlet({ sqls: [OUTLET_GOLD], schemaScope: RETRIEVED_WIDENING, maxRetries: 0 });
   assert.equal(noBudget.result.errorStage, 'validation');
   assert.equal(noBudget.result.errorCode, 'TABLE_SCOPE');
   assert.ok(!noBudget.trace.events.some((event) => event.event === 'prompt.widened'));
 
   // A table outside the in-scope schema stays rejected exactly as today.
   const narrow = { ...schema, tables: schema.tables.filter((table) => table.tableName !== 'StoreLocation') };
-  const outside = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: 'retrieved', onSchema: narrow });
+  const outside = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: RETRIEVED_WIDENING, onSchema: narrow });
   assert.equal(outside.result.errorStage, 'validation');
   assert.equal(outside.result.errorCode, 'TABLE_SCOPE');
   assert.ok(!outside.trace.events.some((event) => event.event === 'prompt.widened'));
   assert.equal(outside.client.requests[0].messages[1].content, outside.client.requests[1].messages[1].content, 'the retry keeps the same prompt');
   assert.match(outside.client.requests[1].messages.at(-1).content, /was rejected by SQL validation \(guardrails\) with this error:\nSQL references table "StoreLocation" which is outside the allowed table set\./);
 
-  // SCHEMA_WIDEN_ON_DEMAND=0: the product loop as it was before schema scopes.
-  const off = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: { schemaScope: 'retrieved', widenOnDemand: false } });
-  assert.equal(off.result.errorCode, 'TABLE_SCOPE');
-  assert.equal(off.result.attemptCount, 2);
-  assert.ok(!off.trace.events.some((event) => event.event === 'prompt.widened'));
-  assert.equal(off.client.requests[0].messages[1].content, off.client.requests[1].messages[1].content);
+  // Widening off (SCHEMA_WIDEN_ON_DEMAND=0, and the default of an explicit
+  // SCHEMA_SCOPE=retrieved): the product loop as it was before schema scopes.
+  for (const scope of [{ schemaScope: 'retrieved', widenOnDemand: false }, 'retrieved', { schemaScope: 'retrieved' }]) {
+    const off = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: scope });
+    assert.equal(off.result.errorCode, 'TABLE_SCOPE');
+    assert.equal(off.result.attemptCount, 2);
+    assert.equal(off.result.schemaScope.widenOnDemand, false);
+    assert.ok(!off.trace.events.some((event) => event.event === 'prompt.widened'));
+    assert.equal(off.client.requests[0].messages[1].content, off.client.requests[1].messages[1].content);
+    assert.match(off.client.requests[1].messages.at(-1).content, /outside the allowed table set/);
+  }
+});
+
+test('auto falling back to retrieved (schema over the budget) widens on demand by default', async () => {
+  const estimate = estimateFullSchemaTokens(schema);
+  const { result, trace } = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: { schemaScope: 'auto', fullSchemaMaxTokens: estimate - 1 } });
+  assert.equal(result.success, true, result.error?.message);
+  assert.equal(result.schemaScope.requested, 'auto');
+  assert.equal(result.schemaScope.effective, 'retrieved');
+  assert.equal(result.schemaScope.widenOnDemand, true);
+  assert.deepEqual(result.schemaScope.widenedTables, ['StoreLocation']);
+  assert.ok(trace.events.some((event) => event.event === 'prompt.widened'));
 });
 
 test('full scope in the product loop: the same SQL is accepted at once, and the result says which scope applied', async () => {
@@ -317,7 +345,8 @@ test('full scope in the product loop: the same SQL is accepted at once, and the 
     process.env.SCHEMA_SCOPE = 'retrieved';
     const fromEnv = await runOutlet({ sqls: [OUTLET_GOLD, OUTLET_GOLD], schemaScope: undefined });
     assert.equal(fromEnv.result.schemaScope.effective, 'retrieved');
-    assert.deepEqual(fromEnv.result.schemaScope.widenedTables, ['StoreLocation']);
+    assert.equal(fromEnv.result.schemaScope.widenOnDemand, false, 'an explicit retrieved scope does not widen by default');
+    assert.equal(fromEnv.result.errorCode, 'TABLE_SCOPE');
   } finally {
     if (saved === undefined) {
       delete process.env.SCHEMA_SCOPE;
