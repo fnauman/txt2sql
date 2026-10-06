@@ -394,14 +394,31 @@ count. The report contains:
   provenance (git sha, prompt, semantic-layer, fixture and dataset hashes);
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
+**Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
+whole suite, 3 repetitions, measured on 2026-10-06):
+
+| Measure | Result |
+|---|---|
+| Strict accuracy (245 answer cases, 130 intents) | **68.8%** (95% CI 63.1%–74.6%) |
+| By split | dev 72.6% (168 cases) · holdout 60.6% (77 cases) |
+| Failures by cause (repetitions) | model 137 · system 92 (all retrieval misses; 0 guardrail false rejections) · infrastructure 0 |
+| Guardrails over every attempt | precision 100%, recall 26.4%, false-rejection rate 0% |
+| Abstain / clarify cases handled | 0 of 10 (the product always answers; not in accuracy) |
+| Cost and latency | $0.37 total · $0.00073 per correct answer · p50 2.4 s, p95 5.4 s |
+
+The 12-point dev/holdout gap is the cost of new vocabulary; the system failures
+are retrieval misses that the validator then enforces as table-scope rejections
+(34 cases are flagged as known gaps, capping accuracy at 86.5% even with
+perfect SQL). These are measurements of today's product, not targets.
+
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
 `--gate` makes a significantly worse run exit 1. Harness, database and
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
-`--case-id`, `--split`. One repetition of the whole suite costs roughly 13
-cents on gpt-4o-mini. The dataset composition, the generator, how to add a
+`--case-id`, `--split`. One repetition of the whole suite costs about 12
+cents on gpt-4o-mini (the committed baseline: $0.37 for 3 repetitions). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 

@@ -1002,8 +1002,38 @@ retries, measured 1,374,116 bytes; a real model's longer SQL can add some. A fil
 partial run (filters, fewer fixtures, or a case set that differs from the
 default suite) is refused before it starts; `--baseline-file <path>` saves
 such a subset somewhere else, never inside `eval/baselines/` (every file there
-is a model's default baseline). No baseline is committed yet; it has to be
-re-made whenever the datasets change.
+is a model's default baseline). The committed baseline is
+`eval/baselines/gpt-4o-mini.json` (see [Current baseline](#current-baseline));
+it has to be re-made whenever the datasets, the prompt or the model change on
+purpose.
+
+### Current baseline
+
+`eval/baselines/gpt-4o-mini.json`, written by
+`npm run eval -- --repeat 3 --write-baseline` on 2026-10-06: gpt-4o-mini at
+api.openai.com, prompt version `0c314451d4b7`, fixtures seed `094282546fe5` /
+v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default suite (255 unique
+cases), compact file 1.33 MB.
+
+| Measure | Result |
+|---|---|
+| Strict accuracy (245 answer cases / 130 intents) | 68.8% (95% CI 63.1%–74.6%, case bootstrap) |
+| Majority-pass cases | 169/245 (Wilson 95% 62.9%–74.4%) |
+| Intent-clustered accuracy | 66.1% |
+| By split | dev 72.6% (168 cases) · holdout 60.6% (77 cases) |
+| Attribution (repetitions) | pass 506 · model 137 · system 92 (retrieval misses 92, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion (823 attempts) | 72 wrong SQL caught, 0 correct SQL rejected, 201 wrong SQL accepted; precision 100%, recall 26.4% |
+| Behaviour cases | 0 of 10 handled (5 abstain, 5 clarify) |
+| Cost | $0.3709 total · $0.00049 per question · $0.00073 per correct answer |
+| Latency | p50 2.41 s · p95 5.39 s (product loop) · retry rate 11.5% |
+
+How to read it: the known-validator-rejection flags cap strict accuracy at
+86.5% (dev 89.3%, holdout 80.5%) even with perfect SQL, and the 92 system
+failures are exactly those retrieval-scope rejections. The holdout gap
+(60.6% vs 72.6%) measures how much of today's accuracy depends on vocabulary
+the semantic layer and prompt rules were tuned on. Guardrails no longer reject
+correct SQL, but they catch only about a quarter of wrong SQL; most wrong
+answers are semantically wrong SQL that is still valid.
 
 ### CI
 
@@ -1022,10 +1052,10 @@ re-made whenever the datasets change.
 
 ### Cost
 
-LLM cost is small: the audit's paid baseline on gpt-4o-mini cost about
-$0.0005 per question (one case repetition, up to two LLM calls), so one
-repetition of the 255-case suite is about 13 cents and `--repeat 3` about 40
-cents. `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
+LLM cost is small: the committed gpt-4o-mini baseline cost $0.00049 per
+question (one case repetition, up to two LLM calls), so one repetition of the
+255-case suite is about 12 cents and `--repeat 3` about 37 cents (measured:
+$0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
 
 ## Known limits
 
