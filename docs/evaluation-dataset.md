@@ -1161,7 +1161,8 @@ npm run eval -- --help                              # every flag
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
-comparison spec and expected behaviour): today 255 cases over 140 intents.
+comparison spec and expected behaviour): today 404 cases over 217 intents
+(255 dev, 149 holdout).
 Only the kept definition runs, so a duplicate is dropped only when dataset
 order cannot matter; anything else is a dataset conflict (exit 2). A case id
 that appears in two datasets must be the same case in every field that is run,
@@ -1403,7 +1404,7 @@ the first repetition's copy at the case's top level. A rescore of the compact
 baseline gives the same outcomes and statistics as a rescore of the full
 report; for 255 cases at `--repeat 3` it is about 1.4 MB (10^6 bytes, as
 the "Baseline written" line prints it) instead of about 6-9 MB, one line per
-case. A fake-provider run whose wrong answers were long plausible SQL, with
+case (the committed 404-case baseline is about 2.1 MB). A fake-provider run whose wrong answers were long plausible SQL, with
 retries, measured 1,374,116 bytes; a real model's longer SQL can add some. A filtered or
 partial run (filters, fewer fixtures, or a case set that differs from the
 default suite) is refused before it starts; `--baseline-file <path>` saves
