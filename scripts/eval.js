@@ -26,7 +26,8 @@
 // `npm run benchmark` / `npm run evaluate` run this with --profile benchmark:
 // one dataset (default core-public), no Docker start, no seeding (stale
 // fixtures only warn), no verification, and the old exit rule (1 when any case
-// fails in a single-repetition run). Run with --help for every flag.
+// fails in a single-repetition run; an abstain / clarify case fails when the
+// model answers it). Run with --help for every flag.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -116,7 +117,8 @@ Profiles:
   --profile benchmark         what npm run benchmark / evaluate use: one dataset
                               (default core-public), no Docker, no seeding, no
                               verification, exit 1 when any case fails in a
-                              single-repetition run
+                              single-repetition run (an abstain / clarify case
+                              fails when the model answers it)
 Exit codes: 0 ok; 1 gate failed (--gate) or, in the benchmark profile, a failed
 case; 2 harness, dataset or infrastructure failure.
 ${ENV_USAGE}`;
@@ -520,7 +522,8 @@ export function gateSuiteCoverageFailure(coverage, { minFraction = MIN_GATE_PAIR
  * Exit code of a finished run: { code, reasons }. 2 for harness, dataset or
  * infrastructure failures, and for a --gate whose baseline pairs too few cases
  * (gatePairingFailure); 1 for a failed --gate (or, in the benchmark profile,
- * any failed case in a single-repetition run); else 0.
+ * any failed case in a single-repetition run: an answer case that did not
+ * pass, or an abstain / clarify case the model answered); else 0.
  */
 export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false } = {}) {
   // A rescore keeps outcomes it could not re-check (a recorded outage or a
@@ -585,9 +588,15 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     }
   }
   if (failOnAnyFailure && report.stats.repeat <= 1) {
-    const failed = (report.results || []).filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
-    if (failed > 0) {
-      failures.push(`${failed} case(s) failed (benchmark profile, single run)`);
+    // An answer case fails when a counted repetition did not pass; an abstain
+    // / clarify case (never counted in accuracy) when a repetition scored for
+    // its behaviour answered instead of declining.
+    const records = report.results || [];
+    const answerFailed = records.filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
+    const behaviorFailed = records.filter((record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted).length;
+    if (answerFailed + behaviorFailed > 0) {
+      const behavior = behaviorFailed > 0 ? `; ${behaviorFailed} abstain/clarify case(s) answered instead of declining` : '';
+      failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior})`);
     }
   }
   return failures.length > 0 ? { code: 1, reasons: failures } : { code: 0, reasons: [] };
