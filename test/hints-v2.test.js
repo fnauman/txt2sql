@@ -510,6 +510,27 @@ test('v2 layer: another amount demotes a metric only when it modifies the metric
   assert.equal(rejects('Show revenue and gross amount in March 2026.', `SELECT SUM(d.NetAmount) AS revenue, SUM(d.GrossAmount) AS gross ${march}`), null);
   assert.equal(rejects('Show average order value and gross amount in March 2026.', `SELECT AVG(d.BillTotalAmount) AS aov, SUM(d.GrossAmount) AS gross ${march}`), 'METRIC_COLUMN');
   assert.equal(rejects('Show average order value and gross amount in March 2026.', `SELECT AVG(COALESCE(d.NetAmount,0)) AS aov, SUM(d.GrossAmount) AS gross ${march}`), null);
+  // Re-review: the other amount modifying a generic word of the metric
+  // ("gross sales", "order value including tax") or a second mention ("gross
+  // revenue" next to "revenue") does not demote the unmodified explicit
+  // phrase.
+  for (const [question, name, sql] of [
+    ['Show revenue and gross sales in March 2026.', 'net_sales', 'SUM(d.BillTotalAmount) AS revenue'],
+    ['Show gross sales and revenue in March 2026.', 'net_sales', 'SUM(d.BillTotalAmount) AS revenue'],
+    ['Compare revenue with gross sales for March 2026.', 'net_sales', 'SUM(d.BillTotalAmount) AS revenue'],
+    ['Show revenue and gross revenue in March 2026.', 'net_sales', 'SUM(d.BillTotalAmount) AS revenue'],
+    ['Show revenue and sales including tax for March 2026.', 'net_sales', 'SUM(d.BillTotalAmount) AS revenue'],
+    ['Show average order value and gross order value in March 2026.', 'average_order_value', 'AVG(d.BillTotalAmount) AS aov'],
+    ['Show gross order value and average order value in March 2026.', 'average_order_value', 'AVG(d.BillTotalAmount) AS aov'],
+    ['Show average order value and order value including tax in March 2026.', 'average_order_value', 'AVG(d.BillTotalAmount) AS aov'],
+    ['Show the average order value and the average gross order value in March 2026.', 'average_order_value', 'AVG(d.BillTotalAmount) AS aov'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(rejects(question, `SELECT ${sql}, SUM(d.GrossAmount) AS gross ${march}`), 'METRIC_COLUMN', question);
+  }
+  // Every explicit phrase modified still demotes.
+  assert.equal(metricOf(v2Plan('Show gross revenue and gross sales in March 2026.'), 'net_sales').enforcementReason, 'other_amount_named');
 
   // Wording that modifies the metric phrase: before it, after it in
   // parentheses or with glue words, or a tax phrase after it.

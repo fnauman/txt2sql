@@ -688,6 +688,19 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
   });
 }
 
+// Whether every explicit metric phrase in the question is modified by one of
+// `otherSpans`. A span inside a longer explicit span ("revenue" inside "total
+// revenue") is part of that phrase, so only the longest spans are read.
+function everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) {
+  const phrases = explicitSpans.filter(
+    (span) =>
+      !explicitSpans.some(
+        (other) => other !== span && other.start <= span.start && span.end <= other.end && other.end - other.start > span.end - span.start
+      )
+  );
+  return phrases.length > 0 && phrases.every((phrase) => otherAmountModifiesMetric(otherSpans, [phrase], questionWords));
+}
+
 /**
  * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
  * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning). Both
@@ -715,12 +728,16 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
   // tax"), so the metric's column is not what it measures. Only wording that
   // modifies the metric phrase counts (otherAmountModifiesMetric); another
   // measure asked for alongside it ("revenue and gross amount") leaves the
-  // metric enforced. An explicit "net" phrase ("net sales") still enforces.
+  // metric enforced. Only the explicit phrases count, and every one of them
+  // must be modified: a modified generic word ("revenue and gross sales") or
+  // a second, modified mention ("revenue and gross revenue") leaves an
+  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales")
+  // still enforces.
   const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
   if (
     otherAmounts.length > 0 &&
     questionWords &&
-    otherAmountModifiesMetric(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(matchedSynonyms, questionWords), questionWords) &&
+    everyExplicitSpanModified(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(explicitMatches, questionWords), questionWords) &&
     !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
