@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { selectSuite } from '../src/eval/suite.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
-import { loadCases, measureScope } from '../scripts/measure-prompt-cache.js';
+import { loadCases, measureScope, measurementScopes } from '../scripts/measure-prompt-cache.js';
 
 // Prompt size per schema scope over the whole eval suite, offline (the numbers
 // in docs/experiments/01-schema-scope.md come from npm run
@@ -50,4 +50,25 @@ test('--suite honours --case-id and --tag and records them in the report', async
   assert.deepEqual(byTag.dataset.filters, { caseIds: [], tags: ['swedish'] });
 
   await assert.rejects(loadCases(['--suite', '--datasets-dir', datasetsDir, '--tag', 'no_such_tag']), /No cases matched/);
+});
+
+test('--schema-scope retrieved does not inherit widen-on-demand from the default auto configuration', () => {
+  // Unset SCHEMA_WIDEN_ON_DEMAND: each scope gets its own default.
+  assert.deepEqual(measurementScopes('retrieved', {}).map((config) => ({ ...config })), [
+    { schemaScope: 'retrieved', fullSchemaMaxTokens: 8000, widenOnDemand: false },
+  ]);
+  assert.deepEqual(
+    measurementScopes('all', {}).map((config) => [config.schemaScope, config.widenOnDemand]),
+    [['retrieved', false], ['full', true], ['auto', true]]
+  );
+  assert.equal(measurementScopes(undefined, {}).length, 1);
+  assert.equal(measurementScopes(undefined, {})[0].schemaScope, 'auto');
+  assert.equal(measurementScopes(undefined, { SCHEMA_SCOPE: 'retrieved' })[0].widenOnDemand, false);
+  // The command line overrides SCHEMA_SCOPE; an explicit widen setting and the budget still apply.
+  assert.equal(measurementScopes('retrieved', { SCHEMA_SCOPE: 'auto' })[0].widenOnDemand, false);
+  assert.equal(measurementScopes('retrieved', { SCHEMA_WIDEN_ON_DEMAND: '1' })[0].widenOnDemand, true);
+  assert.equal(measurementScopes('auto', { SCHEMA_WIDEN_ON_DEMAND: '0' })[0].widenOnDemand, false);
+  assert.equal(measurementScopes('full', { SCHEMA_FULL_MAX_TOKENS: '1200' })[0].fullSchemaMaxTokens, 1200);
+  assert.equal(measureScope(schema, cases.slice(0, 1), measurementScopes('retrieved', {})[0]).schema_scope.widenOnDemand, false);
+  assert.throws(() => measurementScopes('everything', {}), /--schema-scope must be one of retrieved, full, auto or all/);
 });

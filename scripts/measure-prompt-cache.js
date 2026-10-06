@@ -179,6 +179,24 @@ function describeSelectionFilters(filters) {
   return [filters.caseId != null ? `case-id=${filters.caseId}` : null, filters.tag ? `tag=${filters.tag}` : null].filter(Boolean).join(', ');
 }
 
+/**
+ * The schema-scope configs to measure for --schema-scope (a scope name, `all`
+ * or unset for the configured SCHEMA_SCOPE). A scope chosen on the command
+ * line is resolved as if SCHEMA_SCOPE were set to it, so widen-on-demand gets
+ * that scope's default (off for an explicit retrieved) unless
+ * SCHEMA_WIDEN_ON_DEMAND is set; SCHEMA_FULL_MAX_TOKENS still applies.
+ */
+export function measurementScopes(scopeOption, env = process.env) {
+  if (scopeOption && scopeOption !== 'all' && !SCHEMA_SCOPES.includes(scopeOption)) {
+    throw new Error(`--schema-scope must be one of ${SCHEMA_SCOPES.join(', ')} or all; got "${scopeOption}".`);
+  }
+  const withScope = (schemaScope) => resolveSchemaScopeConfig({ ...env, SCHEMA_SCOPE: schemaScope });
+  if (scopeOption === 'all') {
+    return SCHEMA_SCOPES.map(withScope);
+  }
+  return [scopeOption ? withScope(scopeOption) : resolveSchemaScopeConfig(env)];
+}
+
 function printSummary(result) {
   const { summary } = result;
   console.log(`\nSchema scope: ${describeSchemaScope(result.schema_scope)}`);
@@ -195,15 +213,7 @@ async function main() {
   await loadEnvironment(argv);
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
-  const scopeOption = getOptionValue(argv, '--schema-scope');
-  if (scopeOption && scopeOption !== 'all' && !SCHEMA_SCOPES.includes(scopeOption)) {
-    throw new Error(`--schema-scope must be one of ${SCHEMA_SCOPES.join(', ')} or all; got "${scopeOption}".`);
-  }
-  const configured = resolveSchemaScopeConfig();
-  const scopes =
-    scopeOption === 'all'
-      ? SCHEMA_SCOPES.map((schemaScope) => ({ ...configured, schemaScope }))
-      : [scopeOption ? { ...configured, schemaScope: scopeOption } : configured];
+  const scopes = measurementScopes(getOptionValue(argv, '--schema-scope'));
 
   const schema = await loadNarrowSchema({
     modelsDir: MODELS_DIR,
