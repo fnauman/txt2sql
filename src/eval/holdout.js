@@ -2,8 +2,13 @@
 //
 // Freeze: datasets/holdout-manifest.json lists every holdout case of every
 // dataset (split 'holdout') with the fingerprints of what it asks and how it
-// is scored: the question, the gold SQL (controls.goldFingerprint) and the
-// scoring fingerprint (gold + alternatives + comparison spec, suite.js). A
+// is scored and reported: the question, the gold SQL
+// (controls.goldFingerprint), the scoring fingerprint (gold + alternatives +
+// comparison spec, suite.js; what a comparison pairs cases on) and the
+// measurement fingerprint (the case-definition fields that move a failure
+// between attribution buckets or report breakdowns: split, expected
+// behaviour, known_validator_rejection, expected tables, failure class,
+// difficulty and tags), with its intent and datasets. A
 // hygiene test (test/holdout-manifest.test.js) fails when a holdout case is
 // added, removed or changed without the manifest being rewritten, and the
 // manifest must carry a dated note for its current state (`history`), so a
@@ -24,6 +29,7 @@ import path from 'node:path';
 
 import { DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE } from '../benchmark.js';
 import { goldFingerprint, normalizeSqlText } from './controls.js';
+import { sha256Hex, stableStringify } from './provenance.js';
 import { caseSplit, scoringFingerprint } from './suite.js';
 
 export const MANIFEST_VERSION = 1;
@@ -41,6 +47,30 @@ export function isHoldoutCase(testCase) {
   return caseSplit(testCase) === 'holdout';
 }
 
+const sortedStrings = (values) => [...new Set((values || []).map(String))].sort();
+
+/**
+ * Fingerprint of the case-definition fields that change how a holdout case is
+ * measured without changing how it is scored (the scoring fingerprint, which
+ * a comparison pairs cases on, stays as it is): a known_validator_rejection
+ * flag or expected tables move its failures between the model and system
+ * buckets, the split and expected behaviour decide whether and how it counts,
+ * and failure class, difficulty and tags drive the report's breakdowns.
+ */
+export function measurementFingerprint(testCase) {
+  return sha256Hex(
+    stableStringify({
+      split: caseSplit(testCase),
+      expected_behavior: testCase.expected_behavior || 'answer',
+      known_validator_rejection: testCase.known_validator_rejection || null,
+      expected_tables: sortedStrings(testCase.expected_tables),
+      failure_class: testCase.failure_class || null,
+      difficulty: testCase.difficulty || null,
+      tags: sortedStrings(testCase.tags),
+    })
+  ).slice(0, 16);
+}
+
 /** The manifest entry of one holdout case. */
 export function holdoutManifestEntry(testCase, datasetNames = []) {
   return {
@@ -50,6 +80,7 @@ export function holdoutManifestEntry(testCase, datasetNames = []) {
     question_fingerprint: sha16(normalizeSqlText(testCase.question)),
     gold_fingerprint: goldFingerprint(testCase.expected_sql),
     scoring_fingerprint: scoringFingerprint(testCase),
+    measurement_fingerprint: measurementFingerprint(testCase),
   };
 }
 
@@ -76,7 +107,7 @@ export function computeHoldoutEntries(datasets) {
 // all of them, so any change the check reports changes the fingerprint too
 // and needs a note (a field compared but not hashed could be rewritten
 // silently by --write, and could never get its note).
-const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'intentId', 'datasets'];
+const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'measurement_fingerprint', 'intentId', 'datasets'];
 
 /** Fingerprint of a set of entries (what the history notes are written for): every compared field. */
 export function holdoutEntriesFingerprint(entries) {

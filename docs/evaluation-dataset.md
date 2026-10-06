@@ -141,11 +141,17 @@ other words).
 **The holdout freeze.** `datasets/holdout-manifest.json` (not a dataset:
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
 case of every dataset with the fingerprints of its question, its gold
-(`gold_fingerprint`) and its scoring (`scoring_fingerprint`: gold,
-alternatives and comparison spec), and a dated `history` of notes.
-`test/holdout-manifest.test.js` fails when a holdout case is added, removed
-(or moved to dev) or changed without the manifest being rewritten, when the
-manifest is edited by hand, and when its current state has no note:
+(`gold_fingerprint`), its scoring (`scoring_fingerprint`: gold,
+alternatives and comparison spec; what a comparison pairs cases on) and its
+measurement (`measurement_fingerprint`: split, expected behaviour,
+`known_validator_rejection`, expected tables, failure class, difficulty and
+tags, the fields that move a failure between attribution buckets or report
+breakdowns), its intent and datasets, and a dated `history` of notes. The
+manifest `fingerprint` covers every one of those fields, so every change the
+check reports needs a note. `test/holdout-manifest.test.js` fails when a
+holdout case is added, removed (or moved to dev) or changed without the
+manifest being rewritten, when the manifest is edited by hand, and when its
+current state has no note:
 
 ```bash
 npm run holdout-manifest                                          # check (exit 1 on a difference)
@@ -163,8 +169,9 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   documented look, for example when retiring a holdout). `report.json` keeps
   every case for the rescore, the comparison and the gate; opening it is
   revealing the holdout.
-- **Any change to the holdout** (a case added, removed, reworded, re-scored
-  or moved to dev) requires a manifest update with a note saying what and
+- **Any change to the holdout** (a case added, removed, reworded, re-scored,
+  re-labelled, for example a `known_validator_rejection` flag, or moved to
+  dev) requires a manifest update with a note saying what and
   why; the manifest diff is the reviewable record.
 - A holdout that has been inspected is retired to dev with a tag (as the
   first one was, `formerly_holdout`), and a new one is authored blind.

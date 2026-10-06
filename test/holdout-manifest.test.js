@@ -18,7 +18,8 @@ import {
 import { listDatasetNames, loadSuiteDatasets } from '../src/eval/suite.js';
 
 // The holdout freeze (measurement hygiene): datasets/holdout-manifest.json
-// lists every holdout case with its question, gold and scoring fingerprints.
+// lists every holdout case with its question, gold, scoring and measurement
+// fingerprints.
 // Adding, removing or changing a holdout case without rewriting the manifest
 // (npm run holdout-manifest -- --write --note "...") fails here.
 
@@ -119,6 +120,30 @@ test('a changed intent or dataset membership needs a note, and --write accepts i
     assert.deepEqual(next.history.map((entry) => entry.note), ['two holdout cases authored blind', `${label} changed`], label);
     assert.deepEqual(compareHoldoutManifest(next, entries).problems, [], label);
   }
+});
+
+test('a measurement-relevant field (known_validator_rejection, expected tables, breakdown labels) is frozen without touching the scoring fingerprint', () => {
+  const base = [raw('h1', { tags: ['a', 'b'], difficulty: 'medium', failure_class: 'join', expected_tables: ['Customer', 'SalesDocument'] }), raw('h2')];
+  const entries = computeHoldoutEntries(datasetsOf(base));
+  const manifest = buildHoldoutManifest(entries, { note: 'two holdout cases authored blind', date: '2026-10-06' });
+  for (const [label, overrides] of [
+    ['known_validator_rejection', { known_validator_rejection: 'METRIC_COLUMN' }],
+    ['expected tables', { expected_tables: ['Customer'] }],
+    ['failure class', { failure_class: 'grain' }],
+    ['difficulty', { difficulty: 'hard' }],
+    ['tags', { tags: ['a'] }],
+  ]) {
+    const changed = computeHoldoutEntries(datasetsOf([{ ...base[0], ...overrides }, base[1]]));
+    // Pairing with earlier reports is untouched: same scoring fingerprint.
+    assert.equal(changed[0].scoring_fingerprint, entries[0].scoring_fingerprint, label);
+    assert.deepEqual(compareHoldoutManifest(manifest, changed).changed, [{ id: 'h1', fields: ['measurement_fingerprint'] }], label);
+    assert.throws(() => buildHoldoutManifest(changed, { previous: manifest }), /pass --note/, label);
+    const next = buildHoldoutManifest(changed, { previous: manifest, note: `${label} changed`, date: '2026-10-07' });
+    assert.deepEqual(compareHoldoutManifest(next, changed).problems, [], label);
+  }
+  // Order of tags and expected tables is not a change.
+  const reordered = computeHoldoutEntries(datasetsOf([{ ...base[0], tags: ['b', 'a'], expected_tables: ['SalesDocument', 'Customer'] }, base[1]]));
+  assert.deepEqual(compareHoldoutManifest(manifest, reordered).problems, []);
 });
 
 test('an empty holdout has a valid manifest too', () => {
