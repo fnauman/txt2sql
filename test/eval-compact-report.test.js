@@ -239,6 +239,8 @@ test('a compact report is marked, versioned, idempotent and one line per case; a
   assert.equal(repetition.llm_usage_attempt, 1);
   assert.deepEqual(repetition.attempts[0].llm, { ok: true, durationMs: 1300, tablesUsed: ['Customer'] });
   assert.deepEqual(repetition.llm_usage, { prompt_tokens: 2000, completion_tokens: 100, total_tokens: 2100, prompt_tokens_details: { cached_tokens: 1024 } });
+  // A cost keeps its total, the one figure the statistics and the budget read.
+  assert.deepEqual(repetition.llm_cost, { totalCost: 0.000287 });
   // restoreSharedCallUsage (what a rescore reads) gives the call its copy back.
   const restored = restoreSharedCallUsage(repetition);
   assert.equal('llm_usage_attempt' in restored, false);

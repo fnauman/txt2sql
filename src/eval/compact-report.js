@@ -239,7 +239,7 @@ function compactRepetition(repetition) {
     out.llm_usage = compactUsage(out.llm_usage);
   }
   if (out.llm_cost !== undefined) {
-    out.llm_cost = compactCost(out.llm_cost, ['currency', 'inputCost', 'outputCost', 'totalCost']);
+    out.llm_cost = compactCost(out.llm_cost, ['totalCost']);
   }
   const attempts = (repetition.attempts || []).map(compactAttempt);
   shareSingleCallUsage(out, attempts);
