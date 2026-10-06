@@ -102,3 +102,12 @@ test('without holdout cases nothing is hidden and the breakdowns are the run\'s 
   assert.equal(markdown, renderReportMarkdown(report, { revealHoldout: true }));
   assert.doesNotMatch(markdown, /aggregate only|not listed|cover the dev cases only/);
 });
+
+test('the budget row counts skipped holdout cases without naming them; revealHoldout names them', async () => {
+  const report = await reportWith(CANDIDATE_OUTCOMES);
+  report.budget = { limitUsd: 1, spentUsd: 1, exhausted: true, skippedCases: ['dev_flip', 'secret_holdout_case'] };
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /\| Budget \| \$1\.0000 of \$1\.00; 2 case\(s\) skipped: dev_flip, 1 holdout case\(s\) \|/);
+  assert.doesNotMatch(markdown, /secret_holdout_case/);
+  assert.match(renderReportMarkdown(report, { revealHoldout: true }), /2 case\(s\) skipped: dev_flip, secret_holdout_case \|/);
+});

@@ -495,7 +495,7 @@ function behaviorSection(report, hidden = new Set()) {
   return lines.join('\n');
 }
 
-function costSection(report) {
+function costSection(report, hidden = new Set()) {
   const { cost, latency, retries, tokens } = report.stats;
   const rows = [
     [
@@ -517,12 +517,12 @@ function costSection(report) {
     ['Tokens', `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}`],
   ];
   if (report.budget?.limitUsd != null) {
-    rows.push([
-      'Budget',
-      `${formatUsd(report.budget.spentUsd)} of ${formatLimitUsd(report.budget.limitUsd)}${
-        report.budget.skippedCases.length ? `; ${report.budget.skippedCases.length} case(s) skipped: ${report.budget.skippedCases.join(', ')}` : ''
-      }`,
-    ]);
+    // Skipped holdout cases are counted, not named (aggregate only).
+    const skipped = report.budget.skippedCases || [];
+    const listed = skipped.filter((id) => !hidden.has(id));
+    const holdoutSkipped = skipped.length - listed.length;
+    const names = [...listed, ...(holdoutSkipped > 0 ? [`${holdoutSkipped} holdout case(s)`] : [])].join(', ');
+    rows.push(['Budget', `${formatUsd(report.budget.spentUsd)} of ${formatLimitUsd(report.budget.limitUsd)}${skipped.length ? `; ${skipped.length} case(s) skipped: ${names}` : ''}`]);
   }
   return ['## Cost, latency, retries, tokens', '', table(['Metric', 'Value'], rows)].join('\n');
 }
@@ -752,7 +752,7 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
     behaviorSection(report, hidden),
     casesSection(report, hidden),
     breakdownSection(report, hidden),
-    costSection(report),
+    costSection(report, hidden),
     verificationSection(report),
     provenanceSection(report),
     legacySection(report),
