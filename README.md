@@ -426,33 +426,31 @@ accuracy, and its failures are system errors. The report contains:
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
-whole suite, 3 repetitions, full-schema prompting via the default
+whole 404-case suite, 3 repetitions, full-schema prompting via the default
 `SCHEMA_SCOPE=auto`, measured on 2026-10-06):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (245 answer cases, 130 intents) | **72.8%** (95% CI 67.2%–78.2%) |
-| By split | dev 74.6% (168 cases) · holdout 68.8% (77 cases) |
-| Failures by cause (repetitions) | model 200 · system 0 (no retrieval misses, no guardrail false rejections) · infrastructure 0 |
-| Guardrails over every attempt | precision 100%, recall 22.6%, false-rejection rate 0% |
-| Abstain / clarify cases handled | 0 of 10 (the product always answers; not in accuracy) |
-| Cost and latency | $0.33 total · $0.00062 per correct answer · p50 2.6 s, p95 5.3 s · 91.5% of prompt tokens cached |
+| Strict accuracy (392 answer cases, 205 intents) | **62.2%** (95% CI 57.5%–66.8%) |
+| By split | dev **74.7%** (245 cases) · fresh holdout **41.3%** (147 cases) |
+| Failures by cause (repetitions) | model 430 · system 15 (known validator rejections only; no retrieval misses, no guardrail false rejections) · infrastructure 0 |
+| Guardrails over every attempt | precision 100%, recall 18.0%, false-rejection rate 0% |
+| Abstain / clarify cases handled | 0 of 12 (the product always answers; not in accuracy) |
+| Cost and latency | $0.54 total · $0.00074 per correct answer · p50 2.5 s, p95 5.2 s · 91.5% of prompt tokens cached |
 
-This baseline was measured before the measurement-hygiene changes (the
-scoring relaxations, the "spend" reading, the relabelled failure classes,
-known validator rejections counted as system errors, and the holdout
-retired to dev); its split numbers are those of the retired holdout. It is
-re-made on the current datasets before the next experiment is measured.
-
-The previous baseline used the retrieved tables as the validator's allow-list
-and scored 68.8% (dev 72.6%, holdout 60.6%) with 92 system failures, all
-retrieval misses; switching to full-schema prompting is
-[Experiment 1](docs/experiments/01-schema-scope.md) (+4.0 pts, paired
-bootstrap CI +0.1 to +7.9, exact McNemar p = 0.064 — a likely but not yet
-significant improvement). With perfect SQL the suite's ceiling
-is now 99.6%; the remaining failures are model errors — mostly metric-column
-confusion, distractor joins and result shape — which the next experiments
-target. These are measurements of the product, not targets.
+The fresh holdout is 77 new intents written blind (no model answers to them
+were seen while writing) and audited by two independent annotators before
+this run; reports show it in aggregate only. The 33-point gap between dev and
+holdout is the honest measure of how the product copes with new kinds of
+questions: the holdout leans on analytical shapes the dev set barely covers
+(shares and ratios, overdue and ageing balances, running totals,
+month-over-month change, weekday and value-band breakdowns) and on unfamiliar
+wording, so dev accuracy overstates what a new user's questions would get.
+With perfect SQL the suite's ceiling is 98.7% (5 cases are known validator
+rejections); every other failure is a model error. On the earlier 255-case
+suite, [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema
+prompting) moved strict accuracy from 68.8% to 72.8%. These are measurements
+of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
@@ -462,9 +460,8 @@ so `--min-accuracy` is refused with exit 2). Harness, database and
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
-`--case-id`, `--split`, `--reveal-holdout`. One repetition of the 255 dev cases costs about 11
-cents on gpt-4o-mini (the committed baseline: $0.33 for 3 repetitions); the whole 404-case suite
-is about 18 cents per repetition. The dataset composition, the generator, how to add a
+`--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole 404-case suite costs
+about 18 cents on gpt-4o-mini (the committed baseline: $0.54 for 3 repetitions). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 
