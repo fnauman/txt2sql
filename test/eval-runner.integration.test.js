@@ -7,6 +7,8 @@ import path from 'node:path';
 import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import mysql from 'mysql2/promise';
+
 import { loadBenchmarkDataset } from '../src/benchmark.js';
 
 // Opt-in end-to-end check of `npm run eval` (scripts/eval.js) against a real
@@ -406,4 +408,89 @@ test('--gate exits 2 when the baseline is not a report, or pairs no case with th
   const unpaired = await runEval(['--rescore', first.reportPath, '--compare', renamed, '--gate'], 'gate-unpaired');
   assert.equal(unpaired.code, 2, unpaired.stdout + unpaired.stderr);
   assert.match(unpaired.stdout, /HARNESS: --gate compared no case with the baseline \S*renamed-baseline\.json: 0 of this run's 26 case\(s\) paired \(26 not in the baseline\)/);
+});
+
+// Kills every connection of the query user once one of them runs a statement
+// containing `marker` (a deliberately slow SLEEP), like a database restart or
+// a network drop in the middle of a read. Resolves with how many it killed.
+async function killQueryConnectionsDuring(marker, { timeoutMs = 60_000 } = {}) {
+  const admin = await mysql.createConnection({
+    host: process.env.TEST_MARIADB_HOST || '127.0.0.1',
+    port: Number(process.env.TEST_MARIADB_PORT),
+    user: process.env.TEST_MARIADB_ADMIN_USER || 'root',
+    password: process.env.TEST_MARIADB_ADMIN_PASSWORD,
+  });
+  try {
+    const user = process.env.TEST_MARIADB_USER || 'demo_readonly';
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const [rows] = await admin.query('SELECT ID, INFO FROM information_schema.PROCESSLIST WHERE USER = ?', [user]);
+      if (rows.some((row) => String(row.INFO || '').includes(marker))) {
+        for (const row of rows) {
+          await admin.query(`KILL CONNECTION ${Number(row.ID)}`).catch(() => null);
+        }
+        return rows.length;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return 0;
+  } finally {
+    await admin.end();
+  }
+}
+
+function runScript(script, args) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [path.join(REPO_ROOT, script), ...args], { env: evalEnv(), cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) =>
+      resolve({ code: error ? error.code : 0, stdout, stderr })
+    );
+  });
+}
+
+test('a connection dropped during verification, verify-dataset or a rescore exits 2 (never 0 with no verdict)', { skip }, async () => {
+  requireAdmin();
+  assert.ok(first, 'needs the first run');
+  // A control that sleeps, so the connection can be killed while it is read.
+  const controlsDir = path.join(outputRoot, 'sleepy-controls');
+  await fs.cp(path.join(REPO_ROOT, 'datasets/controls'), controlsDir, { recursive: true });
+  const controlsFile = path.join(controlsDir, 'core-public.json');
+  const controls = JSON.parse(await fs.readFile(controlsFile, 'utf8'));
+  controls.core_public_001.negative[0].sql = 'SELECT SLEEP(4) AS CustomerName, 1 AS total_net_amount';
+  await fs.writeFile(controlsFile, JSON.stringify(controls));
+
+  const [killedInVerify, verify] = await Promise.all([killQueryConnectionsDuring('SLEEP(4)'), runEval(['--offline', '--controls-dir', controlsDir], 'dropped-verify')]);
+  assert.ok(killedInVerify > 0, verify.stdout + verify.stderr);
+  assert.equal(verify.code, 2, verify.stdout + verify.stderr);
+  assert.match(verify.stderr + verify.stdout, /The database failed during verification/);
+
+  const [killedInDatasetCheck, dataset] = await Promise.all([
+    killQueryConnectionsDuring('SLEEP(4)'),
+    runScript('scripts/verify-dataset.js', ['--dataset', 'core-public', '--controls-dir', controlsDir]),
+  ]);
+  assert.ok(killedInDatasetCheck > 0, dataset.stdout + dataset.stderr);
+  // A verdict, and it is a failure: the controls the drop interrupted are unscored.
+  assert.equal(dataset.code, 1, dataset.stdout + dataset.stderr);
+  assert.match(dataset.stdout, /^Verified 9 cases across 1 dataset\(s\) on 3 fixture\(s\); [1-9]\d* failure\(s\)\.$/m);
+  assert.match(dataset.stdout, /negative control m1 could not be scored: infrastructure error/);
+
+  // A gold that sleeps, read while rescoring a recorded report.
+  const datasetsDir = path.join(outputRoot, 'sleepy-datasets');
+  await fs.mkdir(datasetsDir, { recursive: true });
+  for (const name of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
+    const cases = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets', `${name}.json`), 'utf8'));
+    for (const testCase of cases) {
+      if (testCase.id === 'core_public_001') {
+        testCase.expected_sql = 'SELECT SLEEP(4) AS s';
+        delete testCase.expected_row_counts;
+      }
+    }
+    await fs.writeFile(path.join(datasetsDir, `${name}.json`), JSON.stringify(cases));
+  }
+  const [killedInRescore, rescore] = await Promise.all([
+    killQueryConnectionsDuring('SLEEP(4)'),
+    runEval(['--rescore', first.reportPath, '--skip-verify', '--datasets-dir', datasetsDir], 'dropped-rescore'),
+  ]);
+  assert.ok(killedInRescore > 0, rescore.stdout + rescore.stderr);
+  assert.equal(rescore.code, 2, rescore.stdout + rescore.stderr);
+  assert.match(rescore.stdout, /HARNESS: \d+ repetition\(s\): database infrastructure errors \(infra_error\)/);
 });

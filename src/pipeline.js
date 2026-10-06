@@ -2239,7 +2239,52 @@ function readRows(connection, statement, params, { maxRows = null } = {}) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let settled = false;
-    const query = params === undefined ? core.query(statement) : core.query(statement, params);
+    // mysql2 reports a fatal error of a callback-less command (a dropped or
+    // killed connection, mid-read or before the command was even sent) on the
+    // core connection, never on the query: without these listeners the read
+    // would never settle and the process could drain its event loop and exit
+    // as if nothing had happened.
+    const watchesConnection = typeof core.on === 'function' && typeof core.removeListener === 'function';
+    const onConnectionError = (error) => fail(error || connectionLostError());
+    const onConnectionEnd = () => fail(connectionLostError());
+    const stopWatching = () => {
+      if (watchesConnection) {
+        core.removeListener('error', onConnectionError);
+        core.removeListener('end', onConnectionEnd);
+      }
+    };
+    const succeed = (value) => {
+      if (!settled) {
+        settled = true;
+        stopWatching();
+        resolve(value);
+      }
+    };
+    function fail(error) {
+      if (!settled) {
+        settled = true;
+        stopWatching();
+        reject(error);
+      }
+    }
+
+    const deadError = closedConnectionError(core);
+    if (deadError) {
+      fail(deadError);
+      return;
+    }
+    if (watchesConnection) {
+      core.on('error', onConnectionError);
+      core.on('end', onConnectionEnd);
+    }
+
+    let query;
+    try {
+      query = params === undefined ? core.query(statement) : core.query(statement, params);
+    } catch (error) {
+      fail(error);
+      return;
+    }
     query.on('result', (row) => {
       if (settled) {
         return; // past the cap (or failed): drop it
@@ -2248,24 +2293,33 @@ function readRows(connection, statement, params, { maxRows = null } = {}) {
         rows.push(row);
         return;
       }
-      settled = true;
-      resolve({ rows, overflowed: true, streamed: true });
+      succeed({ rows, overflowed: true, streamed: true });
     });
     // Always listened to, even after settling: an unhandled 'error' event on
     // the query would crash the process.
-    query.on('error', (error) => {
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    });
-    query.on('end', () => {
-      if (!settled) {
-        settled = true;
-        resolve({ rows, overflowed: false, streamed: true });
-      }
-    });
+    query.on('error', (error) => fail(error));
+    query.on('end', () => succeed({ rows, overflowed: false, streamed: true }));
   });
+}
+
+function connectionLostError(message = 'Connection lost: the database connection closed during the query.') {
+  const error = new Error(message);
+  error.code = 'PROTOCOL_CONNECTION_LOST';
+  error.fatal = true;
+  return error;
+}
+
+// The error a mysql2 core connection already carries (or a generic connection
+// loss when it is closing or its socket is gone), or null when it is usable.
+function closedConnectionError(core) {
+  const fatal = core._fatalError || core._protocolError;
+  if (fatal) {
+    return fatal;
+  }
+  if (core._closing || core.stream?.destroyed) {
+    return connectionLostError("Can't add new command when connection is in closed state");
+  }
+  return null;
 }
 
 // KILL QUERY for a cancelled request. Pools from createMariaDbPool provide
