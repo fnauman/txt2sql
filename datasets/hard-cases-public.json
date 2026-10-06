@@ -132,7 +132,7 @@
   {
     "id": "hard_vocab_receivables_by_outlet_mar_2026",
     "intentId": "store_outstanding_balance_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "What is the receivables position by outlet for March 2026 sales?",
     "canonicalQuestion": "What is the receivables position by outlet for March 2026 sales?",
     "difficulty": "hard",
@@ -141,7 +141,8 @@
       "new_vocabulary",
       "outstanding_balance",
       "store_location",
-      "aggregation"
+      "aggregation",
+      "formerly_holdout"
     ],
     "failure_class": "vocabulary",
     "notes": "\"Receivables position\" and \"outlet\" are not in the semantic layer: outstanding BalanceAmount by store location for documents dated March 2026.",
@@ -470,7 +471,7 @@
   {
     "id": "hard_typo_ar_balance_by_store_mar_2026",
     "intentId": "store_outstanding_balance_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "AR bal by store mar 2026",
     "canonicalQuestion": "What is the receivables position by outlet for March 2026 sales?",
     "difficulty": "hard",
@@ -479,7 +480,8 @@
       "typo",
       "outstanding_balance",
       "store_location",
-      "aggregation"
+      "aggregation",
+      "formerly_holdout"
     ],
     "failure_class": "typo",
     "notes": "Shorthand for outstanding (accounts-receivable) balance by store location for documents dated March 2026; same intent and gold as hard_vocab_receivables_by_outlet_mar_2026.",
@@ -632,7 +634,7 @@
   {
     "id": "hard_asof_previous_quarter_units_by_category",
     "intentId": "category_qty_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "As of 2026-05-10, how many units did each category sell in the previous quarter?",
     "canonicalQuestion": "As of 2026-05-10, how many units did each category sell in the previous quarter?",
     "difficulty": "hard",
@@ -641,7 +643,8 @@
       "relative_date",
       "product_category",
       "quantity",
-      "aggregation"
+      "aggregation",
+      "formerly_holdout"
     ],
     "failure_class": "relative_date",
     "notes": "The previous quarter as of 2026-05-10 is Q1 2026 (January-March).",
@@ -770,7 +773,7 @@
   {
     "id": "hard_entity_weekend_pantry_units_feb_2026",
     "intentId": "weekend_pantry_qty_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many units of Weekend Pantry campaign products did we sell in February 2026?",
     "canonicalQuestion": "How many units of Weekend Pantry campaign products did we sell in February 2026?",
     "difficulty": "hard",
@@ -779,7 +782,8 @@
       "named_entity",
       "campaign",
       "quantity",
-      "scalar"
+      "scalar",
+      "formerly_holdout"
     ],
     "failure_class": "entity_resolution",
     "notes": "A campaign named in the question: units on lines whose product belongs to the Weekend Pantry campaign. Scoring relaxation empty_as_zero: where the window has no rows, an empty result equals the NULL / 0 total.",
@@ -807,7 +811,7 @@
   {
     "id": "hard_entity_clearspring_units_mar_2026",
     "intentId": "clearspring_qty_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many units of Clearspring Waters products did we sell in March 2026?",
     "canonicalQuestion": "How many units of Clearspring Waters products did we sell in March 2026?",
     "difficulty": "hard",
@@ -816,7 +820,8 @@
       "named_entity",
       "brand",
       "quantity",
-      "scalar"
+      "scalar",
+      "formerly_holdout"
     ],
     "failure_class": "entity_resolution",
     "notes": "A brand named in the question: units of products whose brand (Product.BrandId) is Clearspring Waters. Scoring relaxation empty_as_zero: where the window has no rows, an empty result equals the NULL / 0 total.",
@@ -883,7 +888,7 @@
   {
     "id": "hard_entity_summit_grocers_by_code_mar_2026",
     "intentId": "summit_grocers_net_sales_by_code_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
     "canonicalQuestion": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
     "difficulty": "hard",
@@ -892,7 +897,8 @@
       "named_entity",
       "customer",
       "net_sales",
-      "duplicate_name"
+      "duplicate_name",
+      "formerly_holdout"
     ],
     "failure_class": "entity_resolution",
     "notes": "Two customers share the name Summit Grocers (C-005 and C-008); the question asks for each of them. Two readings are accepted: the customers with March 2026 sales (the gold) and both customers, 0 for one without sales (alternative_expected_sql, LEFT JOIN from Customer).",
@@ -1045,7 +1051,7 @@
   {
     "id": "hard_zero_harbor_kiosk_credit_notes_2026",
     "intentId": "harbor_kiosk_credit_memos_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many credit notes did Harbor Kiosk receive in 2026?",
     "canonicalQuestion": "How many credit notes did Harbor Kiosk receive in 2026?",
     "difficulty": "hard",
@@ -1055,7 +1061,8 @@
       "customer",
       "document_type",
       "document_count",
-      "scalar"
+      "scalar",
+      "formerly_holdout"
     ],
     "failure_class": "empty_result",
     "notes": "\"Credit note\" is the British name of the Credit Memo document type; Harbor Kiosk has none in 2026 in any fixture, so the count is 0.",
@@ -1092,13 +1099,14 @@
   {
     "id": "hard_abstain_weather_on_peak_day",
     "intentId": "weather_on_peak_sales_day",
-    "split": "holdout",
+    "split": "dev",
     "question": "What was the weather in Stockholm on the day our sales peaked in March 2026?",
     "canonicalQuestion": "What was the weather in Stockholm on the day our sales peaked in March 2026?",
     "difficulty": "hard",
     "tags": [
       "hard_case",
-      "unanswerable"
+      "unanswerable",
+      "formerly_holdout"
     ],
     "failure_class": "abstention",
     "expected_behavior": "abstain",
@@ -1122,13 +1130,14 @@
   {
     "id": "hard_abstain_competitor_prices",
     "intentId": "competitor_prices",
-    "split": "holdout",
+    "split": "dev",
     "question": "Which competitors sell the same products cheaper than we do?",
     "canonicalQuestion": "Which competitors sell the same products cheaper than we do?",
     "difficulty": "hard",
     "tags": [
       "hard_case",
-      "unanswerable"
+      "unanswerable",
+      "formerly_holdout"
     ],
     "failure_class": "abstention",
     "expected_behavior": "abstain",
@@ -1182,13 +1191,14 @@
   {
     "id": "hard_clarify_south_store_performance",
     "intentId": "south_store_performance_vague",
-    "split": "holdout",
+    "split": "dev",
     "question": "How is the South Store doing?",
     "canonicalQuestion": "How is the South Store doing?",
     "difficulty": "hard",
     "tags": [
       "hard_case",
-      "ambiguous"
+      "ambiguous",
+      "formerly_holdout"
     ],
     "failure_class": "clarification",
     "expected_behavior": "clarify",
@@ -1197,13 +1207,14 @@
   {
     "id": "hard_clarify_this_year_vs_last_year",
     "intentId": "compare_this_year_last_year",
-    "split": "holdout",
+    "split": "dev",
     "question": "Compare this year with last year.",
     "canonicalQuestion": "Compare this year with last year.",
     "difficulty": "hard",
     "tags": [
       "hard_case",
-      "ambiguous"
+      "ambiguous",
+      "formerly_holdout"
     ],
     "failure_class": "clarification",
     "expected_behavior": "clarify",

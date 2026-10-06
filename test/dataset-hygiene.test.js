@@ -10,10 +10,11 @@ import {
   caseIdFor,
   CONTROLS_PATH,
   DATASET_PATH,
-  HOLDOUT_PERCENT,
+  FORMER_HOLDOUT_PERCENT,
+  FORMERLY_HOLDOUT_TAG,
   INTENT_CATALOGUE,
   serialize,
-  splitForIntent,
+  wasHoldoutIntent,
 } from '../scripts/build-eval-dataset.mjs';
 import { CASE_SPLITS, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
@@ -32,6 +33,9 @@ import { isKeywordToken, tokenizeSql } from '../src/sql-tokenizer.js';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASETS_DIR = path.join(REPO_ROOT, 'datasets');
 const LEGACY_DATASETS = ['core-public', 'paraphrase-public', 'edge-cases-public'];
+// The datasets written before the holdout was retired: every case in them is
+// dev. A holdout lives elsewhere (authored blind, frozen by the manifest).
+const DEV_ONLY_DATASETS = [...LEGACY_DATASETS, 'templated-public', 'hard-cases-public'];
 
 const datasets = Object.fromEntries(
   fs
@@ -61,14 +65,21 @@ function layerPhrases() {
 }
 const words = (text) => ` ${String(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
 
-test('(e) every committed case has an explicit, valid split; legacy datasets are dev, new intents follow the hash rule', () => {
+test('(e) every committed case has an explicit, valid split; the original datasets are dev, formerly holdout cases are tagged', () => {
+  // The holdout of the hash rule (wasHoldoutIntent) was inspected during the
+  // Experiment 1 error analysis, so every one of its cases is dev now, tagged
+  // formerly_holdout; legacy intents (and hard cases rephrasing them) never
+  // were holdout.
   const legacyIntents = new Set(LEGACY_DATASETS.flatMap((name) => datasets[name].map((testCase) => testCase.intentId)));
   for (const { dataset, testCase } of allCases) {
     assert.ok(CASE_SPLITS.includes(testCase.split), `${dataset}/${testCase.id} split ${testCase.split}`);
-    if (LEGACY_DATASETS.includes(dataset) || legacyIntents.has(testCase.intentId)) {
-      assert.equal(testCase.split, 'dev', `${dataset}/${testCase.id}: the semantic layer and prompt rules were tuned on the legacy intents`);
+    const formerly = (testCase.tags || []).includes(FORMERLY_HOLDOUT_TAG);
+    if (DEV_ONLY_DATASETS.includes(dataset)) {
+      assert.equal(testCase.split, 'dev', `${dataset}/${testCase.id}: the holdout of these datasets was retired (formerly_holdout)`);
+      const wasHoldout = !LEGACY_DATASETS.includes(dataset) && !legacyIntents.has(testCase.intentId) && wasHoldoutIntent(testCase.intentId);
+      assert.equal(formerly, wasHoldout, `${dataset}/${testCase.id}: tagged ${FORMERLY_HOLDOUT_TAG} exactly when the retired rule held it out`);
     } else {
-      assert.equal(testCase.split, splitForIntent(testCase.intentId), `${dataset}/${testCase.id} follows splitForIntent(${testCase.intentId})`);
+      assert.equal(formerly && testCase.split === 'holdout', false, `${dataset}/${testCase.id}: a formerly holdout case cannot be holdout again`);
     }
   }
   assert.throws(() => normalizeBenchmarkCase({ id: 'x', question: 'Q?', expected_sql: 'SELECT 1', split: 'train' }), /split "train"/);
@@ -105,8 +116,9 @@ test('(d) one gold SQL belongs to one intent (so a holdout intent is never a dev
 test('(a) holdout questions contain no multi-word phrase of the semantic layer', () => {
   const phrases = layerPhrases();
   assert.ok(phrases.includes('net sales') && phrases.includes('sales documents') && phrases.includes('credit memo'));
+  // Every holdout case, whichever dataset holds it (none while the fresh
+  // holdout is being authored).
   const holdout = allCases.filter(({ testCase }) => testCase.split === 'holdout');
-  assert.ok(holdout.length >= 70, `${holdout.length} holdout cases`);
   for (const { dataset, testCase } of holdout) {
     const text = words(testCase.question);
     const found = phrases.filter((phrase) => [' ', 's ', 'es '].some((ending) => text.includes(`${words(phrase).trimEnd()}${ending}`)));
@@ -276,49 +288,43 @@ test('(h) every gold with a LIMIT orders by a tiebreak after its metric, so the 
 test('(g) the templated generator reproduces the committed dataset and controls byte for byte', async () => {
   const committedDataset = fs.readFileSync(DATASET_PATH, 'utf8');
   const committedControls = fs.readFileSync(CONTROLS_PATH, 'utf8');
-  const built = buildEvalDataset({ previousCases: JSON.parse(committedDataset), layer });
+  const built = buildEvalDataset({ previousCases: JSON.parse(committedDataset) });
   assert.deepEqual(built.problems, []);
   assert.equal(serialize(built.cases), committedDataset, 'datasets/templated-public.json is stale: run npm run build-eval-dataset');
   assert.equal(serialize(built.controls), committedControls, 'datasets/controls/templated-public.json is stale: run npm run build-eval-dataset');
-  // Deterministic: a second build is identical, and the output never depends
-  // on the semantic layer (it is only used to reject holdout wording).
+  // Deterministic: a second build is identical.
   const again = buildEvalDataset({ previousCases: JSON.parse(committedDataset) });
   assert.equal(serialize(again.cases), committedDataset);
   assert.equal(serialize(again.controls), committedControls);
   // Without the committed pins, only expected_row_counts differ.
-  const unpinned = buildEvalDataset({ previousCases: [], layer });
+  const unpinned = buildEvalDataset({ previousCases: [] });
   assert.deepEqual(
     unpinned.cases,
     built.cases.map(({ expected_row_counts: _pins, ...rest }) => rest)
   );
 });
 
-test('the generator rejects holdout wording from the semantic layer and keeps 2-3 phrasings per intent', () => {
+test('the generator emits dev cases only, tags the retired holdout, and keeps 2-3 phrasings per intent', () => {
   for (const intent of INTENT_CATALOGUE) {
     assert.ok(intent.phrasings.length >= 2 && intent.phrasings.length <= 3, intent.intentId);
   }
-  const holdoutIntent = INTENT_CATALOGUE.find((intent) => splitForIntent(intent.intentId) === 'holdout');
-  const tampered = { ...holdoutIntent, phrasings: [...holdoutIntent.phrasings.slice(0, 1), 'Show net sales by sales document type.'] };
-  const index = INTENT_CATALOGUE.indexOf(holdoutIntent);
-  INTENT_CATALOGUE.splice(index, 1, tampered);
-  try {
-    const { problems } = buildEvalDataset({ layer });
-    assert.ok(problems.some((problem) => problem.includes(holdoutIntent.intentId) && /net sales/.test(problem)), problems.join('\n'));
-  } finally {
-    INTENT_CATALOGUE.splice(index, 1, holdoutIntent);
+  const { cases } = buildEvalDataset();
+  assert.deepEqual([...new Set(cases.map((testCase) => testCase.split))], ['dev']);
+  for (const testCase of cases) {
+    assert.equal(testCase.tags.includes(FORMERLY_HOLDOUT_TAG), wasHoldoutIntent(testCase.intentId), testCase.id);
   }
-  assert.equal(HOLDOUT_PERCENT, 42);
+  // The retired rule, as it was: about 42% of the intent ids.
+  assert.equal(FORMER_HOLDOUT_PERCENT, 42);
+  assert.equal(new Set(cases.filter((testCase) => testCase.tags.includes(FORMERLY_HOLDOUT_TAG)).map((testCase) => testCase.intentId)).size, 35);
 });
 
-test('suite composition: 100-150 intents, at least 35 holdout intents, behaviour cases and every hard-case category', () => {
+test('suite composition: 100-150 intents, the retired holdout tagged, behaviour cases and every hard-case category', () => {
   const intents = new Set(unique.map((testCase) => testCase.intentId));
-  const holdoutIntents = new Set(unique.filter((testCase) => testCase.split === 'holdout').map((testCase) => testCase.intentId));
   assert.ok(intents.size >= 100 && intents.size <= 150, `${intents.size} intents`);
-  assert.ok(holdoutIntents.size >= 35, `${holdoutIntents.size} holdout intents`);
-  const legacyIntents = new Set(LEGACY_DATASETS.flatMap((name) => datasets[name].map((testCase) => testCase.intentId)));
-  const newIntents = [...intents].filter((intentId) => !legacyIntents.has(intentId));
-  const share = holdoutIntents.size / newIntents.length;
-  assert.ok(share >= 0.33 && share <= 0.42, `holdout share of new intents ${share.toFixed(3)}`);
+  // The 81 cases (45 intents) of the retired holdout are dev, tagged.
+  const formerly = unique.filter((testCase) => testCase.tags.includes(FORMERLY_HOLDOUT_TAG));
+  assert.deepEqual([formerly.length, new Set(formerly.map((testCase) => testCase.intentId)).size], [81, 45]);
+  assert.ok(formerly.every((testCase) => testCase.split === 'dev'));
 
   const hard = datasets['hard-cases-public'];
   const tagged = (tag) => hard.filter((testCase) => testCase.tags.includes(tag));

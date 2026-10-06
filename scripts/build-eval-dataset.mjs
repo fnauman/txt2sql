@@ -28,16 +28,15 @@
 // validator accepts its gold). Retrieval misses are no such gap any more: the
 // default schema scope (SCHEMA_SCOPE=auto, full at this schema size) allows
 // every in-scope table, and under SCHEMA_SCOPE=retrieved verify-dataset notes
-// them instead. A holdout intent's
-// phrasings must not contain any multi-word synonym of the semantic layer
-// (metadata/semantic-layer.json): the layer and the prompt rules were tuned on
-// the dev wording, so the holdout measures unseen vocabulary as well as unseen
-// intents. The build fails when a holdout phrasing breaks that rule (the
-// output itself never depends on the layer).
+// them instead.
 //
-// Splits: an intent is holdout when the first 32 bits of sha256(intentId),
-// mod 100, are below HOLDOUT_PERCENT; all phrasings of an intent share its
-// split. The same rule (splitForIntent) assigns the hand-written hard cases.
+// Splits: every templated case is dev. Until the measurement-hygiene change a
+// hash rule (wasHoldoutIntent: the first 32 bits of sha256(intentId), mod 100,
+// below FORMER_HOLDOUT_PERCENT) put about 42% of the intents in the holdout.
+// Those intents were inspected during the Experiment 1 error analysis, so they
+// are dev now and tagged `formerly_holdout`; the holdout is authored blind,
+// outside this generator, and frozen by datasets/holdout-manifest.json (see
+// docs/evaluation-dataset.md).
 //
 // Case ids are `tpl_<intentId>_<first 6 hex of sha256(question)>`, so editing
 // a question yields a new id: an id is never reused for a different question
@@ -74,19 +73,27 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATASET_NAME = 'templated-public';
 export const DATASET_PATH = path.join(ROOT, 'datasets', `${DATASET_NAME}.json`);
 export const CONTROLS_PATH = path.join(ROOT, 'datasets', 'controls', `${DATASET_NAME}.json`);
-export const SEMANTIC_LAYER_PATH = path.join(ROOT, 'metadata', 'semantic-layer.json');
 
 // --- splits -------------------------------------------------------------------
 
-export const HOLDOUT_PERCENT = 42;
+// The split of every templated case (see the file comment).
+export const TEMPLATED_SPLIT = 'dev';
+
+// The retired holdout rule, kept to tag the intents it used to hold out.
+export const FORMER_HOLDOUT_PERCENT = 42;
+export const FORMERLY_HOLDOUT_TAG = 'formerly_holdout';
 
 function sha256Hex(text) {
   return crypto.createHash('sha256').update(String(text)).digest('hex');
 }
 
-/** 'holdout' for about HOLDOUT_PERCENT% of intent ids (stable hash), else 'dev'. */
-export function splitForIntent(intentId) {
-  return Number.parseInt(sha256Hex(intentId).slice(0, 8), 16) % 100 < HOLDOUT_PERCENT ? 'holdout' : 'dev';
+/**
+ * True for the intents the retired hash rule put in the holdout (about
+ * FORMER_HOLDOUT_PERCENT% of intent ids). The hand-written hard cases used the
+ * same rule, unless they rephrase an existing intent.
+ */
+export function wasHoldoutIntent(intentId) {
+  return Number.parseInt(sha256Hex(intentId).slice(0, 8), 16) % 100 < FORMER_HOLDOUT_PERCENT;
 }
 
 export function caseIdFor(intentId, question) {
@@ -96,60 +103,6 @@ export function caseIdFor(intentId, question) {
 /** Same rule as controls.goldFingerprint (whitespace-normalized sha256, 16 hex). */
 function goldFingerprint(sql) {
   return sha256Hex(String(sql || '').replace(/\s+/g, ' ').trim()).slice(0, 16);
-}
-
-/**
- * Every multi-word synonym of the semantic layer (entities, metrics, filter
- * hints, value aliases and their canonical values, clarification triggers),
- * lower-cased. Holdout questions must contain none of them.
- */
-export function semanticLayerPhrases(layer) {
-  const phrases = new Set();
-  const add = (value) => {
-    const text = String(value || '').toLowerCase().trim();
-    if (text.split(/\s+/).length > 1) {
-      phrases.add(text);
-    }
-  };
-  for (const entity of layer.entities || []) {
-    (entity.synonyms || []).forEach(add);
-  }
-  for (const metric of layer.metrics || []) {
-    (metric.synonyms || []).forEach(add);
-    (metric.advisory_synonyms || []).forEach(add);
-    (metric.count_advisory_synonyms || []).forEach(add);
-  }
-  for (const hint of layer.filter_hints || []) {
-    (hint.synonyms || []).forEach(add);
-  }
-  for (const alias of layer.value_aliases || []) {
-    add(alias.canonical_value);
-    (alias.aliases || []).forEach(add);
-  }
-  for (const rule of layer.clarification_rules || []) {
-    add(rule.trigger);
-  }
-  return [...phrases].sort();
-}
-
-/** Lower-case words joined by single spaces, punctuation dropped (Unicode letters kept). */
-export function normalizeWords(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-/**
- * The semantic-layer phrases that occur in `question` as whole words, a plural
- * ending included ("credit memos" contains "credit memo").
- */
-export function semanticLayerPhrasesIn(question, phrases) {
-  const words = ` ${normalizeWords(question)} `;
-  return phrases.filter((phrase) => {
-    const needle = normalizeWords(phrase);
-    return [' ', 's ', 'es '].some((ending) => words.includes(` ${needle}${ending}`));
-  });
 }
 
 // --- time windows ---------------------------------------------------------------
@@ -1735,6 +1688,9 @@ function tagsFor(intent) {
     tags.push('posting_date');
   }
   tags.push(...(intent.tags || []));
+  if (wasHoldoutIntent(intent.intentId)) {
+    tags.push(FORMERLY_HOLDOUT_TAG);
+  }
   return [...new Set(tags)];
 }
 
@@ -2051,12 +2007,10 @@ async function readJsonIfExists(file) {
 /**
  * Builds the dataset and its controls in memory. `previousCases` (the
  * committed dataset) supplies the expected_row_counts of cases whose id and
- * gold SQL are unchanged. `layer` is the parsed semantic layer, used only to
- * reject holdout phrasings that contain its vocabulary.
+ * gold SQL are unchanged.
  */
-export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
+export function buildEvalDataset({ previousCases = [] } = {}) {
   const previous = new Map((previousCases || []).map((testCase) => [testCase.id, testCase]));
-  const phrases = layer ? semanticLayerPhrases(layer) : null;
   const cases = [];
   const controls = {};
   const problems = [];
@@ -2068,7 +2022,7 @@ export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
       problems.push(`duplicate intent ${intent.intentId}`);
     }
     seenIntents.add(intent.intentId);
-    const split = splitForIntent(intent.intentId);
+    const split = TEMPLATED_SPLIT;
     const expectedSql = buildQuery(intent);
     const alternatives = alternativesFor(intent);
     const comparison = comparisonFor(intent);
@@ -2084,12 +2038,6 @@ export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
     for (const phrasing of intent.phrasings) {
       const question = typeof phrasing === 'string' ? phrasing : phrasing.q;
       const knownRejection = typeof phrasing === 'string' ? null : phrasing.knownRejection || null;
-      if (split === 'holdout' && phrases) {
-        const found = semanticLayerPhrasesIn(question, phrases);
-        if (found.length > 0) {
-          problems.push(`${intent.intentId} is holdout but "${question}" contains semantic-layer vocabulary: ${found.join(', ')}`);
-        }
-      }
       const id = caseIdFor(intent.intentId, question);
       if (seenIds.has(id)) {
         problems.push(`duplicate case id ${id}`);
@@ -2150,9 +2098,8 @@ export function serialize(value) {
 
 async function main(argv = process.argv.slice(2)) {
   const check = argv.includes('--check');
-  const layer = JSON.parse(await fs.readFile(SEMANTIC_LAYER_PATH, 'utf8'));
   const previousCases = (await readJsonIfExists(DATASET_PATH)) || [];
-  const { cases, controls, problems } = buildEvalDataset({ previousCases, layer });
+  const { cases, controls, problems } = buildEvalDataset({ previousCases });
   if (problems.length > 0) {
     console.error(`build-eval-dataset: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
     return 1;
@@ -2160,10 +2107,10 @@ async function main(argv = process.argv.slice(2)) {
   const datasetText = serialize(cases);
   const controlsText = serialize(controls);
   const intents = new Set(cases.map((testCase) => testCase.intentId));
-  const holdout = new Set(cases.filter((testCase) => testCase.split === 'holdout').map((testCase) => testCase.intentId));
+  const formerlyHoldout = new Set(cases.filter((testCase) => testCase.tags.includes(FORMERLY_HOLDOUT_TAG)).map((testCase) => testCase.intentId));
   const negatives = Object.values(controls).reduce((sum, entry) => sum + entry.negative.length, 0);
   const positives = Object.values(controls).reduce((sum, entry) => sum + entry.positive.length, 0);
-  const summary = `${cases.length} cases, ${intents.size} intents (${holdout.size} holdout), ${negatives} negative and ${positives} positive controls`;
+  const summary = `${cases.length} cases, ${intents.size} intents (${formerlyHoldout.size} formerly holdout, all dev), ${negatives} negative and ${positives} positive controls`;
   if (check) {
     const [currentDataset, currentControls] = await Promise.all([
       fs.readFile(DATASET_PATH, 'utf8').catch(() => ''),

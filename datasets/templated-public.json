@@ -101,7 +101,7 @@
   {
     "id": "tpl_customer_net_sales_top5_q1_2026_483331",
     "intentId": "customer_net_sales_top5_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Who were our top 5 customers by turnover in Q1 2026?",
     "canonicalQuestion": "Who were our top 5 customers by turnover in Q1 2026?",
     "difficulty": "medium",
@@ -110,7 +110,8 @@
       "net_sales",
       "customer",
       "ranking",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 5",
@@ -135,7 +136,7 @@
   {
     "id": "tpl_customer_net_sales_top5_q1_2026_e88290",
     "intentId": "customer_net_sales_top5_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Rank customers by net amount billed for January through March 2026 and show the top five.",
     "canonicalQuestion": "Who were our top 5 customers by turnover in Q1 2026?",
     "difficulty": "medium",
@@ -144,7 +145,8 @@
       "net_sales",
       "customer",
       "ranking",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 5",
@@ -169,7 +171,7 @@
   {
     "id": "tpl_customer_net_sales_apr_2026_71a102",
     "intentId": "customer_net_sales_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Net takings per customer in April 2026.",
     "canonicalQuestion": "Net takings per customer in April 2026.",
     "difficulty": "medium",
@@ -178,7 +180,8 @@
       "net_sales",
       "customer",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
     "expected_tables": [
@@ -198,7 +201,7 @@
   {
     "id": "tpl_customer_net_sales_apr_2026_db0b51",
     "intentId": "customer_net_sales_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much did each customer spend with us in April 2026, excluding tax?",
     "canonicalQuestion": "Net takings per customer in April 2026.",
     "difficulty": "medium",
@@ -207,7 +210,8 @@
       "net_sales",
       "customer",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
     "expected_tables": [
@@ -361,7 +365,7 @@
   {
     "id": "tpl_doctype_net_sales_q1_2026_c03c7d",
     "intentId": "doctype_net_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover by type of document for Q1 2026.",
     "canonicalQuestion": "Turnover by type of document for Q1 2026.",
     "difficulty": "medium",
@@ -370,7 +374,8 @@
       "net_sales",
       "document_type",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
@@ -391,7 +396,7 @@
   {
     "id": "tpl_doctype_net_sales_q1_2026_f92ec1",
     "intentId": "doctype_net_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Break down first-quarter 2026 net takings by kind of document.",
     "canonicalQuestion": "Turnover by type of document for Q1 2026.",
     "difficulty": "medium",
@@ -400,7 +405,8 @@
       "net_sales",
       "document_type",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT t.DocumentTypeName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY t.DocumentTypeId, t.DocumentTypeName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, t.DocumentTypeName ASC",
@@ -683,7 +689,7 @@
   {
     "id": "tpl_total_net_sales_feb15_mar15_2026_40ae9d",
     "intentId": "total_net_sales_feb15_mar15_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
     "canonicalQuestion": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
     "difficulty": "easy",
@@ -691,7 +697,8 @@
       "templated",
       "net_sales",
       "scalar",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -716,7 +723,7 @@
   {
     "id": "tpl_total_net_sales_feb15_mar15_2026_ad37a4",
     "intentId": "total_net_sales_feb15_mar15_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Net takings between Feb 15 and Mar 15, 2026 (inclusive).",
     "canonicalQuestion": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
     "difficulty": "easy",
@@ -724,7 +731,8 @@
       "templated",
       "net_sales",
       "scalar",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -749,7 +757,7 @@
   {
     "id": "tpl_net_sales_monthly_q1_2026_561627",
     "intentId": "net_sales_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Show turnover month by month for Q1 2026.",
     "canonicalQuestion": "Show turnover month by month for Q1 2026.",
     "difficulty": "hard",
@@ -757,7 +765,8 @@
       "templated",
       "net_sales",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -785,7 +794,7 @@
   {
     "id": "tpl_net_sales_monthly_q1_2026_1fff6f",
     "intentId": "net_sales_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Monthly net takings for January to March 2026.",
     "canonicalQuestion": "Show turnover month by month for Q1 2026.",
     "difficulty": "hard",
@@ -793,7 +802,8 @@
       "templated",
       "net_sales",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -821,7 +831,7 @@
   {
     "id": "tpl_net_sales_monthly_nov_2025_feb_2026_23a39e",
     "intentId": "net_sales_monthly_nov_2025_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover per month from November 2025 through February 2026.",
     "canonicalQuestion": "Turnover per month from November 2025 through February 2026.",
     "difficulty": "hard",
@@ -829,7 +839,8 @@
       "templated",
       "net_sales",
       "time_series",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -856,7 +867,7 @@
   {
     "id": "tpl_net_sales_monthly_nov_2025_feb_2026_14397f",
     "intentId": "net_sales_monthly_nov_2025_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How did monthly takings, net of tax, develop between November 2025 and February 2026?",
     "canonicalQuestion": "Turnover per month from November 2025 through February 2026.",
     "difficulty": "hard",
@@ -864,7 +875,8 @@
       "templated",
       "net_sales",
       "time_series",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -1049,7 +1061,7 @@
   {
     "id": "tpl_net_sales_march_2025_vs_march_2026_f34a42",
     "intentId": "net_sales_march_2025_vs_march_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Show March 2025 and March 2026 turnover side by side.",
     "canonicalQuestion": "Show March 2025 and March 2026 turnover side by side.",
     "difficulty": "hard",
@@ -1057,7 +1069,8 @@
       "templated",
       "net_sales",
       "pivot",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "column_order keeps the earlier window first unless the columns are named like the gold columns.",
@@ -1086,7 +1099,7 @@
   {
     "id": "tpl_net_sales_march_2025_vs_march_2026_423088",
     "intentId": "net_sales_march_2025_vs_march_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Put total net takings for March 2025 next to March 2026 in one row.",
     "canonicalQuestion": "Show March 2025 and March 2026 turnover side by side.",
     "difficulty": "hard",
@@ -1094,7 +1107,8 @@
       "templated",
       "net_sales",
       "pivot",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "column_order keeps the earlier window first unless the columns are named like the gold columns.",
@@ -1187,7 +1201,7 @@
   {
     "id": "tpl_net_sales_south_store_mar_2026_ff1f77",
     "intentId": "net_sales_south_store_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "What was turnover at the South Store in March 2026?",
     "canonicalQuestion": "What was turnover at the South Store in March 2026?",
     "difficulty": "medium",
@@ -1196,7 +1210,8 @@
       "net_sales",
       "filter_store_location",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -1222,7 +1237,7 @@
   {
     "id": "tpl_net_sales_south_store_mar_2026_4dd0d0",
     "intentId": "net_sales_south_store_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much did South Store take in March 2026, net of tax?",
     "canonicalQuestion": "What was turnover at the South Store in March 2026?",
     "difficulty": "medium",
@@ -1231,7 +1246,8 @@
       "net_sales",
       "filter_store_location",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -1397,7 +1413,7 @@
   {
     "id": "tpl_net_sales_metro_online_store_q1_2026_a1c3e1",
     "intentId": "net_sales_metro_online_store_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much did Metro Online Store buy from us (net) in Q1 2026?",
     "canonicalQuestion": "How much did Metro Online Store buy from us (net) in Q1 2026?",
     "difficulty": "medium",
@@ -1406,7 +1422,8 @@
       "net_sales",
       "filter_customer",
       "scalar",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -1432,7 +1449,7 @@
   {
     "id": "tpl_net_sales_metro_online_store_q1_2026_87a58f",
     "intentId": "net_sales_metro_online_store_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover from Metro Online Store for the first quarter of 2026.",
     "canonicalQuestion": "How much did Metro Online Store buy from us (net) in Q1 2026?",
     "difficulty": "medium",
@@ -1441,7 +1458,8 @@
       "net_sales",
       "filter_customer",
       "scalar",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -1467,7 +1485,7 @@
   {
     "id": "tpl_net_sales_by_customer_and_store_mar_2026_7ea991",
     "intentId": "net_sales_by_customer_and_store_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover by customer and store location for March 2026.",
     "canonicalQuestion": "Turnover by customer and store location for March 2026.",
     "difficulty": "hard",
@@ -1477,7 +1495,8 @@
       "customer",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT c.CustomerName, s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName, s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC, s.LocationName ASC",
     "expected_tables": [
@@ -1498,7 +1517,7 @@
   {
     "id": "tpl_net_sales_by_customer_and_store_mar_2026_c04623",
     "intentId": "net_sales_by_customer_and_store_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Split March 2026 net takings by customer and by the location that served them.",
     "canonicalQuestion": "Turnover by customer and store location for March 2026.",
     "difficulty": "hard",
@@ -1508,7 +1527,8 @@
       "customer",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT c.CustomerName, s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName, s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC, s.LocationName ASC",
     "expected_tables": [
@@ -1729,7 +1749,7 @@
   {
     "id": "tpl_store_gross_feb_2026_a9f48b",
     "intentId": "store_gross_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Gross amount by store location for February 2026.",
     "canonicalQuestion": "Gross amount by store location for February 2026.",
     "difficulty": "medium",
@@ -1738,7 +1758,8 @@
       "gross_amount",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "metric_column_confusion",
     "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, s.LocationName ASC",
@@ -1759,7 +1780,7 @@
   {
     "id": "tpl_store_gross_feb_2026_dcaf7e",
     "intentId": "store_gross_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much gross turnover (incl. tax) did each store record in February 2026?",
     "canonicalQuestion": "Gross amount by store location for February 2026.",
     "difficulty": "medium",
@@ -1768,7 +1789,8 @@
       "gross_amount",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "metric_column_confusion",
     "expected_sql": "SELECT s.LocationName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, s.LocationName ASC",
@@ -2065,7 +2087,7 @@
   {
     "id": "tpl_product_net_sales_rank_dec_2025_af0d37",
     "intentId": "product_net_sales_rank_dec_2025",
-    "split": "holdout",
+    "split": "dev",
     "question": "Rank products by turnover for December 2025.",
     "canonicalQuestion": "Rank products by turnover for December 2025.",
     "difficulty": "hard",
@@ -2074,7 +2096,8 @@
       "line_net_sales",
       "product",
       "ranking",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
@@ -2102,7 +2125,7 @@
   {
     "id": "tpl_product_net_sales_rank_dec_2025_6f2136",
     "intentId": "product_net_sales_rank_dec_2025",
-    "split": "holdout",
+    "split": "dev",
     "question": "Order every product we sold in December 2025 by its net takings, highest first.",
     "canonicalQuestion": "Rank products by turnover for December 2025.",
     "difficulty": "hard",
@@ -2111,7 +2134,8 @@
       "line_net_sales",
       "product",
       "ranking",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "notes": "A ranking without a number lists every member (no LIMIT); only \"top N\" keeps N (gold convention).",
@@ -2205,7 +2229,7 @@
   {
     "id": "tpl_brand_net_sales_top3_q1_2026_025f70",
     "intentId": "brand_net_sales_top3_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Top 3 brands by turnover in Q1 2026.",
     "canonicalQuestion": "Top 3 brands by turnover in Q1 2026.",
     "difficulty": "hard",
@@ -2214,7 +2238,8 @@
       "line_net_sales",
       "brand",
       "ranking",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_join_path",
     "expected_sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 3",
@@ -2242,7 +2267,7 @@
   {
     "id": "tpl_brand_net_sales_top3_q1_2026_d343eb",
     "intentId": "brand_net_sales_top3_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Which three brands brought in the most money, net of tax, from January to March 2026?",
     "canonicalQuestion": "Top 3 brands by turnover in Q1 2026.",
     "difficulty": "hard",
@@ -2251,7 +2276,8 @@
       "line_net_sales",
       "brand",
       "ranking",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_join_path",
     "expected_sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 3",
@@ -2361,7 +2387,7 @@
   {
     "id": "tpl_category_net_sales_apr_2026_864bce",
     "intentId": "category_net_sales_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover by category in April 2026.",
     "canonicalQuestion": "Turnover by category in April 2026.",
     "difficulty": "hard",
@@ -2370,7 +2396,8 @@
       "line_net_sales",
       "product_category",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
@@ -2394,7 +2421,7 @@
   {
     "id": "tpl_category_net_sales_apr_2026_ce5e82",
     "intentId": "category_net_sales_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Net takings per category for April 2026.",
     "canonicalQuestion": "Turnover by category in April 2026.",
     "difficulty": "hard",
@@ -2403,7 +2430,8 @@
       "line_net_sales",
       "product_category",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
@@ -2501,7 +2529,7 @@
   {
     "id": "tpl_category_net_sales_q1_2025_4b171c",
     "intentId": "category_net_sales_q1_2025",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover by category in Q1 2025.",
     "canonicalQuestion": "Turnover by category in Q1 2025.",
     "difficulty": "hard",
@@ -2510,7 +2538,8 @@
       "line_net_sales",
       "product_category",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
@@ -2534,7 +2563,7 @@
   {
     "id": "tpl_category_net_sales_q1_2025_de597f",
     "intentId": "category_net_sales_q1_2025",
-    "split": "holdout",
+    "split": "dev",
     "question": "Break down first-quarter 2025 net takings by category.",
     "canonicalQuestion": "Turnover by category in Q1 2025.",
     "difficulty": "hard",
@@ -2543,7 +2572,8 @@
       "line_net_sales",
       "product_category",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "grain_confusion",
     "expected_sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC",
@@ -2567,7 +2597,7 @@
   {
     "id": "tpl_campaign_net_sales_q1_2026_918652",
     "intentId": "campaign_net_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Turnover by campaign for Q1 2026.",
     "canonicalQuestion": "Turnover by campaign for Q1 2026.",
     "difficulty": "hard",
@@ -2576,7 +2606,8 @@
       "line_net_sales",
       "campaign",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "campaign_join_path",
     "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
@@ -2601,7 +2632,7 @@
   {
     "id": "tpl_campaign_net_sales_q1_2026_0be558",
     "intentId": "campaign_net_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much did each promotion take in, net of tax, in January–March 2026?",
     "canonicalQuestion": "Turnover by campaign for Q1 2026.",
     "difficulty": "hard",
@@ -2610,7 +2641,8 @@
       "line_net_sales",
       "campaign",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "campaign_join_path",
     "notes": "Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
@@ -3009,7 +3041,7 @@
   {
     "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_a36878",
     "intentId": "herbal_tea_net_sales_monthly_nov_2025_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
     "canonicalQuestion": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
     "difficulty": "hard",
@@ -3018,7 +3050,8 @@
       "line_net_sales",
       "filter_product",
       "time_series",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -3048,7 +3081,7 @@
   {
     "id": "tpl_herbal_tea_net_sales_monthly_nov_2025_feb_2026_af98b0",
     "intentId": "herbal_tea_net_sales_monthly_nov_2025_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much did the Herbal Tea Variety Pack take, net of tax, in each month between November 2025 and February 2026?",
     "canonicalQuestion": "Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.",
     "difficulty": "hard",
@@ -3057,7 +3090,8 @@
       "line_net_sales",
       "filter_product",
       "time_series",
-      "date_range"
+      "date_range",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -3483,7 +3517,7 @@
   {
     "id": "tpl_kitchen_towels_qty_q1_2026_db17e4",
     "intentId": "kitchen_towels_qty_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many units of Kitchen Towels 4 Roll did we sell in Q1 2026?",
     "canonicalQuestion": "How many units of Kitchen Towels 4 Roll did we sell in Q1 2026?",
     "difficulty": "hard",
@@ -3492,7 +3526,8 @@
       "quantity",
       "filter_product",
       "scalar",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -3519,7 +3554,7 @@
   {
     "id": "tpl_kitchen_towels_qty_q1_2026_9d5e9a",
     "intentId": "kitchen_towels_qty_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Total quantity of Kitchen Towels 4 Roll sold in the first quarter of 2026.",
     "canonicalQuestion": "How many units of Kitchen Towels 4 Roll did we sell in Q1 2026?",
     "difficulty": "hard",
@@ -3528,7 +3563,8 @@
       "quantity",
       "filter_product",
       "scalar",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -3555,7 +3591,7 @@
   {
     "id": "tpl_cane_sugar_qty_monthly_q1_2026_382678",
     "intentId": "cane_sugar_qty_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Monthly quantity of Cane Sugar 2kg sold in Q1 2026.",
     "canonicalQuestion": "Monthly quantity of Cane Sugar 2kg sold in Q1 2026.",
     "difficulty": "hard",
@@ -3564,7 +3600,8 @@
       "quantity",
       "filter_product",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -3594,7 +3631,7 @@
   {
     "id": "tpl_cane_sugar_qty_monthly_q1_2026_f87077",
     "intentId": "cane_sugar_qty_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many units of Cane Sugar 2kg did we sell in each month of Q1 2026?",
     "canonicalQuestion": "Monthly quantity of Cane Sugar 2kg sold in Q1 2026.",
     "difficulty": "hard",
@@ -3603,7 +3640,8 @@
       "quantity",
       "filter_product",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -3633,7 +3671,7 @@
   {
     "id": "tpl_store_qty_mar_2026_4d7e63",
     "intentId": "store_qty_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Units per store location in March 2026.",
     "canonicalQuestion": "Units per store location in March 2026.",
     "difficulty": "hard",
@@ -3642,7 +3680,8 @@
       "quantity",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
@@ -3665,7 +3704,7 @@
   {
     "id": "tpl_store_qty_mar_2026_651565",
     "intentId": "store_qty_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many units left each of our locations in March 2026?",
     "canonicalQuestion": "Units per store location in March 2026.",
     "difficulty": "hard",
@@ -3674,7 +3713,8 @@
       "quantity",
       "store_location",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "notes": "Units are product units: the delivery-fee lines (NULL ProductId, Quantity 1) are not units sold, so the gold keeps product lines only (l.ProductId IS NOT NULL; a join to Product is equivalent), like the product-level unit cases.",
@@ -3837,7 +3877,7 @@
   {
     "id": "tpl_store_document_count_q1_2026_de8eff",
     "intentId": "store_document_count_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number of documents per store location in Q1 2026.",
     "canonicalQuestion": "Number of documents per store location in Q1 2026.",
     "difficulty": "medium",
@@ -3846,7 +3886,8 @@
       "document_count",
       "store_location",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT s.LocationName, COUNT(*) AS document_count FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY COUNT(*) DESC, s.LocationName ASC",
@@ -3866,7 +3907,7 @@
   {
     "id": "tpl_store_document_count_q1_2026_89c42b",
     "intentId": "store_document_count_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many documents came from each store in January–March 2026?",
     "canonicalQuestion": "Number of documents per store location in Q1 2026.",
     "difficulty": "medium",
@@ -3875,7 +3916,8 @@
       "document_count",
       "store_location",
       "aggregation",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT s.LocationName, COUNT(*) AS document_count FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY COUNT(*) DESC, s.LocationName ASC",
@@ -3895,7 +3937,7 @@
   {
     "id": "tpl_document_count_may_2026_7afacb",
     "intentId": "document_count_may_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many documents did we have in May 2026?",
     "canonicalQuestion": "How many documents did we have in May 2026?",
     "difficulty": "easy",
@@ -3903,7 +3945,8 @@
       "templated",
       "document_count",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01'",
     "expected_tables": [
@@ -3921,7 +3964,7 @@
   {
     "id": "tpl_document_count_may_2026_0fecfa",
     "intentId": "document_count_may_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number of documents dated May 2026.",
     "canonicalQuestion": "How many documents did we have in May 2026?",
     "difficulty": "easy",
@@ -3929,7 +3972,8 @@
       "templated",
       "document_count",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-05-01' AND d.DocumentDate < '2026-06-01'",
     "expected_tables": [
@@ -3947,7 +3991,7 @@
   {
     "id": "tpl_document_count_monthly_2026_bd4fed",
     "intentId": "document_count_monthly_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number of documents by month for 2026.",
     "canonicalQuestion": "Number of documents by month for 2026.",
     "difficulty": "hard",
@@ -3955,7 +3999,8 @@
       "templated",
       "document_count",
       "time_series",
-      "year"
+      "year",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -3982,7 +4027,7 @@
   {
     "id": "tpl_document_count_monthly_2026_891aba",
     "intentId": "document_count_monthly_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many documents did we record in each month of 2026?",
     "canonicalQuestion": "Number of documents by month for 2026.",
     "difficulty": "hard",
@@ -3990,7 +4035,8 @@
       "templated",
       "document_count",
       "time_series",
-      "year"
+      "year",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -4075,7 +4121,7 @@
   {
     "id": "tpl_store_receipt_count_2026_f470c5",
     "intentId": "store_receipt_count_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many store receipts were there in 2026?",
     "canonicalQuestion": "How many store receipts were there in 2026?",
     "difficulty": "medium",
@@ -4084,7 +4130,8 @@
       "document_count",
       "filter_document_type",
       "scalar",
-      "year"
+      "year",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Store Receipt%'",
@@ -4104,7 +4151,7 @@
   {
     "id": "tpl_store_receipt_count_2026_1d19d1",
     "intentId": "store_receipt_count_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number of Store Receipt documents dated in 2026.",
     "canonicalQuestion": "How many store receipts were there in 2026?",
     "difficulty": "medium",
@@ -4113,7 +4160,8 @@
       "document_count",
       "filter_document_type",
       "scalar",
-      "year"
+      "year",
+      "formerly_holdout"
     ],
     "failure_class": "entity_filter",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN DocumentType t ON d.DocumentTypeId = t.DocumentTypeId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2027-01-01' AND t.DocumentTypeName LIKE '%Store Receipt%'",
@@ -4245,7 +4293,7 @@
   {
     "id": "tpl_documents_posted_feb_2026_b4d3f2",
     "intentId": "documents_posted_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many documents have a posting date in February 2026?",
     "canonicalQuestion": "How many documents have a posting date in February 2026?",
     "difficulty": "medium",
@@ -4254,7 +4302,8 @@
       "document_count",
       "scalar",
       "single_month",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_date_column",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-02-01' AND d.PostingDate < '2026-03-01'",
@@ -4273,7 +4322,7 @@
   {
     "id": "tpl_documents_posted_feb_2026_f54d6b",
     "intentId": "documents_posted_feb_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Count the documents whose posting date falls in February 2026.",
     "canonicalQuestion": "How many documents have a posting date in February 2026?",
     "difficulty": "medium",
@@ -4282,7 +4331,8 @@
       "document_count",
       "scalar",
       "single_month",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_date_column",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-02-01' AND d.PostingDate < '2026-03-01'",
@@ -4301,7 +4351,7 @@
   {
     "id": "tpl_documents_due_apr_2026_6be86c",
     "intentId": "documents_due_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many documents fall due in April 2026?",
     "canonicalQuestion": "How many documents fall due in April 2026?",
     "difficulty": "medium",
@@ -4310,7 +4360,8 @@
       "document_count",
       "scalar",
       "single_month",
-      "due_date"
+      "due_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_date_column",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
@@ -4329,7 +4380,7 @@
   {
     "id": "tpl_documents_due_apr_2026_0cbf15",
     "intentId": "documents_due_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number of documents with a due date in April 2026.",
     "canonicalQuestion": "How many documents fall due in April 2026?",
     "difficulty": "medium",
@@ -4338,7 +4389,8 @@
       "document_count",
       "scalar",
       "single_month",
-      "due_date"
+      "due_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_date_column",
     "expected_sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'",
@@ -4539,7 +4591,7 @@
   {
     "id": "tpl_category_distinct_customers_mar_2026_483c88",
     "intentId": "category_distinct_customers_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many different customers bought each category in March 2026?",
     "canonicalQuestion": "How many different customers bought each category in March 2026?",
     "difficulty": "hard",
@@ -4548,7 +4600,8 @@
       "distinct_customers",
       "product_category",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "distinct_count",
     "expected_sql": "SELECT pc.CategoryName, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY COUNT(DISTINCT d.CustomerId) DESC, pc.CategoryName ASC",
@@ -4570,7 +4623,7 @@
   {
     "id": "tpl_category_distinct_customers_mar_2026_cd96b8",
     "intentId": "category_distinct_customers_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "For March 2026, count the distinct buyers of every category.",
     "canonicalQuestion": "How many different customers bought each category in March 2026?",
     "difficulty": "hard",
@@ -4579,7 +4632,8 @@
       "distinct_customers",
       "product_category",
       "aggregation",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "distinct_count",
     "expected_sql": "SELECT pc.CategoryName, COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY COUNT(DISTINCT d.CustomerId) DESC, pc.CategoryName ASC",
@@ -5053,7 +5107,7 @@
   {
     "id": "tpl_outstanding_balance_mar_2026_45fa9f",
     "intentId": "outstanding_balance_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "What is the total outstanding balance on documents dated March 2026?",
     "canonicalQuestion": "What is the total outstanding balance on documents dated March 2026?",
     "difficulty": "medium",
@@ -5061,7 +5115,8 @@
       "templated",
       "outstanding_balance",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "metric_column_confusion",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -5086,7 +5141,7 @@
   {
     "id": "tpl_outstanding_balance_mar_2026_c15bb6",
     "intentId": "outstanding_balance_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much is still unpaid on March 2026 sales?",
     "canonicalQuestion": "What is the total outstanding balance on documents dated March 2026?",
     "difficulty": "medium",
@@ -5094,7 +5149,8 @@
       "templated",
       "outstanding_balance",
       "scalar",
-      "single_month"
+      "single_month",
+      "formerly_holdout"
     ],
     "failure_class": "metric_column_confusion",
     "notes": "Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.",
@@ -5307,7 +5363,7 @@
   {
     "id": "tpl_outstanding_balance_monthly_q1_2026_59ffde",
     "intentId": "outstanding_balance_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Outstanding balance by document month for Q1 2026.",
     "canonicalQuestion": "Outstanding balance by document month for Q1 2026.",
     "difficulty": "hard",
@@ -5315,7 +5371,8 @@
       "templated",
       "outstanding_balance",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -5343,7 +5400,7 @@
   {
     "id": "tpl_outstanding_balance_monthly_q1_2026_9b1029",
     "intentId": "outstanding_balance_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "For each month of Q1 2026, how much of that month’s sales is still unpaid?",
     "canonicalQuestion": "Outstanding balance by document month for Q1 2026.",
     "difficulty": "hard",
@@ -5351,7 +5408,8 @@
       "templated",
       "outstanding_balance",
       "time_series",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM').",
@@ -5445,7 +5503,7 @@
   {
     "id": "tpl_account_debit_credit_q1_2026_96b9de",
     "intentId": "account_debit_credit_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Debit and credit totals by account name for sales dated in Q1 2026.",
     "canonicalQuestion": "Debit and credit totals by account name for sales dated in Q1 2026.",
     "difficulty": "hard",
@@ -5454,7 +5512,8 @@
       "accounting",
       "debit",
       "credit",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
@@ -5482,7 +5541,7 @@
   {
     "id": "tpl_account_debit_credit_q1_2026_a36558",
     "intentId": "account_debit_credit_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "For sales dated January to March 2026, list each account by name with its total debits and credits.",
     "canonicalQuestion": "Debit and credit totals by account name for sales dated in Q1 2026.",
     "difficulty": "hard",
@@ -5491,7 +5550,8 @@
       "accounting",
       "debit",
       "credit",
-      "quarter"
+      "quarter",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "notes": "Postings of non-canceled sales documents dated in the window (SalesDocument.DocumentDate), the convention of the core ledger cases. Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
@@ -5519,7 +5579,7 @@
   {
     "id": "tpl_account_debit_credit_posted_apr_2026_2218ff",
     "intentId": "account_debit_credit_posted_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "List each account by name with its debits and credits for postings dated April 2026.",
     "canonicalQuestion": "List each account by name with its debits and credits for postings dated April 2026.",
     "difficulty": "hard",
@@ -5529,7 +5589,8 @@
       "debit",
       "credit",
       "single_month",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_join_path",
     "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
@@ -5559,7 +5620,7 @@
   {
     "id": "tpl_account_debit_credit_posted_apr_2026_b2a856",
     "intentId": "account_debit_credit_posted_apr_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Using the posting date, what were the total debits and credits on each account in April 2026? Show the account names.",
     "canonicalQuestion": "List each account by name with its debits and credits for postings dated April 2026.",
     "difficulty": "hard",
@@ -5569,7 +5630,8 @@
       "debit",
       "credit",
       "single_month",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "wrong_join_path",
     "notes": "Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals). Rows are compared on the account name and the amounts (the code may be left out; an answer listing only codes fails, so the questions ask for the account names).",
@@ -5669,7 +5731,7 @@
   {
     "id": "tpl_revenue_credits_monthly_q1_2026_e1b20a",
     "intentId": "revenue_credits_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026.",
     "canonicalQuestion": "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026.",
     "difficulty": "hard",
@@ -5679,7 +5741,8 @@
       "credit",
       "time_series",
       "quarter",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
@@ -5710,7 +5773,7 @@
   {
     "id": "tpl_revenue_credits_monthly_q1_2026_4e91fe",
     "intentId": "revenue_credits_monthly_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How much was credited to ledger 4000 in each month of the first quarter of 2026, by posting date?",
     "canonicalQuestion": "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026.",
     "difficulty": "hard",
@@ -5720,7 +5783,8 @@
       "credit",
       "time_series",
       "quarter",
-      "posting_date"
+      "posting_date",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "notes": "A month can be labelled several ways; alternative_expected_sql accepts the same series labelled 'YYYY-MM-01', with the month number, with the month name, as 'Jan 2026' or as 'January 2026' (the gold uses 'YYYY-MM'). Ledger postings selected by AccountingPosting.PostingDate. Two readings are accepted: every posting in the window, manual journals included (the gold), and the same without the postings of canceled sales documents (alternative_expected_sql: LEFT JOIN SalesDocument with the cancel filter, which keeps manual journals).",
@@ -5970,7 +6034,7 @@
   {
     "id": "tpl_active_customers_without_sales_q1_2026_d84881",
     "intentId": "active_customers_without_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Which active customers had no sales in Q1 2026?",
     "canonicalQuestion": "Which active customers had no sales in Q1 2026?",
     "difficulty": "hard",
@@ -5978,7 +6042,8 @@
       "templated",
       "aggregation",
       "quarter",
-      "anti_join"
+      "anti_join",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "expected_sql": "SELECT c.CustomerName FROM Customer c WHERE c.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM SalesDocument d WHERE d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01') ORDER BY c.CustomerName ASC",
@@ -6001,7 +6066,7 @@
   {
     "id": "tpl_active_customers_without_sales_q1_2026_a927e0",
     "intentId": "active_customers_without_sales_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "List active customers who did not buy anything between January and March 2026.",
     "canonicalQuestion": "Which active customers had no sales in Q1 2026?",
     "difficulty": "hard",
@@ -6009,7 +6074,8 @@
       "templated",
       "aggregation",
       "quarter",
-      "anti_join"
+      "anti_join",
+      "formerly_holdout"
     ],
     "failure_class": "default_filter",
     "expected_sql": "SELECT c.CustomerName FROM Customer c WHERE c.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM SalesDocument d WHERE d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01') ORDER BY c.CustomerName ASC",
@@ -6032,7 +6098,7 @@
   {
     "id": "tpl_customers_bought_feb_not_mar_2026_a6915c",
     "intentId": "customers_bought_feb_not_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "How many customers bought in February 2026 but not in March 2026?",
     "canonicalQuestion": "How many customers bought in February 2026 but not in March 2026?",
     "difficulty": "hard",
@@ -6041,7 +6107,8 @@
       "scalar",
       "date_range",
       "anti_join",
-      "comparison"
+      "comparison",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "expected_sql": "WITH firstMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'), secondMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01') SELECT COUNT(DISTINCT f.CustomerId) AS customer_count FROM firstMonth f LEFT JOIN secondMonth s ON s.CustomerId = f.CustomerId WHERE s.CustomerId IS NULL",
@@ -6060,7 +6127,7 @@
   {
     "id": "tpl_customers_bought_feb_not_mar_2026_bbddd4",
     "intentId": "customers_bought_feb_not_mar_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Count the customers with a February 2026 purchase and none in March 2026.",
     "canonicalQuestion": "How many customers bought in February 2026 but not in March 2026?",
     "difficulty": "hard",
@@ -6069,7 +6136,8 @@
       "scalar",
       "date_range",
       "anti_join",
-      "comparison"
+      "comparison",
+      "formerly_holdout"
     ],
     "failure_class": "aggregation_shape",
     "expected_sql": "WITH firstMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01'), secondMonth AS (SELECT DISTINCT d.CustomerId FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01') SELECT COUNT(DISTINCT f.CustomerId) AS customer_count FROM firstMonth f LEFT JOIN secondMonth s ON s.CustomerId = f.CustomerId WHERE s.CustomerId IS NULL",
@@ -6280,7 +6348,7 @@
   {
     "id": "tpl_store_canceled_value_q1_2026_ae683a",
     "intentId": "store_canceled_value_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "Number and net value of canceled documents by store location in Q1 2026.",
     "canonicalQuestion": "Number and net value of canceled documents by store location in Q1 2026.",
     "difficulty": "hard",
@@ -6290,7 +6358,8 @@
       "aggregation",
       "quarter",
       "sales_document",
-      "canceled"
+      "canceled",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT s.LocationName, COUNT(*) AS document_count, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS canceled_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE d.IsCanceled = 1 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC",
@@ -6316,7 +6385,7 @@
   {
     "id": "tpl_store_canceled_value_q1_2026_570e8b",
     "intentId": "store_canceled_value_q1_2026",
-    "split": "holdout",
+    "split": "dev",
     "question": "For each store, how many documents were canceled between January and March 2026 and what were they worth (net)?",
     "canonicalQuestion": "Number and net value of canceled documents by store location in Q1 2026.",
     "difficulty": "hard",
@@ -6326,7 +6395,8 @@
       "aggregation",
       "quarter",
       "sales_document",
-      "canceled"
+      "canceled",
+      "formerly_holdout"
     ],
     "failure_class": "time_window",
     "expected_sql": "SELECT s.LocationName, COUNT(*) AS document_count, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS canceled_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE d.IsCanceled = 1 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY s.LocationName ASC",

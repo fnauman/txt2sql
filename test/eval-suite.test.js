@@ -81,10 +81,15 @@ test('the default suite is every committed dataset, de-duplicated to the unique 
   assert.equal(suite.duplicates.length, 9);
   assert.ok(suite.duplicates.every((entry) => entry.reason === 'same case id' && entry.dataset === 'edge-cases-public'));
   assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 140);
-  const holdout = await selectSuite({ split: 'holdout' });
-  assert.equal(holdout.entries.length, 81);
-  assert.equal(new Set(holdout.entries.map((entry) => entry.testCase.intentId)).size, 45);
-  assert.equal((await selectSuite({ split: 'dev' })).entries.length, 255 - 81);
+  // The retired holdout (81 cases, 45 intents) is dev now, tagged
+  // formerly_holdout; a fresh holdout is authored blind and frozen by
+  // datasets/holdout-manifest.json. Until it lands, --split holdout selects
+  // nothing (an empty selection is a harness error).
+  await assert.rejects(selectSuite({ split: 'holdout' }), (error) => error.code === 'EMPTY_SELECTION');
+  assert.equal((await selectSuite({ split: 'dev' })).entries.length, 255);
+  const formerly = await selectSuite({ tags: ['formerly_holdout'] });
+  assert.equal(formerly.entries.length, 81);
+  assert.equal(new Set(formerly.entries.map((entry) => entry.testCase.intentId)).size, 45);
   // The pre-existing datasets alone are still the 26 cases over 17 intents.
   const legacy = await selectSuite({ datasetNames: ['core-public', 'paraphrase-public', 'edge-cases-public'] });
   assert.equal(legacy.entries.length, 26);

@@ -398,21 +398,33 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   assert.equal(report.attribution.system.retrievalMisses, 0);
   assert.equal(flagged.length, 1);
   assert.equal(report.stats.strictAccuracy.value, Number((passes / answer.length).toFixed(4)));
-  assert.deepEqual(report.stats.bySplit.map((entry) => entry.key), ['dev', 'holdout']);
+  // The splits in the suite: the retired holdout is dev (formerly_holdout);
+  // a fresh, blind holdout may or may not have landed.
+  const holdoutAnswers = answer.filter((testCase) => testCase.split === 'holdout');
+  assert.deepEqual(report.stats.bySplit.map((entry) => entry.key), holdoutAnswers.length ? ['dev', 'holdout'] : ['dev']);
   assert.equal(report.stats.bySplit.reduce((sum, entry) => sum + entry.cases, 0), answer.length);
 
   const markdown = await fs.readFile(reportPath.replace(/report\.json$/, 'report.md'), 'utf8');
   assert.match(markdown, new RegExp(`Behaviour cases: abstain/clarify — ${behavior.length} cases, 1 handled correctly\\.`));
-  assert.match(markdown, /By split: dev [\d.]+% \(\d+ cases\) · holdout [\d.]+% \(\d+ cases\)\./);
+  if (holdoutAnswers.length) {
+    assert.match(markdown, /By split: dev [\d.]+% \(\d+ cases\) · holdout [\d.]+% \(\d+ cases\)\./);
+  }
   assert.match(markdown, /## Behaviour cases \(abstain \/ clarify\)/);
   assert.match(run.stdout, /ok   hard_abstain_competitor_prices: declined \(expects abstain\)/);
 
-  // --split holdout runs only holdout cases.
+  // --split holdout runs only holdout cases (and, with none, stops before any LLM call).
+  const before = llmRequests;
   const holdout = await runEval(['--split', 'holdout', '--concurrency', '4', '--skip-verify'], 'holdout');
-  assert.equal(holdout.code, 0, `${holdout.stdout}\n${holdout.stderr}`);
-  const { report: holdoutReport } = await findReport(holdout.outputDir);
-  assert.ok(holdoutReport.results.length > 0 && holdoutReport.results.every((record) => record.split === 'holdout'));
-  assert.equal(holdoutReport.suite.filters.split, 'holdout');
+  if (cases.some((testCase) => testCase.split === 'holdout')) {
+    assert.equal(holdout.code, 0, `${holdout.stdout}\n${holdout.stderr}`);
+    const { report: holdoutReport } = await findReport(holdout.outputDir);
+    assert.ok(holdoutReport.results.length > 0 && holdoutReport.results.every((record) => record.split === 'holdout'));
+    assert.equal(holdoutReport.suite.filters.split, 'holdout');
+  } else {
+    assert.equal(holdout.code, 2, `${holdout.stdout}\n${holdout.stderr}`);
+    assert.match(`${holdout.stdout}${holdout.stderr}`, /No cases matched the selection \(split=holdout\)/);
+    assert.equal(llmRequests, before, 'no LLM call for an empty selection');
+  }
 });
 
 test('behaviour-only selections: the benchmark profile fails an answered case; --min-accuracy is refused before any LLM call', { skip }, async () => {

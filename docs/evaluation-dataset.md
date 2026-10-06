@@ -34,11 +34,15 @@ traces, private database dumps, or customer/vendor-specific examples here.
 
 ## Dataset composition
 
-The default suite is every `datasets/*.json`, de-duplicated (the edge suite
-repeats the 9 core cases, which run once): **255 unique cases over 140
-intents**, 45 of them holdout.
+The default suite is every `datasets/*.json` (the holdout manifest
+`datasets/holdout-manifest.json` is not a dataset), de-duplicated (the edge
+suite repeats the 9 core cases, which run once): **255 unique cases over 140
+intents**, all of them dev today. The 81 cases (45 intents) that were holdout
+until the Experiment 1 error analysis looked at them are dev now, tagged
+`formerly_holdout`; a fresh holdout is being authored blind (see
+[Splits and the holdout policy](#splits-and-the-holdout-policy)).
 
-| Dataset | Cases | Intents | Intents of its own | Holdout intents (cases) | Behaviour cases | Known validator rejections | Cases with alternative gold |
+| Dataset | Cases | Intents | Intents of its own | Formerly holdout intents (cases) | Behaviour cases | Known validator rejections | Cases with alternative gold |
 |---|---|---|---|---|---|---|---|
 | `core-public` | 9 | 9 | 9 | 0 | 0 | 0 | 2 |
 | `paraphrase-public` | 9 | 9 | 0 (paraphrases of core) | 0 | 0 | 0 | 2 |
@@ -48,7 +52,7 @@ intents**, 45 of them holdout.
 | **Suite (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **1** | |
 
 The original three datasets hold 17 intents; the templated and hard-case
-datasets add 123. Dev: 174 cases over 95 intents.
+datasets add 123.
 
 Strict accuracy counts the 245 answer cases (130 intents); the 10 behaviour
 cases are reported separately (see [Behaviour cases](#behaviour-cases-abstain--clarify)).
@@ -82,7 +86,7 @@ least 6 unanimous case flips (about 35% of the suite) before a method change
 could show as significant. With 245 answer cases (130 intents) the same 6
 flips are 2.4% of the suite, and the intent-clustered interval is narrower.
 
-## Splits and why the holdout matters
+## Splits and the holdout policy
 
 Every case carries `split: 'dev' | 'holdout'` (a missing split reads as dev;
 any other value is an error in `normalizeBenchmarkCase`, and verify-dataset
@@ -90,44 +94,39 @@ names every case with one). All phrasings of an intent share its split, and
 one gold SQL belongs to one intent (so a holdout case is never a dev query in
 other words).
 
-- **dev**: the original core, paraphrase and edge cases (the prompt rules, the
-  few-shot pool and the semantic layer were tuned on their wording), and the
-  new intents the hash puts there.
-- **holdout**: a new intent is holdout when the first 32 bits of
-  `sha256(intentId)`, mod 100, are below 42 (`splitForIntent` in
-  `scripts/build-eval-dataset.mjs`; the hard cases use the same rule). That
-  puts 45 of the 123 new intents (37%) in the holdout. A hard case that
-  rephrases an existing intent (a Swedish version of a core case, a typo of a
-  templated one) inherits that intent's split.
-- **Holdout wording** (enforced by the generator and by
-  `test/dataset-hygiene.test.js` over every dataset): a holdout question
-  contains no multi-word phrase of `metadata/semantic-layer.json` (entity,
-  metric and filter-hint synonyms, value aliases, clarification triggers;
-  whole words, plurals included), and none of the single-word metric synonyms
-  the layer *enforces* (today only "revenue", the net-sales synonym a metric
-  guardrail acts on; master-data names such as the "Sales Revenue" account
-  aside). Holdout questions therefore say "turnover", "net takings", "net of
-  tax" or "net amount" where dev questions say "net sales" or "net revenue".
-  Single-word entity synonyms (customer, store, product, units, documents) and
-  the advisory words ("sales", "sold") still match the layer: they are the
-  only names of those things.
+- **dev**: everything the product may be tuned on: the original core,
+  paraphrase and edge cases (the prompt rules, the few-shot pool and the
+  semantic layer were tuned on their wording), the templated and hard-case
+  intents, and the **formerly holdout** cases (tag `formerly_holdout`).
+- **holdout**: none today. Until the measurement-hygiene change a hash rule
+  put 45 of the 123 templated and hard-case intents (81 cases) in the
+  holdout (`wasHoldoutIntent` in `scripts/build-eval-dataset.mjs`: the first
+  32 bits of `sha256(intentId)`, mod 100, below 42). The error analysis of
+  the Experiment 1 failures read every failing case, holdout ones included,
+  and some proposed fixes were designed from holdout failures (15 of the 18
+  "turnover" questions were holdout), so those cases could no longer
+  estimate generalization: they are dev now, tagged `formerly_holdout`
+  (`--tag formerly_holdout` selects them; report.md's tag breakdown shows
+  them as a group). A fresh holdout is being authored blind, on new intents
+  and new wording, and joins the suite with its manifest (below).
+- **Holdout wording** (enforced by `test/dataset-hygiene.test.js` over every
+  holdout case of every dataset): a holdout question contains no multi-word
+  phrase of `metadata/semantic-layer.json` (entity, metric and filter-hint
+  synonyms, value aliases, clarification triggers; whole words, plurals
+  included), and none of the single-word metric synonyms the layer
+  *enforces* (today only "revenue", the net-sales synonym a metric guardrail
+  acts on; master-data names such as the "Sales Revenue" account aside).
+  Single-word entity synonyms (customer, store, product, units, documents)
+  and the advisory words ("sales", "sold") still match the layer: they are
+  the only names of those things.
 
-So dev measures the product on the wording it was tuned on, and holdout on new
-intents in partly new wording. A dev score well above the holdout score is
-what the tuning would show, but the splits also differ in their intents, so it
-does not prove it (see the limit below). Keep it that way: **never tune the
-prompt rules, the few-shot pool or the semantic layer on holdout wording**,
-and add a synonym that a holdout question uses only together with a fresh
-holdout. Limit: the holdout
-mixes two effects, unseen intents and unseen vocabulary (dev and holdout
-wording differ systematically: "revenue" versus "turnover" / "takings"), so a
-gap does not say which one hurts; several holdout questions are known
-validator rejections for exactly that reason (for "turnover" by product,
-brand, category or campaign, retrieval leaves out `SalesDocument` or
-`SalesDocumentLine`).
+Limit: a holdout whose wording avoids the semantic layer mixes two effects,
+unseen intents and unseen vocabulary, so a dev / holdout gap does not say
+which one hurts.
 
-Run one split with `npm run eval -- --split holdout` (or `dev`); report.md
-breaks every run down by split.
+Run one split with `npm run eval -- --split dev` (or `holdout`; with no
+holdout case that is an empty selection, exit 2); report.md breaks every run
+down by split.
 
 ## The templated generator
 
@@ -180,8 +179,10 @@ of our locations in March 2026?", "Put total net takings for March 2025 next to
 March 2026 in one row."). A phrasing that a careful analyst could read two
 ways is reworded rather than silently resolved by the gold ("each category and
 store combination that had sales", "the customers who bought in November",
-"all document types included", "have a posting date in February"). Holdout
-phrasings follow the holdout wording rule (above).
+"all document types included", "have a posting date in February"). The
+generator writes dev cases only; the intents the retired hash rule held out
+keep their holdout-style wording ("turnover", "net takings") and the tag
+`formerly_holdout`.
 
 **Ids** are `tpl_<intentId>_<first 6 hex of sha256(question)>`: editing a
 question gives a new id, so an id is never reused for a different question
@@ -407,10 +408,9 @@ problem in every scope. See
 
 1. **Templated** (preferred for answerable questions): add an entry to
    `INTENTS` in `scripts/build-eval-dataset.mjs` (template, metric,
-   dimensions, window, filters, shape, 2-3 phrasings). Run `npm run
-   build-eval-dataset`; if the intent is holdout, the build names any
-   semantic-layer phrase to remove (and the hygiene test any enforced metric
-   word). Then on seeded fixtures run `npm run verify-dataset -- --dataset
+   dimensions, window, filters, shape, 2-3 phrasings). The case is dev (the
+   generator writes no holdout). Run `npm run build-eval-dataset`. Then on
+   seeded fixtures run `npm run verify-dataset -- --dataset
    templated-public --write-pins`, run the generator again, and `npm run
    verify-dataset`. Controls come with the template. A survivor means one of
    three things: the family cannot change this intent's answer (add it to
@@ -419,8 +419,8 @@ problem in every scope. See
    break another designed property (add it to `NOT_EMITTED` with that fixture
    limit, and list it under [Known blind spots](#known-blind-spots)).
 2. **Hand-written** (hard cases, or a shape no template covers): add the case
-   to `datasets/hard-cases-public.json` with `split: splitForIntent(intentId)`
-   (or the intent and split of the existing intent whose gold it shares), a
+   to `datasets/hard-cases-public.json` with `split: 'dev'` (and the intent
+   of the existing intent whose gold it shares, if any), a
    gold that follows the conventions above (a scalar gold returns one row), a
    comparison block, `notes` for any alternative reading, and
    tags/`failure_class`; add its id and question hash to
