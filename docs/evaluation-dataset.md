@@ -574,9 +574,14 @@ comparison: {
   must be monotonic in `order` (tie reordering by label is tolerated; NULL
   metrics sort last; values compare as cells match, so two values that both
   match one gold value tie: rounded to `decimals`, a NULL under
-  `null_as_zero` and 0.004 tie at two decimals; with a tolerance, values within
-  twice it tie, as 9.992 and 10.008 both match a gold 10 at 0.01). The default ranking column is the first truly numeric
-  gold column, never a numeric-looking code string.
+  `null_as_zero` and 0.004 tie at two decimals. With a tolerance the ranking
+  follows the row matching: the gold rows the prediction's rows pair with
+  must come in the gold's ranking order, so two rows tie only when they pair
+  with equal gold values, as 9.992 and 10.008 both pairing with a gold 10 at
+  0.01; gold rows 10.015 and 10 are distinct ranks even though their values
+  are within twice the tolerance, and at a cut-off the boundary rows and
+  their ties rank as one tie). The default ranking column is the first truly
+  numeric gold column, never a numeric-looking code string.
 - **Ties at the cut-off** (ranked only): when a gold variant returns as many
   rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), the
   oracle reads it past that `LIMIT` and passes the left-out rows as

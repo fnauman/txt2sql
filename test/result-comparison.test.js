@@ -261,6 +261,42 @@ test('ranked: under a tolerance, two values that both match one gold value tie, 
   assert.equal(compareResultsDetailed(distinct, [distinct[0], distinct[2], distinct[1]], tolerant).reason, 'ranking');
 });
 
+test('ranked: under a tolerance, a tie is two rows matched to equal gold values, not two values within twice it', () => {
+  const tolerant = { mode: 'ranked', order: 'desc', value_columns: ['v'], tolerance: 0.01 };
+  // 10.015 and 10 are distinct gold ranks; no gold value matches both, and the
+  // 0.015 inversion is no tie although it is under twice the tolerance.
+  const gold = [
+    { name: 'A', v: 10.015 },
+    { name: 'B', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(gold, [gold[1], gold[0]], tolerant).reason, 'ranking');
+  assert.equal(compareResultsDetailed(gold, [{ name: 'B', v: 10.009 }, { name: 'A', v: 10.006 }], tolerant).reason, 'ranking');
+  assert.deepEqual(
+    [compareResultsDetailed(gold, gold, tolerant).reason, compareResultsDetailed(gold, [{ name: 'A', v: 10.006 }, { name: 'B', v: 10.009 }], tolerant).reason],
+    ['match', 'match']
+  );
+  // Within the tolerance of each other, distinct gold values are still
+  // distinct ranks: the labels pair each row with its own gold row.
+  const near = [
+    { name: 'A', v: 10.008 },
+    { name: 'B', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(near, [near[1], near[0]], tolerant).reason, 'ranking');
+  assert.equal(compareResultsDetailed(near, [{ name: 'A', v: 10 }, { name: 'B', v: 10.008 }], tolerant).reason, 'match');
+  // Ascending, and with the ranking column elsewhere than first.
+  const asc = { ...tolerant, order: 'asc' };
+  const ascGold = [
+    { v: 10, name: 'B' },
+    { v: 10.015, name: 'A' },
+  ];
+  assert.equal(compareResultsDetailed(ascGold, [ascGold[1], ascGold[0]], asc).reason, 'ranking');
+  assert.equal(compareResultsDetailed(ascGold, ascGold, asc).reason, 'match');
+  // NULL metric rows still sort anywhere without breaking the order of the rest.
+  const withNull = [...gold, { name: 'C', v: null }];
+  assert.equal(compareResultsDetailed(withNull, [withNull[2], withNull[0], withNull[1]], tolerant).reason, 'match');
+  assert.equal(compareResultsDetailed(withNull, [withNull[1], withNull[2], withNull[0]], tolerant).reason, 'ranking');
+});
+
 // Behavior change (EVAL-1 / ORACLE-10): signal checks and the disallowed-column
 // lint used to turn a value match into 'low_signal_success' /
 // 'disallowed_column_used' failures. Only values decide now; both are warnings.
