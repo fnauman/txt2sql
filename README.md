@@ -414,7 +414,10 @@ with 0 everywhere, and a scalar total may be empty where the gold is NULL /
 A case can be flagged as a known product gap (the validator rejects every
 correct answer today; five cases, where a guardrail misreads a ledger account
 name or the word "credit": one dev, four holdout); it still counts in
-accuracy, and its failures are system errors. The report contains:
+accuracy, and a repetition that ends with the validator rejecting it with the
+flagged code is a system error (any other failure of it, such as a wrong
+result or a rejection for another reason, is judged as usual). The report
+contains:
 
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval
@@ -433,7 +436,7 @@ whole 404-case suite, 3 repetitions, full-schema prompting via the default
 |---|---|
 | Strict accuracy (392 answer cases, 205 intents) | **62.2%** (95% CI 57.5%–66.8%) |
 | By split | dev **74.7%** (245 cases) · fresh holdout **41.3%** (147 cases) |
-| Failures by cause (repetitions) | model 430 · system 15 (known validator rejections only; no retrieval misses, no guardrail false rejections) · infrastructure 0 |
+| Failures by cause (repetitions) | model 445 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
 | Guardrails over every attempt | precision 100%, recall 18.0%, false-rejection rate 0% |
 | Abstain / clarify cases handled | 0 of 12 (the product always answers; not in accuracy) |
 | Cost and latency | $0.54 total · $0.00074 per correct answer · p50 2.5 s, p95 5.2 s · 91.5% of prompt tokens cached |
@@ -447,7 +450,12 @@ questions: the holdout leans on analytical shapes the dev set barely covers
 month-over-month change, weekday and value-band breakdowns) and on unfamiliar
 wording, so dev accuracy overstates what a new user's questions would get.
 With perfect SQL the suite's ceiling is 98.7% (5 cases are known validator
-rejections); every other failure is a model error. On the earlier 255-case
+rejections: the validator rejects their correct answers); every failure of
+this baseline is a model error, including those on the flagged cases, none of
+which ended in the flagged rejection. (The failure causes come from
+`npm run eval -- --offline`, which recomputes them; the attribution recorded
+inside `eval/baselines/gpt-4o-mini.json` predates the fix that limits the
+system bucket to the flagged rejection and still says model 430 · system 15.) On the earlier 255-case
 suite, [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema
 prompting) moved strict accuracy from 68.8% to 72.8%. These are measurements
 of the product, not targets.

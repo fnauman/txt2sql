@@ -557,14 +557,18 @@ holdout is looked at in aggregate only).
   and report.md's Verification section), so a product change that closes the
   gap can be measured, live or with `--offline --gate`, before the dataset is
   updated; the dataset change then follows in the same pull request.
-- In a run the case counts in strict accuracy like any other, but **every
-  failure of it is a system error**: a model-bucket outcome (`wrong_result`,
-  `guardrail_true_rejection`, ...) of a flagged case is tagged
-  `known_validator_rejection` and moved to the system bucket, because no
-  model can pass a question whose every correct answer the validator rejects
-  (`report.json`'s `attribution.system.knownValidatorRejections`, the
-  Attribution section of report.md and the console headline count them). A
-  correct answer the validator throws away is, as for any case,
+- In a run the case counts in strict accuracy like any other, and **the
+  flagged rejection is a system error**: a repetition of a flagged case whose
+  final attempt the validator rejected (guardrail or safety layer) with the
+  flagged code is tagged `known_validator_rejection` and moved to the system
+  bucket, because no model can get an answer to that question past the
+  validator (`report.json`'s `attribution.system.knownValidatorRejections`,
+  the Attribution section of report.md and the console headline count them).
+  The flag describes the validator rejecting the correct gold, not every
+  possible answer: any other failure of a flagged case (a wrong result, an
+  execution error, a rejection with a different code such as `FAN_OUT`) is
+  attributed as for any other case, normally to the model. A correct answer
+  the validator throws away is, as for any case,
   `guardrail_false_rejection`.
 
 **Retrieval misses and the schema scope.** Validation follows the product
@@ -1210,7 +1214,7 @@ rule).
   | `llm_error` | model | counted | truncated, refused or unusable output |
   | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a repetition that would otherwise be a model failure |
   | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not in the allow-list (retrieved schema scope only: in the full scope every in-scope table is allowed) |
-  | any model outcome tagged `known_validator_rejection` | system | counted | a failure of a case flagged `known_validator_rejection`: the validator rejects every correct answer to it today |
+  | `guardrail_true_rejection` / `safety_rejection` tagged `known_validator_rejection` | system | counted | a case flagged `known_validator_rejection` whose final attempt the validator rejected with the flagged code: it rejects every correct answer to it today (any other failure of a flagged case is attributed as usual) |
   | `timeout` / `aborted` | infra | counted | the case deadline fired |
   | `infra_error` | infra | excluded | the database failed (in the product loop, a gold query, or a guardrail re-check: tagged `guardrail_unverified`) |
   | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/404/429/5xx, unknown model (`LLM_MODEL_NOT_FOUND`) |
@@ -1405,8 +1409,13 @@ at commit `e42828b`: gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
 255, fresh holdout 149), compact file 2.10 MB. It includes every
 measurement-hygiene change: the [scoring relaxations](#scoring-relaxations),
-the [gold conventions](#gold-conventions), known validator rejections counted
-as system errors, the retired (now dev) holdout and the audited fresh holdout.
+the [gold conventions](#gold-conventions), known validator rejections, the
+retired (now dev) holdout and the audited fresh holdout. The attribution below
+is the offline rescore's (`npm run eval -- --offline`, which recomputes it):
+the attribution recorded inside the committed file predates the fix that
+books only the flagged rejection of a flagged case as a system error (it says
+model 430 · system 15, counting every failure of the five flagged cases);
+strict accuracy and the splits are the same either way.
 
 | Measure | Result |
 |---|---|
@@ -1414,7 +1423,7 @@ as system errors, the retired (now dev) holdout and the audited fresh holdout.
 | Majority-pass cases | 244/392 (Wilson 95% 57.4%–66.9%) |
 | Intent-clustered accuracy | 60.6% (95% CI 54.7%–66.3%) |
 | By split | dev 74.7% (245 cases) · fresh holdout 41.3% (147 cases) |
-| Attribution (repetitions) | pass 731 · model 430 · system 15 (known validator rejections 15; retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Attribution (repetitions) | pass 731 · model 445 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
 | Guardrail confusion (1,261 attempts) | 94 wrong SQL caught, 0 correct SQL rejected, 429 wrong SQL accepted; precision 100%, recall 18.0% |
 | Behaviour cases | 0 of 12 handled (abstain / clarify) |
 | Cost | $0.5406 total · $0.00045 per question · $0.00074 per correct answer · 91.5% of prompt tokens cached |
@@ -1436,9 +1445,13 @@ How to read it:
   holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
   readings, 2 rewordings, 1 wrong gold). The rest of the difference is
   run-to-run variation between two live runs.
-- **System failures.** The 15 system repetitions are the 5 cases flagged
-  `known_validator_rejection` (`METRIC_COLUMN`), which cap strict accuracy at
-  98.7% with perfect SQL. Everything else is a model error.
+- **System failures.** None. The 5 cases flagged
+  `known_validator_rejection` cap strict accuracy at 98.7% with perfect SQL,
+  but none of gpt-4o-mini's 15 failed repetitions on them ended in the flagged
+  rejection: they were wrong results or rejections of wrong SQL with another
+  code (the dev case's retries, for example, were rejected for `FAN_OUT`), so
+  they are model errors like every other failure (case majority: model 148,
+  system 0).
 - **Dev stability.** Paired with the previous (255-case) baseline on the 202
   dev cases whose scoring did not change: 75.6% → 75.3%, 3 flips each way,
   exact McNemar p = 1.0.
