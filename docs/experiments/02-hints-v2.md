@@ -2,7 +2,7 @@
 
 **Variable:** `HINTS_VERSION`, from `1` (the committed baseline's prompt
 knowledge) to `2` (the new default).
-**Status:** offline measurements done; live run pending.
+**Status:** offline measurements done; live run pending (the offline numbers re-measured after the review fixes).
 **Source:** the error analysis of the 66 failing cases of the Experiment 1
 baseline, and the skeptic review's first recommendation ("Exp A: pipeline
 de-poisoning plus knowledge-only semantic layer").
@@ -168,10 +168,17 @@ not checked, and "store location" (entity `store_location`) occurs in five
 committed holdout questions under both versions; closing it needs a dataset
 change.
 
-**The comparison:** a paid `--repeat 3` run with the default setting
-(`HINTS_VERSION` unset = 2), paired against the committed baseline (hints
-version 1, recorded as not recorded). With no dataset change the pairing is
-complete (245 answer cases).
+**The comparison:** arm A is hints version 1, arm B version 2, everything
+else fixed. This branch is to be rebased onto the dataset-hygiene branch
+(inspected holdout moved to dev, baseline refreshed); arm A is then that
+refreshed `eval/baselines/gpt-4o-mini.json` (a version-1 run: recorded as
+`hintsVersion: 1`, or as not recorded when it predates the switch). Before
+paying, `HINTS_VERSION=1 npm run eval -- --offline` must reproduce the
+refreshed baseline with 0 flips (the rebase kept version 1 byte for byte).
+Arm B is one paid `--repeat 3` run with `HINTS_VERSION=2` (the default),
+paired automatically against arm A; the pairing covers the answer cases both
+reports share, which the run prints. A same-day `HINTS_VERSION=1 --repeat 3`
+run is an optional drift control.
 
 **Confounds, stated up front:** version 2 changes the system prompt for every
 question (8,409 vs 5,670 characters of instructions) and the question-specific
@@ -192,9 +199,11 @@ All with zero LLM calls, on freshly seeded fixtures (seed `094282546fe5`, v2
   base branch's system prompt, user prompt (sha256), allow-list and semantic
   plan, in the full and the retrieved scope;
   `test/schema-scope.test.js` still reproduces main's retrieved-scope prompts.
-- The question-specific context of all 255 suite questions under
-  `HINTS_VERSION=1` equals the base branch's; the prompt version is the
-  committed baseline's.
+- The question-specific context, temporal references, entity / metric /
+  filter / join matches and default filters of all 255 suite questions under
+  `HINTS_VERSION=1` equal the base branch's (a dump from the base commit's
+  tree, compared field by field; the system prompt is identical too); the
+  prompt version is the committed baseline's.
 - Rescore of the committed baseline with `HINTS_VERSION=1`: 72.8%
   (179/245 majority passes), 0 flips — the baseline exactly.
 
@@ -253,17 +262,17 @@ characters / 4):
 
 | Per question | Version 1 | Version 2 |
 |---|---|---|
-| Prompt | 4,127 est. tokens | 4,875 est. tokens (+18%) |
+| Prompt | 4,127 est. tokens | 4,874 est. tokens (+18%) |
 | Cacheable prefix (system + schema) | 3,676 | 4,361 (+685: the rewritten and added rules) |
-| Question part | 451 | 514 |
+| Question part | 451 | 513 |
 | Distinct cacheable prefixes | 1 | 1 |
 
 ### Plan changes over the suite
 
 Of the 255 questions under version 2: 27 lose a temporal range, 26 of them wrong (17 pass
 today), 55 lose document display columns, 51 relevance hints lose an
-accidental column, 66 have different metric matches, 39 different join hints
-(the `ProductBrand` bridge hints are gone), 82 different default filters. The
+accidental column, 66 have different metric matches, 40 different join hints
+(the `ProductBrand` bridge hints are gone), 83 different default filters. The
 few-shot examples are the same for every question. Under
 `SCHEMA_SCOPE=retrieved` (not the default) retrieval misses fall from 33 to 25
 golds and none is added.
@@ -280,6 +289,11 @@ HINTS_VERSION=1 npm run verify-dataset
 # rescore of the committed baseline (no LLM calls)
 npm run eval -- --offline
 HINTS_VERSION=1 npm run eval -- --offline
+# no eval wording in the v2 prompt text
+node --test test/few-shot-leakage.test.js
+# prompt size over the suite
+HINTS_VERSION=1 npm run measure-prompt-cache -- --suite
+npm run measure-prompt-cache -- --suite
 # ceiling: point OPENAI_BASE_URL at a local server that answers each case's gold SQL, then
 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval -- --skip-verify --no-baseline
 HINTS_VERSION=1 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval -- --skip-verify --no-baseline
