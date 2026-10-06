@@ -227,7 +227,8 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
   assert.equal(report.behavior.handled, 0);
   assert.deepEqual(summarizeBehavior(records), report.behavior);
 
-  const markdown = renderReportMarkdown(report);
+  // Every case shown (--reveal-holdout): the abstain case is a holdout case.
+  const markdown = renderReportMarkdown(report, { revealHoldout: true });
   assert.match(markdown, /## Behaviour cases \(abstain \/ clarify\)\n\nBehaviour cases: abstain\/clarify — 2 cases, 0 handled correctly\./);
   assert.match(markdown, /By split: dev 100\.0% \(1 case\) · holdout 50\.0% \(1 case\)\./);
   assert.match(markdown, /\| hard_clarify_best_customer \| Who is our best customer\? \| 1\/2 declined \| answered_instead_of_clarify \| expects clarify, model \|/);
@@ -238,7 +239,7 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
     [{ entry: { testCase: normalizeBenchmarkCase({ id: 's1', question: 'Skipped?', expected_sql: "SELECT 's1'" }), datasets: ['d'] }, repetitions: [{ status: 'skipped_budget', attempts: [] }] }],
     { checkGuardrails: false }
   );
-  const withSkipped = renderReportMarkdown(reportOf([...records, skipped]));
+  const withSkipped = renderReportMarkdown(reportOf([...records, skipped]), { revealHoldout: true });
   assert.match(withSkipped, /Excluded from accuracy: skipped_budget 1; 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
   // The headline's denominator is the answer cases (3), not every selected
   // case (5): accuracy is over 3 - 1 = 2 cases.
@@ -246,9 +247,17 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
   assert.doesNotMatch(withSkipped, /of 5 selected case/);
   assert.doesNotMatch(markdown, /had no counted repetition/);
   assert.match(renderReportMarkdown(reportOf(records.filter((record) => record.expected_behavior === 'answer'))), /Excluded from accuracy: none\./);
-  const headline = renderHeadline(report);
+  const headline = renderHeadline(report, { revealHoldout: true });
   assert.match(headline, /Behaviour cases: abstain\/clarify — 2 cases, 0 handled correctly\. \(not in accuracy\)/);
   assert.match(headline, /By split: dev 100\.0% \(1\) · holdout 50\.0% \(1\)/);
+  // By default the behaviour summary covers the listed (dev) case and only
+  // counts the holdout one (holdout display policy).
+  const hidden = renderReportMarkdown(report);
+  assert.match(hidden, /Behaviour cases: abstain\/clarify — 1 case, 0 handled correctly\. Not counted here: 1 holdout abstain\/clarify case\(s\), outcomes not shown\./);
+  assert.match(hidden, /\| clarify \| 1 \| 0\/1 \| answered_instead_of_clarify 1 \|/);
+  assert.doesNotMatch(hidden, /\| abstain \| 1 \||answered_instead_of_abstain 1/);
+  assert.match(hidden, /Excluded from accuracy: 1 abstain\/clarify case \(2 repetitions; see Behaviour cases\); 1 holdout abstain\/clarify case\(s\) \(not listed\)\./);
+  assert.match(renderHeadline(report), /Behaviour cases: abstain\/clarify — 1 case, 0 handled correctly\. Not counted here: 1 holdout abstain\/clarify case\(s\), outcomes not shown\. \(not in accuracy\)/);
 });
 
 test('a comparison never pairs behavior cases; a selection of only behavior cases is not a harness failure', async () => {

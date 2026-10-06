@@ -1252,8 +1252,12 @@ rule).
   split line and rows only; the case tables, the behaviour-case table, the
   comparison's flip and exclusion lists and the console's progress, rescore
   and flip lines leave them out and count them ("N holdout case(s) not
-  listed"), and the failure-class, difficulty and tag breakdowns cover dev
-  cases. `--reveal-holdout` lists them. See
+  listed"), and the failure-class, difficulty and tag breakdowns, the
+  attribution tables, the guardrail confusion matrix and the behaviour
+  summary (report.md and the console) cover dev cases, so that subtracting
+  the listed dev rows from a total cannot give a holdout outcome away;
+  holdout behaviour cases are counted, without their outcomes (they are not
+  in the split accuracy). `--reveal-holdout` lists them. See
   [Splits and the holdout policy](#splits-and-the-holdout-policy).
 - **Cases**: id, question, passes / counted repetitions (declined / counted
   for behaviour cases), the case outcome and its attribution. The case

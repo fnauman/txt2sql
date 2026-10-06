@@ -23,9 +23,13 @@ async function reportWith(outcomes, { comparisonWith = null } = {}) {
     dev_flip: testCase('dev_flip', { tags: ['shared'], failure_class: 'grain_confusion' }),
     secret_holdout_case: testCase('secret_holdout_case', { split: 'holdout', tags: ['shared', 'holdout_only_tag'], failure_class: 'holdout_only_class' }),
     secret_holdout_abstain: normalizeBenchmarkCase({ id: 'secret_holdout_abstain', question: 'Weather?', split: 'holdout', expected_behavior: 'abstain' }),
+    dev_abstain: normalizeBenchmarkCase({ id: 'dev_abstain', question: 'Mood?', expected_behavior: 'abstain' }),
   };
   const caseRecords = await attributeCaseRuns(
-    Object.entries(outcomes).map(([id, statuses]) => ({ entry: { testCase: definitions[id], datasets: ['d'] }, repetitions: statuses.map(rep) })),
+    Object.entries(outcomes).map(([id, statuses]) => ({
+      entry: { testCase: definitions[id], datasets: ['d'] },
+      repetitions: statuses.map((status) => (typeof status === 'string' ? rep(status) : status)),
+    })),
     { checkGuardrails: false }
   );
   const candidate = { results: caseRecords, model: 'm', generatedAt: '2026-10-06T00:00:00.000Z', mode: 'run' };
@@ -110,4 +114,68 @@ test('the budget row counts skipped holdout cases without naming them; revealHol
   assert.match(markdown, /\| Budget \| \$1\.0000 of \$1\.00; 2 case\(s\) skipped: dev_flip, 1 holdout case\(s\) \|/);
   assert.doesNotMatch(markdown, /secret_holdout_case/);
   assert.match(renderReportMarkdown(report, { revealHoldout: true }), /2 case\(s\) skipped: dev_flip, secret_holdout_case \|/);
+});
+
+// A repetition that returned no SQL on purpose (EMPTY_SQL): an abstain case's
+// decline; the same LLM call, timings and attempt count as rep().
+const declined = () => ({
+  ...rep('validation_error'),
+  error_code: 'EMPTY_SQL',
+  attempts: [{ attempt: 1, retry: false, generatedSql: '', llm: { ok: true, durationMs: 1000 }, validation: { ok: false, durationMs: 1, layer: 'safety', code: 'EMPTY_SQL' } }],
+});
+// A wrong result whose expected table was not retrieved: a system error.
+const retrievalMiss = () => ({ ...rep('result_mismatch'), retrieved_tables: ['Store'] });
+
+test('nothing about hidden holdout outcomes can be derived from report.md or the console by subtraction', async () => {
+  // Runs that differ ONLY in the holdout cases' outcomes, with the holdout's
+  // aggregate (accuracy by split) unchanged: a model failure, a different model
+  // failure, a system failure; an abstain case answered or declined. Every
+  // visible dev result is the same, so any difference in what report.md or
+  // the console shows would be a hidden holdout outcome (combined totals
+  // minus the listed dev rows).
+  const dev = { dev_pass: ['pass'], dev_flip: ['result_mismatch'], dev_abstain: ['answered'] };
+  const variants = [
+    { ...dev, secret_holdout_case: ['result_mismatch'], secret_holdout_abstain: ['answered'] },
+    { ...dev, secret_holdout_case: ['execution_error'], secret_holdout_abstain: [declined()] },
+    { ...dev, secret_holdout_case: [retrievalMiss()], secret_holdout_abstain: [declined()] },
+  ];
+  const reports = [];
+  for (const outcomes of variants) {
+    reports.push(await reportWith(outcomes));
+  }
+  // The variants really differ (in report.json, and with --reveal-holdout).
+  assert.notDeepEqual(reports[0].behavior, reports[1].behavior);
+  assert.notDeepEqual(reports[0].attribution, reports[1].attribution);
+  assert.notDeepEqual(reports[1].attribution, reports[2].attribution);
+  assert.notEqual(renderReportMarkdown(reports[0], { revealHoldout: true }), renderReportMarkdown(reports[1], { revealHoldout: true }));
+  assert.notEqual(renderHeadline(reports[1], { revealHoldout: true }), renderHeadline(reports[2], { revealHoldout: true }));
+
+  const markdown = renderReportMarkdown(reports[0]);
+  for (const report of reports.slice(1)) {
+    assert.equal(renderReportMarkdown(report), markdown);
+    assert.equal(renderHeadline(report), renderHeadline(reports[0]));
+  }
+
+  // The behaviour summary covers the listed dev case; the holdout one is
+  // counted, without its outcome.
+  assert.match(markdown, /Behaviour cases: abstain\/clarify — 1 case, 0 handled correctly/);
+  assert.match(markdown, /\| abstain \| 1 \| 0\/1 \| answered_instead_of_abstain 1 \|/);
+  assert.match(markdown, /1 holdout behaviour case\(s\) not listed/);
+  assert.doesNotMatch(markdown, /declined [0-9]/);
+  // Attribution and the guardrail matrix cover the dev answer cases.
+  assert.match(markdown, /\| wrong_result \| model \| 1 \| 1 \| counted \|/);
+  assert.match(markdown, /Accepted \| 1 \| 1 \(missed\) \|/);
+  assert.match(renderHeadline(reports[0]), /Attribution \(repetitions, dev cases\): pass 1 · model 1 · system 0 /);
+});
+
+test('holdout behaviour cases alone are counted without their outcomes', async () => {
+  const answered = await reportWith({ dev_pass: ['pass'], secret_holdout_abstain: ['answered'] });
+  const declinedRun = await reportWith({ dev_pass: ['pass'], secret_holdout_abstain: [declined()] });
+  const markdown = renderReportMarkdown(answered);
+  assert.equal(renderReportMarkdown(declinedRun), markdown);
+  assert.equal(renderHeadline(declinedRun), renderHeadline(answered));
+  assert.match(markdown, /Behaviour cases: 1 holdout abstain\/clarify case\(s\), outcomes not shown\./);
+  assert.doesNotMatch(markdown, /handled correctly|answered_instead_of_abstain [0-9]|declined [0-9]|\| Expected behaviour \|/);
+  assert.doesNotMatch(markdown, /\n\n\n/, 'no empty summary table');
+  assert.match(renderReportMarkdown(answered, { revealHoldout: true }), /0 handled correctly/);
 });
