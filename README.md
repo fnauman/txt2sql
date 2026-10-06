@@ -462,8 +462,9 @@ so `--min-accuracy` is refused with exit 2). Harness, database and
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
-`--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole suite costs about 11
-cents on gpt-4o-mini (the committed baseline: $0.33 for 3 repetitions). The dataset composition, the generator, how to add a
+`--case-id`, `--split`, `--reveal-holdout`. One repetition of the 255 dev cases costs about 11
+cents on gpt-4o-mini (the committed baseline: $0.33 for 3 repetitions); the whole 404-case suite
+is about 18 cents per repetition. The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 

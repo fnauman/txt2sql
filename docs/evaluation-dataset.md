@@ -328,7 +328,15 @@ limit. Its golds predate the [gold conventions](#gold-conventions) write-up
 and its two opt-in scoring relaxations: no fresh case sets
 `ignore_all_zero_rows` or `empty_as_zero` (26 set `null_as_zero`, 14 of them
 scalar), so on those questions the holdout scores a little more strictly
-than dev does.
+than dev does. A sampled review found one more such strictness: a "for each
+month from ... to ..." question whose gold lists only the months with sales,
+so a calendar-spine answer that also lists an empty month with 0 / NULL fails
+on the fixture where that month is empty, although the [breakdown
+convention](#gold-conventions) accepts a zero row where the question says "for
+each". These are recorded, not fixed: changing a holdout gold or its scoring
+needs a dated manifest note (`npm run holdout-manifest -- --write --note
+...`), and the decision is the maintainer's, made without looking at holdout
+results.
 
 **How it was built.** `scripts/build-holdout-dataset.mjs` (`npm run
 build-holdout-dataset`, `-- --check` for drift; the hygiene tests check it
@@ -502,10 +510,11 @@ changes.
 
 `known_validator_rejection: '<code>'` marks a case whose correct answers the
 production validator rejects today, in the default product configuration, a
-product gap the suite measures instead of hiding. One case is flagged:
-`METRIC_COLUMN` (`tpl_revenue_credits_monthly_q1_2026_e1b20a`: the account
-name "Sales Revenue" trips the net-sales metric guardrail on a ledger
-question).
+product gap the suite measures instead of hiding. Five cases are flagged:
+one dev case, `METRIC_COLUMN` (`tpl_revenue_credits_monthly_q1_2026_e1b20a`:
+the account name "Sales Revenue" trips the net-sales metric guardrail on a
+ledger question), and four holdout cases, counted here and not named (the
+holdout is looked at in aggregate only).
 
 - verify-dataset reports a rejection of the gold, an alternative or a positive
   control with that code as a note, and fails when the validator accepts every
@@ -1423,8 +1432,11 @@ misses. The paired comparison and the decision are in
 
 LLM cost is small: the committed gpt-4o-mini baseline cost $0.00044 per
 question (one case repetition, up to two LLM calls), so one repetition of the
-255-case suite is about 11 cents and `--repeat 3` about 33 cents (measured:
-$0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
+255 dev cases is about 11 cents and `--repeat 3` about 33 cents (measured:
+$0.3331; the previous, retrieved-scope baseline cost $0.3709). The whole
+404-case suite (dev plus the fresh holdout) is about 18 cents per repetition
+and about 54 cents with three repetitions, inside the default 1 USD budget.
+`--budget-usd` caps it. Rescoring and `--offline` cost nothing.
 
 ## Known limits
 
@@ -1465,7 +1477,7 @@ $0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` ca
   ASCII-only normalization fails them today, and so does retrieval on most new
   vocabulary and named entities (with the full schema scope that only weakens
   the ranking hint; under the retrieved scope it is a table-scope rejection).
-- **Behaviour cases** are 10 and are scored only on whether SQL was produced;
+- **Behaviour cases** are 12 (10 dev, 2 holdout) and are scored only on whether SQL was produced;
   a future clarification answer will need its own check.
 - **Ambiguity is partly encoded as alternatives**: where two readings are both
   defensible, either passes; a reading the dataset did not foresee fails.
