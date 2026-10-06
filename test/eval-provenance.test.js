@@ -104,6 +104,11 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
   });
 });
 
+// Prompt version of the optimized prompt before SCHEMA_SCOPE existed (the
+// retrieved scope without widen-on-demand), recorded by the first committed
+// baseline (eval: commit the gpt-4o-mini baseline, 1aa30a3).
+const PRE_SCOPE_PROMPT_VERSION = '0c314451d4b7a5f347f574d4cebc60e20b0f92a592a71b1dd6d4ca35fcb1f10f';
+
 test('provenance records the product configuration (schema scope) and the prompt version it implies', async () => {
   const base = { schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} };
   const byDefault = await collectProvenance(base);
@@ -121,12 +126,16 @@ test('provenance records the product configuration (schema scope) and the prompt
   const retrieved = await collectProvenance({ ...base, schemaScope: { schemaScope: 'retrieved', widenOnDemand: false } });
   assert.equal(retrieved.product.schemaScope.effective, 'retrieved');
   assert.equal(retrieved.product.schemaScope.widenOnDemand, false);
-  // The retrieved scope's prompt is the pre-scope prompt: same version as the
-  // committed baseline; the full scope's system prompt differs.
-  const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
-  assert.equal(retrieved.promptVersion, baseline.provenance.promptVersion);
+  // The retrieved scope's prompt is the pre-scope prompt, byte for byte: the
+  // prompt version of the first committed baseline (before SCHEMA_SCOPE).
+  // The full scope's system prompt differs.
+  assert.equal(retrieved.promptVersion, PRE_SCOPE_PROMPT_VERSION);
   assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
-  assert.equal(baseline.provenance.product, undefined, 'the baseline predates the product block');
+  // The committed baseline was produced with the default configuration.
+  const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  assert.equal(baseline.provenance.promptVersion, byDefault.promptVersion);
+  assert.equal(baseline.provenance.product.schemaScope.requested, 'auto');
+  assert.equal(baseline.provenance.product.schemaScope.effective, 'full');
   assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
 });
 
