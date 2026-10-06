@@ -836,15 +836,17 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //
 // - scalar/rowset: a bijection of compared row tuples must exist (order-blind).
 // - ranked: that bijection must exist AND the model's primary value column must
-//   be monotonic in `order` (catches "didn't sort / sorted wrong" while
+//   be monotonic in `order` up to ties (catches "didn't sort / sorted wrong" while
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
-//   model's may not). Ranking values compare as cells match, so values that
-//   match the same gold value are a tie: rounded to `decimals`; or, with a
-//   tolerance, by the row matching: the gold rows the prediction's rows pair
-//   with must be in the gold's ranking order, and two rows tie only when they
-//   pair with equal gold values (not when their values are merely within twice
-//   the tolerance). The default ranking column is the first truly numeric
-//   gold column (JS numbers, not numeric-looking code strings like '4000').
+//   model's may not). Without a tolerance ranking values compare as cells
+//   match, rounded to `decimals`, so values that match the same gold value are
+//   a tie. With a tolerance they compare unrounded, and a column out of its
+//   own order still passes when the row matching makes it a tie: the gold
+//   rows the prediction's rows pair with come in the gold's ranking order, so
+//   two rows tie only when they pair with equal gold values (not when their
+//   values are merely within twice the tolerance). The default ranking column
+//   is the first truly numeric gold column (JS numbers, not numeric-looking
+//   code strings like '4000').
 // - ties at the cut-off (ranked only, and only when the caller passes
 //   `goldTies`: the rows the gold's own LIMIT left out, see isCutByLimit):
 //   the gold rows whose ranking values (every value column) equal its last
@@ -1349,12 +1351,16 @@ function rankValueOf(value) {
   return temporal === null ? null : Date.parse(temporal.replace(' ', 'T'));
 }
 
-// Without a tolerance (`nullAsZero`: the ranking column's gold column is
-// listed in null_as_zero, so a NULL is ranked as the 0 it was matched as).
-// Values compare as cells match, rounded to `decimals`, so two values that
-// match the same gold value are a tie (NULL and 0.004 for a gold 0 at two
-// decimals). Cell equality is then exact, so a monotonic prediction column is
-// the same as the matched gold rows appearing in the gold's ranking order.
+// Is the prediction's own ranking column monotonic in `order`? (`nullAsZero`:
+// the ranking column's gold column is listed in null_as_zero, so a NULL is
+// ranked as the 0 it was matched as.) Without a tolerance values compare as
+// cells match, rounded to `decimals`, so two values that match the same gold
+// value are a tie (NULL and 0.004 for a gold 0 at two decimals); cell
+// equality is then exact, so this is the same as the matched gold rows
+// appearing in the gold's ranking order. With a tolerance the caller passes
+// `decimals: null`: the values compare unrounded (a rounding would hide an
+// inversion across two distinct gold ranks, 10.0054 before 10.0051), and
+// rankedMatchingHolds decides when they are not in order.
 function rankingHolds(actualRows, primaryActualColumn, order, { nullAsZero = false, decimals = DEFAULT_DECIMALS } = {}) {
   if (!primaryActualColumn) {
     return true;
@@ -1364,7 +1370,7 @@ function rankingHolds(actualRows, primaryActualColumn, order, { nullAsZero = fal
     const raw = row?.[primaryActualColumn];
     const cell = nullAsZero && (raw === null || raw === undefined) ? 0 : raw;
     const ranked = rankValueOf(cell);
-    const value = ranked !== null && toComparableNumber(cell) !== null ? roundTo(ranked, decimals) : ranked;
+    const value = ranked !== null && decimals !== null && toComparableNumber(cell) !== null ? roundTo(ranked, decimals) : ranked;
     if (value === null) {
       // Skip NULL metric rows WITHOUT resetting the running bound: a correct
       // ORDER BY puts NULLs at the end, and a NULL must never license a jump
@@ -1392,10 +1398,11 @@ function cellRank(cell) {
   return cell.kind === 'time' ? Date.parse(cell.key.slice(2).replace(' ', 'T')) : null;
 }
 
-// With a tolerance cell equality is not transitive, so a monotonic prediction
-// column says little: two prediction values that each match a different gold
-// value may be inverted by up to twice the tolerance, across two distinct gold
-// ranks. The ranking is instead a property of the row matching: is there a
+// With a tolerance cell equality is not transitive, so two prediction values
+// out of order by less than twice the tolerance may each match a different
+// gold value, across two distinct gold ranks; distance alone does not make
+// them a tie. A prediction whose own ranking column is out of order
+// (rankingHolds, unrounded) passes only by the row matching: is there a
 // matching (as matchRowsUnordered / matchRowsAcrossBoundary) in which the
 // gold rows paired with the prediction's rows, read in the prediction's
 // order, have ranking values (`primaryIndex`) in `order`? Two prediction rows
@@ -1604,10 +1611,17 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
       return 'scalar_column';
     }
     if (mode === 'ranked' && primaryValueIndex !== -1) {
+      // With a tolerance, a prediction sorted by its own values passes (noise
+      // within the tolerance may flip a near-tie of two distinct gold values:
+      // per-line ROUND sums differ by a cent); one out of its own order passes
+      // only when the row matching makes the inversion a tie.
+      const ownOrder = rankingHolds(actual, assignment[primaryValueIndex], order, {
+        nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]),
+        decimals: tolerance > 0 ? null : decimals,
+      });
       const ranked =
-        tolerance > 0
-          ? rankedMatchingHolds(goldTuples, actualTuples, primaryValueIndex, order, tolerance, { isBoundary, tieTuples })
-          : rankingHolds(actual, assignment[primaryValueIndex], order, { nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]), decimals });
+        ownOrder ||
+        (tolerance > 0 && rankedMatchingHolds(goldTuples, actualTuples, primaryValueIndex, order, tolerance, { isBoundary, tieTuples }));
       if (!ranked) {
         return 'ranking';
       }
