@@ -283,7 +283,7 @@ test('statuses: mismatch, retrieval miss, LLM failure, infra failure', async () 
   });
   assert.equal(notMissing.status, 'result_mismatch');
   assert.ok(notMissing.retrieved_tables.includes('LedgerAccount'), 'the full scope allows every in-scope table');
-  assert.deepEqual(notMissing.ranked_tables, missing.retrieved_tables, 'retrieval still ranks the same tables');
+  assert.deepEqual([...notMissing.ranked_tables].sort(), [...missing.retrieved_tables].sort(), 'retrieval still ranks the same tables');
 
   const llmDown = await evaluateQuestion({
     ...base,

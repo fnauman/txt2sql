@@ -344,10 +344,22 @@ test('full scope in the product loop: the same SQL is accepted at once, and the 
   assert.ok(promptFor(OUTLET_QUESTION, 'full').context.retrieval.expandedTableNames.length > 0);
   assert.deepEqual(result.rankedTables, []);
   assert.deepEqual(rankedTableNames(promptFor(OUTLET_QUESTION, 'full').context.retrieval), []);
-  const matched = promptFor('Show the top customers by total net sales amount in March 2026.', 'full').context.retrieval;
+  const matchedPrompt = promptFor('Show the top customers by total net sales amount in March 2026.', 'full');
+  const matched = matchedPrompt.context.retrieval;
   assert.equal(matched.fallbackToDefaultSelection, false);
-  assert.deepEqual(rankedTableNames(matched), matched.expandedTableNames);
+  // Score order (strongest match first), then the join-path connectors: the
+  // order of the prompt's relevance hint, not the schema order of the
+  // expanded set.
+  assert.deepEqual(rankedTableNames(matched), matchedPrompt.context.relevanceHint.map((entry) => entry.tableName));
+  assert.equal(rankedTableNames(matched)[0], 'SalesDocument');
+  assert.notDeepEqual(rankedTableNames(matched), matched.expandedTableNames);
+  assert.deepEqual([...rankedTableNames(matched)].sort(), [...matched.expandedTableNames].sort());
   assert.ok(rankedTableNames(matched).includes('Customer'));
+  // The retrieved scope reports the same ranking.
+  assert.deepEqual(
+    rankedTableNames(promptFor('Show the top customers by total net sales amount in March 2026.', 'retrieved').context.retrieval),
+    rankedTableNames(matched)
+  );
 
   // Without an explicit setting the product loop reads SCHEMA_SCOPE (unset: auto).
   const saved = process.env.SCHEMA_SCOPE;
