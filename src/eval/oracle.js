@@ -12,11 +12,13 @@
 //   findSharedAssignment searches for one mapping valid on every fixture at
 //   once; a search cut off by its step bound fails closed
 //   ('assignment_search_exhausted'), never a pass.
-// - Ties at the cut-off: where a gold variant returned as many rows as its own
-//   outermost LIMIT (isCutByLimit, per variant and fixture), a ranked
-//   comparison lets the rows tied at its last ranking value match by value, so
-//   a prediction without the gold's tiebreak is not scored by which tied item
-//   MariaDB happened to return.
+// - Ties at the cut-off: where a ranked gold variant returned as many rows as
+//   its own outermost LIMIT (isCutByLimit, per variant and fixture), it runs
+//   once more with that LIMIT raised by GOLD_TIE_LOOKAHEAD_ROWS; the rows past
+//   the original LIMIT that tie with its last ranking value may stand in for
+//   its boundary rows, so a prediction without the gold's tiebreak is not
+//   scored by which tied item MariaDB happened to return. A cut with no such
+//   row (no tie) stays strict.
 // - Gold runs with its own generous timeout (GOLD_STATEMENT_TIMEOUT_MS) so a
 //   slow gold never looks like a model failure, and is cached per fixture.
 // - The prediction runs as the read-only query user with the statement timeout
@@ -30,6 +32,8 @@ import {
   findSharedAssignment,
   isCutByLimit,
   listGoldVariants,
+  topLevelLimitRowCount,
+  withTopLevelLimitRowCount,
   matchResultSets,
   runSignalChecksThroughAssignment,
 } from '../benchmark.js';
@@ -39,6 +43,21 @@ import { isEvalInfraError } from './infra-errors.js';
 import { FIXTURES } from './fixtures.js';
 
 export const GOLD_STATEMENT_TIMEOUT_MS = 30_000;
+
+// How far past its own LIMIT a cut ranked gold is read to find the items tied
+// with its last row (ties at the cut-off). A tie group longer than this is
+// only partly known, so a prediction picking one of the unread items fails.
+export const GOLD_TIE_LOOKAHEAD_ROWS = 1000;
+
+// The same row in the same column order (the gold and its run past the LIMIT).
+function sameRow(left, right) {
+  const keys = Object.keys(left ?? {});
+  const rightKeys = Object.keys(right ?? {});
+  return (
+    keys.length === rightKeys.length &&
+    keys.every((key, index) => rightKeys[index] === key && JSON.stringify(left[key]) === JSON.stringify(right[key]))
+  );
+}
 
 /**
  * One query-role connection per fixture, as `[{ name, database, connection }]`
@@ -218,6 +237,32 @@ export async function scoreAgainstGold({
     )
   );
 
+  // Ties at the cut-off: for each ranked variant cut by its own LIMIT on a
+  // fixture, the rows that LIMIT left out ([variant][fixture], null when not
+  // cut). The run past the LIMIT must start with exactly the gold's rows (the
+  // gold's ORDER BY is total), or nothing is relaxed.
+  const ranked = (comparison?.mode || 'rowset') === 'ranked';
+  const goldTies = await Promise.all(
+    variants.map((variant, variantIndex) =>
+      Promise.all(
+        connections.map(async (fixtureConnection, fixtureIndex) => {
+          const gold = goldRows[variantIndex][fixtureIndex];
+          if (!ranked || !isCutByLimit(variant.sql, gold.length)) {
+            return null;
+          }
+          const limit = topLevelLimitRowCount(variant.sql);
+          const extended = await executeGoldSql(fixtureConnection, withTopLevelLimitRowCount(variant.sql, limit + GOLD_TIE_LOOKAHEAD_ROWS), {
+            goldCache,
+            timeoutMs: goldTimeoutMs,
+            label: `${variant.label} past its LIMIT`,
+            signal,
+          });
+          return gold.every((row, index) => sameRow(row, extended[index])) ? extended.slice(gold.length) : null;
+        })
+      )
+    )
+  );
+
   const predictions = await Promise.all(
     connections.map((fixtureConnection, fixtureIndex) => {
       const largestGold = Math.max(...goldRows.map((rowsByFixture) => rowsByFixture[fixtureIndex].length));
@@ -226,8 +271,6 @@ export async function scoreAgainstGold({
   );
 
   const scored = variants.map((variant, variantIndex) => {
-    // Did this variant's own LIMIT cut its result on each fixture?
-    const goldCutOff = goldRows[variantIndex].map((rows) => isCutByLimit(variant.sql, rows.length));
     const outcomes = connections.map((fixtureConnection, fixtureIndex) => {
       const prediction = predictions[fixtureIndex];
       const gold = goldRows[variantIndex][fixtureIndex];
@@ -235,7 +278,7 @@ export async function scoreAgainstGold({
         return { match: false, reason: 'execution_error', assignments: [], goldColumns: [], empty: false, truncated: false };
       }
       // Per-fixture verdict and reason; the shared mapping is searched below.
-      return matchResultSets(gold, prediction.rows, comparison, { limit: 1, goldCutOff: goldCutOff[fixtureIndex] });
+      return matchResultSets(gold, prediction.rows, comparison, { limit: 1, goldTies: goldTies[variantIndex][fixtureIndex] });
     });
     const allMatch = outcomes.every((outcome) => outcome.match);
     const shared = allMatch
@@ -243,7 +286,7 @@ export async function scoreAgainstGold({
           connections.map((_fixtureConnection, fixtureIndex) => ({
             expected: goldRows[variantIndex][fixtureIndex],
             actual: predictions[fixtureIndex].rows,
-            goldCutOff: goldCutOff[fixtureIndex],
+            goldTies: goldTies[variantIndex][fixtureIndex],
           })),
           comparison
         )
