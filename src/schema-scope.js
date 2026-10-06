@@ -4,8 +4,10 @@
 // - 'retrieved': the prompt shows the tables retrieval picked (plus join-path
 //   connectors) and the validator allows exactly those. A retrieval miss is a
 //   TABLE_SCOPE rejection. An explicit SCHEMA_SCOPE=retrieved is the product
-//   loop as it was before schema scopes existed (and so the committed
-//   baseline): widen-on-demand is off unless SCHEMA_WIDEN_ON_DEMAND=1. With
+//   loop as it was before schema scopes existed (and so the previous,
+//   retrieved-scope baseline: eval/baselines/gpt-4o-mini.json at commit
+//   1aa30a3, prompt version 0c314451d4b7; the current committed baseline ran
+//   'auto'): widen-on-demand is off unless SCHEMA_WIDEN_ON_DEMAND=1. With
 //   widen-on-demand a TABLE_SCOPE rejection of an in-scope table rebuilds the
 //   prompt with that table for the retry.
 // - 'full': the prompt shows every in-scope table in one stable schema block
@@ -32,8 +34,9 @@ const MAX_SCHEMA_FULL_MAX_TOKENS = 1_000_000;
 /**
  * Widen-on-demand when SCHEMA_WIDEN_ON_DEMAND is unset: on for 'auto' (the
  * large-schema fallback to 'retrieved' should recover from retrieval misses),
- * off for an explicit 'retrieved' (today's behaviour exactly, so the committed
- * baseline reproduces with one variable). 'full' never widens; the value only
+ * off for an explicit 'retrieved' (the behaviour before schema scopes, so the
+ * previous, retrieved-scope baseline at commit 1aa30a3 reproduces with one
+ * variable). 'full' never widens; the value only
  * matters if the scope resolves to 'retrieved'.
  */
 export function defaultWidenOnDemand(schemaScope) {

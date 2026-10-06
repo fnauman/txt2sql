@@ -43,14 +43,15 @@ table and its FK path for the retry, within the same retry budget, and tells
 the model the table was added (trace event `prompt.widened`). It is on by
 default when `auto` falls back to `retrieved` (a schema over the budget) and
 off by default for an explicit `SCHEMA_SCOPE=retrieved`, which is therefore
-the baseline's product loop with one variable: the same prompt, byte for byte,
+the previous baseline's product loop with one variable: the same prompt, byte for byte,
 for all 255 suite questions, the same prompt version and the same retries.
 `SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1` selects retrieved +
 widening explicitly.
 
 **The comparison:** a paid `--repeat 3` run with the default setting, paired
-against the committed baseline (gpt-4o-mini, 3 repetitions, retrieved scope,
-no widening). Everything else is fixed: model, datasets and gold, fixtures,
+against the baseline committed before this experiment (gpt-4o-mini, 3
+repetitions, retrieved scope, no widening; `eval/baselines/gpt-4o-mini.json`
+at commit `1aa30a3`). Everything else is fixed: model, datasets and gold, fixtures,
 semantic layer, retry budget (1), statement timeout.
 
 **Confound, stated up front:** the full arm changes two things that cannot be

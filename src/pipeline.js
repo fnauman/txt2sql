@@ -1338,8 +1338,8 @@ ${context.tableBlocks}`,
 }
 
 // The schema block's caching note per effective schema scope. The 'retrieved'
-// text is the one every prompt had before schema scopes existed (the
-// committed baseline's prompt version).
+// text is the one every prompt had before schema scopes existed (the previous,
+// retrieved-scope baseline's prompt version, 0c314451d4b7).
 const SCHEMA_PREFIX_NOTES = {
   retrieved: 'In-scope schema context comes first and may be reused across questions with the same retrieved tables.',
   full: 'In-scope schema context comes first: it lists every in-scope table and is the same for every question.',

@@ -1129,10 +1129,10 @@ misses. The paired comparison and the decision are in
 
 ### Cost
 
-LLM cost is small: the committed gpt-4o-mini baseline cost $0.00049 per
+LLM cost is small: the committed gpt-4o-mini baseline cost $0.00044 per
 question (one case repetition, up to two LLM calls), so one repetition of the
-255-case suite is about 12 cents and `--repeat 3` about 37 cents (measured:
-$0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
+255-case suite is about 11 cents and `--repeat 3` about 33 cents (measured:
+$0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
 
 ## Known limits
 

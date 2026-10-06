@@ -77,3 +77,52 @@ test('experiment status: the index and each write-up agree, and a write-up with 
     }
   }
 });
+
+// Prose (with source comments reduced to their text) split into sentences; a
+// heading or a blank line also ends one.
+function sentences(text) {
+  const prose = text
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:\/\/|\/\*\*?|\*\/?)\s?/, ''))
+    .join('\n');
+  return prose
+    .split(/\n\s*\n|\n(?=#)|(?<=\.)\s+/)
+    .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+test('the committed baseline is described as what it recorded: its schema scope and its cost', () => {
+  const baseline = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  const recordedScope = baseline.provenance.product.schemaScope;
+  assert.ok(recordedScope?.effective, 'the baseline records its schema scope');
+
+  // A sentence that ties the retrieved scope to the committed baseline is only
+  // right while the baseline ran the retrieved scope; otherwise it must point
+  // at the previous (retrieved-scope) baseline instead.
+  if (recordedScope.effective !== 'retrieved') {
+    for (const file of ['README.md', 'src/schema-scope.js', 'src/pipeline.js', 'docs/evaluation-dataset.md', 'docs/experiments/01-schema-scope.md']) {
+      const stale = sentences(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8')).filter(
+        (sentence) => /retrieved/.test(sentence) && /committed\s+baseline/.test(sentence) && !/previous|before this experiment|1aa30a3/.test(sentence)
+      );
+      assert.deepEqual(stale, [], `${file} calls the retrieved scope the committed baseline, which ran ${recordedScope.effective}`);
+    }
+  }
+
+  // Quoted costs of the committed baseline are its own.
+  const spent = baseline.budget.spentUsd;
+  const repetitions = baseline.stats.repetitions.total;
+  const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
+  const readmeCost = /\(the committed baseline: \$(\d+\.\d+) for (\d+) repetitions\)/.exec(readme);
+  assert.ok(readmeCost, 'README quotes the committed baseline cost');
+  assert.equal(readmeCost[1], spent.toFixed(2));
+  assert.equal(Number(readmeCost[2]), baseline.runner.repeat);
+
+  const guide = fs.readFileSync(path.join(REPO_ROOT, 'docs/evaluation-dataset.md'), 'utf8').replace(/\s+/g, ' ');
+  const perQuestion = /committed gpt-4o-mini baseline cost \$(\d+\.\d+) per question/.exec(guide);
+  assert.ok(perQuestion, 'docs/evaluation-dataset.md quotes the per-question cost');
+  assert.equal(perQuestion[1], (spent / repetitions).toFixed(5));
+  const measured = /`--repeat 3` about (\d+) cents \(measured: \$(\d+\.\d+)[;)]/.exec(guide);
+  assert.ok(measured, 'docs/evaluation-dataset.md quotes the measured --repeat 3 cost');
+  assert.equal(measured[2], spent.toFixed(4));
+  assert.equal(Number(measured[1]), Math.round(spent * 100));
+});
