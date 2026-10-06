@@ -215,37 +215,82 @@ OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval 
 
 ## Live results
 
-*To be filled in after the paid run.*
-
-Run: `OPENAI_API_KEY=... npm run eval -- --repeat 3 --budget-usd 1` with the
-default setting (`SCHEMA_SCOPE` unset = `auto`, which resolves to `full`),
-paired automatically against `eval/baselines/gpt-4o-mini.json`.
+Run on 2026-10-06: `npm run eval -- --repeat 3 --budget-usd 1 --write-baseline`
+with the default setting (`SCHEMA_SCOPE` unset = `auto` → `full`, 2,258 of
+8,000 estimated tokens), paired automatically against the previous
+`eval/baselines/gpt-4o-mini.json`. Fixtures, datasets (apart from the removed
+stale `known_validator_rejection` flags) and the model are unchanged; only the
+schema scope and the prompt layout differ. Cost of the run: $0.33.
 
 | | Baseline (retrieved) | Candidate (full) |
 |---|---|---|
-| Git sha / prompt version | `f5e6ffef21c9` / `0c314451d4b7` | |
-| Strict accuracy (95% CI) | 68.8% (63.1%–74.6%) | |
-| dev / holdout | 72.6% / 60.6% | |
-| Majority-pass cases | 169/245 | |
-| Intent-clustered accuracy | 66.1% | |
-| System failures (repetitions) | 92 (retrieval misses 92) | |
-| Guardrail precision / recall | 100% / 26.4% | |
-| Paired: improvements / regressions, McNemar p | | |
-| Δ strict accuracy (95% CI) | | |
-| Cost per correct answer | $0.00073 | |
-| Prompt tokens per call / cached share | 3,407 / 72% | |
-| Latency p50 / p95, retry rate | 2.41 s / 5.39 s, 11.5% | |
+| Git sha / prompt version | `f5e6ffef21c9` / `0c314451d4b7` | `606e0ee94531` / `b264e57d8e15` |
+| Strict accuracy (95% CI) | 68.8% (63.1%–74.6%) | **72.8%** (67.2%–78.2%) |
+| dev / holdout | 72.6% / 60.6% | 74.6% / **68.8%** |
+| Majority-pass cases | 169/245 | 179/245 |
+| Intent-clustered accuracy | 66.1% | 69.6% |
+| System failures (repetitions) | 92 (retrieval misses 92) | **0** |
+| Model failures (repetitions) | 137 | 200 |
+| Guardrail precision / recall | 100% / 26.4% | 100% / 22.6% |
+| Paired: improvements / regressions, McNemar p | | 17 / 7, p = 0.064 |
+| Δ strict accuracy (95% CI, paired bootstrap) | | +4.0 pts (+0.1 to +7.9) |
+| Cost per correct answer | $0.00073 | **$0.00062** |
+| Prompt tokens per call / cached share | 3,407 / 72% | 3,690 / **91.5%** |
+| Latency p50 / p95, retry rate | 2.41 s / 5.39 s, 11.5% | 2.64 s / 5.25 s, **5.6%** |
 
-When reading the flips, treat the two `hard_zero_harbor_kiosk_*` cases as
-unscored: their gold is empty or zero on every fixture, so wrong SQL that
-also returns nothing passes (see the rescore above).
+**Excluding the two oracle artefacts** (`hard_zero_harbor_kiosk_*`, whose gold
+is empty or zero on every fixture, so wrong SQL that returns nothing passes;
+both are among the improvements): 243 cases, 69.3% → 72.6% (+3.3 pts),
+15 improvements vs 7 regressions, exact McNemar p = 0.134.
 
-Optional second arm, retrieved + widening (not the baseline):
-`SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1` with the same command. It
-keeps the retrieved prompt and widens the allow-list only on a retry, so it
-separates part of the allow-list effect from the prompt layout.
-`SCHEMA_SCOPE=retrieved` alone would re-run the baseline's configuration.
+**Where the gains come from.** All 92 system failures disappear: every
+retrieval miss that the old allow-list turned into a hard `TABLE_SCOPE`
+rejection now reaches the model. 11 of the 15 real improvements are cases that
+used to fail on a missing table (brand / category / campaign breakdowns, the
+Swedish and typo phrasings, new vocabulary such as "receivables by outlet"),
+which is why holdout gains 8.2 points against 2.0 on dev. The single cached
+prefix (one prefix for every question instead of 48) raises the cached share
+of prompt tokens from 72% to 91.5%, so cost per correct answer falls 15% even
+though the prompt is 8% longer, and retries halve.
+
+**Where it loses.** The 7 regressions are systematic (3/3 repetitions) and are
+the classic cost of a wider context — distractors the model used to be unable
+to see:
+
+- `tpl_brand_net_sales_feb_2026`: joins through the `ProductBrand` bridge
+  table (a documented trap) instead of `Product.BrandId`;
+- `tpl_outstanding_balance_due_apr_2026`: `SUM(BillTotalAmount)` instead of
+  `BalanceAmount`; `tpl_total_net_sales_feb15_mar15_2026`: `NetPayableAmount`
+  instead of `NetAmount` — metric-column confusion between near-synonyms that
+  are now all visible;
+- `tpl_customer_net_sales_sales_invoices_mar_2026`: line-level amounts plus a
+  `DocumentType` join for a document-level question;
+- `tpl_customers_bought_feb_not_mar_2026`, `tpl_distinct_customers_monthly_q1_2026`:
+  wrong result shape (one row per customer instead of a count);
+- `hard_entity_sales_revenue_credits_feb_2026`: filters the posting date on
+  `AccountingPosting` instead of the document date.
+
+Model failures rise from 137 to 200 repetitions because cases that used to stop
+at the validator now reach execution; most of them were failing before too.
 
 ## Decision
 
-*Pending the live run.*
+**Adopt `auto` (= `full` for schemas that fit 8,000 estimated tokens) as the
+default.** It removes an entire failure class (retrieval misses: 92 → 0), lifts
+holdout accuracy by 8 points, lowers cost per correct answer by 15% and halves
+retries, with no guardrail false rejections. The net accuracy gain is
+directionally positive (+4.0 pts, paired bootstrap CI +0.1 to +7.9) but **not
+significant at α = 0.05** by the exact McNemar test (p = 0.064; p = 0.134
+without the two oracle artefacts), so it is reported as a likely improvement,
+not a proven one. `retrieved` stays selectable (and is still what `auto` picks
+for large schemas, with widen-on-demand).
+
+The committed baseline is replaced by this run (`--write-baseline`), so later
+experiments are measured against full-schema prompting.
+
+**Follow-ups this run points to:** the regressions are metric-column confusion
+and distractor joins, which are exactly what the next planned experiments
+target — deterministic metric compilation from the semantic layer
+(net vs payable vs bill total vs balance) and join-path guardrails for bridge
+tables (`ProductBrand`, `CustomerProductPrice`). The two zero-answer hard cases
+need a fixture row that separates right from wrong SQL.
