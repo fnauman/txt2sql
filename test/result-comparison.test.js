@@ -168,6 +168,34 @@ test('ranked: a NULL metric must not reset monotonicity mid-sequence', () => {
   assert.equal(compareResults(gold, interrupted, spec), false);
 });
 
+test('ranked: a null_as_zero metric is ranked as 0, as it is matched', () => {
+  const gold = [
+    { name: 'A', v: 10 },
+    { name: 'C', v: 5 },
+    { name: 'B', v: 0 },
+  ];
+  const spec = { mode: 'ranked', order: 'desc', value_columns: ['v'], null_as_zero: ['v'] };
+  // B's NULL matches the gold's 0, so it ranks as 0 too: 10, 0, 5 is not descending.
+  const misordered = [
+    { name: 'A', v: 10 },
+    { name: 'B', v: null },
+    { name: 'C', v: 5 },
+  ];
+  assert.deepEqual(
+    [compareResultsDetailed(gold, misordered, spec).match, compareResultsDetailed(gold, misordered, spec).reason],
+    [false, 'ranking']
+  );
+  // The same NULL in the 0's place is a correct ranking.
+  assert.equal(compareResults(gold, [misordered[0], misordered[2], misordered[1]], spec), true);
+  // Ascending: the NULL (MariaDB sorts NULL first) ranks as 0, ahead of 5 and 10.
+  const ascending = { ...spec, order: 'asc' };
+  assert.equal(compareResults([...gold].reverse(), [misordered[1], misordered[2], misordered[0]], ascending), true);
+  // Without null_as_zero a NULL is not a ranking value: it is not 0 either, so
+  // the values do not match in the first place.
+  const strict = { mode: 'ranked', order: 'desc', value_columns: ['v'] };
+  assert.equal(compareResultsDetailed(gold, misordered, strict).reason, 'values');
+});
+
 // Behavior change (EVAL-1 / ORACLE-10): signal checks and the disallowed-column
 // lint used to turn a value match into 'low_signal_success' /
 // 'disallowed_column_used' failures. Only values decide now; both are warnings.

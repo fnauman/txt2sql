@@ -869,7 +869,9 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   listed column (`january`, `february`) are judged by position only, so a
 //   label-only swap of such names in the right positions still passes.
 // - null_as_zero: in the listed gold columns NULL counts as 0 on both sides
-//   (a conditional SUM without ELSE 0 returns NULL for a month with no sales).
+//   (a conditional SUM without ELSE 0 returns NULL for a month with no sales),
+//   in the ranking check too: a ranked metric listed here is ranked with its
+//   NULLs as 0, the values it was matched with.
 // - scalar rule: when the gold is a single value (one row, one compared
 //   column) and the prediction has several columns, the column carrying the
 //   gold value must be the one named exactly like the gold column when there
@@ -1337,14 +1339,17 @@ function rankValueOf(value) {
   return temporal === null ? null : Date.parse(temporal.replace(' ', 'T'));
 }
 
-function rankingHolds(actualRows, primaryActualColumn, order, tolerance) {
+// `nullAsZero`: the ranking column's gold column is listed in null_as_zero,
+// so a NULL is ranked as the 0 it was matched as.
+function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullAsZero = false } = {}) {
   if (!primaryActualColumn) {
     return true;
   }
   const slack = tolerance > 0 ? tolerance : 1e-6;
   let previous = null;
   for (const row of actualRows) {
-    const value = rankValueOf(row?.[primaryActualColumn]);
+    const raw = row?.[primaryActualColumn];
+    const value = rankValueOf(nullAsZero && (raw === null || raw === undefined) ? 0 : raw);
     if (value === null) {
       // Skip NULL metric rows WITHOUT resetting the running bound: a correct
       // ORDER BY puts NULLs at the end, and a NULL must never license a jump
@@ -1538,7 +1543,11 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     if (scalarSingleValue && !scalarRuleHolds(goldColumns[0], assignment[0], actual[0], actualColumns)) {
       return 'scalar_column';
     }
-    if (mode === 'ranked' && primaryValueIndex !== -1 && !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance)) {
+    if (
+      mode === 'ranked' &&
+      primaryValueIndex !== -1 &&
+      !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance, { nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]) })
+    ) {
       return 'ranking';
     }
     return null;

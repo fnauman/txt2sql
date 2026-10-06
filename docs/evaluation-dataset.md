@@ -606,8 +606,9 @@ comparison: {
   column identifies itself; the others must keep the gold's relative order.
   Limit: carriers named unlike any listed column are judged by position only.
 - **null_as_zero**: NULL counts as 0 on both sides in the listed columns (a
-  pivot's month without sales, a SUM over an empty window). Without it a NULL
-  gold never equals 0.
+  pivot's month without sales, a SUM over an empty window), in a ranked case's
+  order check too (a NULL between 10 and 5 in a descending ranking is a 0 out
+  of place). Without it a NULL gold never equals 0.
 - **Scalar rule**: when the gold is a single value and the prediction has
   several columns, the carrier must be the column named exactly like the gold
   column when there is one, else the only column of the value's kind, else the
