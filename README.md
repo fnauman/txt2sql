@@ -396,29 +396,29 @@ name); it still counts. The report contains:
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
-whole suite, 3 repetitions, measured on 2026-10-06):
+whole suite, 3 repetitions, full-schema prompting via the default
+`SCHEMA_SCOPE=auto`, measured on 2026-10-06):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (245 answer cases, 130 intents) | **68.8%** (95% CI 63.1%–74.6%) |
-| By split | dev 72.6% (168 cases) · holdout 60.6% (77 cases) |
-| Failures by cause (repetitions) | model 137 · system 92 (all retrieval misses; 0 guardrail false rejections) · infrastructure 0 |
-| Guardrails over every attempt | precision 100%, recall 26.4%, false-rejection rate 0% |
+| Strict accuracy (245 answer cases, 130 intents) | **72.8%** (95% CI 67.2%–78.2%) |
+| By split | dev 74.6% (168 cases) · holdout 68.8% (77 cases) |
+| Failures by cause (repetitions) | model 200 · system 0 (no retrieval misses, no guardrail false rejections) · infrastructure 0 |
+| Guardrails over every attempt | precision 100%, recall 22.6%, false-rejection rate 0% |
 | Abstain / clarify cases handled | 0 of 10 (the product always answers; not in accuracy) |
-| Cost and latency | $0.37 total · $0.00073 per correct answer · p50 2.4 s, p95 5.4 s |
+| Cost and latency | $0.33 total · $0.00062 per correct answer · p50 2.6 s, p95 5.3 s · 91.5% of prompt tokens cached |
 
-The 12-point dev/holdout gap reflects performance on new intents in partly new
-wording (the splits differ in both, so it does not measure the cost of new
-vocabulary alone). The baseline ran
-the retrieved schema scope (the only one before `SCHEMA_SCOPE` existed): its 92
-system failures are repetitions where retrieval did not pick a table the answer
-needs, which the validator then enforced; with perfect SQL that scope caps
-accuracy at 86.5%. The default scope is now `auto` (full at 13 tables), whose
-ceiling with perfect SQL is 99.6%; re-judging the baseline's recorded SQL under
-it with zero LLM calls (`npm run eval -- --offline`) gives 69.8%, and the paid
-comparison belongs in
-[docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md).
-These are measurements of the product, not targets.
+The previous baseline used the retrieved tables as the validator's allow-list
+and scored 68.8% (dev 72.6%, holdout 60.6%) with 92 system failures, all
+retrieval misses; switching to full-schema prompting is
+[Experiment 1](docs/experiments/01-schema-scope.md) (+4.0 pts, paired
+bootstrap CI +0.1 to +7.9, exact McNemar p = 0.064 — a likely but not yet
+significant improvement). The 6-point dev/holdout gap reflects performance on
+new intents in partly new wording (the splits differ in both, so it does not
+measure the cost of new vocabulary alone). With perfect SQL the suite's ceiling
+is now 99.6%; the remaining failures are model errors — mostly metric-column
+confusion, distractor joins and result shape — which the next experiments
+target. These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;

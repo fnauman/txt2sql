@@ -1071,43 +1071,46 @@ purpose.
 ### Current baseline
 
 `eval/baselines/gpt-4o-mini.json`, written by
-`npm run eval -- --repeat 3 --write-baseline` on 2026-10-06: gpt-4o-mini at
-api.openai.com, prompt version `0c314451d4b7`, fixtures seed `094282546fe5` /
-v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default suite (255 unique
-cases), compact file 1.33 MB. It predates `SCHEMA_SCOPE`: it ran the retrieved
-scope without widen-on-demand (`SCHEMA_SCOPE=retrieved`, whose widen-on-demand
-is off by default, reproduces its prompt version and, rescored, its numbers
-exactly).
+`npm run eval -- --repeat 3 --budget-usd 1 --write-baseline` on 2026-10-06
+(the Experiment 1 live run): gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE`
+unset (`auto` → `full`, 2,258 of 8,000 estimated tokens), prompt version
+`b264e57d8e15`, fixtures seed `094282546fe5` / v2 `7adec1b3bc33` / v3
+`51d1c42c3b88`, the whole default suite (255 unique cases), compact file
+1.28 MB.
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (245 answer cases / 130 intents) | 68.8% (95% CI 63.1%–74.6%, case bootstrap) |
-| Majority-pass cases | 169/245 (Wilson 95% 62.9%–74.4%) |
-| Intent-clustered accuracy | 66.1% |
-| By split | dev 72.6% (168 cases) · holdout 60.6% (77 cases) |
-| Attribution (repetitions) | pass 506 · model 137 · system 92 (retrieval misses 92, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion (823 attempts) | 72 wrong SQL caught, 0 correct SQL rejected, 201 wrong SQL accepted; precision 100%, recall 26.4% |
+| Strict accuracy (245 answer cases / 130 intents) | 72.8% (95% CI 67.2%–78.2%, case bootstrap) |
+| Majority-pass cases | 179/245 (Wilson 95% 67.2%–78.2%) |
+| Intent-clustered accuracy | 69.6% (95% CI 62.3%–76.5%) |
+| By split | dev 74.6% (168 cases) · holdout 68.8% (77 cases) |
+| Attribution (repetitions) | pass 535 · model 200 · system 0 (retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion (778 attempts) | 55 wrong SQL caught, 0 correct SQL rejected, 188 wrong SQL accepted; precision 100%, recall 22.6% |
 | Behaviour cases | 0 of 10 handled (5 abstain, 5 clarify) |
-| Cost | $0.3709 total · $0.00049 per question · $0.00073 per correct answer |
-| Latency | p50 2.41 s · p95 5.39 s (product loop) · retry rate 11.5% |
+| Cost | $0.3331 total · $0.00044 per question · $0.00062 per correct answer · 91.5% of prompt tokens cached |
+| Latency | p50 2.64 s · p95 5.25 s (product loop) · retry rate 5.6% |
 
-How to read it: in that retrieved scope the allow-list was the retrieved
-tables, which capped strict accuracy at 86.5% (dev 89.3%, holdout 80.5%) even
-with perfect SQL; the 92 system failures are repetitions whose allow-list
-lacked a table the answer needs (73 wrong results written around the missing
-table, 14 guardrail and 5 safety rejections; 44 attempts were rejected with
-`TABLE_SCOPE` outright). The default scope is now `auto` (full at 13 tables):
-with perfect SQL its ceiling is 99.6% (dev 100%, holdout 98.7%), and
-`npm run eval -- --offline` re-judges this baseline's recorded SQL under it at
-69.8% (see [docs/experiments/01-schema-scope.md](experiments/01-schema-scope.md)
-for what a rescore can and cannot say). The holdout gap
-(60.6% vs 72.6%) reflects performance on new intents in partly new wording:
+How to read it: with the full in-scope schema as the allow-list there are no
+retrieval misses, and with perfect SQL the suite's ceiling is 99.6% (one
+`METRIC_COLUMN` known validator rejection remains). Every failure is now a
+model error; the systematic ones are metric-column confusion between
+near-synonyms (net vs payable vs bill total vs balance), joins through bridge
+tables (`ProductBrand`) and wrong result shapes. The two `hard_zero_harbor_kiosk_*`
+cases have an empty or zero gold on every fixture, so the oracle cannot tell
+right from wrong SQL there; treat their outcomes as unscored. The holdout gap
+(68.8% vs 74.6%) reflects performance on new intents in partly new wording:
 the holdout differs from dev in its intents as well as its wording, so the gap
 does not say how much of it comes from vocabulary the semantic layer and
 prompt rules were tuned on and how much from the questions themselves (see
-[Known limits](#known-limits)). Guardrails no longer reject
-correct SQL, but they catch only about a quarter of wrong SQL; most wrong
-answers are semantically wrong SQL that is still valid.
+[Known limits](#known-limits)). Guardrails never reject correct SQL, but they
+catch only about a fifth of wrong SQL; most wrong answers are semantically
+wrong SQL that is still valid.
+
+The previous baseline (prompt version `0c314451d4b7`, retrieved scope without
+widen-on-demand, which `SCHEMA_SCOPE=retrieved` reproduces exactly) scored
+68.8% (dev 72.6%, holdout 60.6%) with 92 system failures, all retrieval
+misses. The paired comparison and the decision are in
+[docs/experiments/01-schema-scope.md](experiments/01-schema-scope.md).
 
 ### CI
 
