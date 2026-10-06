@@ -1,0 +1,288 @@
+{
+  "version": "1+hints-v2",
+  "description": "Hints version 2 overlay (HINTS_VERSION=2, src/hints-version.js; docs/experiments/02-hints-v2.md), applied on top of metadata/semantic-layer.json. An entry replaces the base entry of the same kind and name in full; a new name is appended. HINTS_VERSION=1 reads semantic-layer.json alone.",
+  "entities": [
+    {
+      "name": "customer",
+      "synonyms": [
+        "customer",
+        "customers",
+        "client",
+        "clients",
+        "buyer",
+        "buyers"
+      ],
+      "preferred_tables": [
+        "Customer"
+      ],
+      "display_columns": [
+        "Customer.CustomerName",
+        "Customer.CustomerCode"
+      ],
+      "default_filters": [],
+      "notes": [
+        "v2: \"account\" and \"accounts\" are not customer synonyms: in this schema they name ledger accounts (ledger_account)."
+      ]
+    },
+    {
+      "name": "brand",
+      "synonyms": [
+        "brand",
+        "brands",
+        "brand name",
+        "brand names",
+        "manufacturer brand",
+        "label",
+        "labels"
+      ],
+      "preferred_tables": [
+        "Brand"
+      ],
+      "display_columns": [
+        "Brand.BrandName"
+      ],
+      "default_filters": [],
+      "notes": [
+        "v2: brands are reached through Product.BrandId; the ProductBrand bridge covers only some products and is not a preferred table."
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "name": "net_sales",
+      "synonyms": [
+        "net sales",
+        "sales",
+        "sale",
+        "revenue",
+        "buyers",
+        "biggest buyers",
+        "top buyers",
+        "turnover",
+        "spend",
+        "spent"
+      ],
+      "advisory_synonyms": [
+        "sales",
+        "sale",
+        "buyers",
+        "turnover",
+        "spend",
+        "spent"
+      ],
+      "preferred_expression": "COALESCE(SalesDocument.NetAmount, 0)",
+      "preferred_columns": [
+        "SalesDocument.NetAmount"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument",
+        "Customer"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "Sales, revenue, turnover and spend are net of tax: SalesDocument.NetAmount. Use GrossAmount only when the question says gross or tax included, and BillTotalAmount, NetPayableAmount or SubtotalAmount only when the question names that amount."
+      ]
+    },
+    {
+      "name": "line_net_sales",
+      "synonyms": [
+        "product sales",
+        "sku sales",
+        "item sales",
+        "merchandise sales",
+        "brand sales",
+        "category sales",
+        "campaign sales"
+      ],
+      "preferred_expression": "COALESCE(SalesDocumentLine.NetAmount, 0)",
+      "preferred_columns": [
+        "SalesDocumentLine.NetAmount"
+      ],
+      "grain": "sales_document_line",
+      "preferred_tables": [
+        "SalesDocumentLine",
+        "Product",
+        "SalesDocument"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "Use SalesDocumentLine.NetAmount (not the header NetAmount, not line TotalAmount) when sales are filtered or grouped by product, brand, category or campaign; campaigns are reached through Product.CampaignId."
+      ]
+    },
+    {
+      "name": "quantity_sold",
+      "synonyms": [
+        "quantity sold",
+        "qty sold",
+        "units sold",
+        "sold",
+        "sell",
+        "moved",
+        "movement",
+        "units",
+        "quantity"
+      ],
+      "advisory_synonyms": [
+        "sold",
+        "sell",
+        "moved",
+        "movement",
+        "units",
+        "quantity"
+      ],
+      "preferred_expression": "COALESCE(SalesDocumentLine.Quantity, 0)",
+      "preferred_columns": [
+        "SalesDocumentLine.Quantity"
+      ],
+      "grain": "sales_document_line",
+      "preferred_tables": [
+        "SalesDocumentLine",
+        "Product",
+        "SalesDocument"
+      ],
+      "default_filters": [
+        "SalesDocumentLine.ProductId IS NOT NULL",
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "Units sold count product lines only: lines without a product (delivery fees) are not units."
+      ]
+    },
+    {
+      "name": "document_count",
+      "synonyms": [
+        "document count",
+        "invoice count",
+        "order count",
+        "used the most",
+        "most used"
+      ],
+      "preferred_expression": "COUNT(*)",
+      "preferred_columns": [
+        "SalesDocument.SalesDocumentId"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument",
+        "DocumentType"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "For document type/class questions, group by DocumentTypeName, not DocumentTypeClass.",
+        "Count rows of SalesDocument itself; a posting-date filter is SalesDocument.PostingDate (counting through AccountingPosting counts posting rows)."
+      ]
+    },
+    {
+      "name": "debit_amount",
+      "synonyms": [
+        "debit",
+        "debits",
+        "debit amount",
+        "biggest debits"
+      ],
+      "count_advisory_synonyms": [
+        "debit",
+        "debits"
+      ],
+      "preferred_expression": "COALESCE(AccountingPosting.DebitAmount, 0)",
+      "preferred_columns": [
+        "AccountingPosting.DebitAmount"
+      ],
+      "grain": "accounting_posting",
+      "preferred_tables": [
+        "AccountingPosting",
+        "LedgerAccount",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use accounting postings with LedgerAccount for ledger debit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings have no sales document."
+      ]
+    },
+    {
+      "name": "credit_amount",
+      "synonyms": [
+        "credit",
+        "credits",
+        "credit amount",
+        "biggest credits"
+      ],
+      "count_advisory_synonyms": [
+        "credit",
+        "credits"
+      ],
+      "preferred_expression": "COALESCE(AccountingPosting.CreditAmount, 0)",
+      "preferred_columns": [
+        "AccountingPosting.CreditAmount"
+      ],
+      "grain": "accounting_posting",
+      "preferred_tables": [
+        "AccountingPosting",
+        "LedgerAccount",
+        "SalesDocument"
+      ],
+      "notes": [
+        "Use accounting postings with LedgerAccount for ledger credit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings have no sales document."
+      ]
+    },
+    {
+      "name": "average_order_value",
+      "synonyms": [
+        "average order value",
+        "order value"
+      ],
+      "preferred_expression": "AVG(COALESCE(SalesDocument.NetAmount, 0))",
+      "preferred_columns": [
+        "SalesDocument.NetAmount"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "Average order value is the average net amount per sales document, AVG(COALESCE(SalesDocument.NetAmount, 0)) over non-canceled documents, not the bill total."
+      ]
+    },
+    {
+      "name": "outstanding_balance",
+      "synonyms": [
+        "open amount",
+        "open balance",
+        "unpaid balance",
+        "outstanding",
+        "unpaid",
+        "owe",
+        "owed"
+      ],
+      "advisory_synonyms": [
+        "outstanding",
+        "unpaid",
+        "owe",
+        "owed"
+      ],
+      "preferred_expression": "COALESCE(SalesDocument.BalanceAmount, 0)",
+      "preferred_columns": [
+        "SalesDocument.BalanceAmount"
+      ],
+      "grain": "sales_document",
+      "preferred_tables": [
+        "SalesDocument"
+      ],
+      "default_filters": [
+        "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+      ],
+      "notes": [
+        "Outstanding, unpaid or open amounts are SalesDocument.BalanceAmount, not the bill total."
+      ]
+    }
+  ]
+}

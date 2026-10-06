@@ -61,7 +61,8 @@ const recordedMiss = {
 };
 
 function rescoreUnder(schemaScope) {
-  const validate = createValidatorProbe({ schema, schemaScope });
+  // Hints version 1: the baseline's prompts, where "turnover" matched nothing.
+  const validate = createValidatorProbe({ schema, schemaScope, hintsVersion: 1 });
   return rescoreRepetition(recordedMiss, { testCase: outletCase, connections: [], goldCache: createGoldCache(), schema, validate, score: matchingScore });
 }
 

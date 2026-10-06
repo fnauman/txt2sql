@@ -130,13 +130,16 @@ for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_ex
 // The schema-scope experiment's premise, pinned: under the retrieved scope 33
 // golds (every one the dataset used to flag TABLE_SCOPE) are rejected only
 // because retrieval did not pick an in-scope table they need; nothing else
-// changes. The default scope admits them (the tests above). The fresh holdout
-// is held to the same rule (only TABLE_SCOPE for an in-scope table) without a
-// pinned count: nothing may be tuned on how retrieval does on it.
-test('under the retrieved schema scope exactly 33 golds are rejected, each with TABLE_SCOPE for an in-scope table', () => {
+// changes. The default scope admits them (the tests above). That was hints
+// version 1's retrieval; version 2's semantic layer (turnover, units, order
+// value, ...) picks the needed table for 8 of them and misses no other gold.
+// The fresh holdout is held to the same rule (only TABLE_SCOPE for an
+// in-scope table) without a pinned count: nothing may be tuned on how
+// retrieval does on it.
+function retrievedScopeRejections(hintsVersion) {
   const rejected = new Set();
   for (const testCase of GOLD) {
-    const semanticPlan = buildSemanticPlan(testCase.question);
+    const semanticPlan = buildSemanticPlan(testCase.question, { hintsVersion });
     const prompt = buildOptimizedPrompt(schema, testCase.question, { masterDataCandidates: [], semanticPlan, schemaScope: 'retrieved' });
     const allowedTables = prompt.tables.map((table) => table.tableName);
     for (const sql of [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])]) {
@@ -155,5 +158,13 @@ test('under the retrieved schema scope exactly 33 golds are rejected, each with 
       }
     }
   }
-  assert.equal(rejected.size, 33, [...rejected].join(', '));
+  return rejected;
+}
+
+test('under the retrieved schema scope exactly 33 golds are rejected (hints version 1), each with TABLE_SCOPE for an in-scope table; 25 under version 2, all among them', () => {
+  const v1 = retrievedScopeRejections(1);
+  assert.equal(v1.size, 33, [...v1].join(', '));
+  const v2 = retrievedScopeRejections(2);
+  assert.equal(v2.size, 25, [...v2].join(', '));
+  assert.deepEqual([...v2].filter((id) => !v1.has(id)), [], 'version 2 adds no retrieval miss');
 });

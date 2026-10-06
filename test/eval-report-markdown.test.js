@@ -245,6 +245,7 @@ test('the hints version is in the provenance, the comparison table and the conso
   baseline.provenance.product = { schemaScope: full };
   const report = await sampleReport({ mode: 'rescore' });
   report.provenance.product = { schemaScope: full, hintsVersion: 2 };
+  report.provenance.semanticLayerOverlay = { path: 'metadata/semantic-layer.hints-v2.json', sha256: 'ab'.repeat(32) };
   report.rescoredFrom.schemaScope = full;
   report.rescoredFrom.hintsVersion = null;
   report.comparison = compareReports(
@@ -254,6 +255,7 @@ test('the hints version is in the provenance, the comparison table and the conso
   );
   const markdown = renderReportMarkdown(report);
   assert.match(markdown, /\| Hints version \| 2 \(default\) \|/);
+  assert.match(markdown, /\| Semantic layer version \| [0-9a-f]{12} \(with overlay metadata\/semantic-layer\.hints-v2\.json abababababab\) \|/);
   assert.match(markdown, /\| Hints version \| not recorded \(before HINTS_VERSION: 1\) \| 2 \(default\) \|/);
   assert.match(markdown, /\| Recorded hints version \| not recorded \(before HINTS_VERSION: 1\) \(recorded SQL re-judged with today's semantic plan; the prompts are not regenerated\) \|/);
   assert.match(renderHeadline(report), /\n {2}hints version: not recorded \(before HINTS_VERSION: 1\) → 2 \(default\)/);

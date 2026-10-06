@@ -12,6 +12,7 @@ import {
   describeLlmEndpoint,
   repoRelative,
   resolveGitState,
+  SEMANTIC_LAYER_OVERLAY_PATH,
   SEMANTIC_LAYER_PATH,
   stableStringify,
   traceMetadataFromProvenance,
@@ -87,7 +88,15 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     runner: { repeat: 3, concurrency: 4 },
     gitState: { sha: 'f00', dirty: true, changedFiles: 1 },
   });
-  assert.equal(provenance.semanticLayerVersion, sha256(await fs.readFile(SEMANTIC_LAYER_PATH)));
+  // Hints version 2 (the default) reads the base layer and its overlay.
+  const baseHash = sha256(await fs.readFile(SEMANTIC_LAYER_PATH));
+  const overlayHash = sha256(await fs.readFile(SEMANTIC_LAYER_OVERLAY_PATH));
+  assert.deepEqual(provenance.semanticLayerOverlay, { path: 'metadata/semantic-layer.hints-v2.json', sha256: overlayHash });
+  assert.equal(provenance.semanticLayerVersion, sha256(stableStringify({ base: baseHash, overlay: overlayHash })));
+  // Version 1 keeps the plain file hash of the reports before HINTS_VERSION.
+  const v1 = await collectProvenance({ schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {}, hintsVersion: 1 });
+  assert.equal(v1.semanticLayerVersion, baseHash);
+  assert.equal(v1.semanticLayerOverlay, null);
   assert.deepEqual(provenance.datasets, [{ name: 'core-public', path: 'datasets/core-public.json', sha256: sha256(await fs.readFile(datasetPath)) }]);
   assert.deepEqual(provenance.controls, [{ path: 'datasets/controls/core-public.json', sha256: sha256(await fs.readFile(controlsPath)) }]);
   assert.equal(provenance.schemaPath, 'generated/schema.json');

@@ -37,13 +37,16 @@ const MAIN_PROMPTS = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'test/fixtu
 
 // A retrieval miss on main: no table matches "outlet" or "turnover", so
 // retrieval falls back to four alphabetical tables and StoreLocation is not
-// in the allow-list (hard_vocab_outlet_turnover_top1_mar_2026).
+// in the allow-list (hard_vocab_outlet_turnover_top1_mar_2026). That is hints
+// version 1 (HINTS_VERSION=1): version 2 maps "turnover" to net sales, so
+// these schema-scope tests build their prompts with version 1 unless they
+// say otherwise.
 const OUTLET_QUESTION = 'Which outlet had the highest turnover in March 2026?';
 const OUTLET_GOLD =
   "SELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY s.StoreLocationId, s.LocationName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC LIMIT 1";
 
 function promptFor(question, schemaScope, extra = {}) {
-  const { hintsVersion, ...rest } = extra;
+  const { hintsVersion = 1, ...rest } = extra;
   return buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question, { hintsVersion }), schemaScope, ...rest });
 }
 
@@ -177,7 +180,7 @@ test('allow-list per scope: full admits every in-scope table, retrieved only the
 
   // Outside the in-scope schema: rejected in every scope.
   const narrow = { ...schema, tables: schema.tables.filter((table) => table.tableName !== 'StoreLocation') };
-  const narrowFull = buildOptimizedPrompt(narrow, OUTLET_QUESTION, { schemaScope: 'full' });
+  const narrowFull = buildOptimizedPrompt(narrow, OUTLET_QUESTION, { schemaScope: 'full', hintsVersion: 1 });
   assert.ok(!narrowFull.tables.some((table) => table.tableName === 'StoreLocation'));
   for (const prompt of [full, retrieved, narrowFull]) {
     const allowed = prompt.tables.map((table) => table.tableName);
@@ -264,7 +267,7 @@ async function runOutlet({ sqls, schemaScope, maxRetries = 1, onSchema = schema 
   const client = scriptedClient(sqls);
   const connection = fakeConnection();
   const trace = createBufferedTraceLogger();
-  const result = await runOptimizedQuestion({ client, connection, schema: onSchema, question: OUTLET_QUESTION, trace, maxRetries, schemaScope, statementTimeoutMs: 0 });
+  const result = await runOptimizedQuestion({ client, connection, schema: onSchema, question: OUTLET_QUESTION, trace, maxRetries, schemaScope, statementTimeoutMs: 0, hintsVersion: 1 });
   return { result, client, connection, trace };
 }
 

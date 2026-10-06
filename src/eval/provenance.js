@@ -7,7 +7,9 @@
 // - promptVersion: sha256 over the optimized system prompt (built by the real
 //   builder, so it includes the business rules), the BUSINESS_RULES and
 //   FEW_SHOT_EXAMPLES constants and the model request options;
-// - semanticLayerVersion: sha256 of metadata/semantic-layer.json;
+// - semanticLayerVersion: sha256 of metadata/semantic-layer.json (hints
+//   version 1), or for hints version 2 of that file's and its overlay's
+//   hashes together; semanticLayerOverlay names the overlay (null for 1);
 // - schemaVersion: sha256 of the compiled schema the prompts were built from;
 // - fixtures: expected and actual content hashes per fixture database;
 // - datasets and controls: sha256 of every file read;
@@ -36,6 +38,7 @@ import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffective
 const execFileAsync = promisify(execFile);
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const SEMANTIC_LAYER_PATH = path.resolve(REPO_ROOT, 'metadata/semantic-layer.json');
+export const SEMANTIC_LAYER_OVERLAY_PATH = path.resolve(REPO_ROOT, 'metadata/semantic-layer.hints-v2.json');
 
 export function sha256Hex(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
@@ -164,6 +167,7 @@ export async function collectProvenance({
   runner = {},
   repoRoot = REPO_ROOT,
   semanticLayerPath = SEMANTIC_LAYER_PATH,
+  semanticLayerOverlayPath = SEMANTIC_LAYER_OVERLAY_PATH,
   gitState = null,
   schemaScope = undefined,
   hintsVersion = undefined,
@@ -177,6 +181,14 @@ export async function collectProvenance({
   for (const file of controlsFiles) {
     controlsEntries.push({ path: repoRelative(file, repoRoot), sha256: await hashFile(file) });
   }
+  // The semantic layer the run read: the base file, plus the hints-v2
+  // overlay under version 2 (both hashes together, so the version changes
+  // when either file does; version 1 keeps the plain file hash of older
+  // reports).
+  const version = normalizeHintsVersion(hintsVersion);
+  const baseLayerHash = await hashFile(semanticLayerPath);
+  const overlay = version === 1 ? null : { path: repoRelative(semanticLayerOverlayPath, repoRoot), sha256: await hashFile(semanticLayerOverlayPath) };
+  const semanticLayerVersion = overlay ? sha256Hex(stableStringify({ base: baseLayerHash, overlay: overlay.sha256 })) : baseLayerHash;
   const fixtureEntries = fixtures.map((fixture) => ({
     name: fixture.name,
     database: fixture.database,
@@ -188,7 +200,8 @@ export async function collectProvenance({
     git,
     promptVersion: computePromptVersion(schema, { schemaScope, hintsVersion }),
     product: describeProductConfig(schema, schemaScope, hintsVersion),
-    semanticLayerVersion: await hashFile(semanticLayerPath),
+    semanticLayerVersion,
+    semanticLayerOverlay: overlay,
     schemaVersion: computeSchemaVersion(schema),
     schemaPath: repoRelative(schemaPath, repoRoot),
     fixturesVersion: sha256Hex(stableStringify(fixtureEntries.map((fixture) => [fixture.name, fixture.expectedContentHash]))),

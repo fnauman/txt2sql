@@ -707,7 +707,10 @@ function provenanceSection(report) {
     ['Prompt version', short(provenance.promptVersion)],
     ['Schema scope', schemaScopeText(provenance.product?.schemaScope)],
     ['Hints version', describeHintsVersion(provenance.product?.hintsVersion)],
-    ['Semantic layer version', short(provenance.semanticLayerVersion)],
+    [
+      'Semantic layer version',
+      `${short(provenance.semanticLayerVersion)}${provenance.semanticLayerOverlay ? ` (with overlay ${provenance.semanticLayerOverlay.path} ${short(provenance.semanticLayerOverlay.sha256)})` : ''}`,
+    ],
     ['Schema version', short(provenance.schemaVersion)],
     ['Fixtures', (provenance.fixtures || []).map((fixture) => `${fixture.name} ${short(fixture.contentHash)}`).join(', ') || 'n/a'],
     ['Datasets', (provenance.datasets || []).map((dataset) => `${dataset.name} ${short(dataset.sha256)}`).join(', ') || 'n/a'],

@@ -753,6 +753,9 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
   ]);
   const defaultFilters = uniqueStrings([
     ...entities.flatMap((entry) => entry.defaultFilters),
+    // Version 2: a metric's own default filters (units count product lines
+    // only, canceled documents excluded) apply even when no entity matched.
+    ...(version === 1 ? [] : metrics.flatMap((entry) => entry.defaultFilters)),
   ]);
 
   const plan = {
@@ -1290,6 +1293,18 @@ function formatTemporalReferences(temporalReferences) {
     .join('\n');
 }
 
+// Version 1 said "counts and lists do not need it" for every advisory match,
+// also for "How many units did we sell" (a SUM of quantity). Version 2 says
+// which kind of weak match it is.
+function advisoryMetricNote(metric, hintsVersion) {
+  if (hintsVersion === 1) {
+    return ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)';
+  }
+  return metric.enforcementReason === 'count_or_existence_intent'
+    ? ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)'
+    : ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
+}
+
 function formatSemanticHints(semanticPlan, { hintsVersion = 1 } = {}) {
   if (
     !semanticPlan ||
@@ -1316,14 +1331,17 @@ function formatSemanticHints(semanticPlan, { hintsVersion = 1 } = {}) {
     // An advisory metric matched only generic wording ("sales", "sold") or a
     // count/existence question, so say so instead of steering a COUNT query
     // toward an amount column.
-    const advisoryNote =
-      metric.enforcement === 'advisory'
-        ? ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)'
-        : '';
+    const advisoryNote = metric.enforcement === 'advisory' ? advisoryMetricNote(metric, hintsVersion) : '';
+    // Version 2 also states the metric's default filters and notes (the
+    // conventions behind the gold: product lines only for units, canceled
+    // documents excluded, which amount column a money word means).
+    const defaults =
+      hintsVersion !== 1 && (metric.defaultFilters || []).length > 0 ? `; apply default filters ${metric.defaultFilters.join(' AND ')}` : '';
+    const notes = hintsVersion !== 1 && (metric.notes || []).length > 0 ? ` ${metric.notes.join(' ')}` : '';
     lines.push(
       `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}${advisoryNote}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
         metric.preferredTables.length > 0 ? ` using tables ${metric.preferredTables.join(', ')}` : ''
-      }.`
+      }${defaults}.${notes}`
     );
   }
 

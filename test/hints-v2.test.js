@@ -3,9 +3,18 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import fs from 'node:fs';
+
 import { BUSINESS_RULES, BUSINESS_RULES_V2, businessRulesFor, DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
-import { buildOptimizedPrompt, buildQuestionContext, extractTemporalReferences } from '../src/pipeline.js';
+import { buildOptimizedPrompt, buildQuestionContext, buildSemanticPlan, extractTemporalReferences, validateReadOnlySql } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
+import {
+  applySemanticLayerOverlay,
+  DEFAULT_SEMANTIC_LAYER_PATH,
+  HINTS_V2_SEMANTIC_LAYER_OVERLAY_PATH,
+  loadSemanticLayerForHintsVersion,
+  loadSemanticLayerSync,
+} from '../src/semantic-layer.js';
 
 // Hints version 2 (docs/experiments/02-hints-v2.md), one test group per
 // change. The case ids in the comments are the dev failures (error analysis of
@@ -155,4 +164,144 @@ test('v2 rules: count, single-total and time-grain shapes; money, unit, cancella
   assert.match(v2Rule(/exclude them with IFNULL/), /wherever SalesDocument appears: also when it is joined only for a date .*inside a subquery or NOT EXISTS, and in the ON clause of a LEFT JOIN used as an anti-join/);
   assert.match(v2Rule(/^Campaign sales, units and customers/), /do not use SalesDocument\.CampaignId for campaign results/);
   assert.match(v2Rule(/"account" means LedgerAccount/), /LedgerAccount\.AccountCode, never on LedgerAccountId, and an account name with LIKE on LedgerAccount\.AccountName/);
+});
+
+// --- semantic layer: the hints-v2 overlay ------------------------------------
+// metadata/semantic-layer.json (and its template) are unchanged; version 2
+// reads metadata/semantic-layer.hints-v2.json on top. Motivating dev
+// failures: money words with no metric fell back to BillTotalAmount
+// (hard_vocab_department_turnover_feb_2026, hard_entity_lakeside_spend_q1_2026,
+// the average-order-value cases 30dc49 / 146d60 / afb751 / 820a8d,
+// tpl_outstanding_balance_due_apr_2026_571390 "open amount"); the brand entity
+// preferred the partial ProductBrand bridge (tpl_brand_net_sales_feb_2026_196b6b);
+// "stopped selling" made a count question a quantity one (paraphrase_public_004);
+// units counted delivery-fee lines (214320, 12ab97, 2f8130, 1d11c5);
+// "account" pulled the customer entity into ledger questions
+// (tpl_account_net_movement_feb_2026_c1256b).
+
+const metricOf = (plan, name) => plan.metrics.find((metric) => metric.name === name) || null;
+const v1Plan = (question) => buildSemanticPlan(question, { hintsVersion: 1 });
+const v2Plan = (question) => buildSemanticPlan(question, { hintsVersion: 2 });
+
+test('overlay mechanics: an entry replaces the same-named base entry in place, a new one is appended, typos are refused', () => {
+  const base = { version: 1, entities: [{ name: 'a', synonyms: ['x'] }, { name: 'b' }], metrics: [{ name: 'm' }], join_paths: [{ name: 'j' }] };
+  const merged = applySemanticLayerOverlay(base, { version: '1+o', entities: [{ name: 'b', synonyms: ['y'] }, { name: 'c' }] });
+  assert.deepEqual(merged, { version: '1+o', entities: [{ name: 'a', synonyms: ['x'] }, { name: 'b', synonyms: ['y'] }, { name: 'c' }], metrics: [{ name: 'm' }], join_paths: [{ name: 'j' }] });
+  assert.deepEqual(base.entities[1], { name: 'b' }, 'the base is not modified');
+  assert.throws(() => applySemanticLayerOverlay(base, { metric: [] }), /unknown keys: metric/);
+  assert.throws(() => applySemanticLayerOverlay(base, { metrics: [{ synonyms: ['z'] }] }), /entry without a name/);
+  assert.throws(() => applySemanticLayerOverlay(base, { metrics: {} }), /"metrics" must be an array/);
+});
+
+test('version 1 reads semantic-layer.json alone (identical to its template); version 2 changes only the overlay entries', () => {
+  assert.equal(loadSemanticLayerForHintsVersion(1), loadSemanticLayerSync());
+  assert.equal(
+    fs.readFileSync(DEFAULT_SEMANTIC_LAYER_PATH, 'utf8'),
+    fs.readFileSync(path.join(REPO_ROOT, 'metadata/semantic-layer.template.json'), 'utf8')
+  );
+  const v1 = loadSemanticLayerForHintsVersion(1);
+  const v2 = loadSemanticLayerForHintsVersion(2);
+  const overlay = JSON.parse(fs.readFileSync(HINTS_V2_SEMANTIC_LAYER_OVERLAY_PATH, 'utf8'));
+  assert.equal(v2.version, '1+hints-v2');
+  for (const kind of ['filter_hints', 'value_aliases', 'join_paths', 'clarification_rules']) {
+    assert.deepEqual(v2[kind], v1[kind], kind);
+  }
+  for (const kind of ['entities', 'metrics']) {
+    const changed = new Set(overlay[kind].map((entry) => entry.name));
+    assert.deepEqual(
+      v2[kind].filter((entry) => !changed.has(entry.name)),
+      v1[kind].filter((entry) => !changed.has(entry.name)),
+      `${kind} outside the overlay are unchanged`
+    );
+  }
+  assert.deepEqual(overlay.entities.map((entry) => entry.name), ['customer', 'brand']);
+  assert.deepEqual(overlay.metrics.map((entry) => entry.name), [
+    'net_sales',
+    'line_net_sales',
+    'quantity_sold',
+    'document_count',
+    'debit_amount',
+    'credit_amount',
+    'average_order_value',
+    'outstanding_balance',
+  ]);
+});
+
+test('v2 layer: brands prefer Brand only, so the ProductBrand join hints are gone', () => {
+  const question = 'How much revenue did each brand bring in during February 2026?';
+  const joins = (plan) => plan.joinHints.map((hint) => hint.name);
+  assert.ok(joins(v1Plan(question)).includes('product_brand_to_brand'));
+  assert.ok(!joins(v2Plan(question)).some((name) => name.startsWith('product_brand')));
+  assert.ok(joins(v2Plan(question)).includes('product_to_brand'));
+  assert.ok(!v2Plan(question).requiredTables.includes('ProductBrand'));
+  assert.doesNotMatch(buildOptimizedPrompt(schema, question).user, /prefer tables Brand, ProductBrand/);
+});
+
+test('v2 layer: turnover and spend are net sales (advisory: never a rejection), with the money-word convention in the hint', () => {
+  for (const [question, word] of [
+    ['Show turnover by department for February 2026.', 'turnover'],
+    ['How much did Lakeside Wholesale spend with us in Q1 2026?', 'spend'],
+    ['Which 3 clients spent the most with us in December 2025?', 'spent'],
+  ]) {
+    assert.equal(metricOf(v1Plan(question), 'net_sales'), null, question);
+    const metric = metricOf(v2Plan(question), 'net_sales');
+    assert.deepEqual([metric.matchedSynonyms, metric.enforcement], [[word], 'advisory'], question);
+  }
+  // A product dimension still derives the line-level metric.
+  assert.ok(metricOf(v2Plan('Show turnover by department for February 2026.'), 'line_net_sales'));
+  const hint = buildOptimizedPrompt(schema, 'Which outlet had the highest turnover in March 2026?').user;
+  assert.match(hint, /Metric "net_sales" matched turnover .*prefer COALESCE\(SalesDocument\.NetAmount, 0\).*apply default filters IFNULL\(SalesDocument\.IsCanceled, 0\) = 0\. Sales, revenue, turnover and spend are net of tax: SalesDocument\.NetAmount\. Use GrossAmount only when the question says gross/);
+  // "gross turnover" keeps its gold: advisory never rejects GrossAmount.
+  const gross = 'How much gross turnover (incl. tax) did each store record in February 2026?';
+  const prompt = buildOptimizedPrompt(schema, gross);
+  const sql = "SELECT s.LocationName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY s.StoreLocationId, s.LocationName";
+  const validated = validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument', 'StoreLocation'] } });
+  assert.deepEqual(validated.guardrails.warnings.map((warning) => [warning.code, warning.metric]), [['METRIC_COLUMN_NOT_USED', 'net_sales']]);
+});
+
+test('v2 layer: average order value and open amounts get a metric, enforced on their explicit phrases', () => {
+  const aov = metricOf(v2Plan('What was the average order value in March 2026?'), 'average_order_value');
+  assert.equal(aov.enforcement, 'enforced');
+  assert.equal(aov.preferredExpression, 'AVG(COALESCE(SalesDocument.NetAmount, 0))');
+  assert.equal(metricOf(v1Plan('What was the average order value in March 2026?'), 'average_order_value'), null);
+  const open = metricOf(v2Plan('Total open amount on documents with a due date in April 2026.'), 'outstanding_balance');
+  assert.deepEqual([open.matchedSynonyms, open.enforcement, open.preferredColumns], [['open amount'], 'enforced', ['SalesDocument.BalanceAmount']]);
+  assert.equal(metricOf(v2Plan('How much is still unpaid on March 2026 sales?'), 'outstanding_balance').enforcement, 'advisory');
+
+  const prompt = buildOptimizedPrompt(schema, 'What was the average order value in March 2026?');
+  const allowed = prompt.tables.map((table) => table.tableName);
+  const validate = (sql) => validateReadOnlySql(sql, allowed, { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+  assert.throws(() => validate("SELECT AVG(BillTotalAmount) AS aov FROM SalesDocument WHERE DocumentDate >= '2026-03-01'"), { code: 'METRIC_COLUMN' });
+  assert.doesNotThrow(() => validate("SELECT ROUND(AVG(COALESCE(d.NetAmount, 0)), 2) AS avg_order_value FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0"));
+});
+
+test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
+  const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
+  assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);
+  assert.deepEqual(units.defaultFilters, ['SalesDocumentLine.ProductId IS NOT NULL', 'IFNULL(SalesDocument.IsCanceled, 0) = 0']);
+  assert.equal(metricOf(v1Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold'), null);
+  const question = 'How many units did we sell in total in December 2025?';
+  assert.ok(v2Plan(question).defaultFilters.includes('SalesDocumentLine.ProductId IS NOT NULL'));
+  assert.ok(!v1Plan(question).defaultFilters.includes('SalesDocumentLine.ProductId IS NOT NULL'));
+  assert.match(
+    buildOptimizedPrompt(schema, question).user,
+    /Metric "quantity_sold" matched sell, units .*apply default filters SalesDocumentLine\.ProductId IS NOT NULL AND IFNULL\(SalesDocument\.IsCanceled, 0\) = 0\. Units sold count product lines only/
+  );
+  assert.doesNotMatch(buildOptimizedPrompt(schema, question, { hintsVersion: 1 }).user, /apply default filters SalesDocumentLine\.ProductId/);
+
+  const stopped = 'How many SKUs sold in February 2026 but stopped selling in March 2026?';
+  assert.deepEqual(metricOf(v1Plan(stopped), 'quantity_sold').matchedSynonyms, ['sold', 'sell', 'stopped selling']);
+  assert.deepEqual(metricOf(v2Plan(stopped), 'quantity_sold').matchedSynonyms, ['sold', 'sell']);
+
+  const ledger = 'For each account, by name, what is debit minus credit on postings of sales dated February 2026?';
+  assert.ok(v1Plan(ledger).entities.some((entity) => entity.name === 'customer'));
+  assert.ok(!v2Plan(ledger).entities.some((entity) => entity.name === 'customer'));
+  assert.ok(v2Plan(ledger).entities.some((entity) => entity.name === 'ledger_account'));
+  assert.ok(v2Plan('Top 3 customers by gross amount in April 2026.').entities.some((entity) => entity.name === 'customer'));
+});
+
+test('v2 layer: ledger metric hints state when SalesDocument is joined and its cancellation filter', () => {
+  const prompt = buildOptimizedPrompt(schema, 'Show the top ledger accounts by debit amount in March 2026.').user;
+  assert.match(prompt, /Metric "debit_amount" matched .*Join SalesDocument only to filter on a document column \(such as DocumentDate\), and then also apply IFNULL\(SalesDocument\.IsCanceled, 0\) = 0; a PostingDate filter needs no SalesDocument join/);
+  assert.doesNotMatch(buildOptimizedPrompt(schema, 'Show the top ledger accounts by debit amount in March 2026.', { hintsVersion: 1 }).user, /Join SalesDocument only/);
 });
