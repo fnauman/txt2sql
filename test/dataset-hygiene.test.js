@@ -15,7 +15,7 @@ import {
   serialize,
   splitForIntent,
 } from '../scripts/build-eval-dataset.mjs';
-import { CASE_SPLITS, normalizeBenchmarkCase } from '../src/benchmark.js';
+import { CASE_SPLITS, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import { goldFingerprint, loadControlsIndex, normalizeSqlText, resolveCaseControls } from '../src/eval/controls.js';
 import { MASTER_DATA } from '../src/eval/fixture-data.js';
@@ -23,6 +23,7 @@ import { FIXTURES } from '../src/eval/fixtures.js';
 import { dedupeSuiteCases, scoringFingerprint } from '../src/eval/suite.js';
 import { createValidatorProbe } from '../src/eval/verify.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
+import { isKeywordToken, tokenizeSql } from '../src/sql-tokenizer.js';
 
 // Dataset hygiene (audit plan 2.6): splits, the holdout's vocabulary, id
 // stability, leakage into the prompt, pins, and the generator's determinism.
@@ -225,6 +226,51 @@ test('(f) every answer case pins its gold row count on seed, v2 and v3; behavior
     assert.deepEqual(Object.keys(testCase.expected_row_counts || {}), fixtureNames, `${dataset}/${testCase.id} pins`);
     assert.ok(Object.values(testCase.expected_row_counts).every((count) => Number.isInteger(count) && count >= 0), `${dataset}/${testCase.id} pins`);
   }
+});
+
+// The keys of a query's outermost ORDER BY (split at depth-0 commas), or [].
+function outermostOrderByKeys(sql) {
+  const tokens = tokenizeSql(sql).filter((token) => token.type !== 'whitespace' && token.type !== 'comment');
+  let depth = 0;
+  let keys = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const atTop = depth === 0;
+    if (token.type === 'punct' && token.value === '(') depth += 1;
+    if (token.type === 'punct' && token.value === ')') depth -= 1;
+    if (atTop && isKeywordToken(token, 'ORDER') && isKeywordToken(tokens[index + 1], 'BY')) {
+      keys = [''];
+      index += 1;
+    } else if (atTop && isKeywordToken(token, 'LIMIT')) {
+      break;
+    } else if (keys && atTop && token.type === 'punct' && token.value === ',') {
+      keys.push('');
+    } else if (keys) {
+      keys[keys.length - 1] = `${keys[keys.length - 1]} ${token.value}`.trim();
+    }
+  }
+  return keys ?? [];
+}
+
+test('(h) every gold with a LIMIT orders by a tiebreak after its metric, so the rows it keeps are deterministic', () => {
+  // The oracle lets a prediction swap items tied at a gold's cut-off (ties at
+  // the cut-off), but the gold itself must not depend on the execution plan.
+  const offenders = [];
+  for (const { dataset, testCase } of allCases) {
+    for (const sql of [testCase.expected_sql, ...(testCase.alternative_expected_sql || [])].filter(Boolean)) {
+      const keys = outermostOrderByKeys(sql);
+      if (topLevelLimitRowCount(sql) !== null && keys.length < 2) {
+        offenders.push(`${dataset}/${testCase.id}: ORDER BY ${keys.join(', ') || '(none)'}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+  // The live baseline's tie-blind SQL for tpl_product_qty_top5_feb_2026_8a9dc1 would be flagged.
+  const tieBlind =
+    'SELECT p.ProductName, ROUND(SUM(sdl.Quantity), 3) AS total_qty FROM SalesDocument sd JOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId ' +
+    'JOIN Product p ON sdl.ProductId = p.ProductId GROUP BY p.ProductId, p.ProductName ORDER BY SUM(sdl.Quantity) DESC LIMIT 5';
+  assert.deepEqual(outermostOrderByKeys(tieBlind), ['SUM ( sdl . Quantity ) DESC']);
+  assert.deepEqual(outermostOrderByKeys(`${tieBlind.replace(' LIMIT 5', '')}, p.ProductName ASC LIMIT 5`), ['SUM ( sdl . Quantity ) DESC', 'p . ProductName ASC']);
 });
 
 test('(g) the templated generator reproduces the committed dataset and controls byte for byte', async () => {
