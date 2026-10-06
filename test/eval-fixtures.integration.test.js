@@ -13,7 +13,7 @@ import { loadControlsIndex } from '../src/eval/controls.js';
 import { FACT_TABLES, MASTER_TABLES } from '../src/eval/fixture-data.js';
 import { checkFixtureContent, checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, describeFixtureContent } from '../src/eval/fixtures.js';
-import { closeFixtureConnections, createGoldCache, openFixtureConnections } from '../src/eval/oracle.js';
+import { closeFixtureConnections, createGoldCache, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
 import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
 import { createMariaDbConnection } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -222,6 +222,40 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
       // The point of the extra fixtures: the seed alone catches far less.
       assert.ok(summary.design.seedOnlyRate < summary.design.rate);
     }
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
+test('ties at the cut-off: the live baseline\'s tie-blind top 5 passes whichever tied product MariaDB returns', { skip }, async () => {
+  // tpl_product_qty_top5_feb_2026_8a9dc1 on v3: 'Herbal Tea Variety Pack' and
+  // 'Spring Water 24 Pack' both moved 34 units, at position 5. The recorded
+  // gpt-4o-mini SQL orders by the quantity alone, so the plan picks the fifth
+  // product (it scored wrong_result live and pass on a rescore); the tails
+  // force each of the two legal answers.
+  const { cases } = await loadBenchmarkDataset({ datasetName: 'templated-public', caseId: 'tpl_product_qty_top5_feb_2026_8a9dc1' });
+  const [testCase] = cases;
+  const tieBlind =
+    'SELECT p.ProductName, ROUND(SUM(sdl.Quantity), 3) AS total_qty FROM SalesDocument sd ' +
+    'JOIN SalesDocumentLine sdl ON sd.SalesDocumentId = sdl.SalesDocumentId JOIN Product p ON sdl.ProductId = p.ProductId ' +
+    "WHERE IFNULL(sd.IsCanceled, 0) = 0 AND sd.DocumentDate >= '2026-02-01' AND sd.DocumentDate < '2026-03-01' " +
+    'GROUP BY p.ProductId, p.ProductName ORDER BY SUM(sdl.Quantity) DESC';
+  const connections = await openFixtureConnections({ env });
+  try {
+    const v3 = connections.find((entry) => entry.name === 'v3');
+    const fifth = {};
+    for (const [label, tail] of [['as written', ''], ['name ASC', ', p.ProductName ASC'], ['name DESC', ', p.ProductName DESC']]) {
+      const sql = `${tieBlind}${tail} LIMIT 5`;
+      const [rows] = await v3.connection.query(sql);
+      fifth[label] = rows[4].ProductName;
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, true, `${label}: ${score.reason} (killed on ${score.killedOn.join(', ')})`);
+    }
+    // The fixture still holds the tie this test is about.
+    assert.deepEqual([fifth['name ASC'], fifth['name DESC']], ['Herbal Tea Variety Pack', 'Spring Water 24 Pack']);
+    // Another product at the cut-off with another quantity is still wrong.
+    const wrong = await scoreAgainstGold({ testCase, predictedSql: `${tieBlind.replace(">= '2026-02-01'", "> '2026-02-01'")} LIMIT 5`, connections });
+    assert.equal(wrong.match, false);
   } finally {
     await closeFixtureConnections(connections);
   }
