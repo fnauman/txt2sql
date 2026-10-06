@@ -722,8 +722,12 @@ the comparison pairs no case (an unrelated or empty baseline, renamed ids,
 changed gold for every shared case) or fewer than half of the run's cases
 (`MIN_GATE_PAIRED_FRACTION` = 0.5 in scripts/eval.js): the regression gate has
 then not tested the run, and a baseline that pairs less than half the suite is
-stale, so refresh it. `--min-accuracy` does not stand in for a comparison
-that was asked for. With 26 cases a significant change needs at
+stale, so refresh it. On a rescore (`--offline --gate`, `--rescore`) the same
+floor applies to today's suite: a rescore re-judges the recorded cases, so
+the gate also counts how many of today's (filtered) suite cases are paired
+(same id, same gold and scoring, counted in both); none, or fewer than half,
+exits 2, e.g. after every case id was renamed or with a baseline of a subset.
+`--min-accuracy` does not stand in for a comparison that was asked for. With 26 cases a significant change needs at
 least 6 unanimous flips in one direction (p = 0.031); 5 give p = 0.0625.
 
 Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed

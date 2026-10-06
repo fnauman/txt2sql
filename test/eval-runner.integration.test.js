@@ -494,3 +494,28 @@ test('a connection dropped during verification, verify-dataset or a rescore exit
   assert.equal(rescore.code, 2, rescore.stdout + rescore.stderr);
   assert.match(rescore.stdout, /HARNESS: \d+ repetition\(s\): database infrastructure errors \(infra_error\)/);
 });
+
+test('--gate on a rescore exits 2 when the recorded report does not cover today\'s suite (renamed ids, a subset baseline)', { skip }, async () => {
+  assert.ok(first, 'needs the first run');
+  // Today's datasets with every case id renamed: the recorded report pairs with itself, not with them.
+  const datasetsDir = path.join(outputRoot, 'renamed-datasets');
+  await fs.mkdir(datasetsDir, { recursive: true });
+  for (const name of ['core-public', 'paraphrase-public', 'edge-cases-public']) {
+    const cases = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets', `${name}.json`), 'utf8'));
+    await fs.writeFile(path.join(datasetsDir, `${name}.json`), JSON.stringify(cases.map((testCase) => ({ ...testCase, id: `v2_${testCase.id}` }))));
+  }
+  const renamed = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify', '--datasets-dir', datasetsDir], 'gate-renamed-suite');
+  assert.equal(renamed.code, 2, renamed.stdout + renamed.stderr);
+  assert.match(renamed.stdout, /HARNESS: --gate checked none of today's 26 suite case\(s\) against the baseline \S+: 26 not in the rescored report/);
+
+  // A one-case recorded report.
+  const oneCase = path.join(outputRoot, 'one-case-report.json');
+  await fs.writeFile(oneCase, JSON.stringify({ ...first.report, results: first.report.results.slice(0, 1) }));
+  const subset = await runEval(['--rescore', oneCase, '--gate', '--skip-verify'], 'gate-subset-suite');
+  assert.equal(subset.code, 2, subset.stdout + subset.stderr);
+  assert.match(subset.stdout, /HARNESS: --gate checked only 1 of today's 26 suite case\(s\) \(below 50%\)/);
+
+  // The full recorded report covers the suite.
+  const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-full-suite');
+  assert.equal(full.code, 0, full.stdout + full.stderr);
+});

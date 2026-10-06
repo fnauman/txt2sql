@@ -11,6 +11,7 @@ import {
   createRunStopper,
   defaultBaselinePath,
   describeRunnerFlags,
+  describeSuiteCoverage,
   MIN_GATE_PAIRED_FRACTION,
   parseEvalArgs,
   providerConfigRejection,
@@ -374,6 +375,41 @@ test('--gate fails (exit 2) when the baseline pairs no case, or fewer than half 
   assert.equal(gateWith({ results: ids('other', 5).map((id) => record(id, 1)) }, { gate: false }).code, 0);
   // --min-accuracy does not rescue a comparison that was asked for but compared nothing.
   assert.equal(gateWith({ results: [] }, { gate: true, minAccuracy: 0.1 }).code, 2);
+});
+
+test('--gate on a rescore fails (exit 2) when the recorded report no longer covers today\'s suite', () => {
+  const record = (id, gold = `SELECT '${id.replace(/^v2_/, '')}'`) => ({ id, question: `${id}?`, gold_fingerprint: gold, summary: { counted: 1, passes: 1, passRate: 1, majorityPass: true, outcome: 'pass' } });
+  const ids = (prefix, count) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+  const suite = (names) => names.map((id) => ({ testCase: { id } }));
+  // A rescore pairs with its own source, so the comparison alone looks perfect.
+  const rescoreGate = (recordedIds, suiteIds, { gold = null } = {}) => {
+    const recorded = { results: recordedIds.map((id) => record(id)) };
+    const rescored = { results: recordedIds.map((id) => record(id, gold?.[id])) };
+    const comparison = compareReports(recorded, rescored, { resamples: 50, baselineLabel: 'eval/baselines/gpt-4o-mini.json' });
+    comparison.suiteCoverage = describeSuiteCoverage(suite(suiteIds), comparison);
+    return computeExitCode({ ...fakeReport(), comparison }, { gate: true });
+  };
+
+  // Every case id renamed: the 26 recorded cases pair with themselves, none of today's.
+  const renamed = rescoreGate(ids('c', 26), ids('v2_c', 26));
+  assert.equal(renamed.code, 2);
+  assert.match(renamed.reasons.join('\n'), /--gate checked none of today's 26 suite case\(s\) against the baseline eval\/baselines\/gpt-4o-mini\.json: 26 not in the rescored report; the recorded report no longer covers the suite/);
+  // A one-case default baseline.
+  const subset = rescoreGate(['c0'], ids('c', 26));
+  assert.equal(subset.code, 2);
+  assert.match(subset.reasons.join('\n'), /--gate checked only 1 of today's 26 suite case\(s\) \(below 50%\).*: 25 not in the rescored report/);
+  // Half of the suite is enough; the whole suite passes.
+  assert.equal(rescoreGate(ids('c', 13), ids('c', 26)).code, 0);
+  assert.equal(rescoreGate(ids('c', 26), ids('c', 26)).code, 0);
+  // Today's gold changed for most cases: rescored on the new gold, those do not pair.
+  const regolded = rescoreGate(ids('c', 10), ids('c', 10), { gold: Object.fromEntries(ids('c', 6).map((id) => [id, 'new gold'])) });
+  assert.equal(regolded.code, 2);
+  assert.match(regolded.reasons.join('\n'), /only 4 of today's 10 suite case\(s\).*6 with changed gold or scoring/);
+  // Without --gate nothing is gated.
+  const comparison = compareReports({ results: [record('c0')] }, { results: [record('c0')] }, { resamples: 50 });
+  comparison.suiteCoverage = describeSuiteCoverage(suite(ids('c', 26)), comparison);
+  assert.equal(computeExitCode({ ...fakeReport(), comparison }, { gate: false }).code, 0);
+  assert.deepEqual(comparison.suiteCoverage.notInReport.length, 25);
 });
 
 test('a baseline must be an evaluation report: results[] with case ids, a known report version', () => {

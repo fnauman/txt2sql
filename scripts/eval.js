@@ -436,6 +436,59 @@ export function gatePairingFailure(comparison, { minFraction = MIN_GATE_PAIRED_F
 }
 
 /**
+ * How much of today's suite a rescore's comparison covers: { suiteCases,
+ * paired, notInReport, goldChanged, notCounted, notInBaseline } (id lists).
+ * A rescore re-judges the RECORDED cases: one whose id is no longer in the
+ * suite (renamed) is rescored from its recorded definition and pairs with its
+ * own recording, and a suite case the recorded report lacks is never looked
+ * at. The rescore's own pairing (comparison.paired against
+ * comparison.candidateCases) therefore says nothing about today's suite; only
+ * suite cases among the paired ones (same id, same gold and scoring, counted
+ * in both) were actually checked.
+ */
+export function describeSuiteCoverage(suiteEntries, comparison) {
+  const idsOf = (list) => new Set((list || []).map((entry) => (typeof entry === 'string' ? entry : entry.id)));
+  const paired = idsOf(comparison.pairedCases);
+  const goldChanged = idsOf(comparison.excluded?.goldChanged);
+  const notCounted = idsOf(comparison.excluded?.notCounted);
+  const notInBaseline = idsOf(comparison.newCases);
+  const suiteIds = [...new Set(suiteEntries.map((entry) => entry.testCase.id))].sort();
+  const pick = (set) => suiteIds.filter((id) => set.has(id));
+  return {
+    suiteCases: suiteIds.length,
+    paired: pick(paired).length,
+    notInReport: suiteIds.filter((id) => !paired.has(id) && !goldChanged.has(id) && !notCounted.has(id) && !notInBaseline.has(id)),
+    goldChanged: pick(goldChanged),
+    notCounted: pick(notCounted),
+    notInBaseline: pick(notInBaseline),
+  };
+}
+
+/** Why --gate on a rescore has not checked enough of today's suite (null when it has). */
+export function gateSuiteCoverageFailure(coverage, { minFraction = MIN_GATE_PAIRED_FRACTION, label = '' } = {}) {
+  if (!coverage || !(coverage.suiteCases > 0)) {
+    return null;
+  }
+  const { suiteCases, paired } = coverage;
+  if (paired > 0 && paired >= minFraction * suiteCases) {
+    return null;
+  }
+  const why = [
+    coverage.notInReport.length ? `${coverage.notInReport.length} not in the rescored report` : null,
+    coverage.goldChanged.length ? `${coverage.goldChanged.length} with changed gold or scoring` : null,
+    coverage.notCounted.length ? `${coverage.notCounted.length} not counted or timed out in one report` : null,
+    coverage.notInBaseline.length ? `${coverage.notInBaseline.length} not in the baseline` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const scope = paired === 0 ? `none of today's ${suiteCases} suite case(s)` : `only ${paired} of today's ${suiteCases} suite case(s) (below ${Math.round(minFraction * 100)}%)`;
+  return (
+    `--gate checked ${scope} against the baseline${label ? ` ${label}` : ''}${why ? `: ${why}` : ''}; ` +
+    'the recorded report no longer covers the suite, so refresh the baseline (npm run eval -- --write-baseline)'
+  );
+}
+
+/**
  * Exit code of a finished run: { code, reasons }. 2 for harness, dataset or
  * infrastructure failures, and for a --gate whose baseline pairs too few cases
  * (gatePairingFailure); 1 for a failed --gate (or, in the benchmark profile,
@@ -480,6 +533,11 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     const pairing = gatePairingFailure(report.comparison);
     if (pairing) {
       harness.push(pairing);
+    }
+    // A rescore: the pairing must also cover today's suite (describeSuiteCoverage).
+    const coverage = gateSuiteCoverageFailure(report.comparison.suiteCoverage, { label: report.comparison.baseline?.label || '' });
+    if (coverage) {
+      harness.push(coverage);
     }
   }
   if (harness.length > 0) {
@@ -1066,6 +1124,8 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     { results: caseRecords, model, generatedAt, provenance, mode: 'rescore' },
     { baselineLabel: repoRelative(baseline.path), candidateLabel: 'rescore' }
   );
+  // Today's suite (with the same filters): what the gate must have checked.
+  comparison.suiteCoverage = describeSuiteCoverage(describeFilters(filters) ? filterSuiteEntries(selection.entries, filters) : selection.entries, comparison);
   const runPaths = createBenchmarkRunPaths({ datasetName: `${suite.name}-rescore`, model, outputDir: options.outputDir });
   const reportPath = options.resultsFile || runPaths.reportPath;
   const report = buildReport({
