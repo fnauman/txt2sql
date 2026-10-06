@@ -284,7 +284,7 @@ test('version 1 reads semantic-layer.json alone (identical to its template); ver
     'debit_amount',
     'credit_amount',
     'average_order_value',
-    'outstanding_balance',
+    'open_balance',
   ]);
 });
 
@@ -325,9 +325,9 @@ test('v2 layer: average order value and open amounts get a metric, enforced on t
   assert.equal(aov.enforcement, 'enforced');
   assert.equal(aov.preferredExpression, 'AVG(COALESCE(SalesDocument.NetAmount, 0))');
   assert.equal(metricOf(v1Plan('What was the average order value in March 2026?'), 'average_order_value'), null);
-  const open = metricOf(v2Plan('Total open amount on documents with a due date in April 2026.'), 'outstanding_balance');
+  const open = metricOf(v2Plan('Total open amount on documents with a due date in April 2026.'), 'open_balance');
   assert.deepEqual([open.matchedSynonyms, open.enforcement, open.preferredColumns], [['open amount'], 'enforced', ['SalesDocument.BalanceAmount']]);
-  assert.equal(metricOf(v2Plan('How much is still unpaid on March 2026 sales?'), 'outstanding_balance').enforcement, 'advisory');
+  assert.equal(metricOf(v2Plan('How much is still unpaid on March 2026 sales?'), 'open_balance').enforcement, 'advisory');
 
   const prompt = buildOptimizedPrompt(schema, 'What was the average order value in March 2026?');
   const allowed = prompt.tables.map((table) => table.tableName);

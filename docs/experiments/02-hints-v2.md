@@ -107,7 +107,7 @@ vocabulary entry, not a fix for one wording.
 |---|---|
 | `net_sales`: "turnover", "spend", "spent" as **advisory** synonyms (a hint, never a `METRIC_COLUMN` rejection, so "gross turnover" keeps `GrossAmount`), with the money-word convention as its note; with a product dimension the line-level metric is derived as before | `hard_vocab_department_turnover_feb_2026`, `hard_vocab_outlet_turnover_top1_mar_2026`, `hard_entity_lakeside_spend_q1_2026`; `40ae9d`, `af0d37`, `a36878`, `025f70`, `918652` (holdout) |
 | new metric `average_order_value` = `AVG(COALESCE(SalesDocument.NetAmount, 0))`, enforced on "average order value", advisory on "order value" alone. A new per-metric list, `advisory_when_mentioned` (gross, tax included, including tax, bill total, net payable, subtotal, ...), makes the metric a hint when the question names another amount, so "average gross order value" and "average order value including tax" accept `GrossAmount` as rule 10 says; `net_sales` carries the same list ("revenue including tax"), and an explicit "net" phrase ("net sales") still enforces. (The first version enforced "order value" in every question; review showed it contradicted rule 10.) | `30dc49`, `146d60`, `afb751`, `820a8d` (4 of 4 AOV questions failed, all on `BillTotalAmount`) |
-| new metric `outstanding_balance` = `BalanceAmount`, enforced on "open amount", "open balance", "unpaid balance" (and its name), advisory on "outstanding", "unpaid", "owe", "owed". The guardrail accepts `BalanceAmount`, or `NetPayableAmount` together with `PaidAmount` (a new `alternative_column_sets` field: `BalanceAmount = NetPayableAmount - PaidAmount` in every `SalesDocument` row of seed, v2 and v3), so an equivalent open-amount formula is not rejected; `BillTotalAmount - PaidAmount` still is. | `tpl_outstanding_balance_due_apr_2026_571390` ("open amount" → `BillTotalAmount`) |
+| new metric `open_balance` = `BalanceAmount`, enforced on "open amount", "open balance", "unpaid balance" (and its name), advisory on "outstanding", "unpaid", "owe", "owed". (It was first named `outstanding_balance`; the matcher reads a name as a synonym, so "outstanding balance" enforced the metric in two holdout questions, `45fa9f` and `59ffde`, which the vocabulary check did not see. Renamed; see the dataset paragraph below.) The guardrail accepts `BalanceAmount`, or `NetPayableAmount` together with `PaidAmount` (a new `alternative_column_sets` field: `BalanceAmount = NetPayableAmount - PaidAmount` in every `SalesDocument` row of seed, v2 and v3), so an equivalent open-amount formula is not rejected; `BillTotalAmount - PaidAmount` still is. | `tpl_outstanding_balance_due_apr_2026_571390` ("open amount" → `BillTotalAmount`) |
 | `quantity_sold`: "units" and "quantity" (advisory: "unit price" must not demand `Quantity`), default filter `ProductId IS NOT NULL`, no "stopped selling" | `214320`, `12ab97`, `2f8130`, `1d11c5`, `paraphrase_public_004` ("stopped selling" made a count a quantity); `651565`, `4d7e63` (holdout) |
 | `brand` prefers `Brand` only (no `ProductBrand`, so no bridge join hints) | `196b6b`; `d343eb`, `025f70` (holdout) |
 | `customer` (and the `Customer` table alias) without "account" / "accounts" | `c1256b`; noise in `e1b20a` |
@@ -149,7 +149,16 @@ the flag is a note ("still rejects it under HINTS_VERSION=1, which keeps the
 flag"); a flag no supported version needs is still a problem. Remove the flag
 when version 1 is retired. The templated generator's holdout-vocabulary check
 now reads both arms' layers (the overlay adds "average order value", "open
-amount", ...); the committed holdout contains none of it.
+amount", ...) and the names of the overlay's entries (underscores as spaces),
+because the matcher treats a name as one more synonym. The committed holdout
+contains none of that vocabulary. Under version 2 the holdout still meets
+the overlay's single-word synonyms, which the check allows by design
+("turnover", "spend", "outstanding", "unpaid", "units": advisory hints, never
+a rejection); with the inspected holdout moving to dev that matters only for
+the blind holdout being written. Not closed here: the base layer's names are
+not checked, and "store location" (entity `store_location`) occurs in five
+committed holdout questions under both versions; closing it needs a dataset
+change.
 
 **The comparison:** a paid `--repeat 3` run with the default setting
 (`HINTS_VERSION` unset = 2), paired against the committed baseline (hints

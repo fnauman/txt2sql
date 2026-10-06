@@ -27,8 +27,8 @@
 // wording rule of the other datasets: no multi-word phrase of
 // metadata/semantic-layer.json and not the enforced word "revenue" (the build
 // fails on either). The rule covers both HINTS_VERSION arms: the phrases the
-// hints-v2 overlay (metadata/semantic-layer.hints-v2.json) adds are refused
-// too, except in the frozen cases listed in FROZEN_HINTS_V2_VOCABULARY (the
+// hints-v2 overlay (metadata/semantic-layer.hints-v2.json) adds, and its
+// entry names, are refused too, except in the frozen cases listed in FROZEN_HINTS_V2_VOCABULARY (the
 // set was frozen against the base layer, before the overlay's vocabulary was
 // checked against it; see that constant). Unlike the templated generator, intents are hand-written:
 // each lists its gold SQL (and any alternative reading), the comparison block
@@ -91,6 +91,26 @@ export function vocabularyLayers(baseLayer, overlay = null) {
 }
 
 /**
+ * Every phrase holdout wording must avoid: the multi-word synonyms of both
+ * hints versions' layers (vocabularyLayers), plus the names of the overlay's
+ * entries with underscores as spaces. The matcher treats an entry's name as
+ * one more synonym ("outstanding_balance" matches "outstanding balance"), so
+ * a name the hints-v2 overlay introduces is tuned vocabulary as well. The
+ * base layer's names are not included: the fresh holdout was frozen against
+ * its synonyms only (the retired holdout had "store location", entity
+ * store_location, in five questions).
+ */
+export function vocabularyPhrases(baseLayer, overlay = null) {
+  const layers = vocabularyLayers(baseLayer, overlay);
+  return [
+    ...new Set([
+      ...layers.flatMap((entry) => semanticLayerPhrases(entry)),
+      ...(overlay ? semanticLayerPhrases(overlay, { includeNames: true }) : []),
+    ]),
+  ].sort();
+}
+
+/**
  * The frozen cases whose wording contains phrases of hints version 2's
  * vocabulary only (the overlay's), by case id: exactly those phrases. The set
  * was authored blind against the base layer and frozen (holdout-manifest.json)
@@ -110,11 +130,12 @@ export const FROZEN_HINTS_V2_VOCABULARY = Object.freeze({
 /**
  * Every multi-word synonym of the semantic layer (entities, metrics, filter
  * hints, value aliases and their canonical values, clarification triggers),
- * lower-cased. Holdout questions must contain none of them. (These lived in
+ * lower-cased, and with `includeNames` the entity, metric and filter-hint
+ * names (underscores as spaces). Holdout questions must contain none of them. (These lived in
  * build-eval-dataset.mjs until its holdout was retired; the wording rule now
  * belongs to the blind holdout alone.)
  */
-export function semanticLayerPhrases(layer) {
+export function semanticLayerPhrases(layer, { includeNames = false } = {}) {
   const phrases = new Set();
   const add = (value) => {
     const text = String(value || '').toLowerCase().trim();
@@ -122,15 +143,23 @@ export function semanticLayerPhrases(layer) {
       phrases.add(text);
     }
   };
+  const addName = (entry) => {
+    if (includeNames) {
+      add(String(entry?.name || '').replace(/_/g, ' '));
+    }
+  };
   for (const entity of layer.entities || []) {
+    addName(entity);
     (entity.synonyms || []).forEach(add);
   }
   for (const metric of layer.metrics || []) {
+    addName(metric);
     (metric.synonyms || []).forEach(add);
     (metric.advisory_synonyms || []).forEach(add);
     (metric.count_advisory_synonyms || []).forEach(add);
   }
   for (const hint of layer.filter_hints || []) {
+    addName(hint);
     (hint.synonyms || []).forEach(add);
   }
   for (const alias of layer.value_aliases || []) {
@@ -2223,15 +2252,22 @@ function phrasingOf(phrasing) {
  * committed dataset) supplies the expected_row_counts of cases whose id and
  * gold SQL are unchanged. `layer` is the parsed semantic layer, or `layers`
  * several (vocabularyLayers: both hints versions', the base layer first),
- * used only to reject holdout wording that contains their vocabulary; a
- * phrase only a later layer has is allowed in the case ids of
+ * and `phrases` optionally the phrase list itself (vocabularyPhrases), used
+ * only to reject holdout wording that contains their vocabulary; a phrase
+ * the base layer (the first) does not have is allowed in the case ids of
  * `frozenExceptions` (FROZEN_HINTS_V2_VOCABULARY), exactly.
  */
-export function buildHoldoutDataset({ previousCases = [], layer = null, layers = layer ? [layer] : [], frozenExceptions = FROZEN_HINTS_V2_VOCABULARY } = {}) {
+export function buildHoldoutDataset({
+  previousCases = [],
+  layer = null,
+  layers = layer ? [layer] : [],
+  phrases: givenPhrases = null,
+  frozenExceptions = FROZEN_HINTS_V2_VOCABULARY,
+} = {}) {
   const previous = new Map((previousCases || []).map((testCase) => [testCase.id, testCase]));
   const basePhrases = layers.length > 0 ? semanticLayerPhrases(layers[0]) : null;
-  const laterPhrases =
-    layers.length > 1 ? [...new Set(layers.slice(1).flatMap((entry) => semanticLayerPhrases(entry)))].filter((phrase) => !basePhrases.includes(phrase)).sort() : [];
+  const checkedPhrases = givenPhrases || [...new Set(layers.flatMap((entry) => semanticLayerPhrases(entry)))];
+  const laterPhrases = basePhrases ? checkedPhrases.filter((phrase) => !basePhrases.includes(phrase)).sort() : [];
   const phrases = basePhrases;
   const exceptionsSeen = new Set();
   const cases = [];
@@ -2405,7 +2441,11 @@ async function main(argv = process.argv.slice(2)) {
   const layer = JSON.parse(await fs.readFile(SEMANTIC_LAYER_PATH, 'utf8'));
   const overlay = JSON.parse(await fs.readFile(SEMANTIC_LAYER_OVERLAY_PATH, 'utf8'));
   const previousCases = (await readJsonIfExists(DATASET_PATH)) || [];
-  const { cases, controls, problems } = buildHoldoutDataset({ previousCases, layers: vocabularyLayers(layer, overlay) });
+  const { cases, controls, problems } = buildHoldoutDataset({
+    previousCases,
+    layers: vocabularyLayers(layer, overlay),
+    phrases: vocabularyPhrases(layer, overlay),
+  });
   if (problems.length > 0) {
     console.error(`build-holdout-dataset: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
     return 1;

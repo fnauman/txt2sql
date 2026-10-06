@@ -27,6 +27,7 @@ import {
   semanticLayerPhrases,
   semanticLayerPhrasesIn,
   vocabularyLayers,
+  vocabularyPhrases,
 } from '../scripts/build-holdout-dataset.mjs';
 import { CASE_SPLITS, isDatasetFileName, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
@@ -542,15 +543,41 @@ test('fresh holdout: the wording rule covers the hints-v2 overlay vocabulary too
   const extra = buildHoldoutDataset({ previousCases: committed, layers, frozenExceptions: { ...FROZEN_HINTS_V2_VOCABULARY, ho2_missing_000000: ['open balance'] } }).problems;
   assert.deepEqual(extra, ['ho2_missing_000000: listed in FROZEN_HINTS_V2_VOCABULARY but not a case: update FROZEN_HINTS_V2_VOCABULARY']);
 
+  // An overlay entry's name matches like a synonym, so the overlay's names
+  // are vocabulary too (npm run build-holdout-dataset checks vocabularyPhrases).
+  // Review finding: the first overlay named the open-balance metric
+  // outstanding_balance, which matched "outstanding balance", and a
+  // synonyms-only check missed it.
+  const phrases = vocabularyPhrases(layer, overlay);
+  for (const name of ['average order value', 'open balance']) {
+    assert.ok(phrases.includes(name), name);
+  }
+  assert.deepEqual(buildHoldoutDataset({ previousCases: committed, layers, phrases }).problems, []);
+  const renamed = { ...overlay, metrics: overlay.metrics.map((metric) => (metric.name === 'open_balance' ? { ...metric, name: 'outstanding_balance' } : metric)) };
+  assert.ok(vocabularyPhrases(layer, renamed).includes('outstanding balance'));
+  assert.ok(!semanticLayerPhrases(vocabularyLayers(layer, renamed)[1]).includes('outstanding balance'));
+  // The base layer's names are left out (the holdout was frozen against its
+  // synonyms only).
+  assert.ok(!phrases.includes('store location'));
+  assert.ok(semanticLayerPhrases(layer, { includeNames: true }).includes('store location'));
+
   // A new holdout phrasing with version 2's vocabulary is refused under both
-  // arms' layers (and passes version 1's alone).
+  // arms' layers (and passes version 1's alone); one with an overlay entry's
+  // name only with the names checked.
   const index = HOLDOUT_INTENTS.findIndex((intent) => intent.answer !== false);
   const original = HOLDOUT_INTENTS[index];
-  HOLDOUT_INTENTS.splice(index, 1, { ...original, phrasings: [...original.phrasings.slice(0, 1), 'What was the average order value per store?'] });
+  const tamper = (question) => HOLDOUT_INTENTS.splice(index, 1, { ...original, phrasings: [...original.phrasings.slice(0, 1), question] });
+  const problemsOf = (options) => buildHoldoutDataset(options).problems.filter((problem) => problem.includes(original.intentId));
   try {
-    assert.deepEqual(buildHoldoutDataset({ layer }).problems.filter((problem) => problem.includes(original.intentId)), []);
-    const { problems } = buildHoldoutDataset({ layers });
-    assert.ok(problems.some((problem) => problem.includes(original.intentId) && /hints-v2 vocabulary: average order value/.test(problem)), problems.join('\n'));
+    tamper('What was the average order value per store?');
+    assert.deepEqual(problemsOf({ layer }), []);
+    const problems = problemsOf({ layers });
+    assert.ok(problems.some((problem) => /hints-v2 vocabulary: average order value/.test(problem)), problems.join('\n'));
+    tamper('Outstanding balance by customer at the end of March 2026.');
+    const renamedLayers = vocabularyLayers(layer, renamed);
+    assert.deepEqual(problemsOf({ layers: renamedLayers }), []);
+    const named = problemsOf({ layers: renamedLayers, phrases: vocabularyPhrases(layer, renamed) });
+    assert.ok(named.some((problem) => /hints-v2 vocabulary: outstanding balance/.test(problem)), named.join('\n'));
   } finally {
     HOLDOUT_INTENTS.splice(index, 1, original);
   }
