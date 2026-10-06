@@ -315,7 +315,9 @@ The default, `'answer'`, is every other case.
   cases, M handled correctly" section report them. A case is handled when it
   declined in more than half of its counted repetitions.
 - **verify-dataset** runs nothing for them (no gold, no pins, no controls); a
-  rescore keeps them as recorded.
+  rescore keeps them as recorded. **evaluate-retrieval** leaves them out of
+  the recall numbers (no expected tables) and lists them under
+  `behavior_cases` with the tables retrieval would offer.
 
 **Why the product fails them today.** The product has no abstention or
 clarification channel: the response schema has no field for "cannot answer"
