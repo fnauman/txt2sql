@@ -55,10 +55,53 @@ export function caseMetadata(testCase, datasets = []) {
   };
 }
 
-/** One results[i] entry from attributed repetitions. */
+/** The keys caseMetadata() writes: dataset fields of a case record. */
+export const CASE_RECORD_FIELDS = Object.freeze([
+  'id',
+  'intentId',
+  'question',
+  'canonicalQuestion',
+  'expected_sql',
+  'alternative_expected_sql',
+  'expected_tables',
+  'expected_columns',
+  'disallowed_columns',
+  'signal_checks',
+  'comparison',
+  'expected_row_counts',
+  'difficulty',
+  'tags',
+  'failure_class',
+  'split',
+  'expected_behavior',
+  'known_validator_rejection',
+  'datasets',
+  'gold_fingerprint',
+  'scoring_fingerprint',
+]);
+
+// Keys of a result record that describe the case, not one repetition: its
+// dataset fields (plus an older report's single expected_row_count pin) and
+// the per-case summary blocks.
+const CASE_LEVEL_KEYS = new Set([...CASE_RECORD_FIELDS, 'expected_row_count', 'summary', 'repetitions', 'case_source']);
+
+/**
+ * A repetition's own fields: `fields` without any case-level key. A
+ * pre-runner report has no repetitions[], so its whole case record is the
+ * recorded repetition; this keeps its old case definition out of it.
+ */
+export function withoutCaseFields(fields) {
+  return Object.fromEntries(Object.entries(fields || {}).filter(([key]) => !CASE_LEVEL_KEYS.has(key)));
+}
+
+/**
+ * One results[i] entry from attributed repetitions: the case's dataset fields
+ * (today's definition, which the verdicts used), then the first repetition's
+ * result fields, which never override a case field.
+ */
 export function buildCaseRecord(entry, repetitions, extra = {}) {
   const [first = {}] = repetitions;
-  const { repetition: _repetition, ...firstFields } = first;
+  const { repetition: _repetition, ...firstFields } = withoutCaseFields(first);
   void _repetition;
   return {
     ...caseMetadata(entry.testCase, entry.datasets),

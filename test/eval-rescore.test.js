@@ -9,7 +9,8 @@ import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
 import { recordedRepetitions, rescoreReportCases, rescoreRepetition, testCaseFromRecord } from '../src/eval/rescore.js';
-import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
+import { attributeCaseRuns, buildReport, CASE_RECORD_FIELDS, caseMetadata } from '../src/eval/runner.js';
+import { scoringFingerprint } from '../src/eval/suite.js';
 import { createValidatorProbe } from '../src/eval/verify.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
@@ -218,6 +219,42 @@ test('today\'s dataset case wins over the recorded one, and a failing gold exclu
     ['expected_sql_error', 'expected_sql_error', false],
   ]);
   assert.equal(byId(report).rec_customers_old_rule.case_source, 'recorded');
+});
+
+test('a pre-runner report rescored against today\'s case records today\'s definition, not the recorded one', async () => {
+  const source = await loadSource();
+  const base = source.results[0].repetitions[0];
+  // Pre-runner shape: no repetitions[], so the whole old record (its case
+  // fields included) is the recorded repetition.
+  const legacy = { ...source, results: [{ ...source.results[0], repetitions: undefined, summary: undefined, ...base }] };
+  assert.equal(legacy.results[0].question, 'How many active customers do we have?');
+  assert.equal('question' in recordedRepetitions(legacy.results[0])[0], false, 'the recorded repetition is the record without its case fields');
+  const today = normalizeBenchmarkCase({
+    ...testCaseFromRecord(source.results[0]),
+    question: 'Count the active customers.',
+    expected_sql: 'SELECT COUNT(*) AS active_customers FROM Customer WHERE IsActive = 1',
+    comparison: { mode: 'rowset' },
+    tags: ['customer'],
+    split: 'holdout',
+    expected_row_counts: { seed: 1, v2: 1 },
+  });
+  const { report } = await rescoreToReport(legacy, { currentCases: new Map([[today.id, today]]) });
+  const [record] = report.results;
+  assert.equal(record.case_source, 'current dataset');
+  assert.equal(record.repetitions[0].status, 'pass', 'judged on today\'s definition');
+  // The record carries the definition the verdict used.
+  const metadata = caseMetadata(today, record.datasets);
+  assert.deepEqual(Object.keys(metadata), [...CASE_RECORD_FIELDS], 'CASE_RECORD_FIELDS lists what caseMetadata writes');
+  for (const field of Object.keys(metadata)) {
+    assert.deepEqual(record[field], metadata[field], field);
+  }
+  assert.equal(record.scoring_fingerprint, scoringFingerprint(today));
+  // The repetition keeps its own result fields, without the old case fields.
+  for (const field of ['question', 'expected_sql', 'comparison', 'tags', 'split', 'gold_fingerprint', 'summary']) {
+    assert.equal(field in record.repetitions[0], false, field);
+  }
+  assert.equal(record.repetitions[0].generated_sql, base.generated_sql);
+  assert.deepEqual(record.retrieved_tables, record.repetitions[0].retrieved_tables);
 });
 
 test('runs cut short keep their status unless a recorded attempt now completes; pre-runner reports replay too', async () => {

@@ -49,6 +49,7 @@ import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, list
 import { validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
+import { withoutCaseFields } from './runner.js';
 
 const STAGE_STATUS = { llm: 'llm_error', validation: 'validation_error', execution: 'execution_error', infra: 'infra_error' };
 const EXECUTED_STATUSES = new Set(['pass', 'result_mismatch', 'retrieval_miss']);
@@ -87,12 +88,16 @@ export function testCaseFromRecord(record) {
   return normalizeBenchmarkCase(raw);
 }
 
-/** The repetitions recorded for a result (a pre-runner report has one, the result itself). */
+/**
+ * The repetitions recorded for a result (a pre-runner report has one, the
+ * result itself, without its case fields: the rescore judges and records
+ * today's case definition, never the recorded one).
+ */
 export function recordedRepetitions(record) {
   if (Array.isArray(record.repetitions) && record.repetitions.length > 0) {
     return record.repetitions;
   }
-  return [{ ...record, repetition: 1 }];
+  return [{ ...withoutCaseFields(record), repetition: 1 }];
 }
 
 /**
