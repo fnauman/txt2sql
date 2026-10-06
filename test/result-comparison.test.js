@@ -196,6 +196,37 @@ test('ranked: a null_as_zero metric is ranked as 0, as it is matched', () => {
   assert.equal(compareResultsDetailed(gold, misordered, strict).reason, 'values');
 });
 
+test('ranked: ranking values compare as the cells match, rounded to decimals (or within the tolerance)', () => {
+  const gold = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0 },
+    { name: 'C', v: 0 },
+  ];
+  const spec = { mode: 'ranked', order: 'desc', value_columns: ['v'], null_as_zero: ['v'] };
+  // NULL and 0.004 both match the gold's 0 at two decimals: a tie, not a
+  // misordering, in either order.
+  for (const tail of [[null, 0.004], [0.004, null]]) {
+    const actual = [{ name: 'A', v: 5 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    assert.deepEqual([compareResultsDetailed(gold, actual, spec).match, compareResultsDetailed(gold, actual, spec).reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // Without null_as_zero: 0.001 then 0.004 is the same tie.
+  const strict = { mode: 'ranked', order: 'desc', value_columns: ['v'] };
+  assert.equal(compareResults(gold, [{ name: 'A', v: 5 }, { name: 'B', v: 0.001 }, { name: 'C', v: 0.004 }], strict), true);
+  // Ascending, the same.
+  assert.equal(compareResults([...gold].reverse(), [{ name: 'C', v: 0.004 }, { name: 'B', v: null }, { name: 'A', v: 5 }], { ...spec, order: 'asc' }), true);
+  // Values that differ after rounding still have to be ranked.
+  const distinct = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0.01 },
+    { name: 'C', v: 0 },
+  ];
+  assert.equal(compareResultsDetailed(distinct, [distinct[0], distinct[2], distinct[1]], strict).reason, 'ranking');
+  // With decimals: 3, 0.004 is not 0.
+  assert.equal(compareResultsDetailed(gold, [{ name: 'A', v: 5 }, { name: 'B', v: null }, { name: 'C', v: 0.004 }], { ...spec, decimals: 3 }).reason, 'values');
+  // With a tolerance, values within it tie (as they match).
+  assert.equal(compareResults(gold, [{ name: 'A', v: 5 }, { name: 'B', v: null }, { name: 'C', v: 0.004 }], { ...spec, tolerance: 0.005 }), true);
+});
+
 // Behavior change (EVAL-1 / ORACLE-10): signal checks and the disallowed-column
 // lint used to turn a value match into 'low_signal_success' /
 // 'disallowed_column_used' failures. Only values decide now; both are warnings.

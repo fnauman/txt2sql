@@ -838,7 +838,9 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 // - ranked: that bijection must exist AND the model's primary value column must
 //   be monotonic in `order` (catches "didn't sort / sorted wrong" while
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
-//   model's may not). The default ranking column is the first truly numeric
+//   model's may not). Ranking values compare as cells match (rounded to
+//   `decimals`, or within the tolerance), so values that match the same gold
+//   value are a tie. The default ranking column is the first truly numeric
 //   gold column (JS numbers, not numeric-looking code strings like '4000').
 // - ties at the cut-off (ranked only, and only when the caller passes
 //   `goldTies`: the rows the gold's own LIMIT left out, see isCutByLimit):
@@ -1340,8 +1342,11 @@ function rankValueOf(value) {
 }
 
 // `nullAsZero`: the ranking column's gold column is listed in null_as_zero,
-// so a NULL is ranked as the 0 it was matched as.
-function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullAsZero = false } = {}) {
+// so a NULL is ranked as the 0 it was matched as. Values compare as cells
+// match: within the tolerance when one is set, else rounded to `decimals`, so
+// two values that both match the same gold value (NULL and 0.004 for a gold 0
+// at two decimals) are a tie.
+function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullAsZero = false, decimals = DEFAULT_DECIMALS } = {}) {
   if (!primaryActualColumn) {
     return true;
   }
@@ -1349,7 +1354,9 @@ function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullA
   let previous = null;
   for (const row of actualRows) {
     const raw = row?.[primaryActualColumn];
-    const value = rankValueOf(nullAsZero && (raw === null || raw === undefined) ? 0 : raw);
+    const cell = nullAsZero && (raw === null || raw === undefined) ? 0 : raw;
+    const ranked = rankValueOf(cell);
+    const value = ranked !== null && tolerance <= 0 && toComparableNumber(cell) !== null ? roundTo(ranked, decimals) : ranked;
     if (value === null) {
       // Skip NULL metric rows WITHOUT resetting the running bound: a correct
       // ORDER BY puts NULLs at the end, and a NULL must never license a jump
@@ -1546,7 +1553,7 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     if (
       mode === 'ranked' &&
       primaryValueIndex !== -1 &&
-      !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance, { nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]) })
+      !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance, { nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]), decimals })
     ) {
       return 'ranking';
     }
