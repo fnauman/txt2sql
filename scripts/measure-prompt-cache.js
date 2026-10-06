@@ -9,8 +9,14 @@
 //   npm run measure-prompt-cache -- --suite --schema-scope all
 //   options: --dataset <name> | --dataset-file <path> | --suite  [--datasets-dir <dir>]
 //            [--case-id <id>] [--tag <tag>] [--schema-scope retrieved|full|auto|all]
-//            (with --suite, --case-id and --tag take comma-separated lists)
 //            [--results-file <path>] [--refresh-schema]
+//            with --suite (selected like npm run eval): [--dataset <names>]
+//            [--dataset-file <paths>] [--split dev|holdout|all] [--intent <ids>],
+//            and --case-id / --tag / --dataset / --dataset-file / --intent take
+//            comma-separated lists
+//
+// Unknown flags are rejected, like npm run eval: a misspelled filter must not
+// silently measure the whole suite.
 //
 // --schema-scope defaults to the configured SCHEMA_SCOPE (default auto); `all`
 // measures retrieved, full and auto side by side. Master-data candidates are
@@ -22,8 +28,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
-import { getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { describeFilters, parseList, selectSuite } from '../src/eval/suite.js';
+import { DOTENV_FLAG, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
+import { describeFilters, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { buildOptimizedPrompt, loadNarrowSchema, rankedTableNames, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
 import { SCHEMA_SCOPES, describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 
@@ -32,6 +38,68 @@ const __dirname = path.dirname(__filename);
 const MODELS_DIR = path.resolve(__dirname, '../models');
 const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 const DEFAULT_RESULTS_FILE = path.resolve(__dirname, '../generated/prompt-cache-measurement.json');
+
+// Every flag this script (and its env loader) understands.
+const VALUE_FLAGS = new Set([
+  '--dataset',
+  '--dataset-file',
+  '--dev-set',
+  '--datasets-dir',
+  '--split',
+  '--case-id',
+  '--tag',
+  '--intent',
+  '--schema-scope',
+  '--results-file',
+  DOTENV_FLAG,
+  '--env-dir',
+]);
+const BOOLEAN_FLAGS = new Set(['--help', '--suite', '--refresh-schema', '--use-home-env']);
+const USAGE = `Usage: npm run measure-prompt-cache -- [options]
+  --dataset <name> | --dataset-file <path> | --suite   what to measure (default core-public)
+  --datasets-dir <dir>
+  --case-id <ids> --tag <tags>                        narrow the selection
+  --split dev|holdout|all --intent <ids>              (with --suite) narrow the suite like npm run eval
+  --schema-scope retrieved|full|auto|all              default: the configured SCHEMA_SCOPE
+  --results-file <path> --refresh-schema
+  --dotenv <path> | --env-dir <dir> | --use-home-env`;
+
+function closestFlag(name) {
+  const known = [...VALUE_FLAGS, ...BOOLEAN_FLAGS];
+  const bare = (flag) => flag.replace(/[^a-z]/g, '');
+  return known.find((flag) => bare(flag) === bare(name)) || known.find((flag) => flag.startsWith(name)) || null;
+}
+
+/**
+ * Rejects unknown flags, stray arguments, value flags without a value (or
+ * whose value is empty or another flag) and boolean flags given a value.
+ */
+export function validateMeasureArgv(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith('--')) {
+      throw new Error(`Unexpected argument "${arg}" (every option is a --flag).`);
+    }
+    const equals = arg.indexOf('=');
+    const name = equals === -1 ? arg : arg.slice(0, equals);
+    if (VALUE_FLAGS.has(name)) {
+      const value = equals === -1 ? argv[index + 1] : arg.slice(equals + 1);
+      if (value === undefined || String(value).trim() === '' || (equals === -1 && value.startsWith('--'))) {
+        throw new Error(`${name} needs a value.`);
+      }
+      if (equals === -1) {
+        index += 1;
+      }
+    } else if (BOOLEAN_FLAGS.has(name)) {
+      if (equals !== -1) {
+        throw new Error(`${name} takes no value; got "${arg}".`);
+      }
+    } else {
+      const suggestion = closestFlag(name);
+      throw new Error(`Unknown option "${name}".${suggestion ? ` Did you mean ${suggestion}?` : ''}`);
+    }
+  }
+}
 
 function average(values) {
   if (!values || values.length === 0) {
@@ -122,31 +190,46 @@ export function measureScope(schema, testCases, schemaScope) {
 
 /**
  * The questions to measure and how they were selected: { dataset, cases }.
- * --suite measures the eval default suite (every dataset, de-duplicated like
- * npm run eval), narrowed by --case-id / --tag like npm run eval; otherwise one
- * dataset, narrowed the same way. dataset.filters records the filters.
+ * --suite selects like npm run eval: the default suite (every dataset,
+ * de-duplicated) or the --dataset / --dataset-file lists, narrowed by
+ * --split / --case-id / --tag / --intent. Otherwise one dataset, narrowed by
+ * --case-id / --tag (--split and --intent need --suite). dataset.filters
+ * records the filters.
  */
 export async function loadCases(argv) {
   const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
+  const datasetFileOption = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
   if (hasOptionFlag(argv, '--suite')) {
+    const split = getOptionValue(argv, '--split') || 'all';
+    if (!SPLITS.includes(split)) {
+      throw new Error(`--split must be one of ${SPLITS.join(', ')}; got "${split}".`);
+    }
     const selection = await selectSuite({
       datasetsDir,
+      datasetNames: parseList(getOptionValue(argv, '--dataset')),
+      datasetFiles: parseList(datasetFileOption),
+      split,
       caseIds: parseList(getOptionValue(argv, '--case-id')),
       tags: parseList(getOptionValue(argv, '--tag')),
+      intents: parseList(getOptionValue(argv, '--intent')),
     });
-    const filtered = describeFilters(selection.filters) !== '';
+    const { filters } = selection;
     return {
       dataset: {
         name: selection.name,
         path: null,
         selected_case_count: selection.entries.length,
         total_case_count: selection.totalCaseCount,
-        filters: filtered ? { caseIds: selection.filters.caseIds, tags: selection.filters.tags } : null,
+        filters:
+          describeFilters(filters) !== '' ? { split: filters.split, caseIds: filters.caseIds, tags: filters.tags, intents: filters.intents } : null,
       },
       cases: selection.entries.map((entry) => entry.testCase),
     };
   }
-  const datasetPath = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
+  if (getOptionValue(argv, '--split') !== null || getOptionValue(argv, '--intent') !== null) {
+    throw new Error('--split and --intent need --suite (one dataset is selected by --case-id / --tag).');
+  }
+  const datasetPath = datasetFileOption;
   const datasetName = getOptionValue(argv, '--dataset') || (datasetPath ? null : DEFAULT_DATASET_NAME);
   const datasetInfo = await loadBenchmarkDataset({
     datasetName,
@@ -167,8 +250,8 @@ export async function loadCases(argv) {
   };
 }
 
-// The filters of either selection: a suite's { caseIds, tags } or a dataset's
-// { caseId, tag }.
+// The filters of either selection: a suite's { split, caseIds, tags, intents }
+// or a dataset's { caseId, tag }.
 function describeSelectionFilters(filters) {
   if (!filters) {
     return '';
@@ -210,6 +293,11 @@ function printSummary(result) {
 
 async function main() {
   const argv = process.argv.slice(2);
+  validateMeasureArgv(argv);
+  if (hasOptionFlag(argv, '--help')) {
+    console.log(USAGE);
+    return;
+  }
   await loadEnvironment(argv);
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
@@ -243,7 +331,7 @@ async function main() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
   main().catch((error) => {
-    console.error(`Prompt cache measurement failed: ${error.message}`);
+    console.error(`Prompt cache measurement failed: ${error.message}${/^(Unknown option|Unexpected argument)|needs a value|takes no value/.test(error.message) ? '\nRun with --help for usage.' : ''}`);
     process.exitCode = 1;
   });
 }
