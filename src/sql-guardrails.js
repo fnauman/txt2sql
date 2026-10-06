@@ -1262,6 +1262,237 @@ function negatesMinuend(token) {
   return token?.type === 'operator' && token.value === '-';
 }
 
+// Comparison and logical operators and keywords: a difference that is an
+// operand of one is a condition ("NetPayableAmount - PaidAmount > 0"), not a
+// computed value.
+const PREDICATE_OPERATORS = new Set(['=', '<', '>', '<=', '>=', '<>', '!=', '<=>', '!', '&&', '||']);
+const PREDICATE_KEYWORDS = new Set(['AND', 'OR', 'XOR', 'NOT', 'IS', 'IN', 'BETWEEN', 'LIKE', 'RLIKE', 'REGEXP', 'SOUNDS', 'EXISTS']);
+// Clauses (read backwards from an expression) whose expressions filter, join,
+// group or order rows, or select a CASE branch.
+const CONDITION_CLAUSE_KEYWORDS = new Set(['WHERE', 'HAVING', 'ON', 'USING', 'WHEN', 'BY', 'LIMIT', 'OFFSET', 'CASE']);
+// Keywords that end an expression when read forwards.
+const EXPRESSION_BOUNDARY_KEYWORDS = new Set([
+  'AS', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'WHEN', 'THEN', 'ELSE', 'END', 'UNION', 'INTERSECT',
+  'EXCEPT', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'CROSS', 'STRAIGHT_JOIN', 'NATURAL', 'ON', 'USING', 'OVER', 'WINDOW', 'ASC', 'DESC', 'INTO', 'FOR', 'LOCK',
+]);
+
+const CASE_KEYWORD = new Set(['CASE']);
+const END_KEYWORD = new Set(['END']);
+
+function isBareKeyword(token, words) {
+  return token?.type === 'word' && !token.afterDot && words.has(token.upper);
+}
+
+// Whether tokens[index] names a function called with the '(' after it
+// ("SUM(", "IF(", a user function), not a keyword before a group ("IN (",
+// "EXISTS (", "FROM (", "AS (", "AND (").
+function isFunctionCallName(tokens, index) {
+  const token = tokens[index];
+  if (token?.type !== 'word' || token.afterDot || !isPunctToken(tokens[index + 1], '(')) {
+    return false;
+  }
+  const word = token.upper;
+  return (
+    (KNOWN_SQL_FUNCTIONS.has(word) || !SQL_KEYWORDS.has(word)) &&
+    !PREDICATE_KEYWORDS.has(word) &&
+    !CONDITION_CLAUSE_KEYWORDS.has(word) &&
+    !OPERATOR_WORDS.has(word)
+  );
+}
+
+// The CASE that the END/THEN/ELSE at tokens[index] belongs to (same
+// parenthesis level), or -1.
+function matchingCaseBefore(tokens, index, parens) {
+  let depth = 0;
+  for (let at = index - 1; at >= 0; at -= 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, ')')) {
+      const open = parens.openOf.get(at);
+      if (open === undefined) {
+        return -1;
+      }
+      at = open;
+    } else if (isPunctToken(token, '(')) {
+      return -1;
+    } else if (isBareKeyword(token, END_KEYWORD)) {
+      depth += 1;
+    } else if (isBareKeyword(token, CASE_KEYWORD)) {
+      if (depth === 0) {
+        return at;
+      }
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+// The END closing the CASE expression that tokens[index] (a CASE, THEN or
+// ELSE) is part of (same parenthesis level), or -1.
+function matchingEndAfter(tokens, index, parens) {
+  let depth = 0;
+  for (let at = index + 1; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(')) {
+      const close = parens.closeOf.get(at);
+      if (close === undefined) {
+        return -1;
+      }
+      at = close;
+    } else if (isPunctToken(token, ')')) {
+      return -1;
+    } else if (isBareKeyword(token, CASE_KEYWORD)) {
+      depth += 1;
+    } else if (isBareKeyword(token, END_KEYWORD)) {
+      if (depth === 0) {
+        return at;
+      }
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+// Whether the expression ending at tokens[end] continues into a comparison or
+// logical operator before its boundary (a comma, a closing parenthesis or a
+// clause keyword).
+function continuesIntoPredicate(tokens, end, parens) {
+  for (let at = end + 1; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(')) {
+      const close = parens.closeOf.get(at);
+      if (close === undefined) {
+        return false;
+      }
+      at = close;
+      continue;
+    }
+    if (isPunctToken(token, ')') || isPunctToken(token, ',') || isPunctToken(token, ';')) {
+      return false;
+    }
+    if (token.type === 'operator' && PREDICATE_OPERATORS.has(token.value)) {
+      return true;
+    }
+    if (token.type !== 'word' || token.afterDot || isFunctionCallName(tokens, at)) {
+      continue;
+    }
+    if (token.upper === 'CASE') {
+      const caseEnd = matchingEndAfter(tokens, at, parens);
+      if (caseEnd < 0) {
+        return false;
+      }
+      at = caseEnd;
+    } else if (PREDICATE_KEYWORDS.has(token.upper)) {
+      return true;
+    } else if (EXPRESSION_BOUNDARY_KEYWORDS.has(token.upper)) {
+      return false;
+    }
+  }
+  return false;
+}
+
+// The unmatched '(' enclosing tokens[index], or -1 at the top level.
+function enclosingOpenParen(tokens, index, parens) {
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (isPunctToken(tokens[at], ')')) {
+      const open = parens.openOf.get(at);
+      if (open === undefined) {
+        return -1;
+      }
+      at = open;
+    } else if (isPunctToken(tokens[at], '(')) {
+      return at;
+    }
+  }
+  return -1;
+}
+
+// The operand a parenthesized group at tokens[open] forms: with its function
+// name when a function word precedes it.
+function groupOperandStart(tokens, open) {
+  return isFunctionCallName(tokens, open - 1) ? open - 1 : open;
+}
+
+/**
+ * Whether the expression tokens[start..end] is a computed value: it reaches a
+ * SELECT list (of the query, a derived table, a CTE or a scalar subquery
+ * there) through function arguments, arithmetic and CASE results, without
+ * being an operand of a comparison or logical operator or sitting in a WHERE,
+ * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as
+ * "AND NetPayableAmount - PaidAmount > 0" computes no value.
+ */
+function expressionIsComputedValue(tokens, start, end, parens) {
+  for (let guard = 0; guard <= tokens.length; guard += 1) {
+    if (continuesIntoPredicate(tokens, end, parens)) {
+      return false;
+    }
+    let sameExpression = true;
+    let next = null;
+    for (let at = start - 1; at >= 0 && !next; at -= 1) {
+      const token = tokens[at];
+      if (isPunctToken(token, ')')) {
+        const open = parens.openOf.get(at);
+        if (open === undefined) {
+          return false;
+        }
+        at = open;
+      } else if (isPunctToken(token, '(')) {
+        const close = parens.closeOf.get(at);
+        if (close === undefined) {
+          return false;
+        }
+        next = [groupOperandStart(tokens, at), close];
+      } else if (isPunctToken(token, ',')) {
+        sameExpression = false;
+      } else if (isPunctToken(token, ';')) {
+        return false;
+      } else if (token.type === 'operator' && PREDICATE_OPERATORS.has(token.value)) {
+        if (sameExpression) {
+          return false;
+        }
+      } else if (token.type === 'word' && !token.afterDot && !isFunctionCallName(tokens, at)) {
+        const word = token.upper;
+        if (word === 'END') {
+          at = matchingCaseBefore(tokens, at, parens);
+          if (at < 0) {
+            return false;
+          }
+        } else if (word === 'THEN' || word === 'ELSE') {
+          const caseStart = matchingCaseBefore(tokens, at, parens);
+          const caseEnd = matchingEndAfter(tokens, at, parens);
+          if (caseStart < 0 || caseEnd < 0) {
+            return false;
+          }
+          next = [caseStart, caseEnd];
+        } else if (word === 'SELECT') {
+          // A select-list item: of the whole query, or of a subquery whose
+          // own place decides.
+          const open = enclosingOpenParen(tokens, at, parens);
+          if (open < 0) {
+            return true;
+          }
+          const close = parens.closeOf.get(open);
+          if (close === undefined) {
+            return false;
+          }
+          next = [groupOperandStart(tokens, open), close];
+        } else if (word === 'FROM' || word === 'JOIN' || word === 'AS') {
+          // A derived table ("FROM (SELECT ...)") or a CTE body ("AS (...)").
+          return true;
+        } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
+          return false;
+        } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {
+          return false;
+        }
+      }
+    }
+    if (!next) {
+      return false;
+    }
+    [start, end] = next;
+  }
+  return false;
+}
+
 /**
  * Whether the SQL computes `minuend - subtrahend` (qualified column names,
  * matched by column name like columnMentioned): a binary minus whose left
@@ -1269,8 +1500,10 @@ function negatesMinuend(token) {
  * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
  * defaults and SUM (both sides summed alike), and neither operand bound to a
  * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
- * difference may sit anywhere (a derived table computing it counts); a
- * difference of aliases of the two columns ("np - pa") does not.
+ * difference must be a computed value (expressionIsComputedValue): in a
+ * SELECT list, a derived table's included, not in a filter, join, grouping,
+ * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count). A
+ * difference of aliases of the two columns ("np - pa") does not count.
  */
 function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
   const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();
@@ -1300,7 +1533,8 @@ function computesColumnDifference(tokens, minuend, subtrahend, parens = matching
       !bindsTighterThanMinus(tokens[leftStart - 1]) &&
       !negatesMinuend(tokens[leftStart - 1]) &&
       !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
-      !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER')
+      !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER') &&
+      expressionIsComputedValue(tokens, leftStart, rightEnd, parens)
     ) {
       return true;
     }

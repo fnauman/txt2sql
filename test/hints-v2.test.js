@@ -468,9 +468,37 @@ test('v2 METRIC_COLUMN: the open-balance alternative needs NetPayableAmount - Pa
   ]) {
     assert.equal(rejects(`SELECT ROUND(${expression}, 2) AS open_amount ${april}`), 'METRIC_COLUMN', expression);
   }
-  // The difference in a filter or a string literal does not count (the safety layer rejects comments).
+  // A comparison of the two columns, or the difference in a string literal, does not count (the safety layer rejects comments).
   assert.equal(rejects(`SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND d.PaidAmount < d.NetPayableAmount`), 'METRIC_COLUMN');
   assert.equal(rejects(`SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount, 'NetPayableAmount - PaidAmount' AS note ${april}`), 'METRIC_COLUMN');
+  // Re-review: the difference written as a condition (a filter, a join, a
+  // CASE WHEN, HAVING or ORDER BY) computes no open balance: these return
+  // SUM(NetPayableAmount) over the open documents.
+  for (const sql of [
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND d.NetPayableAmount - d.PaidAmount > 0`,
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND 0 < d.NetPayableAmount - d.PaidAmount`,
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND (d.NetPayableAmount - d.PaidAmount) <> 0`,
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND d.NetPayableAmount - d.PaidAmount BETWEEN 0.01 AND 1000000`,
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} AND d.SalesDocumentId IN (SELECT x.SalesDocumentId FROM SalesDocument x WHERE x.NetPayableAmount - x.PaidAmount > 0)`,
+    `SELECT ROUND(SUM(CASE WHEN d.NetPayableAmount - d.PaidAmount > 0 THEN d.NetPayableAmount ELSE 0 END), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(d.NetPayableAmount), 2) AS open_amount, SUM(d.NetPayableAmount - d.PaidAmount > 0) AS open_documents ${april}`,
+    `SELECT d.CustomerId, ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} GROUP BY d.CustomerId HAVING SUM(d.NetPayableAmount) - SUM(d.PaidAmount) > 0`,
+    `SELECT d.CustomerId, ROUND(SUM(d.NetPayableAmount), 2) AS open_amount ${april} GROUP BY d.CustomerId ORDER BY SUM(d.NetPayableAmount) - SUM(d.PaidAmount) DESC`,
+  ]) {
+    assert.equal(rejects(sql), 'METRIC_COLUMN', sql);
+  }
+  // The same difference as a computed value counts, wherever the query also
+  // uses it as a condition.
+  for (const sql of [
+    `SELECT ROUND(SUM(CASE WHEN d.NetPayableAmount > d.PaidAmount THEN d.NetPayableAmount - d.PaidAmount ELSE 0 END), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(IF(d.NetPayableAmount - d.PaidAmount > 0, d.NetPayableAmount - d.PaidAmount, 0)), 2) AS open_amount ${april}`,
+    `SELECT d.SalesDocumentId, d.NetPayableAmount - d.PaidAmount open_amount ${april} AND d.NetPayableAmount - d.PaidAmount > 0 ORDER BY open_amount DESC`,
+    `SELECT d.CustomerId, ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april} GROUP BY d.CustomerId HAVING SUM(d.NetPayableAmount - d.PaidAmount) > 0`,
+    `WITH t AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT ROUND(SUM(bal), 2) AS open_amount FROM t`,
+    `SELECT (SELECT ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) ${april}) AS open_amount`,
+  ]) {
+    assert.equal(rejects(sql), null, sql);
+  }
   // The rejection names the accepted difference.
   assert.throws(() => validateReadOnlySql(`SELECT SUM(d.NetPayableAmount + d.PaidAmount) AS open_amount ${april}`, allowed, { promptContext: prompt.context, response: { sql: '', tables_used: ['SalesDocument'] } }), {
     code: 'METRIC_COLUMN',
