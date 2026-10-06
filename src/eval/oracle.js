@@ -12,6 +12,11 @@
 //   findSharedAssignment searches for one mapping valid on every fixture at
 //   once; a search cut off by its step bound fails closed
 //   ('assignment_search_exhausted'), never a pass.
+// - Ties at the cut-off: where a gold variant returned as many rows as its own
+//   outermost LIMIT (isCutByLimit, per variant and fixture), a ranked
+//   comparison lets the rows tied at its last ranking value match by value, so
+//   a prediction without the gold's tiebreak is not scored by which tied item
+//   MariaDB happened to return.
 // - Gold runs with its own generous timeout (GOLD_STATEMENT_TIMEOUT_MS) so a
 //   slow gold never looks like a model failure, and is cached per fixture.
 // - The prediction runs as the read-only query user with the statement timeout
@@ -23,6 +28,7 @@
 import {
   findDisallowedColumnsUsed,
   findSharedAssignment,
+  isCutByLimit,
   listGoldVariants,
   matchResultSets,
   runSignalChecksThroughAssignment,
@@ -220,6 +226,8 @@ export async function scoreAgainstGold({
   );
 
   const scored = variants.map((variant, variantIndex) => {
+    // Did this variant's own LIMIT cut its result on each fixture?
+    const goldCutOff = goldRows[variantIndex].map((rows) => isCutByLimit(variant.sql, rows.length));
     const outcomes = connections.map((fixtureConnection, fixtureIndex) => {
       const prediction = predictions[fixtureIndex];
       const gold = goldRows[variantIndex][fixtureIndex];
@@ -227,12 +235,16 @@ export async function scoreAgainstGold({
         return { match: false, reason: 'execution_error', assignments: [], goldColumns: [], empty: false, truncated: false };
       }
       // Per-fixture verdict and reason; the shared mapping is searched below.
-      return matchResultSets(gold, prediction.rows, comparison, { limit: 1 });
+      return matchResultSets(gold, prediction.rows, comparison, { limit: 1, goldCutOff: goldCutOff[fixtureIndex] });
     });
     const allMatch = outcomes.every((outcome) => outcome.match);
     const shared = allMatch
       ? findSharedAssignment(
-          connections.map((_fixtureConnection, fixtureIndex) => ({ expected: goldRows[variantIndex][fixtureIndex], actual: predictions[fixtureIndex].rows })),
+          connections.map((_fixtureConnection, fixtureIndex) => ({
+            expected: goldRows[variantIndex][fixtureIndex],
+            actual: predictions[fixtureIndex].rows,
+            goldCutOff: goldCutOff[fixtureIndex],
+          })),
           comparison
         )
       : null;
