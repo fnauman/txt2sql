@@ -2,7 +2,7 @@
 
 **Variable:** `HINTS_VERSION`, from `1` (the committed baseline's prompt
 knowledge) to `2` (the new default).
-**Status:** offline measurements done; live run pending (the offline numbers re-measured after the review fixes).
+**Status:** offline measurements done; live run pending (the offline numbers re-measured after the review fixes, and on the measurement-hygiene base).
 **Source:** the error analysis of the 66 failing cases of the Experiment 1
 baseline, and the skeptic review's first recommendation ("Exp A: pipeline
 de-poisoning plus knowledge-only semantic layer").
@@ -47,9 +47,11 @@ run, rescore and verification), `verify-dataset`, `measure-prompt-cache`,
 schema scopes, semantic plans and validator decisions
 (`test/hints-version.test.js` pins 20 questions against
 `test/fixtures/hints-v1-prompts.json`, written by the base branch; the
-question-specific part of all 255 suite prompts was diffed too, identical),
-and the prompt version stays the committed baseline's `b264e57d8e15`. Version
-2's prompt version is `4358263bcf82`.
+question-specific part of all 255 suite prompts was diffed too, identical;
+after the rebase onto the measurement-hygiene branch every prompt of the
+404-case suite was compared, below), and the prompt version stays the
+committed baseline's `b264e57d8e15`. Version 2's prompt version is
+`4358263bcf82`.
 
 **Held fixed:** the model (gpt-4o-mini), temperature and request options, the
 few-shot pool and how it is picked (version 1 tokens in both arms), the schema
@@ -149,49 +151,74 @@ vocabulary entry, not a fix for one wording.
   lints (cancellation injection, `NOT IN` over nullable columns, fan-out of
   `COUNT(*)`):* later experiments (the analysis's Exp B to D).
 
-**Dataset flag.** The dataset is unchanged. Its one
+**Dataset flags.** No dataset changes. The dev flag
 `known_validator_rejection: METRIC_COLUMN` (`e1b20a`) is real under version 1
-and closed by version 2. Both arms must verify, so verification now asks the
+and closed by version 2. Both arms must verify, so verification asks the
 other supported hints versions before calling a flag stale: under version 2
 the flag is a note ("still rejects it under HINTS_VERSION=1, which keeps the
 flag"); a flag no supported version needs is still a problem. Remove the flag
-when version 1 is retired. The templated generator's holdout-vocabulary check
-now reads both arms' layers (the overlay adds "average order value", "open
-amount", ...) and the names of the overlay's entries (underscores as spaces),
-because the matcher treats a name as one more synonym. The committed holdout
-contains none of that vocabulary. Under version 2 the holdout still meets
-the overlay's single-word synonyms, which the check allows by design
-("turnover", "spend", "outstanding", "unpaid", "units": advisory hints, never
-a rejection); with the inspected holdout moving to dev that matters only for
-the blind holdout being written. Not closed here: the base layer's names are
-not checked, and "store location" (entity `store_location`) occurs in five
-committed holdout questions under both versions; closing it needs a dataset
-change.
+when version 1 is retired. The fresh holdout's four flags (all
+`METRIC_COLUMN`) were measured with version 1's prompts; verify-dataset finds
+none of them stale under version 2 (it still rejects them), so the frozen
+holdout is untouched. The tests check every flag under version 1 and, for a
+holdout flag, only that version 2 rejects its gold variants with the flag's
+code or not at all (which one is not pinned). One attribution effect: a
+flagged case's failures count as system errors whatever the hints version,
+so under version 2 `e1b20a`'s failures (wrong answers that version 2 no
+longer rejects) are still in the system bucket; strict accuracy is not
+affected.
+
+**Holdout wording.** The holdout-vocabulary check (since the
+measurement-hygiene change in `scripts/build-holdout-dataset.mjs`; every
+templated case is dev) reads both arms' layers (the overlay adds "average
+order value", "open amount", ...) and the names of the overlay's entries
+(underscores as spaces), because the matcher treats a name as one more
+synonym. The fresh holdout was authored blind against the base layer and
+frozen before the overlay's vocabulary was checked against it: five of its
+147 answer questions contain overlay phrases ("open balance" in four,
+"unpaid balance" in one), which version 2 enforces as `open_balance`
+(`BalanceAmount`). They stay as frozen and are pinned exactly in
+`FROZEN_HINTS_V2_VOCABULARY`; any other match fails the build. For the
+version-2 arm those five cases do not measure unseen vocabulary. Likewise
+one holdout question shares the 4-word phrases "product such as delivery" /
+"such as delivery fees" with the units rule of version 2 (written from dev
+failures, independently of the holdout, which was authored blind on another
+branch);
+`test/few-shot-leakage.test.js` pins exactly that overlap. Under version 2
+the holdout also meets the overlay's single-word synonyms, which the check
+allows by design ("turnover", "spend", "outstanding", "unpaid", "units":
+advisory hints, never a rejection). The base layer's names are not checked
+(the holdout was frozen against its synonyms only).
 
 **The comparison:** arm A is hints version 1, arm B version 2, everything
-else fixed. This branch is to be rebased onto the dataset-hygiene branch
-(inspected holdout moved to dev, baseline refreshed); arm A is then that
-refreshed `eval/baselines/gpt-4o-mini.json` (a version-1 run: recorded as
-`hintsVersion: 1`, or as not recorded when it predates the switch). Before
-paying, `HINTS_VERSION=1 npm run eval -- --offline` must reproduce the
-refreshed baseline with 0 flips (the rebase kept version 1 byte for byte).
-Arm B is one paid `--repeat 3` run with `HINTS_VERSION=2` (the default),
-paired automatically against arm A; the pairing covers the answer cases both
-reports share, which the run prints. A same-day `HINTS_VERSION=1 --repeat 3`
-run is an optional drift control.
+else fixed. This branch is rebased onto the measurement-hygiene branch
+(inspected holdout moved to dev, the fresh blind holdout, the re-made
+404-case baseline); arm A is that `eval/baselines/gpt-4o-mini.json` (a
+version-1 run, recorded as not recorded: it predates the switch).
+`HINTS_VERSION=1 npm run eval -- --offline` reproduces it with 0 flips over
+392 paired answer cases (below). Arm B is one paid `--repeat 3` run with
+`HINTS_VERSION=2` (the default), paired automatically against arm A; the
+pairing covers the 392 answer cases both reports share. Holdout results are
+read in aggregate only. A same-day `HINTS_VERSION=1 --repeat 3` run is an
+optional drift control.
 
 **Confounds, stated up front:** version 2 changes the system prompt for every
 question (8,409 vs 5,670 characters of instructions) and the question-specific
 context of 190 of the 255 questions (129 of them pass today), so a live
 result measures the bundle, not each change; the per-change tables say which
-failures each change targets. The motivating failures include today's holdout
-cases.
+failures each change targets. The motivating failures include cases of the
+holdout of the time, dev now (`formerly_holdout`). On the 404-case suite
+version 2 changes the question-specific context of 190 of the 255 dev and 94
+of the 149 fresh holdout questions (none of them tuned on: the fresh holdout
+was authored blind, on another branch, and these changes never saw it).
 
 ## Offline measurements
 
 All with zero LLM calls, on freshly seeded fixtures (seed `094282546fe5`, v2
-`7adec1b3bc33`, v3 `51d1c42c3b88`), over the default suite (255 unique cases,
-245 answer cases, 130 intents), full schema scope.
+`7adec1b3bc33`, v3 `51d1c42c3b88`), full schema scope. The sections up to
+Plan changes were measured over the default suite of the time (255 unique
+cases, 245 answer cases, 130 intents) against the 255-case baseline; the last
+section repeats the checks on the measurement-hygiene base (404 cases).
 
 ### Version 1 is the baseline
 
@@ -276,6 +303,47 @@ accidental column, 66 have different metric matches, 40 different join hints
 few-shot examples are the same for every question. Under
 `SCHEMA_SCOPE=retrieved` (not the default) retrieval misses fall from 33 to 25
 golds and none is added.
+
+### On the measurement-hygiene base (404-case suite)
+
+Measured after the rebase onto `eval/measurement-hygiene` (scoring
+relaxations, gold conventions, known validator rejections counted as system
+errors, the inspected holdout retired to dev, the fresh blind holdout, and the
+baseline re-made on the 404-case suite with prompt version `b264e57d8e15`).
+Holdout numbers are aggregates.
+
+**Version 1 is the base.** The system and user prompts (full and retrieved
+scope), allow-lists and semantic plans of all 404 suite questions under
+`HINTS_VERSION=1` equal the base commit's (sha256 per question).
+`HINTS_VERSION=1 npm run eval -- --offline` reproduces the committed
+baseline: 62.2% (dev 74.7%, holdout 41.3%), 392 paired answer cases, 0
+flips, 0 pass-rate changes.
+
+**Rescore under version 2** (`npm run eval -- --offline`; validator and
+semantic-plan effects only, as above):
+
+| | Baseline (= version-1 rescore) | Rescore, version 2 |
+|---|---|---|
+| Strict accuracy | 62.2% (dev 74.7%, holdout 41.3%) | 62.2% (dev 74.7%, holdout 41.3%); paired 392, Δ 0.0, 0 flips |
+| Repetitions: pass / wrong result / guardrail true rejection | 731 / 417 / 21 | 731 / 405 / 33 |
+| Attribution (repetitions) | model 430 · system 15 | model 430 · system 15 |
+| Guardrail confusion (over every attempt) | TP 94, FP 0, FN 429 · precision 100%, recall 18.0% | TP 103, FP 0, FN 417 · precision 100%, recall 19.8% |
+
+The movement is the same as on the old suite, all of it in dev: the 15
+repetitions of the five average-order-value / open-amount cases answered with
+`BillTotalAmount` are now true `METRIC_COLUMN` rejections, and `e1b20a`'s
+three repetitions are no longer rejected (still wrong, and still counted as
+system errors because the flag stays). No holdout repetition changes outcome;
+no passing repetition changes.
+
+**Verification:** `npm run verify-dataset` and `HINTS_VERSION=1 npm run
+verify-dataset` pass (413 cases on 3 fixtures, 0 failures); under version 2
+the only flag note is `e1b20a`'s (kept by version 1).
+
+**Prompt size** (`measure-prompt-cache --suite`, 404 questions, full scope):
+version 1 4,109 est. tokens per prompt (cacheable prefix 3,676, question part
+433), version 2 4,859 (+18%; prefix 4,361, question part 498); one cacheable
+prefix in both.
 
 ### Reproduce
 
