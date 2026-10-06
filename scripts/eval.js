@@ -44,6 +44,7 @@ import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance 
 import { renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
+import { runScriptMain } from '../src/eval/script-exit.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { describeFilters, filterSuiteEntries, parseList, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
@@ -1256,7 +1257,6 @@ export async function main(argv = process.argv.slice(2), { profile = 'eval' } = 
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  main().then((code) => {
-    process.exitCode = code;
-  });
+  // Exit 2 until main() settles: a run that never settles never passes.
+  runScriptMain(() => main(), { label: 'eval' });
 }

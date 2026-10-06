@@ -46,6 +46,7 @@ import {
   verifyCase,
 } from '../src/eval/verify.js';
 import { loadNarrowSchema, writeJsonFile } from '../src/pipeline.js';
+import { runScriptMain } from '../src/eval/script-exit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -284,14 +285,16 @@ export async function main(argv = process.argv.slice(2)) {
   for (const failure of gateFailures) {
     console.log(`FAIL: ${failure}`);
   }
-  if (totalFailures > 0 || gateFailures.length > 0) {
-    process.exitCode = 1;
-  }
+  return totalFailures > 0 || gateFailures.length > 0 ? 1 : 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  main().catch((error) => {
-    console.error(`Dataset verification failed: ${error.message}`);
-    process.exitCode = 1;
+  // Exit 2 until main() settles: a verification that never settles never passes.
+  runScriptMain(() => main(), {
+    label: 'verify-dataset',
+    onError: (error) => {
+      console.error(`Dataset verification failed: ${error.message}`);
+      return 1;
+    },
   });
 }
