@@ -1253,8 +1253,9 @@ rule).
   comparison's flip and exclusion lists and the console's progress, rescore
   and flip lines leave them out and count them ("N holdout case(s) not
   listed"), and the failure-class, difficulty and tag breakdowns, the
-  attribution tables, the guardrail confusion matrix and the behaviour
-  summary (report.md and the console) cover dev cases, so that subtracting
+  attribution tables, the guardrail confusion matrix, the behaviour summary
+  and the cost, latency, retry and token figures (report.md and the console)
+  cover dev cases, so that subtracting
   the listed dev rows from a total cannot give a holdout outcome away;
   holdout behaviour cases are counted, without their outcomes (they are not
   in the split accuracy). `--reveal-holdout` lists them. See
@@ -1274,10 +1275,11 @@ rule).
   `declined` only when more than half of its scored repetitions declined.
 - **By split, failure class, difficulty and tag**: cases, accuracy, majority
   passes.
-- **Cost, latency, retries, tokens** (every case, behaviour cases included):
-  total cost, cost per question and per correct answer, p50/p95 product-loop
-  and LLM-call latency, retry rate, prompt (cached) and completion tokens, the
-  budget.
+- **Cost, latency, retries, tokens** (every case, behaviour cases included;
+  dev cases only while the holdout is hidden): total cost, cost per question
+  and per correct answer, p50/p95 product-loop and LLM-call latency, retry
+  rate, prompt (cached) and completion tokens, the budget (always the whole
+  run's spend).
 - **Verification**: fixture status, the kill rates per dataset, and the
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).

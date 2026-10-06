@@ -4,7 +4,7 @@
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
 import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
-import { summarizeBreakdowns } from './stats.js';
+import { summarizeBreakdowns, summarizeRunUsage } from './stats.js';
 
 // Holdout display policy (src/eval/holdout.js): unless `revealHoldout` is
 // set, report.md and the console show holdout results in aggregate only (the
@@ -29,22 +29,36 @@ const isBehaviorRecord = (record) => Boolean(record.expected_behavior && record.
 // The summaries report.md and the console show. A summary over every case
 // next to the listed dev rows gives the hidden holdout outcomes away by
 // subtraction (combined behaviour or attribution counts minus the dev rows),
-// so with holdout cases hidden the behaviour summary, the attribution and the
-// guardrail confusion matrix are recomputed from the listed records; hidden
-// holdout behaviour cases are only counted (the dataset says how many there
-// are), never with their outcomes. The holdout's one shown aggregate is its
+// so with holdout cases hidden the behaviour summary, the attribution, the
+// guardrail confusion matrix and the cost, latency, retry and token figures
+// are recomputed from the listed records (a holdout case that completed no
+// LLM call, or made a retry, would otherwise show up in those counts; a live
+// run's console also prints each dev repetition's cost). Hidden holdout
+// behaviour cases are only counted (the dataset says how many there are),
+// never with their outcomes. The holdout's one shown aggregate is its
 // accuracy by split. Without hidden cases these are the report's own.
 function displayedSummaries(report, hidden = new Set()) {
   const results = report.results || [];
   const listed = results.filter((record) => !hidden.has(record.id));
   if (listed.length === results.length) {
-    return { attribution: report.attribution, behavior: report.behavior, records: results, hiddenAnswerCases: 0, hiddenBehaviorCases: 0 };
+    const { cost, latency, retries, tokens } = report.stats || {};
+    return {
+      attribution: report.attribution,
+      behavior: report.behavior,
+      usage: { cost, latency, retries, tokens },
+      records: results,
+      hidden: false,
+      hiddenAnswerCases: 0,
+      hiddenBehaviorCases: 0,
+    };
   }
   const hiddenRecords = results.filter((record) => hidden.has(record.id));
   return {
     attribution: summarizeAttribution(listed.filter((record) => !isBehaviorRecord(record))),
     behavior: summarizeBehavior(listed),
+    usage: summarizeRunUsage(listed),
     records: listed,
+    hidden: true,
     hiddenAnswerCases: hiddenRecords.filter((record) => !isBehaviorRecord(record)).length,
     hiddenBehaviorCases: hiddenRecords.filter(isBehaviorRecord).length,
   };
@@ -180,7 +194,7 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
     lines.push('');
     lines.push(
       `Holdout: ${hiddenHoldout} case(s), shown in aggregate only (accuracy by split); error analysis and experiment design use dev ` +
-        'failures only (attribution, the guardrail matrix, behaviour cases and the finer breakdowns cover dev cases). `--reveal-holdout` lists them.'
+        'failures only (attribution, the guardrail matrix, behaviour cases, cost, latency and the finer breakdowns cover dev cases). `--reveal-holdout` lists them.'
     );
   }
   const behaviorText = behaviorSummaryText(shown);
@@ -547,8 +561,8 @@ function behaviorSection(report, hidden = new Set(), shown = displayedSummaries(
   return lines.join('\n');
 }
 
-function costSection(report, hidden = new Set()) {
-  const { cost, latency, retries, tokens } = report.stats;
+function costSection(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
+  const { cost, latency, retries, tokens } = shown.usage;
   const rows = [
     [
       'Total LLM cost',
@@ -576,7 +590,18 @@ function costSection(report, hidden = new Set()) {
     const names = [...listed, ...(holdoutSkipped > 0 ? [`${holdoutSkipped} holdout case(s)`] : [])].join(', ');
     rows.push(['Budget', `${formatUsd(report.budget.spentUsd)} of ${formatLimitUsd(report.budget.limitUsd)}${skipped.length ? `; ${skipped.length} case(s) skipped: ${names}` : ''}`]);
   }
-  return ['## Cost, latency, retries, tokens', '', table(['Metric', 'Value'], rows)].join('\n');
+  return [
+    '## Cost, latency, retries, tokens',
+    '',
+    ...(shown.hidden
+      ? [
+          'Cost, latency, retries and tokens cover the dev cases only (the holdout is shown in aggregate, by split; the Budget row, when ' +
+            'there is one, is the whole run\'s spend). `--reveal-holdout` covers every case.',
+          '',
+        ]
+      : []),
+    table(['Metric', 'Value'], rows),
+  ].join('\n');
 }
 
 function comparisonSection(comparison, { revealHoldout = false } = {}) {
@@ -805,7 +830,7 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
     behaviorSection(report, hidden, shown),
     casesSection(report, hidden),
     breakdownSection(report, hidden),
-    costSection(report, hidden),
+    costSection(report, hidden, shown),
     verificationSection(report),
     provenanceSection(report),
     legacySection(report),
@@ -820,6 +845,7 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
   // cover the listed (dev) cases, so nothing hidden can be subtracted out.
   const shown = displayedSummaries(report, hiddenIds(report, { revealHoldout }));
   const attribution = shown.attribution;
+  const usage = shown.usage;
   const buckets = attribution.repetitions.byBucket;
   const lines = [
     `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} (95% CI ${formatInterval(stats.strictAccuracy.ci95)}) over ${stats.cases.counted} cases / ${stats.cases.intents} intents, ` +
@@ -833,8 +859,9 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
       ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]
       : []),
     ...(behaviorSummaryText(shown) ? [`${behaviorSummaryText(shown)} (not in accuracy)`] : []),
-    `Cost ${formatUsd(stats.cost.total)} (${formatUsd(stats.cost.perQuestion, 5)}/question, ${formatUsd(stats.cost.perCorrect, 5)}/correct) · ` +
-      `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
+    `Cost${shown.hidden ? ' (dev cases)' : ''} ${formatUsd(usage.cost.total)} (${formatUsd(usage.cost.perQuestion, 5)}/question, ` +
+      `${formatUsd(usage.cost.perCorrect, 5)}/correct) · ` +
+      `latency p50 ${formatMs(usage.latency.questionWallMs.p50)} p95 ${formatMs(usage.latency.questionWallMs.p95)} · retry rate ${formatPercent(usage.retries.rate)}`,
   ];
   if (report.stopped) {
     lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);

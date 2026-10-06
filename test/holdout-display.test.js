@@ -13,7 +13,17 @@ import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 // cases only. report.json keeps everything.
 
 const attempt = { attempt: 1, retry: false, generatedSql: 'SELECT 1', llm: { ok: true, durationMs: 1000 }, validation: { ok: true, durationMs: 1 }, execution: { ok: true, durationMs: 1, rowCount: 1 } };
-const rep = (status) => ({ status, warnings: [], retrieved_tables: ['Customer'], attempts: [attempt], attempt_count: 1, timings: { totalMs: 1000 } });
+// A repetition that made one priced LLM call (as a live run records it).
+const rep = (status) => ({
+  status,
+  warnings: [],
+  retrieved_tables: ['Customer'],
+  attempts: [attempt],
+  attempt_count: 1,
+  llm_usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
+  llm_cost: { totalCost: 0.0001 },
+  timings: { totalMs: 1000, questionMs: 900 },
+});
 const testCase = (id, extra = {}) =>
   normalizeBenchmarkCase({ id, intentId: id, question: `Question ${id}?`, expected_sql: `SELECT '${id}'`, expected_tables: ['Customer'], ...extra });
 
@@ -125,19 +135,36 @@ const declined = () => ({
 });
 // A wrong result whose expected table was not retrieved: a system error.
 const retrievalMiss = () => ({ ...rep('result_mismatch'), retrieved_tables: ['Store'] });
+// The provider refused the call (HTTP 400: not an outage, so the run goes
+// on): no SQL, no usage, no cost, a short LLM call.
+const providerRefusal = () => ({
+  status: 'llm_error',
+  error_code: 'HTTP_400',
+  warnings: [],
+  retrieved_tables: ['Customer'],
+  attempts: [{ attempt: 1, retry: false, generatedSql: '', llm: { ok: false, durationMs: 50, code: 'HTTP_400' } }],
+  attempt_count: 1,
+  timings: { totalMs: 60, questionMs: 55 },
+});
+// The case deadline hit before any LLM call completed.
+const deadline = () => ({ status: 'aborted', timed_out: true, warnings: [], retrieved_tables: [], attempts: [], attempt_count: 0, timings: { totalMs: 60000 } });
 
 test('nothing about hidden holdout outcomes can be derived from report.md or the console by subtraction', async () => {
   // Runs that differ ONLY in the holdout cases' outcomes, with the holdout's
   // aggregate (accuracy by split) unchanged: a model failure, a different model
-  // failure, a system failure; an abstain case answered or declined. Every
-  // visible dev result is the same, so any difference in what report.md or
-  // the console shows would be a hidden holdout outcome (combined totals
-  // minus the listed dev rows).
+  // failure, a system failure, a provider refusal (no LLM usage); an abstain
+  // case answered, declined, refused by the provider or cut by the deadline.
+  // Every visible dev result is the same, so any difference in what report.md
+  // or the console shows would be a hidden holdout outcome (combined totals,
+  // the cost, latency, retry and token rows included, minus the listed dev
+  // rows).
   const dev = { dev_pass: ['pass'], dev_flip: ['result_mismatch'], dev_abstain: ['answered'] };
   const variants = [
     { ...dev, secret_holdout_case: ['result_mismatch'], secret_holdout_abstain: ['answered'] },
     { ...dev, secret_holdout_case: ['execution_error'], secret_holdout_abstain: [declined()] },
     { ...dev, secret_holdout_case: [retrievalMiss()], secret_holdout_abstain: [declined()] },
+    { ...dev, secret_holdout_case: [providerRefusal()], secret_holdout_abstain: [providerRefusal()] },
+    { ...dev, secret_holdout_case: ['result_mismatch'], secret_holdout_abstain: [deadline()] },
   ];
   const reports = [];
   for (const outcomes of variants) {
@@ -149,6 +176,11 @@ test('nothing about hidden holdout outcomes can be derived from report.md or the
   assert.notDeepEqual(reports[1].attribution, reports[2].attribution);
   assert.notEqual(renderReportMarkdown(reports[0], { revealHoldout: true }), renderReportMarkdown(reports[1], { revealHoldout: true }));
   assert.notEqual(renderHeadline(reports[1], { revealHoldout: true }), renderHeadline(reports[2], { revealHoldout: true }));
+  assert.equal(reports[0].stats.cost.questionsWithoutLlmCall, 0);
+  assert.equal(reports[3].stats.cost.questionsWithoutLlmCall, 2);
+  assert.equal(reports[4].stats.cost.questionsWithoutLlmCall, 1);
+  assert.notEqual(renderReportMarkdown(reports[0], { revealHoldout: true }), renderReportMarkdown(reports[3], { revealHoldout: true }));
+  assert.notEqual(renderReportMarkdown(reports[0], { revealHoldout: true }), renderReportMarkdown(reports[4], { revealHoldout: true }));
 
   const markdown = renderReportMarkdown(reports[0]);
   for (const report of reports.slice(1)) {
@@ -166,6 +198,12 @@ test('nothing about hidden holdout outcomes can be derived from report.md or the
   assert.match(markdown, /\| wrong_result \| model \| 1 \| 1 \| counted \|/);
   assert.match(markdown, /Accepted \| 1 \| 1 \(missed\) \|/);
   assert.match(renderHeadline(reports[0]), /Attribution \(repetitions, dev cases\): pass 1 · model 1 · system 0 /);
+  // Cost, latency, retries and tokens cover the dev cases (3 repetitions).
+  assert.match(markdown, /Cost, latency, retries and tokens cover the dev cases only/);
+  assert.match(markdown, /\| Total LLM cost \| \$0\.0003 \|/);
+  assert.match(markdown, /\(n=3\)/);
+  assert.match(markdown, /\| Tokens \| prompt 300 /);
+  assert.match(renderHeadline(reports[0]), /Cost \(dev cases\) \$0\.0003 /);
 });
 
 test('holdout behaviour cases alone are counted without their outcomes', async () => {

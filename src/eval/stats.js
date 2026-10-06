@@ -198,30 +198,13 @@ function isExecuted(repetition) {
 }
 
 /**
- * Headline statistics over case records ({ id, intentId, tags, difficulty,
- * failure_class, repetitions[], summary }) as built by the runner
- * (summary from summarizeCaseRepetitions in attribution.js).
+ * Cost, latency, retries and tokens over case records' executed repetitions
+ * (abstain / clarify cases included): the `cost`, `latency`, `retries` and
+ * `tokens` of summarizeRunStatistics. report.md recomputes them over the
+ * listed (dev) cases when holdout cases are hidden.
  */
-export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
-  const records = caseRecords || [];
-  // Abstain / clarify cases never count in accuracy (their repetitions are
-  // never `counted`); cost, latency, retries and tokens below cover them too.
-  const behaviorRecords = new Set(records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer'));
-  const counted = records.filter((record) => record.summary?.counted > 0);
-  const passRates = counted.map((record) => record.summary.passRate);
-  const majorityPasses = counted.filter((record) => record.summary.majorityPass).length;
-  const repeat = records.reduce((max, record) => Math.max(max, record.repetitions?.length || 0), 0);
-
-  const intents = groupBy(counted, (record) => [record.intentId || record.id]);
-  const perIntent = [...intents.entries()]
-    .map(([intentId, group]) => ({
-      intentId,
-      cases: group.length,
-      accuracy: round(mean(group.map((record) => record.summary.passRate))),
-    }))
-    .sort((left, right) => left.intentId.localeCompare(right.intentId));
-
-  const repetitions = records.flatMap((record) => record.repetitions || []);
+export function summarizeRunUsage(caseRecords) {
+  const repetitions = (caseRecords || []).flatMap((record) => record.repetitions || []);
   const executed = repetitions.filter(isExecuted);
   const passing = repetitions.filter((repetition) => repetition.outcome === 'pass');
   const knownCosts = executed.map(costOf).filter((value) => value !== null);
@@ -248,6 +231,73 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
     tokens.cached += usage.prompt_tokens_details?.cached_tokens || 0;
   }
 
+  return {
+    cost: {
+      currency: 'USD',
+      total: round(totalCost, 6),
+      questions: executed.length,
+      perQuestion: executed.length ? round(totalCost / executed.length, 6) : null,
+      correct: passing.length,
+      perCorrect: passing.length ? round(totalCost / passing.length, 6) : null,
+      questionsWithoutCost: withoutPrice,
+      questionsWithoutLlmCall: withoutLlmCall,
+    },
+    latency: {
+      questionWallMs: {
+        definition: 'the product loop (master data, prompt, LLM, validation, execution, retries) per question',
+        n: executed.filter((repetition) => Number.isFinite(questionMs(repetition))).length,
+        p50: round(percentile(executed.map(questionMs), 0.5), 1),
+        p95: round(percentile(executed.map(questionMs), 0.95), 1),
+      },
+      caseWallMs: {
+        definition: 'per question including the harness: gold runs and scoring on every fixture',
+        n: executed.filter((repetition) => Number.isFinite(caseMs(repetition))).length,
+        p50: round(percentile(executed.map(caseMs), 0.5), 1),
+        p95: round(percentile(executed.map(caseMs), 0.95), 1),
+      },
+      llmCallMs: {
+        n: llmCalls.filter((attempt) => Number.isFinite(attempt.llm.durationMs)).length,
+        p50: round(percentile(llmCalls.map((attempt) => attempt.llm.durationMs), 0.5), 1),
+        p95: round(percentile(llmCalls.map((attempt) => attempt.llm.durationMs), 0.95), 1),
+      },
+    },
+    retries: {
+      questions: executed.length,
+      questionsWithRetry: executed.filter((repetition) => (repetition.attempt_count || 0) > 1).length,
+      rate: executed.length ? round(executed.filter((repetition) => (repetition.attempt_count || 0) > 1).length / executed.length) : null,
+      llmCalls: llmCalls.length,
+      retryCalls: llmCalls.filter((attempt) => attempt.retry).length,
+    },
+    tokens,
+  };
+}
+
+/**
+ * Headline statistics over case records ({ id, intentId, tags, difficulty,
+ * failure_class, repetitions[], summary }) as built by the runner
+ * (summary from summarizeCaseRepetitions in attribution.js).
+ */
+export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
+  const records = caseRecords || [];
+  // Abstain / clarify cases never count in accuracy (their repetitions are
+  // never `counted`); cost, latency, retries and tokens (summarizeRunUsage)
+  // cover them too.
+  const behaviorRecords = new Set(records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer'));
+  const counted = records.filter((record) => record.summary?.counted > 0);
+  const passRates = counted.map((record) => record.summary.passRate);
+  const majorityPasses = counted.filter((record) => record.summary.majorityPass).length;
+  const repeat = records.reduce((max, record) => Math.max(max, record.repetitions?.length || 0), 0);
+
+  const intents = groupBy(counted, (record) => [record.intentId || record.id]);
+  const perIntent = [...intents.entries()]
+    .map(([intentId, group]) => ({
+      intentId,
+      cases: group.length,
+      accuracy: round(mean(group.map((record) => record.summary.passRate))),
+    }))
+    .sort((left, right) => left.intentId.localeCompare(right.intentId));
+
+  const repetitions = records.flatMap((record) => record.repetitions || []);
   const excluded = {};
   for (const repetition of records.filter((record) => !behaviorRecords.has(record)).flatMap((record) => record.repetitions || []).filter((entry) => !entry.counted)) {
     excluded[repetition.outcome] = (excluded[repetition.outcome] || 0) + 1;
@@ -294,43 +344,7 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
       perIntent,
     },
     ...summarizeBreakdowns(counted),
-    cost: {
-      currency: 'USD',
-      total: round(totalCost, 6),
-      questions: executed.length,
-      perQuestion: executed.length ? round(totalCost / executed.length, 6) : null,
-      correct: passing.length,
-      perCorrect: passing.length ? round(totalCost / passing.length, 6) : null,
-      questionsWithoutCost: withoutPrice,
-      questionsWithoutLlmCall: withoutLlmCall,
-    },
-    latency: {
-      questionWallMs: {
-        definition: 'the product loop (master data, prompt, LLM, validation, execution, retries) per question',
-        n: executed.filter((repetition) => Number.isFinite(questionMs(repetition))).length,
-        p50: round(percentile(executed.map(questionMs), 0.5), 1),
-        p95: round(percentile(executed.map(questionMs), 0.95), 1),
-      },
-      caseWallMs: {
-        definition: 'per question including the harness: gold runs and scoring on every fixture',
-        n: executed.filter((repetition) => Number.isFinite(caseMs(repetition))).length,
-        p50: round(percentile(executed.map(caseMs), 0.5), 1),
-        p95: round(percentile(executed.map(caseMs), 0.95), 1),
-      },
-      llmCallMs: {
-        n: llmCalls.filter((attempt) => Number.isFinite(attempt.llm.durationMs)).length,
-        p50: round(percentile(llmCalls.map((attempt) => attempt.llm.durationMs), 0.5), 1),
-        p95: round(percentile(llmCalls.map((attempt) => attempt.llm.durationMs), 0.95), 1),
-      },
-    },
-    retries: {
-      questions: executed.length,
-      questionsWithRetry: executed.filter((repetition) => (repetition.attempt_count || 0) > 1).length,
-      rate: executed.length ? round(executed.filter((repetition) => (repetition.attempt_count || 0) > 1).length / executed.length) : null,
-      llmCalls: llmCalls.length,
-      retryCalls: llmCalls.filter((attempt) => attempt.retry).length,
-    },
-    tokens,
+    ...summarizeRunUsage(records),
   };
 }
 
