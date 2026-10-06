@@ -333,20 +333,19 @@ flips, 0 pass-rate changes.
 | | Baseline (= version-1 rescore) | Rescore, version 2 |
 |---|---|---|
 | Strict accuracy | 62.2% (dev 74.7%, holdout 41.3%) | 62.2% (dev 74.7%, holdout 41.3%); paired 392, Δ 0.0, 0 flips |
-| Repetitions: pass / wrong result / guardrail true rejection | 731 / 417 / 21 | 731 / 405 / 33 |
-| Attribution (repetitions) | model 430 · system 15 | model 430 · system 15 |
-| Guardrail confusion (over every attempt) | TP 94, FP 0, FN 429 · precision 100%, recall 18.0% | TP 103, FP 0, FN 417 · precision 100%, recall 19.8% |
+| Repetitions, dev cases: pass / wrong result / guardrail true rejection | 549 / 176 / 10 | 549 / 164 / 22 |
+| Attribution, dev cases (repetitions) | model 186 · system 0 | model 186 · system 0 |
+| Guardrail confusion, dev attempts | TP 61, FP 0, FN 176 · precision 100%, recall 25.7% | TP 70, FP 0, FN 164 · precision 100%, recall 29.9% |
 
-(Attribution as measured then. The current attribution rules, which the Live
-results table also uses, give pass 731 · model 445 · system 0 for both
-rescores; the outcomes are unchanged.)
+(Dev cases, with today's attribution rules, as the offline rescore prints
+them by default; the holdout is read only as its accuracy by split.)
 
-The movement is the same as on the old suite, all of it in dev: the 15
-repetitions of the five average-order-value / open-amount cases answered with
-`BillTotalAmount` are now true `METRIC_COLUMN` rejections, and `e1b20a`'s
-three repetitions are no longer rejected (still wrong, and still counted as
-system errors because the flag stays). No holdout repetition changes outcome;
-no passing repetition changes.
+The movement is the same as on the old suite: the 15 dev repetitions of the
+five average-order-value / open-amount cases answered with `BillTotalAmount`
+are now true `METRIC_COLUMN` rejections, and `e1b20a`'s three repetitions are
+no longer rejected (still wrong; model errors under either version, since
+none ends in the flagged rejection). No passing repetition changes, and
+strict accuracy is unchanged in both splits.
 
 **Verification:** `npm run verify-dataset` and `HINTS_VERSION=1 npm run
 verify-dataset` pass (413 cases on 3 fixtures, 0 failures); under version 2
@@ -402,12 +401,12 @@ oracle and retry budget. Run cost: $0.63.
 | Intent-clustered accuracy | 60.6% | 73.3% |
 | Paired: improvements / regressions, exact McNemar p | | 57 / 13, p < 0.001 |
 | Δ strict accuracy (paired bootstrap 95% CI) | | +11.5 pts (+7.6 to +15.3) |
-| Attribution (repetitions, current rules) | pass 731 · model 445 · system 0 | pass 866 · model 310 · system 0 |
-| Guardrail precision / recall | 100% / 18.0% | 100% / 19.4% |
-| Abstain / clarify handled | 0 / 12 | 0 / 12 |
-| Cost per correct answer | $0.00074 | $0.00073 |
-| Prompt tokens per call / cached share | 3,676 / 91.5% | 4,367 / 83.4% |
-| Latency p50 / p95, retry rate | 2.53 s / 5.24 s, 7.0% | 2.39 s / 4.25 s, 5.0% |
+| Attribution, dev cases (repetitions) | pass 549 · model 186 · system 0 | pass 649 · model 86 · system 0 |
+| Guardrail precision / recall, dev attempts | 100% / 25.7% | 100% / 30.4% |
+| Abstain / clarify handled, dev cases | 0 / 10 | 0 / 10 |
+| Cost per correct answer, dev cases | $0.00062 | $0.00060 |
+| Prompt tokens per call / cached share, dev cases | 3,692 / 91.0% | 4,377 / 83.5% |
+| Latency p50 / p95, retry rate, dev cases | 2.49 s / 5.32 s, 6.7% | 2.39 s / 4.40 s, 3.8% |
 
 **By split** (aggregate counts only; the holdout policy forbids per-case
 holdout analysis):
@@ -425,9 +424,11 @@ before v2 existed, and nobody looked at its per-case results. Five holdout
 questions happen to use v2's new money words ("open balance", "unpaid
 balance"); they are pinned in the holdout builder and counted, not excluded —
 the words are ordinary business vocabulary, not tuned to the holdout. Cost per
-correct answer is flat: the prompt is about 19% longer and its cached share
-falls from 91.5% to 83.4%, but fewer retries and more correct answers offset
-it, and p95 latency drops by a second.
+correct answer is flat (dev cases): the prompt is about 19% longer and its
+cached share falls from 91.0% to 83.5%, but fewer retries and more correct
+answers offset it, and p95 latency drops by almost a second. Attribution,
+guardrail, behaviour, cost and latency rows cover dev cases, as the reports
+print them by default; the holdout is read only as its accuracy by split.
 
 ## Decision
 
@@ -436,7 +437,7 @@ this repository so far (+11.5 pts strict accuracy, McNemar p < 0.001) and,
 crucially, it improves the blind holdout significantly (+7.9 pts, p = 0.035),
 at unchanged cost per correct answer and lower latency. `HINTS_VERSION=1`
 stays selectable and reproduces the previous prompts byte for byte. The
-committed baseline is replaced by this run. The 0 of 12 abstain/clarify cases
-remain the clearest product gap; the next experiments are the multi-table
+committed baseline is replaced by this run. Abstain / clarify (0 of 10 dev
+cases handled) remains the clearest product gap; the next experiments are the multi-table
 entity index, deterministic SQL lints, and the metric compiler (see the error
 analysis order in [README](README.md)).
