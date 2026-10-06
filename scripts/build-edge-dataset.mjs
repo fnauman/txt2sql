@@ -122,7 +122,7 @@ const PUBLIC_EDGE_CASES = [
       "product",
       "master_data"
     ],
-    "failure_class": "master_data_resolution",
+    "failure_class": "grain_confusion",
     "expected_sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName",
     "expected_tables": [
       "SalesDocumentLine",

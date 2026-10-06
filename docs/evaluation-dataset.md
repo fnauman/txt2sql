@@ -60,17 +60,17 @@ By difficulty: 16 easy, 95 medium, 144 hard. By comparison mode: 77 scalar,
 
 | `failure_class` | Cases | | `failure_class` | Cases |
 |---|---|---|---|---|
-| `aggregation_shape` (series, pivots) | 31 | | `entity_filter` | 16 |
-| `time_window` | 24 | | `wrong_date_column` | 15 |
-| `metric_column_confusion` | 17 | | `distinct_count` | 10 |
-| `grain_confusion` | 17 | | `ratio_metric` | 8 |
-| `wrong_join_path` | 7 | | `stale_snapshot_field` | 5 |
-| `campaign_join_path` | 3 | | `master_data_resolution` | 1 |
+| `aggregation_shape` (series, pivots, counts) | 35 | | `entity_filter` | 16 |
+| `time_window` | 20 | | `wrong_date_column` | 11 |
+| `metric_column_confusion` | 20 | | `distinct_count` | 10 |
+| `grain_confusion` | 18 | | `ratio_metric` | 8 |
+| `default_filter` | 16 | | `stale_snapshot_field` | 5 |
+| `wrong_join_path` | 9 | | `campaign_join_path` | 3 |
 | `vocabulary` | 5 | | `multilingual` | 5 |
 | `typo` | 4 | | `relative_date` | 5 |
-| `entity_resolution` | 5 | | `empty_result` | 4 |
+| `entity_resolution` | 4 | | `empty_result` | 4 |
 | `abstention` | 5 | | `clarification` | 5 |
-| `ambiguous_metric` | 2 | | (none) | 61 |
+| `ambiguous_metric` | 2 | | (none) | 45 |
 
 Templated coverage (cases): windows: 89 single-month (every month from
 November 2025 to May 2026), 68 quarter, 14 year, 14 explicit date range, 4
@@ -427,14 +427,38 @@ by it. The original eight, from the edge suite:
 | `campaign_join_path` | The campaign through the document header instead of the product. |
 | `wrong_date_column` | Posting date vs document date vs due date. |
 | `stale_snapshot_field` | A denormalized snapshot column instead of the master data. |
-| `master_data_resolution` | A fuzzy entity term resolved to the right products. |
-| `aggregation_shape` | The wrong result shape (series, side-by-side columns). |
+| `master_data_resolution` | A fuzzy entity term resolved to the right products (no case today: see below). |
+| `aggregation_shape` | The wrong result shape (series, side-by-side columns; a list where "how many" asks for one count). |
 
 Added with the new datasets: `time_window` (quarters, ranges, years),
 `entity_filter` (a named member), `distinct_count`, `ratio_metric` (average
 order value), `vocabulary`, `multilingual`, `typo`, `relative_date`,
 `entity_resolution`, `empty_result`, `ambiguous_metric`, `abstention`,
-`clarification`.
+`clarification`. Added after the error analysis of the Experiment 1
+failures: `default_filter`, a filter every answer must carry by convention
+although the question does not say it: canceled documents left out (also
+when `SalesDocument` is joined into a ledger question by document date, or
+sits inside an anti-join) and product lines only for units (the
+delivery-fee lines are not units sold).
+
+The same analysis corrected labels that named the wrong trap and filled the
+missing labels of the failing cases (generator rules or intent overrides for
+templated cases, so every phrasing of an intent shares its label):
+
+| Cases | Was | Now | Why |
+|---|---|---|---|
+| `edge_public_003` | `master_data_resolution` | `grain_confusion` | the name-based filter returns the same products as the tag-based one on this master data; the trap left is one row per line instead of per product (missing `DISTINCT`) |
+| `hard_entity_lakeside_spend_q1_2026` | `entity_resolution` | `metric_column_confusion` | the customer resolves; the amount ("spend") is the trap |
+| `tpl_outstanding_balance_due_apr_2026_*` | `wrong_date_column` | `metric_column_confusion` | "open amount" / "unpaid balance" is `BalanceAmount`; the due date is not where answers go wrong |
+| `tpl_account_debit_credit_posted_apr_2026_*` | `wrong_date_column` | `wrong_join_path` | an inner join to `SalesDocument` drops the manual journals |
+| `tpl_customer_qty_top3_q1_2026_*` | `time_window` | `default_filter` | product lines only for units |
+| `tpl_active_customers_without_sales_q1_2026_*` | `time_window` | `default_filter` | the cancel filter inside the anti-join |
+| `core_public_004`, `paraphrase_public_004`, `tpl_customers_bought_feb_not_mar_2026_*` | none | `aggregation_shape` | "how many" over an anti-join: one count |
+| `core_public_005` / `009`, `paraphrase_public_005` / `009`, the templated document-date ledger intents (`tpl_account_net_movement_feb_2026_*`, `tpl_account_debit_credit_q1_2026_*`) | none | `default_filter` | postings of non-canceled sales documents only |
+| `tpl_store_qty_mar_2026_*`, `tpl_total_qty_dec_2025_*` | none | `default_filter` | product lines only for units |
+
+`failure_class` is not part of the scoring fingerprint, so relabelling never
+takes a case out of a paired comparison.
 
 ## The multi-fixture oracle
 

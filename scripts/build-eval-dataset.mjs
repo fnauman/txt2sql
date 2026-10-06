@@ -1256,7 +1256,9 @@ const INTENTS = [
   },
   {
     intentId: 'outstanding_balance_due_apr_2026', template: 'fact', metric: 'balance', window: '2026-04', shape: 'scalar', dateColumn: 'DueDate',
-    failure_class: 'wrong_date_column',
+    // The error analysis (Experiment 1) found the trap is the amount ("open
+    // amount", "unpaid balance": BalanceAmount), not the due date.
+    failure_class: 'metric_column_confusion',
     phrasings: [
       'How much unpaid balance falls due in April 2026?',
       'Total open amount on documents with a due date in April 2026.',
@@ -1293,6 +1295,9 @@ const INTENTS = [
   },
   {
     intentId: 'account_debit_credit_posted_apr_2026', template: 'ledger', measures: ['debit', 'credit'], window: '2026-04', dateMode: 'posting',
+    // The trap the error analysis found: an inner join to SalesDocument drops
+    // the April manual journals (the posting date itself is not ambiguous).
+    failure_class: 'wrong_join_path',
     phrasings: [
       'List each account by name with its debits and credits for postings dated April 2026.',
       'Using the posting date, what were the total debits and credits on each account in April 2026? Show the account names.',
@@ -1336,6 +1341,8 @@ const INTENTS = [
   // ---- other shapes ----
   {
     intentId: 'active_customers_without_sales_q1_2026', template: 'active_customers_without_sales', window: 'q1-2026', shape: 'breakdown', boundary: 'end',
+    // The cancel filter inside the anti-join (a canceled Q1 sale is no sale).
+    failure_class: 'default_filter',
     comparison: { mode: 'rowset', compare_columns: ['CustomerName'] },
     mutants: ['cancel', 'date_col', 'date_boundary', 'date_boundary_other', 'active'],
     difficulty: 'hard', tags: ['anti_join'],
@@ -1346,6 +1353,8 @@ const INTENTS = [
   },
   {
     intentId: 'customers_bought_feb_not_mar_2026', template: 'customers_lost_between', windows: ['2026-02', '2026-03'], shape: 'scalar',
+    // "How many": one count, not the list of customers.
+    failure_class: 'aggregation_shape',
     comparison: { mode: 'scalar' },
     mutants: ['cancel', 'cancel_first', 'cancel_second', 'count_docs', 'date_col', 'date_boundary', 'date_boundary_other'],
     notEmitted: {
@@ -1620,7 +1629,13 @@ function failureClassFor(intent) {
     return 'aggregation_shape';
   }
   if (intent.template === 'ledger') {
-    return intent.dateMode === 'posting' ? 'wrong_date_column' : null;
+    // By the sales document's date: the postings of non-canceled documents
+    // only (the cancel filter through the SalesDocument join).
+    return intent.dateMode === 'posting' ? 'wrong_date_column' : 'default_filter';
+  }
+  // Units are product units: the delivery-fee lines must be left out.
+  if (unitsNeedProductJoinOnly(intent)) {
+    return 'default_filter';
   }
   const dims = intent.dims || [];
   if (['gross', 'balance', 'paid'].includes(intent.metric)) {

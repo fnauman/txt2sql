@@ -164,6 +164,7 @@
       "comparison",
       "anti_join"
     ],
+    "failure_class": "aggregation_shape",
     "expected_sql": "WITH feb AS (SELECT DISTINCT l.ProductId FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' AND l.ProductId IS NOT NULL), mar AS (SELECT DISTINCT l.ProductId FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL) SELECT COUNT(*) AS product_count FROM feb LEFT JOIN mar ON mar.ProductId = feb.ProductId WHERE mar.ProductId IS NULL",
     "expected_tables": [
       "SalesDocumentLine",
@@ -201,6 +202,7 @@
       "ranking",
       "temporal"
     ],
+    "failure_class": "default_filter",
     "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
@@ -373,6 +375,7 @@
       "ranking",
       "temporal"
     ],
+    "failure_class": "default_filter",
     "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
