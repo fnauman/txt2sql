@@ -232,6 +232,14 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
   assert.match(markdown, /By split: dev 100\.0% \(1 case\) · holdout 50\.0% \(1 case\)\./);
   assert.match(markdown, /\| hard_clarify_best_customer \| Who is our best customer\? \| 1\/2 declined \| answered_instead_of_clarify \| expects clarify, model \|/);
   assert.match(markdown, /\| split \| holdout \| 1 \| 50\.0% \| 0\/1 \|/);
+  // The attribution tables leave the behaviour cases out, and say so.
+  assert.match(markdown, /Excluded from accuracy: 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
+  const [skipped] = await attributeCaseRuns(
+    [{ entry: { testCase: normalizeBenchmarkCase({ id: 's1', question: 'Skipped?', expected_sql: "SELECT 's1'" }), datasets: ['d'] }, repetitions: [{ status: 'skipped_budget', attempts: [] }] }],
+    { checkGuardrails: false }
+  );
+  assert.match(renderReportMarkdown(reportOf([...records, skipped])), /Excluded from accuracy: skipped_budget 1; 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
+  assert.match(renderReportMarkdown(reportOf(records.filter((record) => record.expected_behavior === 'answer'))), /Excluded from accuracy: none\./);
   const headline = renderHeadline(report);
   assert.match(headline, /Behaviour cases: abstain\/clarify — 2 cases, 0 handled correctly\. \(not in accuracy\)/);
   assert.match(headline, /By split: dev 100\.0% \(1\) · holdout 50\.0% \(1\)/);

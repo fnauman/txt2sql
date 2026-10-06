@@ -812,7 +812,9 @@ run.
   | `harness_error` | harness | excluded | the runner itself threw |
 
   Behaviour cases have their own outcomes (`declined`,
-  `answered_instead_of_abstain`, `answered_instead_of_clarify`) and section.
+  `answered_instead_of_abstain`, `answered_instead_of_clarify`) and section;
+  the section's "Excluded from accuracy" line counts them next to the
+  excluded outcomes.
   To decide a guardrail rejection, its SQL must first pass the safety layer;
   then it runs read-only on every fixture through the oracle, and a match makes
   it a false rejection. A timeout counts as a failure on purpose (slow cases

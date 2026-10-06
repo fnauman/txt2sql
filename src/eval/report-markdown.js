@@ -279,13 +279,23 @@ function attributionSection(report) {
         'are infra_error, not model errors: the rejection might have been a false one.'
     );
   }
+  // Excluded outcomes (repetitions of answer cases), and the abstain /
+  // clarify cases, which are never in accuracy or in the tables above.
   const excluded = Object.entries(attribution.excluded);
+  const behaviorCases = (report.results || []).filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const parts = [];
+  if (excluded.length > 0) {
+    parts.push(excluded.map(([outcome, count]) => `${outcome} ${count}`).join(', '));
+  }
+  if (behaviorCases.length > 0) {
+    const repetitions = behaviorCases.reduce((total, record) => total + (record.repetitions?.length || 0), 0);
+    parts.push(
+      `${behaviorCases.length} abstain/clarify case${behaviorCases.length === 1 ? '' : 's'} ` +
+        `(${repetitions} repetition${repetitions === 1 ? '' : 's'}; see Behaviour cases)`
+    );
+  }
   lines.push('');
-  lines.push(
-    excluded.length > 0
-      ? `Excluded from accuracy: ${excluded.map(([outcome, count]) => `${outcome} ${count}`).join(', ')}.`
-      : 'Excluded from accuracy: none.'
-  );
+  lines.push(`Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`);
   return lines.join('\n');
 }
 
