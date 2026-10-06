@@ -1445,12 +1445,16 @@ suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
 255, fresh holdout 149), compact file 2.10 MB. It includes every
 measurement-hygiene change: the [scoring relaxations](#scoring-relaxations),
 the [gold conventions](#gold-conventions), known validator rejections, the
-retired (now dev) holdout and the audited fresh holdout. The attribution below
-is the offline rescore's (`npm run eval -- --offline`, which recomputes it):
-the attribution recorded inside the committed file predates the fix that
-books only the flagged rejection of a flagged case as a system error (it says
-model 430 · system 15, counting every failure of the five flagged cases);
-strict accuracy and the splits are the same either way.
+retired (now dev) holdout and the audited fresh holdout. The attribution,
+guardrail, behaviour, per-question cost and latency rows below are what the
+offline rescore (`npm run eval -- --offline`, which recomputes the
+attribution) prints by default: they cover the dev cases, and the holdout is
+read only as its accuracy by split (see the
+[holdout policy](#splits-and-the-holdout-policy); `--reveal-holdout` prints
+every case). The attribution recorded inside the committed file predates the
+fix that books only the flagged rejection of a flagged case as a system
+error, so it still books every failure of a flagged case as one; strict
+accuracy and the splits are the same either way.
 
 | Measure | Result |
 |---|---|
@@ -1458,11 +1462,11 @@ strict accuracy and the splits are the same either way.
 | Majority-pass cases | 244/392 (Wilson 95% 57.4%–66.9%) |
 | Intent-clustered accuracy | 60.6% (95% CI 54.7%–66.3%) |
 | By split | dev 74.7% (245 cases) · fresh holdout 41.3% (147 cases) |
-| Attribution (repetitions) | pass 731 · model 445 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion (1,261 attempts) | 94 wrong SQL caught, 0 correct SQL rejected, 429 wrong SQL accepted; precision 100%, recall 18.0% |
-| Behaviour cases | 0 of 12 handled (abstain / clarify) |
-| Cost | $0.5406 total · $0.00045 per question · $0.00074 per correct answer · 91.5% of prompt tokens cached |
-| Latency | p50 2.53 s · p95 5.24 s (product loop) · retry rate 7.0% |
+| Attribution, dev cases (repetitions) | pass 549 · model 186 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion, dev cases (786 attempts) | 61 wrong SQL caught, 0 correct SQL rejected, 176 wrong SQL accepted; precision 100%, recall 25.7% |
+| Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
+| Cost | $0.5406 for the whole run (the budget row) · dev cases: $0.00044 per question · $0.00062 per correct answer · 91.0% of prompt tokens cached |
+| Latency, dev cases | p50 2.49 s · p95 5.32 s (product loop) · retry rate 6.7% |
 
 How to read it:
 
@@ -1480,18 +1484,18 @@ How to read it:
   holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
   readings, 2 rewordings, 1 wrong gold). The rest of the difference is
   run-to-run variation between two live runs.
-- **System failures.** None. The 5 cases flagged
-  `known_validator_rejection` cap strict accuracy at 98.7% with perfect SQL,
-  but none of gpt-4o-mini's 15 failed repetitions on them ended in the flagged
-  rejection: they were wrong results or rejections of wrong SQL with another
-  code (the dev case's retries, for example, were rejected for `FAN_OUT`), so
-  they are model errors like every other failure (case majority: model 148,
-  system 0).
+- **System failures.** None among the dev cases (the holdout's failure
+  causes are not shown). The 5 cases flagged `known_validator_rejection`
+  (1 dev, 4 holdout) cap strict accuracy at 98.7% with perfect SQL; the dev
+  one's failed repetitions did not end in the flagged rejection (its retries
+  were rejected for `FAN_OUT`), so they are model errors like every other
+  dev failure (dev case majority: model 61, system 0).
 - **Dev stability.** Paired with the previous (255-case) baseline on the 202
   dev cases whose scoring did not change: 75.6% → 75.3%, 3 flips each way,
   exact McNemar p = 1.0.
-- **Guardrails** never reject correct SQL but catch under a fifth of wrong SQL;
-  most wrong answers are semantically wrong SQL that is still valid.
+- **Guardrails** (dev cases) never reject correct SQL but catch about a
+  quarter of wrong SQL (61 of 237 attempts); most wrong answers are
+  semantically wrong SQL that is still valid.
 
 Earlier baselines: the retrieved-scope baseline (prompt version
 `0c314451d4b7`) scored 68.8% on the 255-case suite with 92 system failures,

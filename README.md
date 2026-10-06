@@ -422,10 +422,10 @@ contains:
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval
   miss, known validator rejection, infrastructure), the guardrail confusion
-  matrix, the abstain / clarify cases handled, a per-case table (dev cases;
-  holdout ones only with `--reveal-holdout`), cost / latency / retries /
-  tokens, and the provenance (git sha, prompt, semantic-layer, fixture and
-  dataset hashes);
+  matrix, the abstain / clarify cases handled, a per-case table, cost /
+  latency / retries / tokens (all of these cover the dev cases; holdout
+  cases only with `--reveal-holdout`), and the provenance (git sha, prompt,
+  semantic-layer, fixture and dataset hashes);
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
@@ -436,10 +436,10 @@ whole 404-case suite, 3 repetitions, full-schema prompting via the default
 |---|---|
 | Strict accuracy (392 answer cases, 205 intents) | **62.2%** (95% CI 57.5%–66.8%) |
 | By split | dev **74.7%** (245 cases) · fresh holdout **41.3%** (147 cases) |
-| Failures by cause (repetitions) | model 445 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
-| Guardrails over every attempt | precision 100%, recall 18.0%, false-rejection rate 0% |
-| Abstain / clarify cases handled | 0 of 12 (the product always answers; not in accuracy) |
-| Cost and latency | $0.54 total · $0.00074 per correct answer · p50 2.5 s, p95 5.2 s · 91.5% of prompt tokens cached |
+| Failures by cause (repetitions, dev cases) | model 186 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
+| Guardrails over every dev attempt | precision 100%, recall 25.7%, false-rejection rate 0% |
+| Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
+| Cost and latency | $0.54 for the whole run · dev cases: $0.00062 per correct answer, p50 2.5 s, p95 5.3 s, 91.0% of prompt tokens cached |
 
 The fresh holdout is 77 new intents written blind (no model answers to them
 were seen while writing) and audited by two independent annotators before
@@ -450,14 +450,15 @@ questions: the holdout leans on analytical shapes the dev set barely covers
 month-over-month change, weekday and value-band breakdowns) and on unfamiliar
 wording, so dev accuracy overstates what a new user's questions would get.
 With perfect SQL the suite's ceiling is 98.7% (5 cases are known validator
-rejections: the validator rejects their correct answers); every failure of
-this baseline is a model error, including those on the flagged cases, none of
-which ended in the flagged rejection. (The failure causes come from
-`npm run eval -- --offline`, which recomputes them; the attribution recorded
-inside `eval/baselines/gpt-4o-mini.json` predates the fix that limits the
-system bucket to the flagged rejection and still says model 430 · system 15.) On the earlier 255-case
-suite, [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema
-prompting) moved strict accuracy from 68.8% to 72.8%. These are measurements
+rejections: the validator rejects their correct answers); every dev failure
+of this baseline is a model error, including the flagged dev case's, which
+did not end in the flagged rejection. (The failure causes, guardrail,
+behaviour and per-question cost figures are what `npm run eval -- --offline`
+prints by default: it recomputes the attribution and covers the dev cases,
+the holdout only as its split accuracy. The attribution recorded inside
+`eval/baselines/gpt-4o-mini.json` predates the fix that limits the system
+bucket to the flagged rejection.) On the earlier 255-case suite,
+[Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting) moved strict accuracy from 68.8% to 72.8%. These are measurements
 of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
