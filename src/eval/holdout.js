@@ -72,12 +72,16 @@ export function computeHoldoutEntries(datasets) {
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
-/** Fingerprint of a set of entries (what the history notes are written for). */
-export function holdoutEntriesFingerprint(entries) {
-  return sha16(JSON.stringify((entries || []).map((entry) => [entry.id, entry.question_fingerprint, entry.gold_fingerprint, entry.scoring_fingerprint])));
-}
-
+// Every field of an entry the check compares; the manifest fingerprint covers
+// all of them, so any change the check reports changes the fingerprint too
+// and needs a note (a field compared but not hashed could be rewritten
+// silently by --write, and could never get its note).
 const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'intentId', 'datasets'];
+
+/** Fingerprint of a set of entries (what the history notes are written for): every compared field. */
+export function holdoutEntriesFingerprint(entries) {
+  return sha16(JSON.stringify((entries || []).map((entry) => [entry.id, ...COMPARED_FIELDS.map((field) => entry[field] ?? null)])));
+}
 
 /**
  * Differences between a manifest and the holdout of today's datasets:

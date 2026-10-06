@@ -103,6 +103,24 @@ test('the manifest must be rewritten, not hand-edited, and every change needs a 
   assert.deepEqual(next.history.map((entry) => [entry.date, entry.cases]), [['2026-10-06', 1], ['2026-10-07', 2]]);
 });
 
+test('a changed intent or dataset membership needs a note, and --write accepts it', () => {
+  const base = [raw('h1'), raw('h2')];
+  const manifest = buildHoldoutManifest(computeHoldoutEntries(datasetsOf(base)), { note: 'two holdout cases authored blind', date: '2026-10-06' });
+  for (const [label, datasets, fields] of [
+    ['intent', datasetsOf([raw('h1', { intentId: 'another_intent' }), base[1]]), ['intentId']],
+    ['dataset membership', [...datasetsOf(base), ...datasetsOf([base[0]], 'other')], ['datasets']],
+  ]) {
+    const entries = computeHoldoutEntries(datasets);
+    assert.deepEqual(compareHoldoutManifest(manifest, entries).changed, [{ id: 'h1', fields }], label);
+    // Never rewritten silently: the change needs a note, and the note is accepted.
+    assert.throws(() => buildHoldoutManifest(entries, { previous: manifest }), /pass --note/, label);
+    const next = buildHoldoutManifest(entries, { previous: manifest, note: `${label} changed`, date: '2026-10-07' });
+    assert.notEqual(next.fingerprint, manifest.fingerprint, label);
+    assert.deepEqual(next.history.map((entry) => entry.note), ['two holdout cases authored blind', `${label} changed`], label);
+    assert.deepEqual(compareHoldoutManifest(next, entries).problems, [], label);
+  }
+});
+
 test('an empty holdout has a valid manifest too', () => {
   const entries = computeHoldoutEntries(datasetsOf([raw('d1', { split: 'dev' })]));
   assert.deepEqual(entries, []);
@@ -126,6 +144,16 @@ test('npm run holdout-manifest checks, and writes only with a note', async () =>
     await fs.writeFile(path.join(dir, 'set.json'), JSON.stringify([raw('h1', { expected_sql: "SELECT 'changed' AS x" })]));
     assert.equal(await holdoutManifestCli(['--datasets-dir', dir], { output }), 1);
     assert.match(lines.join('\n'), /holdout case h1 changed \(gold_fingerprint, scoring_fingerprint\)/);
+    // A changed intent: refused without a note, recorded with one.
+    await fs.writeFile(path.join(dir, 'set.json'), JSON.stringify([raw('h1', { intentId: 'another_intent' })]));
+    assert.equal(await holdoutManifestCli(['--datasets-dir', dir], { output }), 1);
+    assert.match(lines.join('\n'), /holdout case h1 changed \(intentId\)/);
+    assert.equal(await holdoutManifestCli(['--datasets-dir', dir, '--write'], { output }), 1, 'an intent change without --note');
+    assert.match(lines.at(-1), /The holdout changed: pass --note/);
+    assert.equal(await holdoutManifestCli(['--datasets-dir', dir, '--write', '--note', 'intent renamed'], { output, date: '2026-10-07' }), 0);
+    assert.equal(await holdoutManifestCli(['--datasets-dir', dir], { output }), 0);
+    const written = await readHoldoutManifest(path.join(dir, HOLDOUT_MANIFEST_FILE));
+    assert.deepEqual(written.history.map((entry) => entry.note), ['one holdout case', 'intent renamed']);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "policy": "Error analysis and experiment design use dev failures only; holdout results are read in aggregate (report.md and the console show them by split, never per case, unless --reveal-holdout). Any change to the holdout (a case added, removed or changed) requires rewriting this manifest with a dated note (npm run holdout-manifest -- --write --note \"...\").",
-  "fingerprint": "0743dc7eb92e9a42",
+  "fingerprint": "f7fb07500476353d",
   "entries": [
     {
       "id": "ho2_agreed_vs_charged_price_2026_dba74e",
@@ -1512,6 +1512,12 @@
       "fingerprint": "0743dc7eb92e9a42",
       "cases": 149,
       "note": "2026-10-06: gold corrected after an independent two-annotator audit (no model outputs inspected): all 147 answer cases audited, 10 cases (6 intents) changed, none dropped. Gold fix (2 cases): largest_open_items_top5 now lists only documents with an unpaid balance (d.BalanceAmount > 0), so seed returns 3 rows, not 5 padded with paid documents; this subsumes the proposed positive-balance alternative on 599841. Every-member alternatives (6 cases): store_mar_vs_apr_2026 (every store), customer_paid_vs_open_q1_2026 (every customer, plus null_as_zero on paid_amount/open_balance) and category_h1_vs_h2_2025 (every category), as the pivot / 'for each' convention allows. Rewordings (2 cases, new ids): documents_last_7_days 8ee6c9 -> 8ca4d2 ('How many documents ...') and campaign_units_by_store 144980 -> 12ee7a ('... for the campaign and outlet combinations that had sales'). Pins re-written on fresh fixtures; controls regenerated (design kill 779/779, positives 23/23)."
+    },
+    {
+      "date": "2026-10-06",
+      "fingerprint": "f7fb07500476353d",
+      "cases": 149,
+      "note": "2026-10-06: fingerprint scheme change, no holdout case changed. The manifest fingerprint now covers every field the check compares (id, question, gold and scoring fingerprints, intentId and datasets); before, intentId and datasets were compared but not hashed, so a change to them could not get a note. Entries are identical to the previous state."
     }
   ]
 }
