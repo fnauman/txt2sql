@@ -16,7 +16,8 @@ test('de-duplication: same id is one case, same question + gold under another id
       name: 'edge',
       cases: [
         makeCase('c1', 'How many customers?', 'SELECT  COUNT(*)\n FROM Customer'),
-        makeCase('e1', 'how many customers?', 'SELECT COUNT(*) FROM Customer'),
+        // a question duplicate merges only under the same intent (and tags)
+        makeCase('e1', 'how many customers?', 'SELECT COUNT(*) FROM Customer', { intentId: 'c1' }),
         makeCase('e2', 'How many customers?', 'SELECT COUNT(*) FROM Customer WHERE IsActive = 1'),
       ],
     },
@@ -117,7 +118,7 @@ test('the same question and gold scored differently is a separate case; a droppe
         // same question and gold, other comparison spec and an alternative gold
         makeCase('b1', 'How  many?', 'SELECT  1', { comparison: { mode: 'rowset', tolerance: 0.5 }, alternative_expected_sql: ['SELECT 1.0'] }),
         // identical in every way that is scored: a duplicate
-        makeCase('b2', 'how many?', 'SELECT 1', { comparison: { mode: 'scalar' } }),
+        makeCase('b2', 'how many?', 'SELECT 1', { comparison: { mode: 'scalar' }, intentId: 'a1' }),
       ],
     },
   ];
@@ -128,7 +129,7 @@ test('the same question and gold scored differently is a separate case; a droppe
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
   try {
     await fs.writeFile(path.join(dir, 'd1.json'), JSON.stringify([{ id: 'a1', question: 'How many?', expected_sql: 'SELECT 1' }]));
-    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b2', question: 'how many?', expected_sql: 'SELECT 1' }]));
+    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b2', question: 'how many?', expected_sql: 'SELECT 1', intentId: 'a1' }]));
     const suite = await selectSuite({ datasetsDir: dir, caseIds: ['b2'] });
     assert.deepEqual(suite.entries.map((entry) => entry.testCase.id), ['a1']);
     assert.deepEqual(suite.aliasedCaseIds, [{ id: 'b2', keptAs: 'a1' }]);
@@ -155,15 +156,15 @@ test('an id dropped as a question duplicate is still registered: reusing it for 
   // a/Q1, then b/Q1 (dropped: same question and gold as a), then b/Q2.
   const datasets = [
     { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1')] },
-    { name: 'd2', cases: [makeCase('b', 'Q1?', 'SELECT 1')] },
-    { name: 'd3', cases: [makeCase('b', 'Q2?', 'SELECT 2')] },
+    { name: 'd2', cases: [makeCase('b', 'Q1?', 'SELECT 1', { intentId: 'a' })] },
+    { name: 'd3', cases: [makeCase('b', 'Q2?', 'SELECT 2', { intentId: 'a' })] },
   ];
   const { entries, conflicts } = dedupeSuiteCases(datasets);
   assert.deepEqual(conflicts, [{ id: 'b', datasets: ['d2', 'd3'], reason: 'different question and gold SQL' }]);
   assert.deepEqual(entries.map((entry) => entry.testCase.id), ['a'], 'the second b is not kept as a new case');
 
   // The same dropped id repeated verbatim is one more copy of the kept case.
-  const repeated = dedupeSuiteCases([datasets[0], datasets[1], { name: 'd3', cases: [makeCase('b', 'Q1?', 'SELECT  1')] }]);
+  const repeated = dedupeSuiteCases([datasets[0], datasets[1], { name: 'd3', cases: [makeCase('b', 'Q1?', 'SELECT  1', { intentId: 'a' })] }]);
   assert.deepEqual(repeated.conflicts, []);
   assert.deepEqual(repeated.entries.map((entry) => [entry.testCase.id, entry.datasets]), [['a', ['d1', 'd2', 'd3']]]);
   assert.deepEqual(repeated.duplicates.map((entry) => [entry.id, entry.dataset, entry.keptAs]), [
@@ -175,8 +176,8 @@ test('an id dropped as a question duplicate is still registered: reusing it for 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
   try {
     await fs.writeFile(path.join(dir, 'd1.json'), JSON.stringify([{ id: 'a', question: 'Q1?', expected_sql: 'SELECT 1' }]));
-    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b', question: 'Q1?', expected_sql: 'SELECT 1' }]));
-    await fs.writeFile(path.join(dir, 'd3.json'), JSON.stringify([{ id: 'b', question: 'Q2?', expected_sql: 'SELECT 2' }]));
+    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b', question: 'Q1?', expected_sql: 'SELECT 1', intentId: 'a' }]));
+    await fs.writeFile(path.join(dir, 'd3.json'), JSON.stringify([{ id: 'b', question: 'Q2?', expected_sql: 'SELECT 2', intentId: 'a' }]));
     await assert.rejects(selectSuite({ datasetsDir: dir, caseIds: ['b'] }), (error) => error.code === 'DATASET_CONFLICT' && /b has a different question and gold SQL in d2 and d3/.test(error.message));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -277,15 +278,61 @@ test('the same id with different verification metadata, split, validator flag or
 test('a question duplicate under another id must agree on split and validator flag', () => {
   const conflictsOf = (extraA, extraB) =>
     dedupeSuiteCases([
-      { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1', extraA)] },
-      { name: 'd2', cases: [makeCase('b', 'q1?', 'SELECT 1', extraB)] },
+      { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1', { intentId: 'i', ...extraA })] },
+      { name: 'd2', cases: [makeCase('b', 'q1?', 'SELECT 1', { intentId: 'i', ...extraB })] },
     ]);
   const split = conflictsOf({ split: 'dev' }, { split: 'holdout' });
   assert.deepEqual(split.conflicts, [{ id: 'b', datasets: ['d1', 'd2'], reason: 'different split than a (same question and gold SQL)' }]);
   assert.deepEqual([split.entries.map((entry) => entry.testCase.id), split.duplicates], [['a'], []]);
   const flag = conflictsOf({}, { known_validator_rejection: 'TABLE_SCOPE' });
   assert.deepEqual(flag.conflicts, [{ id: 'b', datasets: ['d1', 'd2'], reason: 'different known_validator_rejection than a (same question and gold SQL)' }]);
-  // Agreeing on both, the second id is still one more copy of the first.
-  const same = conflictsOf({ split: 'holdout', tags: ['t1'] }, { split: 'holdout', tags: ['t2'] });
+  // Agreeing on both (and on intent and tags), the second id is still one
+  // more copy of the first.
+  const same = conflictsOf({ split: 'holdout', tags: ['t1'] }, { split: 'holdout', tags: ['t1'] });
   assert.deepEqual([same.conflicts, same.duplicates.map((entry) => [entry.id, entry.keptAs])], [[], [['b', 'a']]]);
+});
+
+test('a question duplicate under another id must agree on tags and intent, so selections never depend on dataset order', async () => {
+  const shared = { intentId: 'count_customers' };
+  const dedupe = (order, extraA, extraB) => {
+    const byName = {
+      d1: { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1', { ...shared, ...extraA })] },
+      d2: { name: 'd2', cases: [makeCase('b', 'q1?', 'SELECT 1', { ...shared, ...extraB })] },
+    };
+    return dedupeSuiteCases(order.map((name) => byName[name]));
+  };
+  const orders = [['d1', 'd2'], ['d2', 'd1']];
+  for (const order of orders) {
+    const [first, second] = order.map((name) => (name === 'd1' ? 'a' : 'b'));
+    const tags = dedupe(order, { tags: ['t1'] }, { tags: ['t2'] });
+    assert.deepEqual(tags.conflicts, [{ id: second, datasets: order, reason: `different tags than ${first} (same question and gold SQL)` }], order.join(','));
+    assert.deepEqual(tags.duplicates, [], 'not merged');
+    const intent = dedupe(order, { intentId: 'i1' }, { intentId: 'i2' });
+    assert.deepEqual(intent.conflicts.map((entry) => entry.reason), [`different intentId than ${first} (same question and gold SQL)`], order.join(','));
+    // An intent left to default is the case's own id: two ids, two intents.
+    const defaulted = dedupe(order, { intentId: undefined }, { intentId: undefined });
+    assert.deepEqual(defaulted.conflicts.map((entry) => entry.reason), [`different intentId than ${first} (same question and gold SQL)`], order.join(','));
+    // The same tags (in any order) and intent: one more copy of the kept case,
+    // and every tag / intent filter selects it in both orders.
+    const same = dedupe(order, { tags: ['t1', 't2'] }, { tags: ['t2', 't1'] });
+    assert.deepEqual([same.conflicts, same.duplicates.map((entry) => [entry.id, entry.keptAs])], [[], [[second, first]]]);
+    for (const filter of [{ tags: ['t1'] }, { tags: ['t2'] }, { intents: ['count_customers'] }]) {
+      assert.equal(filterSuiteEntries(same.entries, filter).length, 1, `${order.join(',')} ${JSON.stringify(filter)}`);
+    }
+  }
+
+  // selectSuite stops the run in both orders.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
+  try {
+    await fs.writeFile(path.join(dir, 'd1.json'), JSON.stringify([{ id: 'a', question: 'Q1?', expected_sql: 'SELECT 1', intentId: 'i', tags: ['t1'] }]));
+    await fs.writeFile(path.join(dir, 'd2.json'), JSON.stringify([{ id: 'b', question: 'q1?', expected_sql: 'SELECT 1', intentId: 'i', tags: ['t2'] }]));
+    for (const datasetNames of orders) {
+      await assert.rejects(
+        selectSuite({ datasetsDir: dir, datasetNames, tags: ['t2'] }),
+        (error) => error.code === 'DATASET_CONFLICT' && /different tags than [ab] \(same question and gold SQL\)/.test(error.message)
+      );
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

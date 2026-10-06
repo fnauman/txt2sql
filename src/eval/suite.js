@@ -26,10 +26,14 @@
 //   Rejecting the second definition, rather than verifying both and running
 //   the first, is the conservative choice: no definition is silently unused;
 // - a question duplicate under another id that would be merged into the kept
-//   case but has a different split or known validator rejection: the split
-//   decides which split's accuracy counts the measurement, the flag how its
-//   verification treats a validator rejection. (Its other fields are verified
-//   under its own id, and the kept case's are reported.)
+//   case but has a different split, known validator rejection, intent or tags:
+//   the split decides which split's accuracy counts the measurement, the flag
+//   how its verification treats a validator rejection, the intent and tags
+//   what --intent / --tag select and how the statistics group the case (only
+//   the kept case's are read, so a different one would make them depend on
+//   dataset order). An intent left out defaults to the case's own id, so two
+//   ids merge only under an explicit shared intentId. (Its other fields are
+//   verified under its own id, and the kept case's are reported.)
 // The id of a dropped duplicate is registered too, with the definition it was
 // dropped with, so a later dataset cannot reuse it for another question.
 //
@@ -155,7 +159,7 @@ export function caseDefinitionFingerprint(testCase) {
 
 // A question duplicate under another id is merged into the kept case only when
 // these agree (see the file comment).
-const QUESTION_DUPLICATE_FIELDS = Object.freeze(['split', 'known_validator_rejection']);
+const QUESTION_DUPLICATE_FIELDS = Object.freeze(['split', 'known_validator_rejection', 'intentId', 'tags']);
 
 function describeDifferences(differs) {
   return differs.length <= 2 ? differs.join(' and ') : `${differs.slice(0, -1).join(', ')} and ${differs[differs.length - 1]}`;

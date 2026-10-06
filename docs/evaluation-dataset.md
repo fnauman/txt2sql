@@ -829,10 +829,12 @@ tables) are not differences; list order inside `signal_checks` or the
 comparison spec is. Free-text `notes` is not compared. Rejecting the second definition,
 rather than verifying both and running the first, is the conservative choice:
 no definition is left unused without a word. A question duplicate under
-another id is merged only when it also has the same split and
-`known_validator_rejection` (they decide which split counts the case and how
-verification treats a validator rejection); its other fields are verified
-under its own id. Filters: `--dataset a,b` or `--dataset-file`, `--split
+another id is merged only when it also has the same split,
+`known_validator_rejection`, intent and tags (they decide which split counts
+the case, how verification treats a validator rejection, and what `--intent`
+/ `--tag` select and the statistics group by, and only the kept case's are
+read); an intent left out defaults to the case's own id, so it takes an
+explicit shared `intentId`. Its other fields are verified under its own id. Filters: `--dataset a,b` or `--dataset-file`, `--split
 dev|holdout|all` (default all), `--case-id`, `--tag` (any of), `--intent`;
 `--case-id` with a dropped duplicate's id selects the case kept in its place
 (in a rescore too). `--fixtures` scores on a subset (it must include `seed`).
