@@ -124,7 +124,7 @@ const HINTS_V2_RULE_REPLACEMENTS = new Map([
   // tpl_receivable_debits_posted_mar_2026_aab20c, hard_entity_sales_revenue_credits_feb_2026).
   [
     'Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested.',
-    'In questions about postings, debits, credits or the ledger, "account" means LedgerAccount, not Customer. Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested; filter an account number (such as 1100) on LedgerAccount.AccountCode, never on LedgerAccountId, and an account name with LIKE on LedgerAccount.AccountName.',
+    'In questions about postings, debits, credits or the ledger, "account" means LedgerAccount, not Customer. Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested; filter an account number or code on LedgerAccount.AccountCode, never on LedgerAccountId, and an account name with LIKE on LedgerAccount.AccountName.',
   ],
   // Delivery-fee lines have no product and are not units sold
   // (tpl_total_qty_dec_2025_214320 / 12ab97, tpl_customer_qty_top3_q1_2026_2f8130 / 1d11c5).
@@ -136,7 +136,7 @@ const HINTS_V2_RULE_REPLACEMENTS = new Map([
   // singular "the highest" (hard_vocab_outlet_turnover_top1_mar_2026).
   [
     'For "top", "biggest", or "most" ranking queries, always apply a LIMIT 10 unless a different limit is explicitly specified.',
-    'Ranking limits: "top N", "N biggest" or "which N ..." gets LIMIT N. A singular superlative that asks for one item ("which store had the highest ...", "the single biggest document") gets LIMIT 1. Plural "top", "biggest", "most" or "highest" with no number gets LIMIT 10. "Rank", "order", "sort" or "from highest to lowest" with no number returns every row (no LIMIT).',
+    'Ranking limits: "top N", "N biggest" or "which N ..." gets LIMIT N. A singular superlative that asks for one item ("which <entity> had the highest <metric>", "the largest <entity>") gets LIMIT 1. Plural "top", "biggest", "most" or "highest" with no number gets LIMIT 10. "Rank", "order", "sort" or "list ... in descending order" with no number returns every row (no LIMIT).',
   ],
 ]);
 

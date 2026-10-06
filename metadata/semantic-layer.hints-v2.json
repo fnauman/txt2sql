@@ -216,7 +216,7 @@
         "SalesDocument"
       ],
       "notes": [
-        "Use accounting postings with LedgerAccount for ledger debit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings have no sales document."
+        "Use accounting postings with LedgerAccount for ledger debit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings carry no SalesDocumentId."
       ]
     },
     {
@@ -242,7 +242,7 @@
         "SalesDocument"
       ],
       "notes": [
-        "Use accounting postings with LedgerAccount for ledger credit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings have no sales document."
+        "Use accounting postings with LedgerAccount for ledger credit analysis. Join SalesDocument only to filter on a document column (such as DocumentDate), and then also apply IFNULL(SalesDocument.IsCanceled, 0) = 0; a PostingDate filter needs no SalesDocument join, and manual journal postings carry no SalesDocumentId."
       ]
     },
     {
@@ -280,7 +280,7 @@
         "IFNULL(SalesDocument.IsCanceled, 0) = 0"
       ],
       "notes": [
-        "Average order value is the average net amount per sales document, AVG(COALESCE(SalesDocument.NetAmount, 0)) over non-canceled documents, not the bill total."
+        "Average order value is AVG(COALESCE(SalesDocument.NetAmount, 0)), one value per non-canceled sales document, not the bill total."
       ]
     },
     {

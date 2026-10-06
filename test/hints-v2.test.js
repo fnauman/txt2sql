@@ -200,7 +200,7 @@ test('v2 rules: posting dates, brands and ranking limits are unambiguous', () =>
   const limits = v2Rule(/^Ranking limits:/);
   assert.match(limits, /"top N".*gets LIMIT N/);
   assert.match(limits, /singular superlative .* gets LIMIT 1/);
-  assert.match(limits, /"Rank", "order", "sort" or "from highest to lowest" with no number returns every row \(no LIMIT\)/);
+  assert.match(limits, /"Rank", "order", "sort" or "list \.\.\. in descending order" with no number returns every row \(no LIMIT\)/);
   assert.ok(!BUSINESS_RULES_V2.some((rule) => /always apply a LIMIT 10/.test(rule)));
 });
 

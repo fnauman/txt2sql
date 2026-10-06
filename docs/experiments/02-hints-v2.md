@@ -49,7 +49,7 @@ schema scopes, semantic plans and validator decisions
 `test/fixtures/hints-v1-prompts.json`, written by the base branch; the
 question-specific part of all 255 suite prompts was diffed too, identical),
 and the prompt version stays the committed baseline's `b264e57d8e15`. Version
-2's prompt version is `16200b102bf9`.
+2's prompt version is `4358263bcf82`.
 
 **Held fixed:** the model (gpt-4o-mini), temperature and request options, the
 few-shot pool and how it is picked (version 1 tokens in both arms), the schema
@@ -124,6 +124,14 @@ vocabulary entry, not a fix for one wording.
 
 **Considered and not done:**
 
+- *Eval wording in the prompt text:* the rewritten rules and the overlay
+  notes are general guidance. Review found two rule examples that quoted dev
+  questions ("the single biggest document", "from highest to lowest") and an
+  account code taken from a motivating case ("such as 1100"); they were
+  replaced by neutral wording, and `test/few-shot-leakage.test.js` now also
+  rejects any 4-word phrase shared between a dataset question and a v2 rule
+  or overlay note, and any dataset literal (gold string literals, 3+ digit
+  codes in questions) the version-1 prompt did not already contain.
 - *Few-shot examples:* none added. The evidence (a list-shaped anti-join
   example priming list answers to "how many") points at a counted anti-join
   example, which would be near-equal to eval intents (`core_public_004`,
