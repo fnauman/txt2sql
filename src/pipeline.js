@@ -1607,14 +1607,40 @@ export function resolveEffectiveSchemaScope(schema, option = undefined) {
   };
 }
 
+// Whether `from` reaches `to` through foreign keys between tables in `within`.
+function isLinkedWithin(adjacency, within, from, to) {
+  const seen = new Set([from]);
+  const queue = [from];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (name === to) {
+      return true;
+    }
+    for (const neighbor of adjacency.get(name) || []) {
+      if (within.has(neighbor) && !seen.has(neighbor)) {
+        seen.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  return false;
+}
+
 // Retrieved scope, widen-on-demand: the retrieved tables plus `extraTables`
-// (in-scope table names) and the connector tables on the shortest foreign-key
-// path from each added table to each retrieved one within three hops (the
-// retrieval join-path bound). An added table with no retrieved table that
-// close (common on the large schemas that make auto fall back to retrieved)
-// gets the shortest path to its nearest retrieved table at any length: a
-// simple path has fewer hops than the in-scope schema has tables. Without it
-// the retry could not join the added table without being rejected again.
+// (in-scope table names) and their connector tables. First, as before, the
+// shortest foreign-key path from each added table to each retrieved one
+// within three hops (the retrieval join-path bound). Then every retrieved
+// table the foreign-key graph links to the added table but the widened set
+// does not yet link to it gets the shortest path at any length (a simple path
+// has fewer hops than the in-scope schema has tables), nearest first (ties in
+// retrieval order), skipping tables an earlier path already linked. Large
+// schemas (where auto falls back to retrieved) are the ones whose retrieved
+// set can be split into parts more than three hops apart; without the long
+// paths the retry could not join the added table to the part its SQL needs
+// without being rejected again. Where the three-hop paths already link
+// everything the prompt is unchanged. Each long path is one shortest path
+// (findShortestJoinPath breaks ties by table name), not the union of tied
+// ones, which on hub-heavy schemas could pull in much of the schema.
 // Unknown or already retrieved names are ignored. Null when nothing is added.
 function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
@@ -1639,25 +1665,20 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
   };
   const anyLength = schema.tables.length;
   for (const addedName of added) {
-    let connected = false;
     for (const currentName of current) {
       const path = findShortestJoinPath(adjacency, addedName, currentName);
       if (path) {
         addPath(path);
-        connected = true;
       }
     }
-    if (!connected) {
-      // The nearest retrieved table (fewest hops; ties in retrieval order).
-      let nearest = null;
-      for (const currentName of current) {
-        const path = findShortestJoinPath(adjacency, addedName, currentName, anyLength);
-        if (path && (!nearest || path.length < nearest.length)) {
-          nearest = path;
-        }
-      }
-      if (nearest) {
-        addPath(nearest);
+    const longPaths = [...current]
+      .filter((currentName) => !isLinkedWithin(adjacency, expanded, addedName, currentName))
+      .map((currentName) => findShortestJoinPath(adjacency, addedName, currentName, anyLength))
+      .filter(Boolean)
+      .sort((left, right) => left.length - right.length);
+    for (const path of longPaths) {
+      if (!isLinkedWithin(adjacency, expanded, addedName, path[path.length - 1])) {
+        addPath(path);
       }
     }
   }

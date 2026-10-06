@@ -496,3 +496,83 @@ test('widen-on-demand recovers a retrieval miss five foreign-key hops away withi
   assert.deepEqual(result.promptTables, ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone', 'Territory']);
   assert.match(client.requests[1].messages[1].content, /- Zone\.TerritoryId -> Territory\.TerritoryId/);
 });
+
+// The same chain one table longer (Territory -> Region). Retrieval for a
+// region question picks Shipment, Territory and Region but links them only
+// through paths of three hops or fewer, so Shipment stays disconnected from
+// Territory and Region (five and six hops). Zone is one hop from Territory but
+// four from Shipment: widening it must still add the long path to Shipment.
+const REGION_CHAIN_SCHEMA = {
+  tables: [
+    ...CHAIN_SCHEMA.tables.filter((table) => table.name !== 'Territory' && table.name !== 'Holiday'),
+    chainTable('Territory', [chainColumn('TerritoryLabel', { type: 'STRING(50)' })], [['RegionId', 'Region']]),
+    chainTable('Region', [chainColumn('RegionLabel', { type: 'STRING(50)' })]),
+  ],
+};
+const REGION_CHAIN_TABLES = REGION_CHAIN_SCHEMA.tables.map((table) => table.tableName);
+const REGION_QUESTION = 'Total shipment weight by region label';
+// The first attempt skips the path from Shipment to Zone; the retry joins it.
+const REGION_GUESS_SQL =
+  'SELECT r.RegionLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Zone z ON s.ShipmentId = z.ZoneId JOIN Territory t ON z.TerritoryId = t.TerritoryId JOIN Region r ON t.RegionId = r.RegionId GROUP BY r.RegionLabel';
+const REGION_FULL_SQL =
+  'SELECT r.RegionLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Depot d ON s.DepotId = d.DepotId JOIN Hub h ON d.HubId = h.HubId JOIN Corridor c ON h.CorridorId = c.CorridorId JOIN Zone z ON c.ZoneId = z.ZoneId JOIN Territory t ON z.TerritoryId = t.TerritoryId JOIN Region r ON t.RegionId = r.RegionId GROUP BY r.RegionLabel';
+
+function regionPrompt(extra = {}) {
+  return buildOptimizedPrompt(REGION_CHAIN_SCHEMA, REGION_QUESTION, {
+    semanticPlan: buildSemanticPlan(REGION_QUESTION),
+    schemaScope: CHAIN_AUTO_RETRIEVED,
+    ...extra,
+  });
+}
+
+function validateRegion(prompt, sql) {
+  try {
+    validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), {
+      promptContext: prompt.context,
+      response: { sql, tables_used: validateSqlSafety(sql, REGION_CHAIN_TABLES).tablesUsed },
+    });
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+test('widening links an added table to every retrieved table it reaches, not only to the nearest one', () => {
+  const retrieved = regionPrompt();
+  assert.equal(retrieved.context.schemaScope.effective, 'retrieved');
+  assert.deepEqual(retrieved.tables.map((table) => table.tableName), ['Shipment', 'Territory', 'Region']);
+  const rejection = validateRegion(retrieved, REGION_GUESS_SQL);
+  assert.equal(rejection?.code, 'TABLE_SCOPE');
+  const allowedTables = retrieved.tables.map((table) => table.tableName);
+  assert.deepEqual(tablesToWidenFor(rejection, REGION_GUESS_SQL, { schema: REGION_CHAIN_SCHEMA, allowedTables }), ['Zone']);
+
+  const widened = regionPrompt({ extraTables: ['Zone'] });
+  assert.deepEqual(widened.context.schemaScope.widenedTables, ['Zone']);
+  assert.deepEqual([...widened.context.schemaScope.widenConnectorTables].sort(), ['Corridor', 'Depot', 'Hub']);
+  assert.deepEqual(
+    widened.tables.map((table) => table.tableName),
+    ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone', 'Territory', 'Region']
+  );
+  assert.match(widened.context.relationshipText, /- Shipment\.DepotId -> Depot\.DepotId/);
+  assert.match(widened.context.relationshipText, /- Corridor\.ZoneId -> Zone\.ZoneId/);
+  assert.equal(validateRegion(widened, REGION_FULL_SQL), null, validateRegion(widened, REGION_FULL_SQL)?.message);
+  assert.ok(!widened.tables.some((table) => table.tableName === 'Carrier'));
+});
+
+test('widen-on-demand recovers a table near one retrieved table and far from another within one retry', async () => {
+  const client = scriptedClient([REGION_GUESS_SQL, REGION_FULL_SQL], REGION_CHAIN_TABLES);
+  const result = await runOptimizedQuestion({
+    client,
+    connection: fakeConnection(),
+    schema: REGION_CHAIN_SCHEMA,
+    question: REGION_QUESTION,
+    trace: createBufferedTraceLogger(),
+    maxRetries: 1,
+    schemaScope: CHAIN_AUTO_RETRIEVED,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, `${result.errorCode}: ${result.error?.message}`);
+  assert.equal(result.attemptCount, 2);
+  assert.deepEqual(result.schemaScope.widenedTables, ['Zone']);
+  assert.deepEqual(result.promptTables, ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone', 'Territory', 'Region']);
+});
