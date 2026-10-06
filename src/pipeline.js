@@ -4,7 +4,7 @@ import OpenAI, { APIUserAbortError } from 'openai';
 import mysql from 'mysql2/promise';
 
 import {
-  BUSINESS_RULES,
+  businessRulesFor,
   DEFAULT_INCLUDED_TABLES,
   FEW_SHOT_EXAMPLES,
   NO_SQL_COMMENTS_RULE,
@@ -12,8 +12,9 @@ import {
 } from './constants.js';
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
+import { normalizeHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig } from './schema-scope.js';
-import { loadSemanticLayerSync } from './semantic-layer.js';
+import { loadSemanticLayerForHintsVersion } from './semantic-layer.js';
 import { SqlValidationError, validateSqlGuardrails } from './sql-guardrails.js';
 import {
   SqlTokenizeError,
@@ -287,7 +288,14 @@ function normalizeQuestionTemporalText(question, temporalReferences) {
   return normalized;
 }
 
-export function buildQuestionContext(question) {
+/**
+ * The question as retrieval and the semantic plan read it: the original and
+ * the temporally normalized text, its lexical tokens and the resolved
+ * temporal references. `hintsVersion` (src/hints-version.js; default 2)
+ * selects how dates are resolved and which tokens retrieval ignores.
+ */
+export function buildQuestionContext(question, { hintsVersion = undefined } = {}) {
+  normalizeHintsVersion(hintsVersion);
   const originalQuestion = String(question || '');
   const temporalReferences = extractTemporalReferences(originalQuestion);
   const normalizedQuestion = normalizeQuestionTemporalText(originalQuestion, temporalReferences);
@@ -638,10 +646,20 @@ function matchSemanticLayer(semanticLayer, questionContext) {
   };
 }
 
-export function buildSemanticPlan(question, { questionContext = null, semanticLayer = loadSemanticLayerSync() } = {}) {
-  const context = questionContext || buildQuestionContext(question);
+/**
+ * The semantic plan of `question`: matched entities, metrics (with their
+ * guardrail enforcement), filter hints, join hints and clarification rules.
+ * `hintsVersion` (src/hints-version.js; default 2) selects the semantic layer
+ * (version 2 applies metadata/semantic-layer.hints-v2.json) and the v2
+ * arbitration; a version-2 plan says so in `hintsVersion`, a version-1 plan
+ * is exactly the plan every run had before HINTS_VERSION existed.
+ */
+export function buildSemanticPlan(question, { questionContext = null, semanticLayer = undefined, hintsVersion = undefined } = {}) {
+  const version = normalizeHintsVersion(hintsVersion);
+  const layer = semanticLayer ?? loadSemanticLayerForHintsVersion(version);
+  const context = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
-  const { matches, suppressedMatches } = matchSemanticLayer(semanticLayer, context);
+  const { matches, suppressedMatches } = matchSemanticLayer(layer, context);
   const entities = matches
     .filter((match) => match.kind === 'entity')
     .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
@@ -660,7 +678,7 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     entities.some((entry) => PRODUCT_CONTEXT_ENTITY_NAMES.has(entry.name)) ||
     filterHints.some((entry) => PRODUCT_CONTEXT_FILTER_TABLES.has(entry.targetTable));
   if (hasProductContext) {
-    metrics = addDerivedMetrics(metrics, semanticLayer);
+    metrics = addDerivedMetrics(metrics, layer);
   }
 
   const requiredTables = uniqueStrings([
@@ -677,19 +695,22 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     ...entities.flatMap((entry) => entry.defaultFilters),
   ]);
 
-  return {
-    version: semanticLayer.version ?? null,
+  const plan = {
+    version: layer.version ?? null,
     entities,
     metrics,
     filterHints,
     requiredTables,
     preferredColumns,
     defaultFilters,
-    clarificationRules: findMatchedClarificationRules(semanticLayer.clarification_rules || [], context),
-    joinHints: findSemanticJoinHints(semanticLayer.join_paths || [], requiredTables),
+    clarificationRules: findMatchedClarificationRules(layer.clarification_rules || [], context),
+    joinHints: findSemanticJoinHints(layer.join_paths || [], requiredTables),
     countIntent,
     suppressedMatches,
   };
+  // Only a version-2 plan is marked: a version-1 plan stays byte for byte the
+  // plan of the runs before HINTS_VERSION existed (absent = 1).
+  return version === 1 ? plan : { ...plan, hintsVersion: version };
 }
 
 function buildSemanticTableBoosts(semanticPlan) {
@@ -1069,11 +1090,12 @@ function expandTablesForJoinPaths(tables, selectedNames, maxJoinPathHops = 3) {
 export function retrieveRelevantTables(
   schema,
   question,
-  { maxTables = 4, maxJoinPathHops = 3, questionContext = null, semanticPlan = null } = {}
+  { maxTables = 4, maxJoinPathHops = 3, questionContext = null, semanticPlan = null, hintsVersion = undefined } = {}
 ) {
-  const resolvedQuestionContext = questionContext || buildQuestionContext(question);
+  const version = normalizeHintsVersion(hintsVersion);
+  const resolvedQuestionContext = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const { questionTokens } = resolvedQuestionContext;
-  const resolvedSemanticPlan = semanticPlan || buildSemanticPlan(question, { questionContext: resolvedQuestionContext });
+  const resolvedSemanticPlan = semanticPlan || buildSemanticPlan(question, { questionContext: resolvedQuestionContext, hintsVersion: version });
   const semanticBoosts = buildSemanticTableBoosts(resolvedSemanticPlan);
   const scored = schema.tables
     .map((table) => {
@@ -1163,8 +1185,10 @@ function scoreExample(example, questionTokens) {
   };
 }
 
+// Few-shot selection reads the version-1 tokens in every hints version: the
+// example pool and how it is picked are held fixed across the A/B.
 export function retrieveRelevantExamples(question, { maxExamples = 2, minScore = 1 } = {}) {
-  const questionTokens = buildQuestionContext(question).questionTokens;
+  const questionTokens = buildQuestionContext(question, { hintsVersion: 1 }).questionTokens;
 
   return FEW_SHOT_EXAMPLES.map((example) => {
     const scored = scoreExample(example, questionTokens);
@@ -1206,7 +1230,7 @@ function formatTemporalReferences(temporalReferences) {
     .join('\n');
 }
 
-function formatSemanticHints(semanticPlan) {
+function formatSemanticHints(semanticPlan, { hintsVersion = 1 } = {}) {
   if (
     !semanticPlan ||
     ((semanticPlan.entities || []).length === 0 &&
@@ -1305,8 +1329,10 @@ function estimatePromptTokens(text) {
   return length === 0 ? 0 : Math.ceil(length / 4);
 }
 
+// The basic prompt has no semantic hints and does not follow HINTS_VERSION:
+// its temporal resolution and tokens are version 1's.
 export function buildBasicPrompt(schema, question) {
-  const questionContext = buildQuestionContext(question);
+  const questionContext = buildQuestionContext(question, { hintsVersion: 1 });
   const context = buildPromptContext(schema.tables, questionContext.questionTokens);
 
   return {
@@ -1345,8 +1371,8 @@ const SCHEMA_PREFIX_NOTES = {
   full: 'In-scope schema context comes first: it lists every in-scope table and is the same for every question.',
 };
 
-function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved' } = {}) {
-  const rules = BUSINESS_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n');
+function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved', hintsVersion = 1 } = {}) {
+  const rules = businessRulesFor(hintsVersion).map((rule, index) => `${index + 1}. ${rule}`).join('\n');
 
   return `You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.
 
@@ -1384,7 +1410,7 @@ In-scope schema:
 ${context.tableBlocks}`;
 }
 
-function buildOptimizedQuestionContext({ question, retrieval, rankedContext, masterDataCandidates, examples }) {
+function buildOptimizedQuestionContext({ question, retrieval, rankedContext, masterDataCandidates, examples, hintsVersion }) {
   return `Question-specific context:
 
 Question:
@@ -1394,7 +1420,7 @@ Resolved temporal references:
 ${formatTemporalReferences(retrieval.temporalReferences)}
 
 Semantic retrieval hints:
-${formatSemanticHints(retrieval.semanticPlan)}
+${formatSemanticHints(retrieval.semanticPlan, { hintsVersion })}
 
 Resolved master-data candidates:
 ${formatMasterDataCandidates(masterDataCandidates)}
@@ -1410,7 +1436,7 @@ ${examples}`;
 // the question part carries retrieval's output as a one-line hint instead of
 // re-printing the retrieved tables (the 'Question-ranked schema details' block
 // of the retrieved scope, about a quarter of that prompt; audit D8).
-function buildFullScopeQuestionContext({ question, retrieval, relevanceHint, masterDataCandidates, examples }) {
+function buildFullScopeQuestionContext({ question, retrieval, relevanceHint, masterDataCandidates, examples, hintsVersion }) {
   return `Question-specific context:
 
 Question:
@@ -1420,7 +1446,7 @@ Resolved temporal references:
 ${formatTemporalReferences(retrieval.temporalReferences)}
 
 Semantic retrieval hints:
-${formatSemanticHints(retrieval.semanticPlan)}
+${formatSemanticHints(retrieval.semanticPlan, { hintsVersion })}
 
 Resolved master-data candidates:
 ${formatMasterDataCandidates(masterDataCandidates)}
@@ -1664,6 +1690,23 @@ export function tablesToWidenFor(rejection, sql, { schema, allowedTables = [] })
 }
 
 /**
+ * The hints version a prompt is built with: the explicit option, else the
+ * version the semantic plan was built with (a version-2 plan is marked; an
+ * unmarked plan is a version-1 plan or a hand-built one), else the default.
+ * A version-2 plan in a version-1 prompt is a caller bug and throws.
+ */
+function resolvePromptHintsVersion(hintsVersion, semanticPlan) {
+  if (hintsVersion === undefined || hintsVersion === null) {
+    return normalizeHintsVersion(semanticPlan ? semanticPlan.hintsVersion ?? 1 : undefined);
+  }
+  const version = normalizeHintsVersion(hintsVersion);
+  if (semanticPlan?.hintsVersion !== undefined && semanticPlan.hintsVersion !== version) {
+    throw new Error(`The semantic plan was built with hints version ${semanticPlan.hintsVersion}, the prompt asks for ${version}.`);
+  }
+  return version;
+}
+
+/**
  * The optimized prompt for `question`. Options:
  * - masterDataCandidates, semanticPlan: question context resolved upstream;
  * - schemaScope: a scope name or config (src/schema-scope.js; default auto).
@@ -1671,14 +1714,23 @@ export function tablesToWidenFor(rejection, sql, { schema, allowedTables = [] })
  *   all; 'retrieved' shows and allows the retrieved tables (the prompt every
  *   question had before schema scopes existed, byte for byte);
  * - extraTables: retrieved scope only, in-scope tables to add (widen-on-demand
- *   after a TABLE_SCOPE rejection; see tablesToWidenFor).
- * `tables` is the allow-list; `context.schemaScope` says which scope applied.
+ *   after a TABLE_SCOPE rejection; see tablesToWidenFor);
+ * - hintsVersion: 1 or 2 (src/hints-version.js; default: the plan's, else 2).
+ *   Version 1 is the prompt every question had before HINTS_VERSION existed,
+ *   byte for byte.
+ * `tables` is the allow-list; `context.schemaScope` says which scope applied
+ * and `context.hintsVersion` which hints version.
  */
-export function buildOptimizedPrompt(schema, question, { masterDataCandidates = [], semanticPlan = null, schemaScope = undefined, extraTables = [] } = {}) {
+export function buildOptimizedPrompt(
+  schema,
+  question,
+  { masterDataCandidates = [], semanticPlan = null, schemaScope = undefined, extraTables = [], hintsVersion = undefined } = {}
+) {
   const scope = resolveEffectiveSchemaScope(schema, schemaScope);
-  const retrieval = retrieveRelevantTables(schema, question, { semanticPlan });
+  const version = resolvePromptHintsVersion(hintsVersion, semanticPlan);
+  const retrieval = retrieveRelevantTables(schema, question, { semanticPlan, hintsVersion: version });
   if (scope.effective === 'full') {
-    return buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates });
+    return buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates, hintsVersion: version });
   }
   const widened = extraTables.length > 0 ? widenRetrievedTables(schema, retrieval.tables, extraTables) : null;
   const promptTables = widened ? widened.tables : retrieval.tables;
@@ -1689,7 +1741,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
     minScore: 1,
   });
   const examples = formatExamples(relevantExamples);
-  const system = buildOptimizedSystemPrompt();
+  const system = buildOptimizedSystemPrompt({ hintsVersion: version });
   const schemaContext = buildOptimizedSchemaContext(stableContext);
   const questionContext = buildOptimizedQuestionContext({
     question,
@@ -1697,6 +1749,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
     rankedContext: context,
     masterDataCandidates,
     examples,
+    hintsVersion: version,
   });
   const promptCache = summarizePromptCacheLayout({
     system,
@@ -1727,6 +1780,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
         widenedTables: widened ? widened.addedTableNames : [],
         widenConnectorTables: widened ? widened.connectorTableNames : [],
       },
+      hintsVersion: version,
       examples: summarizeExamples(relevantExamples),
     },
   };
@@ -1744,18 +1798,19 @@ function summarizeExamples(examples) {
 // Full scope: every in-scope table in one stable schema block (the cacheable
 // prefix, identical for every question), retrieval as a one-line hint, and
 // every in-scope table allowed.
-function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates }) {
+function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates, hintsVersion }) {
   const { schemaContext } = fullSchemaStableContext(schema);
   const context = buildPromptContext(schema.tables, retrieval.questionTokens);
   const relevanceHint = buildRelevanceHint(schema, retrieval);
   const relevantExamples = retrieveRelevantExamples(question, { maxExamples: 2, minScore: 1 });
-  const system = buildOptimizedSystemPrompt({ effectiveScope: 'full' });
+  const system = buildOptimizedSystemPrompt({ effectiveScope: 'full', hintsVersion });
   const questionContext = buildFullScopeQuestionContext({
     question,
     retrieval,
     relevanceHint: relevanceHint.text,
     masterDataCandidates,
     examples: formatExamples(relevantExamples),
+    hintsVersion,
   });
   const promptCache = summarizePromptCacheLayout({ system, schemaContext, questionContext, effectiveScope: 'full' });
 
@@ -1779,6 +1834,7 @@ function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCa
       masterDataCandidates,
       promptCache,
       schemaScope: { ...scope, widenedTables: [], widenConnectorTables: [] },
+      hintsVersion,
       examples: summarizeExamples(relevantExamples),
     },
   };

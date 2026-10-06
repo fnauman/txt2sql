@@ -65,6 +65,14 @@ export const BUSINESS_RULES = [
   'When sorting ranking queries, sort rounded aggregate outputs by the underlying unrounded aggregate expression first, then use a secondary deterministic sort key (e.g., entity name/code like CustomerName, ProductName, AccountCode) in ASC order to handle equal values cleanly.',
 ];
 
+/**
+ * The business rules of hints version `version` (src/hints-version.js).
+ * Version 1 is BUSINESS_RULES, unchanged.
+ */
+export function businessRulesFor(version = 1) {
+  return BUSINESS_RULES;
+}
+
 // Few-shot examples teach patterns (anti-joins, header grain with a dimension,
 // HAVING) with intents that appear in NO benchmark dataset: an example equal
 // or near-equal to a gold query would make the benchmark measure recall of the

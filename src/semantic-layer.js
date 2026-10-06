@@ -93,6 +93,13 @@ export function loadSemanticLayerSync({ filePath = DEFAULT_SEMANTIC_LAYER_PATH, 
   }
 }
 
+/**
+ * The semantic layer hints version `version` (src/hints-version.js) reads.
+ */
+export function loadSemanticLayerForHintsVersion(version = 1, { filePath = DEFAULT_SEMANTIC_LAYER_PATH } = {}) {
+  return loadSemanticLayerSync({ filePath });
+}
+
 export function clearSemanticLayerCache(filePath = null) {
   if (filePath) {
     cachedLayers.delete(path.resolve(filePath));
