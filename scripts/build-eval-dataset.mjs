@@ -47,14 +47,20 @@
 //
 // Controls: per intent, negative controls from the mutation families that
 // apply to its template (dropped cancel filter, header <-> line amount, net
-// <-> gross, wrong date column, off-by-one boundary, MONTH() without YEAR(),
-// COUNT vs COUNT DISTINCT, missing GROUP BY key, wrong ORDER direction or
-// missing LIMIT, dropped filter, stale snapshot, wrong join path, SUM
-// DISTINCT), and positive controls (CTE, derived-table and alias rewrites) for
-// a sample of intents. A family that cannot change the answer for an intent
-// (semantically equivalent there, e.g. GROUP BY name when names are unique) is
-// not emitted; the reason is recorded in the controls file under
-// `not_emitted` (see NOT_EMITTED and the template rules in mutationsFor).
+// <-> gross, wrong date column, both off-by-one boundaries, MONTH() without
+// YEAR(), COUNT vs COUNT DISTINCT, a missing GROUP BY key, wrong ORDER
+// direction or missing LIMIT, dropped filter, fee lines counted as units,
+// stale snapshot, wrong join path, SUM DISTINCT), and positive controls (CTE,
+// derived-table and alias rewrites) for a sample of intents. A family that
+// cannot change the answer for an intent (semantically equivalent there, e.g.
+// GROUP BY name when names are unique), or that no fixture can separate
+// without breaking another designed property (a fixture limit), is not
+// emitted; the reason is recorded in the controls file under `not_emitted`
+// (see NOT_EMITTED and the template rules in mutationsFor). Held-out controls
+// (`h*`, `heldout: true`) come from families the fixtures were deliberately
+// not extended against (snapshot filters and grouping, QUARTER() without
+// YEAR(), the cancel filter in HAVING, rankings ordered by another amount):
+// their kill rate is reported, not gated.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -145,9 +151,10 @@ export function semanticLayerPhrasesIn(question, phrases) {
 
 // --- time windows ---------------------------------------------------------------
 
-// `boundary` picks the off-by-one mutant that can change the answer: 'start'
-// (the first day dropped: v3 has documents on the first day of every month)
-// or 'end' (the day after the window included). `prior` marks single months
+// Both off-by-one mutants are emitted for every window; `boundary` names the
+// side every fixture separates for that window, emitted first: 'start' (the
+// first day dropped: v3 has documents on the first day of every month) or
+// 'end' (the day after the window included). `prior` marks single months
 // whose calendar month also has rows a year earlier on some fixture, so
 // MONTH() without YEAR() changes the answer (v2 has 2024-11, 2024-12 and
 // 2025-02 to 2025-05 rows; v3 has 2025-01 to 2025-03).
