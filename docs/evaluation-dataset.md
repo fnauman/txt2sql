@@ -169,6 +169,18 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   documented look, for example when retiring a holdout). `report.json` keeps
   every case for the rescore, the comparison and the gate; opening it is
   revealing the holdout.
+- While the holdout is hidden, these still cover every case, holdout
+  included: the headline accuracy and its intervals (their holdout share is
+  the split aggregate), the budget row's spend, and **the exit code with its
+  reasons**. The exit code can give a hidden holdout outcome away in edge
+  cases: in the benchmark profile a run whose dev cases all pass exits 1
+  when a holdout case failed, a holdout abstain / clarify case included
+  (whose outcome report.md does not show; the reason does not itemize
+  holdout cases), and an exit 2's harness reasons (gold, runner,
+  infrastructure and provider errors, timeouts, aborted or cancelled
+  repetitions) count every repetition. Both are kept on purpose: the
+  benchmark gate fails on any failed case, and an exit 2 run is not a
+  measurement and cannot become a baseline.
 - **Any change to the holdout** (a case added, removed, reworded, re-scored,
   re-labelled, for example a `known_validator_rejection` flag, or moved to
   dev) requires a manifest update with a note saying what and
@@ -1375,9 +1387,11 @@ then not tested the run, and the baseline is stale. On a rescore
 and scoring, counted in both). A significant change needs at least 6
 unanimous flips in one direction (p = 0.031).
 
-Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
-case); 2 harness, dataset or infrastructure failure (unreachable database,
-fixtures that cannot be seeded, failed verification, bad flags, any
+Exit codes (over every case, holdout included: see the
+[holdout policy](#splits-and-the-holdout-policy)): 0 success; 1 failed gate
+(or, in the benchmark profile, a failed case); 2 harness, dataset or
+infrastructure failure (unreachable database, fixtures that cannot be
+seeded, failed verification, bad flags, any
 `expected_sql_error`, `harness_error`, `infra_error`, `llm_outage`, `timeout`,
 `aborted` or `cancelled` repetition, a run stopped early, a run with no
 counted answer case unless only behaviour cases were selected, or
