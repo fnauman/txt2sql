@@ -28,8 +28,14 @@ export function isBehaviorRecord(record) {
   return Boolean(record?.expected_behavior) && record.expected_behavior !== 'answer';
 }
 
-/** Dataset fields of a case as recorded in results[i]. */
+/**
+ * Dataset fields of a case as recorded in results[i]: CASE_RECORD_FIELDS, plus
+ * the older single `expected_row_count` pin when the case carries one (an
+ * external dataset or a pre-runner report may), right after
+ * expected_row_counts.
+ */
 export function caseMetadata(testCase, datasets = []) {
+  const legacyPin = Number.isInteger(testCase.expected_row_count) ? { expected_row_count: testCase.expected_row_count } : {};
   return {
     id: testCase.id,
     intentId: testCase.intentId,
@@ -43,6 +49,7 @@ export function caseMetadata(testCase, datasets = []) {
     signal_checks: testCase.signal_checks,
     comparison: testCase.comparison ?? null,
     expected_row_counts: testCase.expected_row_counts ?? null,
+    ...legacyPin,
     difficulty: testCase.difficulty,
     tags: testCase.tags,
     failure_class: testCase.failure_class,
@@ -55,7 +62,7 @@ export function caseMetadata(testCase, datasets = []) {
   };
 }
 
-/** The keys caseMetadata() writes: dataset fields of a case record. */
+/** The keys caseMetadata() always writes: dataset fields of a case record. */
 export const CASE_RECORD_FIELDS = Object.freeze([
   'id',
   'intentId',

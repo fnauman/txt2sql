@@ -257,6 +257,34 @@ test('a pre-runner report rescored against today\'s case records today\'s defini
   assert.deepEqual(record.retrieved_tables, record.repetitions[0].retrieved_tables);
 });
 
+test('a pre-runner report keeps its legacy expected_row_count pin through a rescore', async () => {
+  const source = await loadSource();
+  const base = source.results[0].repetitions[0];
+  // Pre-runner shape with the older single pin and no per-fixture map.
+  const { expected_row_counts: _pins, ...withoutPins } = source.results[0];
+  void _pins;
+  const legacy = { ...source, results: [{ ...withoutPins, repetitions: undefined, summary: undefined, ...base, expected_row_count: 1 }] };
+  assert.equal('expected_row_count' in recordedRepetitions(legacy.results[0])[0], false, 'a case field, not a repetition field');
+  assert.equal(testCaseFromRecord(legacy.results[0]).expected_row_count, 1, 'the recorded case keeps the pin');
+
+  // Rescored on the recorded definition, and on today's definition that
+  // still carries the legacy pin: the record keeps it at the case level.
+  const today = testCaseFromRecord(legacy.results[0]);
+  for (const currentCases of [new Map(), new Map([[today.id, today]])]) {
+    const { report } = await rescoreToReport(legacy, { currentCases });
+    const [record] = report.results;
+    assert.equal(record.expected_row_count, 1, record.case_source);
+    assert.equal(record.expected_row_counts, null, record.case_source);
+    assert.equal('expected_row_count' in record.repetitions[0], false, record.case_source);
+    // Rescoring the rescored report keeps it too.
+    const { report: again } = await rescoreToReport(report, { currentCases });
+    assert.equal(again.results[0].expected_row_count, 1, `${record.case_source}, rescored twice`);
+  }
+
+  // A case without the legacy pin records no such field.
+  assert.equal('expected_row_count' in caseMetadata(normalizeBenchmarkCase({ id: 'x', question: 'Q?', expected_sql: 'SELECT 1' })), false);
+});
+
 test('runs cut short keep their status unless a recorded attempt now completes; pre-runner reports replay too', async () => {
   const source = await loadSource();
   const base = source.results[0].repetitions[0];

@@ -74,6 +74,8 @@ export const CASE_FIELDS = [
   'signal_checks',
   'comparison',
   'expected_row_counts',
+  // The older single pin (seed only), kept when a record carries it.
+  'expected_row_count',
   'failure_class',
 ];
 

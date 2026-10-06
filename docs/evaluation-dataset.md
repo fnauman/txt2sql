@@ -497,7 +497,9 @@ Oracle rules (`scoreAgainstGold`):
   and refuses to write anything unless every fixture is `current` with the
   shared master data: run `npm run seed-fixtures` first; behaviour cases have
   none). An external dataset may still carry the older single
-  `expected_row_count`; it is read as the seed's pin.
+  `expected_row_count`; it is read as the seed's pin (and ignored next to
+  `expected_row_counts`), and a result record (live or rescored) keeps it
+  among its case fields.
 - `alternative_expected_sql: [sql, ...]` lists other readings a case accepts,
   each explained in the case `notes`: the original ledger rankings without
   zero-total accounts (`core_public_005` / `009`), the `edge_public_008` pivot
