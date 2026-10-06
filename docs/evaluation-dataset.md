@@ -812,10 +812,21 @@ npm run eval -- --help                              # every flag
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
-comparison spec and expected behaviour): today 255 cases over 140 intents. A
-case id with a different question or gold in two datasets is a dataset
-conflict (exit 2), also when its first appearance was dropped as a duplicate
-of another id. Filters: `--dataset a,b` or `--dataset-file`, `--split
+comparison spec and expected behaviour): today 255 cases over 140 intents.
+Only the kept definition runs (and is verified in process), so a duplicate is
+dropped only when dataset order cannot matter; anything else is a dataset
+conflict (exit 2). A case id that appears in two datasets must be the same
+case in every field: a different question or gold, but equally a different
+split, `known_validator_rejection`, `expected_row_counts`, `signal_checks`,
+intent, tags, expected tables or columns, difficulty or failure class is a
+conflict (whitespace and list order aside), also when its first appearance
+was dropped as a duplicate of another id. Rejecting the second definition,
+rather than verifying both and running the first, is the conservative choice:
+no definition is left unused without a word. A question duplicate under
+another id is merged only when it also has the same split and
+`known_validator_rejection` (they decide which split counts the case and how
+verification treats a validator rejection); its other fields are verified
+under its own id. Filters: `--dataset a,b` or `--dataset-file`, `--split
 dev|holdout|all` (default all), `--case-id`, `--tag` (any of), `--intent`;
 `--case-id` with a dropped duplicate's id selects the case kept in its place
 (in a rescore too). `--fixtures` scores on a subset (it must include `seed`).

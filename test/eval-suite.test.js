@@ -182,3 +182,85 @@ test('an id dropped as a question duplicate is still registered: reusing it for 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+// A duplicate is dropped only when it is the same case: the run (and the
+// in-process verification) uses the first definition, so a second one that
+// differs in anything the run selects, verifies, scores or reports by would
+// be decided by dataset order. Such a difference is a conflict.
+test('the same id with different verification metadata, split, validator flag or other case fields is a conflict', async () => {
+  const base = { comparison: { mode: 'scalar' }, expected_row_counts: { seed: 1, v2: 1, v3: 1 } };
+  const conflictOf = (left, right) => {
+    const forward = dedupeSuiteCases([
+      { name: 'a', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...base, ...left })] },
+      { name: 'b', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...base, ...right })] },
+    ]);
+    const backward = dedupeSuiteCases([
+      { name: 'b', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...base, ...right })] },
+      { name: 'a', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...base, ...left })] },
+    ]);
+    // Dataset order never decides: both orders are the same conflict.
+    assert.deepEqual(backward.conflicts.map((entry) => entry.reason), forward.conflicts.map((entry) => entry.reason));
+    if (forward.conflicts.length > 0) {
+      assert.deepEqual([forward.duplicates, backward.duplicates], [[], []], 'a conflicting definition is not a duplicate');
+    } else {
+      assert.deepEqual(forward.duplicates.map((entry) => [entry.id, entry.reason]), [['x', 'same case id']]);
+    }
+    return forward.conflicts.map((entry) => [entry.id, entry.datasets, entry.reason]);
+  };
+  // Verification metadata (A2): a bad pin or signal check in the second
+  // dataset would otherwise never be verified.
+  assert.deepEqual(conflictOf({}, { expected_row_counts: { seed: 1, v2: 2, v3: 1 } }), [['x', ['a', 'b'], 'different expected_row_counts']]);
+  assert.deepEqual(conflictOf({}, { signal_checks: { min_row_count: 1 } }), [['x', ['a', 'b'], 'different signal_checks']]);
+  // Split (A5): split accuracy would depend on the dataset order.
+  assert.deepEqual(conflictOf({ split: 'dev' }, { split: 'holdout' }), [['x', ['a', 'b'], 'different split']]);
+  assert.deepEqual(conflictOf({}, { split: 'holdout' }), [['x', ['a', 'b'], 'different split']], 'a missing split is dev');
+  assert.deepEqual(conflictOf({ split: 'dev' }, {}), [], 'dev and a missing split are the same split');
+  // Known validator rejection (A6): it decides whether verification accepts
+  // the rejection as a note or stops.
+  assert.deepEqual(conflictOf({ known_validator_rejection: 'TABLE_SCOPE' }, {}), [['x', ['a', 'b'], 'different known_validator_rejection']]);
+  assert.deepEqual(conflictOf({ known_validator_rejection: 'TABLE_SCOPE' }, { known_validator_rejection: 'FAN_OUT' }), [['x', ['a', 'b'], 'different known_validator_rejection']]);
+  // Selection, attribution and report fields: --tag / --intent, retrieval-miss
+  // attribution and the recorded case.
+  assert.deepEqual(conflictOf({ tags: ['a'] }, { tags: ['b'] }), [['x', ['a', 'b'], 'different tags']]);
+  assert.deepEqual(conflictOf({ tags: ['a', 'b'] }, { tags: ['b', 'a'] }), [], 'tag order does not matter');
+  assert.deepEqual(conflictOf({ intentId: 'i1' }, { intentId: 'i2' }), [['x', ['a', 'b'], 'different intentId']]);
+  assert.deepEqual(conflictOf({ expected_tables: ['Customer'] }, { expected_tables: ['Store'] }), [['x', ['a', 'b'], 'different expected_tables']]);
+  assert.deepEqual(conflictOf({ difficulty: 'easy' }, { difficulty: 'hard' }), [['x', ['a', 'b'], 'different difficulty']]);
+  assert.deepEqual(
+    conflictOf({ split: 'dev', known_validator_rejection: 'TABLE_SCOPE' }, { split: 'holdout', expected_row_counts: { seed: 2 } }),
+    [['x', ['a', 'b'], 'different split, known_validator_rejection and expected_row_counts']]
+  );
+  // Whitespace in the question and gold is still not a difference.
+  assert.deepEqual(conflictOf({}, { question: ' Q? ', expected_sql: 'SELECT  1' }), []);
+
+  // selectSuite stops the run, whichever dataset comes first.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
+  try {
+    await fs.writeFile(path.join(dir, 'a.json'), JSON.stringify([{ id: 'x', question: 'Q?', expected_sql: 'SELECT 1', split: 'dev' }]));
+    await fs.writeFile(path.join(dir, 'b.json'), JSON.stringify([{ id: 'x', question: 'Q?', expected_sql: 'SELECT 1', split: 'holdout' }]));
+    for (const datasetNames of [['a', 'b'], ['b', 'a']]) {
+      await assert.rejects(
+        selectSuite({ datasetsDir: dir, datasetNames, split: 'holdout' }),
+        (error) => error.code === 'DATASET_CONFLICT' && /x has a different split in (a and b|b and a)/.test(error.message)
+      );
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a question duplicate under another id must agree on split and validator flag', () => {
+  const conflictsOf = (extraA, extraB) =>
+    dedupeSuiteCases([
+      { name: 'd1', cases: [makeCase('a', 'Q1?', 'SELECT 1', extraA)] },
+      { name: 'd2', cases: [makeCase('b', 'q1?', 'SELECT 1', extraB)] },
+    ]);
+  const split = conflictsOf({ split: 'dev' }, { split: 'holdout' });
+  assert.deepEqual(split.conflicts, [{ id: 'b', datasets: ['d1', 'd2'], reason: 'different split than a (same question and gold SQL)' }]);
+  assert.deepEqual([split.entries.map((entry) => entry.testCase.id), split.duplicates], [['a'], []]);
+  const flag = conflictsOf({}, { known_validator_rejection: 'TABLE_SCOPE' });
+  assert.deepEqual(flag.conflicts, [{ id: 'b', datasets: ['d1', 'd2'], reason: 'different known_validator_rejection than a (same question and gold SQL)' }]);
+  // Agreeing on both, the second id is still one more copy of the first.
+  const same = conflictsOf({ split: 'holdout', tags: ['t1'] }, { split: 'holdout', tags: ['t2'] });
+  assert.deepEqual([same.conflicts, same.duplicates.map((entry) => [entry.id, entry.keptAs])], [[], [['b', 'a']]]);
+});

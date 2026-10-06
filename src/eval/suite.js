@@ -9,9 +9,23 @@
 //   question with the same answer under another id is one measurement, not
 //   two. The same question and gold scored differently stays a separate case.
 // --case-id resolves a dropped duplicate to the case kept in its place.
-// A case id that appears with a different question or gold in two datasets is
-// a dataset conflict: comparisons align cases by id, so it must be fixed. The
-// id of a dropped duplicate is registered too, with the definition it was
+// Only the kept definition is run and verified in process, so a dropped one
+// must not differ in anything that would make the result depend on dataset
+// order. Dataset conflicts (they must be fixed; the run stops):
+// - a case id that appears in two datasets with definitions that are not
+//   identical: a different question, gold, alternatives or comparison spec
+//   (comparisons align cases by id), and equally a different split, known
+//   validator rejection, row-count pins, signal checks, intent, tags,
+//   expected / disallowed columns or tables, canonical question, difficulty or
+//   failure class (caseDefinitionDifferences; whitespace and list order aside).
+//   Rejecting the second definition, rather than verifying both and running
+//   the first, is the conservative choice: no definition is silently unused;
+// - a question duplicate under another id that would be merged into the kept
+//   case but has a different split or known validator rejection: the split
+//   decides which split's accuracy counts the measurement, the flag how its
+//   verification treats a validator rejection. (Its other fields are verified
+//   under its own id, and the kept case's are reported.)
+// The id of a dropped duplicate is registered too, with the definition it was
 // dropped with, so a later dataset cannot reuse it for another question.
 //
 // Filters: --split dev|holdout|all (a case without `split` counts as dev),
@@ -62,6 +76,71 @@ export function scoringFingerprint(testCase) {
 // covers the normalized gold, the alternatives and the comparison spec).
 function questionKey(testCase) {
   return `${normalizeSqlText(testCase.question).toLowerCase()}\u0000${scoringFingerprint(testCase)}`;
+}
+
+const sortedStrings = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value)))].sort();
+
+// The fields of a case definition, each with the normalized value two
+// definitions are compared on. The question, gold and scoring come first.
+// A field that defaults from another one is reported only when that one is
+// the same (DERIVED_FIELDS): the scoring fingerprint covers the gold, the
+// expected tables default to the gold's, the canonical question to the
+// question.
+const DEFINITION_FIELDS = Object.freeze([
+  ['question', (testCase) => normalizeSqlText(testCase.question)],
+  ['gold SQL', (testCase) => goldFingerprint(testCase.expected_sql)],
+  ['alternatives or comparison spec', scoringFingerprint],
+  ['split', caseSplit],
+  ['known_validator_rejection', (testCase) => testCase.known_validator_rejection || null],
+  ['expected_row_counts', (testCase) => testCase.expected_row_counts ?? null],
+  ['expected_row_count', (testCase) => (Number.isInteger(testCase.expected_row_count) ? testCase.expected_row_count : null)],
+  ['signal_checks', (testCase) => testCase.signal_checks ?? null],
+  ['intentId', (testCase) => String(testCase.intentId || testCase.id)],
+  ['tags', (testCase) => sortedStrings(testCase.tags)],
+  ['expected_tables', (testCase) => sortedStrings(testCase.expected_tables)],
+  ['expected_columns', (testCase) => sortedStrings(testCase.expected_columns)],
+  ['disallowed_columns', (testCase) => sortedStrings(testCase.disallowed_columns)],
+  ['canonicalQuestion', (testCase) => normalizeSqlText(testCase.canonicalQuestion || testCase.question)],
+  ['difficulty', (testCase) => testCase.difficulty || null],
+  ['failure_class', (testCase) => testCase.failure_class || null],
+]);
+
+const DERIVED_FIELDS = Object.freeze({
+  'alternatives or comparison spec': 'gold SQL',
+  expected_tables: 'gold SQL',
+  canonicalQuestion: 'question',
+});
+
+const definitionValues = (testCase) => DEFINITION_FIELDS.map(([label, valueOf]) => [label, stableStringify(valueOf(testCase) ?? null)]);
+
+/**
+ * Which fields two definitions of a case disagree on (labels, in
+ * DEFINITION_FIELDS order; empty when they are the same case). Whitespace in
+ * the question and SQL, the order of list fields and a missing split (dev)
+ * are not differences.
+ */
+export function caseDefinitionDifferences(left, right) {
+  const rightValues = new Map(definitionValues(right));
+  const differs = definitionValues(left)
+    .filter(([label, value]) => rightValues.get(label) !== value)
+    .map(([label]) => label);
+  return differs.filter((label) => !differs.includes(DERIVED_FIELDS[label]));
+}
+
+/**
+ * Fingerprint of a whole case definition (every field caseDefinitionDifferences
+ * compares): equal exactly when the two definitions have no difference.
+ */
+export function caseDefinitionFingerprint(testCase) {
+  return sha256Hex(stableStringify(definitionValues(testCase))).slice(0, 16);
+}
+
+// A question duplicate under another id is merged into the kept case only when
+// these agree (see the file comment).
+const QUESTION_DUPLICATE_FIELDS = Object.freeze(['split', 'known_validator_rejection']);
+
+function describeDifferences(differs) {
+  return differs.length <= 2 ? differs.join(' and ') : `${differs.slice(0, -1).join(', ')} and ${differs[differs.length - 1]}`;
 }
 
 /** Dataset names (files *.json) in a datasets directory, sorted. */
@@ -116,19 +195,9 @@ export function dedupeSuiteCases(datasets) {
     for (const testCase of dataset.cases) {
       const sameId = byId.get(testCase.id);
       if (sameId) {
-        const kept = sameId.testCase;
-        const differs = [];
-        if (normalizeSqlText(kept.question) !== normalizeSqlText(testCase.question)) {
-          differs.push('question');
-        }
-        if (goldFingerprint(kept.expected_sql) !== goldFingerprint(testCase.expected_sql)) {
-          differs.push('gold SQL');
-        }
-        if (scoringFingerprint(kept) !== scoringFingerprint(testCase) && !differs.includes('gold SQL')) {
-          differs.push('alternatives or comparison spec');
-        }
+        const differs = caseDefinitionDifferences(sameId.testCase, testCase);
         if (differs.length > 0) {
-          conflicts.push({ id: testCase.id, datasets: [sameId.firstDataset, dataset.name], reason: `different ${differs.join(' and ')}` });
+          conflicts.push({ id: testCase.id, datasets: [sameId.firstDataset, dataset.name], reason: `different ${describeDifferences(differs)}` });
         } else {
           const target = sameId.keptEntry;
           target.datasets.push(dataset.name);
@@ -144,6 +213,18 @@ export function dedupeSuiteCases(datasets) {
       }
       const sameQuestion = byQuestion.get(questionKey(testCase));
       if (sameQuestion) {
+        const differs = caseDefinitionDifferences(sameQuestion.testCase, testCase).filter((label) => QUESTION_DUPLICATE_FIELDS.includes(label));
+        if (differs.length > 0) {
+          conflicts.push({
+            id: testCase.id,
+            datasets: [sameQuestion.datasets[0], dataset.name],
+            reason: `different ${describeDifferences(differs)} than ${sameQuestion.testCase.id} (same question and gold SQL)`,
+          });
+          // Registered, not merged: a later copy of this id is checked
+          // against this definition.
+          byId.set(testCase.id, { testCase, firstDataset: dataset.name, keptEntry: sameQuestion });
+          continue;
+        }
         sameQuestion.datasets.push(dataset.name);
         duplicates.push({
           id: testCase.id,
