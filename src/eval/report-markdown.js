@@ -117,8 +117,16 @@ function headline(report) {
   }
   if (stats.cases.excluded > 0) {
     lines.push('');
+    // The denominator is the answer cases: abstain/clarify cases never have a
+    // counted repetition and are reported on their own, so counting them here
+    // would make "excluded of selected" disagree with the accuracy's n.
+    const behaviorCases = stats.cases.behavior || 0;
+    const answerCases = stats.cases.selected - behaviorCases;
     lines.push(
-      `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
+      behaviorCases > 0
+        ? `${stats.cases.excluded} of ${answerCases} answer case(s) had no counted repetition and are left out of accuracy (see Attribution); ` +
+            `the ${behaviorCases} abstain/clarify case(s) are scored apart.`
+        : `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
     );
   }
   if (report.stopped) {

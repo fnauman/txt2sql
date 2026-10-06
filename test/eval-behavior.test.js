@@ -238,7 +238,13 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
     [{ entry: { testCase: normalizeBenchmarkCase({ id: 's1', question: 'Skipped?', expected_sql: "SELECT 's1'" }), datasets: ['d'] }, repetitions: [{ status: 'skipped_budget', attempts: [] }] }],
     { checkGuardrails: false }
   );
-  assert.match(renderReportMarkdown(reportOf([...records, skipped])), /Excluded from accuracy: skipped_budget 1; 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
+  const withSkipped = renderReportMarkdown(reportOf([...records, skipped]));
+  assert.match(withSkipped, /Excluded from accuracy: skipped_budget 1; 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
+  // The headline's denominator is the answer cases (3), not every selected
+  // case (5): accuracy is over 3 - 1 = 2 cases.
+  assert.match(withSkipped, /1 of 3 answer case\(s\) had no counted repetition and are left out of accuracy \(see Attribution\); the 2 abstain\/clarify case\(s\) are scored apart\./);
+  assert.doesNotMatch(withSkipped, /of 5 selected case/);
+  assert.doesNotMatch(markdown, /had no counted repetition/);
   assert.match(renderReportMarkdown(reportOf(records.filter((record) => record.expected_behavior === 'answer'))), /Excluded from accuracy: none\./);
   const headline = renderHeadline(report);
   assert.match(headline, /Behaviour cases: abstain\/clarify — 2 cases, 0 handled correctly\. \(not in accuracy\)/);
