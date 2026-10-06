@@ -116,9 +116,12 @@ retrieval misses, but only on the retry.
 
 ### Rescore of the committed baseline under each scope
 
-`SCHEMA_SCOPE=<scope> npm run eval -- --rescore eval/baselines/gpt-4o-mini.json`
-re-validates, re-executes and re-scores the recorded SQL (`npm run eval --
---offline --gate` is the `auto` row and exits 0):
+The baseline here is the retrieved-scope recording that was committed before
+this experiment (`eval/baselines/gpt-4o-mini.json` at commit `1aa30a3`, git
+sha `f5e6ffef21c9`, prompt version `0c314451d4b7`); the live run below has
+since replaced that file. `SCHEMA_SCOPE=<scope> npm run eval -- --rescore
+<that recording>` re-validates, re-executes and re-scores the recorded SQL
+(see Reproduce for extracting it); `full` and `auto` give the same row:
 
 | Scope | Strict accuracy | Majority passes | System failures (repetitions) | Paired vs baseline |
 |---|---|---|---|---|
@@ -205,9 +208,15 @@ the default one.
 ```bash
 # prompt size
 npm run measure-prompt-cache -- --suite --schema-scope all
-# rescore per scope (fixtures seeded; no LLM calls)
-SCHEMA_SCOPE=retrieved npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
-SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1 npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
+# rescore per scope of the previous (retrieved-scope) baseline, which the live
+# run replaced: extract it from the commit that last held it (fixtures seeded;
+# no LLM calls). Expect 68.8% / 68.8% / 69.8%.
+git show 1aa30a3:eval/baselines/gpt-4o-mini.json > /tmp/gpt-4o-mini-retrieved-baseline.json
+SCHEMA_SCOPE=retrieved npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
+SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1 npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
+SCHEMA_SCOPE=full npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
+# separately: the current committed (full-schema) baseline under the default
+# setting, the gate check (72.8%, exits 0)
 npm run eval -- --offline --gate
 # ceiling: point OPENAI_BASE_URL at a local server that answers each case's gold SQL, then
 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval -- --skip-verify --no-baseline
