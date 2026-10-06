@@ -55,7 +55,7 @@ import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/set
 import { describeFilters, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
-import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
+import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
 import { calculateCost } from '../src/pricing.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
@@ -210,6 +210,23 @@ function suggestFlag(name) {
  * Rejects unknown flags, stray arguments, value flags without a value (or
  * whose value is empty or another flag) and boolean flags given a value.
  */
+/**
+ * The rescore's console note when the recording ran another schema scope or,
+ * in the retrieved scope, another widen-on-demand setting (the same test as
+ * report.md's "Recorded schema scope" row); null when they behave the same.
+ * recordedScope null = a report from before SCHEMA_SCOPE (retrieved, no
+ * widening).
+ */
+export function rescoreSchemaScopeNote(recordedScope, todayScope) {
+  if (sameSchemaScopeBehaviour(recordedScope, todayScope)) {
+    return null;
+  }
+  return (
+    `  note: the recording ran with schema scope ${recordedScope ? describeSchemaScope(recordedScope) : 'retrieved, no widening (not recorded: before SCHEMA_SCOPE)'}; ` +
+    `today's validator uses ${describeSchemaScope(todayScope)}, so recorded SQL is re-judged with today's scope.`
+  );
+}
+
 export function validateEvalArgv(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -1182,11 +1199,9 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
   const goldCache = createGoldCache();
   const recordedScope = source.provenance?.product?.schemaScope || null;
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
-  if ((recordedScope?.effective || 'retrieved') !== validate.schemaScope.effective) {
-    cli.log(
-      `  note: the recording ran with schema scope ${recordedScope ? describeSchemaScope(recordedScope) : 'retrieved (not recorded: before SCHEMA_SCOPE)'}; ` +
-        `today's validator uses ${describeSchemaScope(validate.schemaScope)}, so recorded SQL is re-judged against today's allow-list.`
-    );
+  const scopeNote = rescoreSchemaScopeNote(recordedScope, validate.schemaScope);
+  if (scopeNote) {
+    cli.log(scopeNote);
   }
   const rescored = await rescoreReportCases(source, {
     currentCases,

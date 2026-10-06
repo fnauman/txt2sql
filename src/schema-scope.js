@@ -131,6 +131,20 @@ export function normalizeSchemaScopeConfig(option) {
   });
 }
 
+/**
+ * Whether two recorded scopes (as in provenance.product.schemaScope; null =
+ * recorded before SCHEMA_SCOPE, i.e. retrieved without widening) behave the
+ * same: the same effective scope and, for the retrieved scope, the same
+ * widen-on-demand setting. auto -> full behaves like full.
+ */
+export function sameSchemaScopeBehaviour(left, right) {
+  const key = (scope) => {
+    const effective = scope?.effective || 'retrieved';
+    return effective === 'retrieved' ? `retrieved|${Boolean(scope?.widenOnDemand)}` : effective;
+  };
+  return key(left) === key(right);
+}
+
 /** One line for logs: "auto -> full (2,412 of 8,000 schema tokens; widen-on-demand on)". */
 export function describeSchemaScope(scope) {
   if (!scope) {

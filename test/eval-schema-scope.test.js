@@ -161,3 +161,23 @@ test('the validator probe reports the TABLE_SCOPE table and whether only the ret
   assert.equal(full.schemaScope.effective, 'full');
   assert.equal(await full(outletCase.question, OUTLET_GOLD), null);
 });
+
+test('the rescore console note fires on a change of scope or of widen-on-demand, like report.md', async () => {
+  const { rescoreSchemaScopeNote } = await import('../scripts/eval.js');
+  const { sameSchemaScopeBehaviour } = await import('../src/schema-scope.js');
+  const full = { requested: 'auto', effective: 'full', widenOnDemand: true };
+  const retrievedOff = { requested: 'retrieved', effective: 'retrieved', widenOnDemand: false };
+  const retrievedOn = { requested: 'retrieved', effective: 'retrieved', widenOnDemand: true };
+
+  // A pre-scope report (null) ran retrieved without widening.
+  assert.equal(rescoreSchemaScopeNote(null, retrievedOff), null);
+  assert.equal(rescoreSchemaScopeNote(retrievedOff, retrievedOff), null);
+  assert.equal(rescoreSchemaScopeNote(full, { ...full, requested: 'full' }), null, 'auto -> full behaves like full');
+  assert.match(rescoreSchemaScopeNote(null, full), /note: the recording ran with schema scope retrieved, no widening .*today's validator uses auto -> full/);
+  // Only the widen-on-demand setting differs: still a note.
+  assert.match(rescoreSchemaScopeNote(null, retrievedOn), /today's validator uses retrieved \(widen-on-demand on\)/);
+  assert.match(rescoreSchemaScopeNote(retrievedOn, retrievedOff), /recording ran with schema scope retrieved \(widen-on-demand on\)/);
+
+  assert.equal(sameSchemaScopeBehaviour(null, retrievedOn), false);
+  assert.equal(sameSchemaScopeBehaviour(null, retrievedOff), true);
+});

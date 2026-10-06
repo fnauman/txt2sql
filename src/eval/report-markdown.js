@@ -1,7 +1,7 @@
 // report.md: the human-readable view of report.json, readable in a terminal
 // and rendered on GitHub (plain Markdown tables, no HTML).
 
-import { describeSchemaScope } from '../schema-scope.js';
+import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER } from './attribution.js';
 
 const BUCKET_LABELS = {
@@ -64,13 +64,7 @@ function schemaScopeText(scope) {
 
 // Same behaviour: the same effective scope (and, for the retrieved scope, the
 // same widen-on-demand setting); auto -> full behaves like full.
-function sameSchemaScope(left, right) {
-  const key = (scope) => {
-    const effective = scope?.effective || 'retrieved';
-    return effective === 'retrieved' ? `retrieved|${Boolean(scope?.widenOnDemand)}` : effective;
-  };
-  return key(left) === key(right);
-}
+const sameSchemaScope = sameSchemaScopeBehaviour;
 
 /** Escapes a value for a Markdown table cell (pipes, newlines). */
 export function cell(value) {
