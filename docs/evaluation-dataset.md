@@ -819,8 +819,9 @@ Only the kept definition runs, so a duplicate is dropped only when dataset
 order cannot matter; anything else is a dataset conflict (exit 2). A case id
 that appears in two datasets must be the same case in every field that is run,
 verified, scored, selected or reported on: a different question or gold, but
-equally a different split, `known_validator_rejection`, `expected_row_counts`,
-`signal_checks`, intent, tags, expected tables or columns, difficulty or
+equally a different split, `known_validator_rejection`, `expected_row_counts`
+(a legacy `expected_row_count` counts as the seed's pin, so it equals
+`expected_row_counts: { seed: n }`), `signal_checks`, intent, tags, expected tables or columns, difficulty or
 failure class is a conflict, also when its first appearance was dropped as a
 duplicate of another id. Whitespace in the question and SQL and the order of
 the top-level list fields (tags, expected / disallowed columns, expected

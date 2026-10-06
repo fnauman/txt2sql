@@ -230,6 +230,22 @@ test('the same id with different verification metadata, split, validator flag or
     conflictOf({ split: 'dev', known_validator_rejection: 'TABLE_SCOPE' }, { split: 'holdout', expected_row_counts: { seed: 2 } }),
     [['x', ['a', 'b'], 'different split, known_validator_rejection and expected_row_counts']]
   );
+  // The legacy single pin is the per-fixture pin of the primary fixture
+  // (resolveExpectedRowCount): the same pin in either representation is not
+  // a difference, and it is ignored when the per-fixture map is present.
+  const legacyBase = { comparison: { mode: 'scalar' } };
+  const legacyConflict = (left, right) =>
+    dedupeSuiteCases([
+      { name: 'a', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...legacyBase, ...left })] },
+      { name: 'b', cases: [makeCase('x', 'Q?', 'SELECT 1', { ...legacyBase, ...right })] },
+    ]).conflicts.map((entry) => entry.reason);
+  assert.deepEqual(legacyConflict({ expected_row_count: 4 }, { expected_row_counts: { seed: 4 } }), []);
+  assert.deepEqual(legacyConflict({ expected_row_counts: { seed: 4 } }, { expected_row_count: 4 }), []);
+  assert.deepEqual(legacyConflict({ expected_row_counts: { seed: 4, v2: 5 } }, { expected_row_counts: { seed: 4, v2: 5 }, expected_row_count: 9 }), [], 'ignored next to the map');
+  assert.deepEqual(legacyConflict({ expected_row_count: 4 }, { expected_row_counts: { seed: 5 } }), ['different expected_row_counts']);
+  assert.deepEqual(legacyConflict({ expected_row_count: 4 }, { expected_row_count: 5 }), ['different expected_row_counts']);
+  assert.deepEqual(legacyConflict({ expected_row_count: 4 }, { expected_row_counts: { seed: 4, v2: 4 } }), ['different expected_row_counts'], 'a v2 pin is not pinned by the legacy field');
+  assert.deepEqual(legacyConflict({ expected_row_count: 4 }, {}), ['different expected_row_counts']);
   // Whitespace in the question and gold is still not a difference.
   assert.deepEqual(conflictOf({}, { question: ' Q? ', expected_sql: 'SELECT  1' }), []);
   // Free-text notes are never run, verified, scored, selected or reported on:

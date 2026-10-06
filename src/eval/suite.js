@@ -15,7 +15,8 @@
 // - a case id that appears in two datasets with definitions that are not
 //   identical: a different question, gold, alternatives or comparison spec
 //   (comparisons align cases by id), and equally a different split, known
-//   validator rejection, row-count pins, signal checks, intent, tags,
+//   validator rejection, row-count pins (the legacy single pin counts as the
+//   primary fixture's), signal checks, intent, tags,
 //   expected / disallowed columns or tables, canonical question, difficulty or
 //   failure class (caseDefinitionDifferences). Whitespace in the question and
 //   SQL and the order of the top-level list fields (tags, expected /
@@ -40,6 +41,7 @@ import path from 'node:path';
 
 import { DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../benchmark.js';
 import { goldFingerprint, normalizeSqlText } from './controls.js';
+import { PRIMARY_FIXTURE } from './fixtures.js';
 import { sha256Hex, stableStringify } from './provenance.js';
 
 export const SPLITS = Object.freeze(['dev', 'holdout', 'all']);
@@ -82,6 +84,17 @@ function questionKey(testCase) {
   return `${normalizeSqlText(testCase.question).toLowerCase()}\u0000${scoringFingerprint(testCase)}`;
 }
 
+// The row-count pins of a case per fixture. The legacy single
+// `expected_row_count` is the pin of the primary fixture and is ignored next to
+// the per-fixture map (resolveExpectedRowCount), so `expected_row_count: 4` and
+// `expected_row_counts: { seed: 4 }` are the same pins.
+function rowCountPins(testCase) {
+  if (testCase.expected_row_counts) {
+    return testCase.expected_row_counts;
+  }
+  return Number.isInteger(testCase.expected_row_count) ? { [PRIMARY_FIXTURE.name]: testCase.expected_row_count } : null;
+}
+
 const sortedStrings = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value)))].sort();
 
 // The fields of a case definition, each with the normalized value two
@@ -96,8 +109,7 @@ const DEFINITION_FIELDS = Object.freeze([
   ['alternatives or comparison spec', scoringFingerprint],
   ['split', caseSplit],
   ['known_validator_rejection', (testCase) => testCase.known_validator_rejection || null],
-  ['expected_row_counts', (testCase) => testCase.expected_row_counts ?? null],
-  ['expected_row_count', (testCase) => (Number.isInteger(testCase.expected_row_count) ? testCase.expected_row_count : null)],
+  ['expected_row_counts', rowCountPins],
   ['signal_checks', (testCase) => testCase.signal_checks ?? null],
   ['intentId', (testCase) => String(testCase.intentId || testCase.id)],
   ['tags', (testCase) => sortedStrings(testCase.tags)],
