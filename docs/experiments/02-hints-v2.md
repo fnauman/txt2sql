@@ -80,7 +80,7 @@ vocabulary entry, not a fix for one wording.
 
 | Change | Motivating cases |
 |---|---|
-| A `<Month> <Year>` match that is part of a longer date phrase is dropped instead of resolved to the whole month: day ranges and as-of days ("between 1 and 10 March 2026", "Today is 15 February 2026"), month ranges and lists sharing a year ("January–March 2026", "between November 2025 and February 2026", "January and February 2026"), anchors (as of, since, before, until, end of) and to-date phrases. Quarters and as-of windows stay unresolved (a later experiment). 27 of the 255 questions lose a wrong range; none gains or changes one. | `tpl_document_count_mar01_10_2026_785050`, `hard_asof_month_to_date_documents` (the model obeyed the wrong month); latent in `tpl_customer_qty_top3_q1_2026_1d11c5`, `tpl_north_district_document_count_q1_2026_c55b7e`, `tpl_total_net_sales_feb15_mar15_2026_40ae9d` (holdout) |
+| A `<Month> <Year>` match that is part of a longer date phrase is dropped instead of resolved to the whole month: a day of the month ("between 1 and 10 March 2026", "Today is 15 February 2026"); a part of the month or a period ending in it ("the first week of", "the last 10 days of", "the second half of", "mid-" / "early" / "late", "the quarter ending", "the three months to"); anchors (as of, since, before, after, until, up to, end of); ranges and lists sharing a year, at either end ("January–March 2026", "from March 2026 to the end of May 2026", "between November 2025 and February 2026", "January and February 2026", "from March 2026 until today"); and to-date or open-ended tails ("to date", "year to date", "YTD", "onwards"). Quarters and as-of windows stay unresolved (a later experiment). The detector is a list of patterns around the match, not a full date grammar: a phrasing it does not list can still resolve to the whole month (`test/hints-v2.test.js` pins the listed ones and the plain mentions that must still resolve). 27 of the 255 questions lose a range and none gains or changes one; 26 of the 27 ranges were wrong, and one was right but incomplete ("Compare January and February 2026 net sales by customer in separate columns": only February was resolved). (The first version missed the parts-of-a-month, period-ending and open-range phrasings and kept only the start month of "from March 2026 to the end of May 2026"; review caught it. None of them is in the suite, so the suite's plans did not change.) | `tpl_document_count_mar01_10_2026_785050`, `hard_asof_month_to_date_documents` (the model obeyed the wrong month); latent in `tpl_customer_qty_top3_q1_2026_1d11c5`, `tpl_north_district_document_count_q1_2026_c55b7e`, `tpl_total_net_sales_feb15_mar15_2026_40ae9d` (holdout) |
 | Rule 4: resolved references are exact for the phrases they quote; anything else is read from the question (was: "do not reinterpret"). | same |
 
 **Business rules** (`BUSINESS_RULES_V2` in `src/constants.js`; version 1's
@@ -243,7 +243,7 @@ characters / 4):
 
 ### Plan changes over the suite
 
-Of the 255 questions under version 2: 27 lose a wrong temporal range (17 pass
+Of the 255 questions under version 2: 27 lose a temporal range, 26 of them wrong (17 pass
 today), 55 lose document display columns, 51 relevance hints lose an
 accidental column, 66 have different metric matches, 39 different join hints
 (the `ProductBrand` bridge hints are gone), 82 different default filters. The

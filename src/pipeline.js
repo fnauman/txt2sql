@@ -277,40 +277,69 @@ function buildMonthRange(year, month) {
 
 // Hints version 2: a "<Month> <Year>" match that is only part of a date
 // phrase the resolver does not understand is dropped instead of being
-// resolved to the whole month. Day ranges and as-of days ("between 1 and 10
-// March 2026", "Today is 15 February 2026"), month ranges and lists sharing a
-// year ("January to March 2026", "between November 2025 and February 2026",
-// "January and February 2026"), anchors ("as of", "since", "before", "until")
-// and to-date phrases ("March 2026 to date") all made the whole-month range
-// wrong; the model reads such a phrase itself (business rule 4). A month
-// with its own year next to another one ("March 2025 and March 2026") is
-// still resolved.
+// resolved to the whole month; the model reads such a phrase itself
+// (business rule 4). A match is dropped when, around it, there is
+// - a day of the month ("between 1 and 10 March 2026", "Today is 15 February
+//   2026");
+// - a part of the month or a period ending in it: a time unit "of" it ("the
+//   first week of", "the last 10 days of", "the second half of", "the end
+//   of"), a mid- / early- / late- prefix, or "ending", "ended", "to",
+//   "through", "until", "up to" before it ("the quarter ending March 2026",
+//   "the three months to March 2026");
+// - an anchor: "as of", "since", "before", "after", "from ... until today";
+// - a range or a list sharing a year, at either end ("January to March
+//   2026", "from March 2026 to the end of May 2026", "between November 2025
+//   and February 2026", "January and February 2026");
+// - a to-date or open-ended tail ("to date", "year to date", "YTD", "so
+//   far", "onwards", "and later").
+// A month with its own year next to another one ("March 2025 and March 2026")
+// and a ranking size before it ("top 10 March 2026 customers") still resolve.
 const MONTH_ALTERNATION = [...MONTH_TOKEN_TO_INFO.keys()].sort((left, right) => right.length - left.length).join('|');
-const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till)';
+const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till|up to|up until)';
 const LIST_CONNECTOR = '(?:,|and|or|&)';
 const DAY_OF_MONTH = '\\d{1,2}(?:st|nd|rd|th)?';
+// "the end of", "the start of": a point inside the month, not all of it.
+const MONTH_POINT = '(?:(?:the\\s+)?(?:very\\s+)?(?:end|start|beginning|middle|close|half|first half|second half)\\s+of\\s+)';
+// Not "month": "the month of March 2026" is the whole month.
+const TIME_UNIT = '(?:days?|weeks?|weekends?|fortnights?|halves|half|quarters?|periods?|parts?|portions?|rest|remainder|end|start|beginning|middle|close)';
 const PARTIAL_BEFORE_PATTERNS = [
   // A day of the month right before: "15 February 2026", "1 and 10 March 2026".
   new RegExp(`\\b${DAY_OF_MONTH}\\s+(?:of\\s+)?$`, 'i'),
   // The end of a month range: "January to March 2026", "November 2025 through February 2026".
-  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s*${RANGE_CONNECTOR}\\s*$`, 'i'),
+  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s*${RANGE_CONNECTOR}\\s*${MONTH_POINT}?$`, 'i'),
   // A month without its own year shares this one: "January and February 2026".
   new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?\\s*${LIST_CONNECTOR}\\s*$`, 'i'),
-  // The end of "between <month> [year] and <month> <year>".
-  new RegExp(`\\bbetween\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s+and\\s*$`, 'i'),
-  // An anchor, not a window: "as of", "since", "before", "until", "end of".
-  /\b(?:as of|as at|today is|since|before|after|until|till|up to|prior to|through|thru|end of|start of|beginning of)\s+(?:the\s+)?$/i,
+  // The end of "between <month> [year] and [the end of] <month> <year>".
+  new RegExp(`\\bbetween\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s+and\\s+${MONTH_POINT}?$`, 'i'),
+  // An anchor or the end of a period, not a window: "as of", "since",
+  // "the quarter ending", "up to".
+  /\b(?:as of|as at|today is|since|before|after|until|till|up to|up until|prior to|through|thru|ending|ended|ending in|ended in|ending on|end of|start of|beginning of)\s+(?:the\s+)?$/i,
+  // A period ending in the month: "the three months to March 2026", "the
+  // 12 weeks to the end of March 2026". A bare "to" ("compare February 2026
+  // to March 2026") is not dropped.
+  new RegExp(`\\b(?:days|weeks|months|quarters|years|period|week|month|quarter|year)\\s+(?:to|into)\\s+${MONTH_POINT}?$`, 'i'),
+  // A part of the month: "the first week of", "the last 10 days of",
+  // "the second half of", "the weeks of".
+  new RegExp(`\\b${TIME_UNIT}\\s+of\\s+(?:the\\s+)?$`, 'i'),
+  // "mid-March 2026", "early March 2026", "late March 2026", "end-March".
+  /\b(?:mid|middle|early|late|end)\s*-?\s*$/i,
 ];
 const PARTIAL_AFTER_PATTERNS = [
-  // The start of a range: "November 2025 through February 2026", "1 March 2026 to 10 March 2026".
-  new RegExp(`^\\s*${RANGE_CONNECTOR}\\s*(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\b`, 'i'),
-  // To-date and open-ended phrases: "March 2026 to date", "March 2026 onwards".
-  /^\s*(?:to date|so far|onwards?|and later|or later|and earlier|or earlier)\b/i,
+  // The start of a range: "November 2025 through February 2026", "1 March
+  // 2026 to 10 March 2026", "March 2026 to the end of May 2026", "March 2026
+  // until today".
+  new RegExp(
+    `^\\s*,?\\s*${RANGE_CONNECTOR}\\s*(?:the\\s+)?${MONTH_POINT}?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION}|today|now|date|present|yesterday)\\b`,
+    'i'
+  ),
+  // To-date and open-ended phrases: "March 2026 to date", "March 2026 YTD",
+  // "March 2026 year to date", "March 2026 onwards".
+  /^\s*,?\s*(?:to date|to-date|so far|onwards?|and later|or later|and earlier|or earlier|and after|and before|ytd|mtd|year to date|year-to-date|month to date|month-to-date)\b/i,
 ];
 // "top 10 March 2026 customers": the number is a ranking size, not a day.
 const RANKING_SIZE_BEFORE_PATTERN = /\b(?:top|bottom|first|last|best|worst)\s+\d{1,2}\s+$/i;
 const BETWEEN_START_PATTERN = new RegExp(
-  `^\\s*and\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\b`,
+  `^\\s*and\\s+(?:the\\s+)?${MONTH_POINT}?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION}|today|now)\\b`,
   'i'
 );
 

@@ -71,6 +71,44 @@ test('v2 temporal: a day range, an as-of day, a month range or a shared year res
   }
 });
 
+test('v2 temporal: a part of a month, a period ending in it, an open range or a to-date tail resolves nothing', () => {
+  // Review finding: the first version still resolved these to the whole
+  // month, and kept only the start month of "from <month> to the end of
+  // <month>". Not in the suite; the same class as 785050.
+  for (const question of [
+    'What were net sales in the first week of March 2026?',
+    'Net sales for the first half of March 2026.',
+    'Net sales in the last 10 days of March 2026.',
+    'Net sales during the second fortnight of March 2026.',
+    'Net sales in mid-March 2026.',
+    'Net sales in early March 2026.',
+    'Net sales in late March 2026.',
+    'Net sales from March 2026 to the end of May 2026.',
+    'Net sales from March 2026 up to May 2026.',
+    'Net sales between March 2026 and the end of May 2026.',
+    'Net sales from March 2026 until today.',
+    'Net sales from March 2026 to now.',
+    'Net sales in the three months to March 2026.',
+    'Net sales for the quarter ending March 2026.',
+    'Net sales for the 12 months ending March 2026.',
+    'Net sales in March 2026 year to date.',
+    'Net sales in March 2026 YTD.',
+  ]) {
+    assert.deepEqual(texts(question, 2), [], question);
+    assert.ok(texts(question, 1).length > 0, `version 1 resolved a whole month: ${question}`);
+  }
+  // A plain whole month next to such words still resolves.
+  for (const question of [
+    'Net sales in the month of March 2026.',
+    'Net sales of March 2026 to customers in Oslo.',
+    'Net sales for March 2026 by week.',
+    'Net sales in March 2026 excluding the first week.',
+    'What were March 2026 net sales?',
+  ]) {
+    assert.deepEqual(texts(question, 2), ['March 2026'], question);
+  }
+});
+
 test('v2 temporal: a month phrase that is fully understood still resolves exactly as in version 1', () => {
   for (const question of [
     'Show the top customers by total net sales amount in March 2026.',
