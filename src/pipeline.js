@@ -628,6 +628,9 @@ const SEPARATE_MEASURE_WORDS = new Set([
 // Words that may stand between a metric phrase and an amount word after it
 // without making that amount a separate measure: "revenue on a gross basis",
 // "revenue in gross terms", "revenue measured gross".
+// Words that may follow an appositive amount (", gross,") when it modifies
+// the metric before it: a period, grouping or filter phrase.
+const APPOSITIVE_FOLLOWING_WORDS = new Set(['in', 'for', 'during', 'over', 'across', 'from', 'since', 'between', 'by', 'per', 'at', 'on', 'of', 'this', 'last', 'each', 'until', 'through', 'to']);
 const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the', 'is', 'are', 'was', 'were', 'measured', 'reported', 'stated', 'calculated', 'counted', 'taken', 'expressed', 'shown']);
 
 /**
@@ -640,8 +643,9 @@ const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the
  * - right after it, at most three glue words apart, when it is a tax phrase
  *   ("revenue including tax", "average order value, tax included": a tax
  *   phrase qualifies an amount and never names one), in parentheses
- *   ("revenue (gross)"), or with no comma between and no measure word after
- *   it ("revenue on a gross basis").
+ *   ("revenue (gross)"), as one word set off by commas or ending the clause
+ *   ("revenue, gross, in March"), or with no comma between and no measure
+ *   word after it ("revenue on a gross basis").
  * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
  * and the bill total") is a separate measure.
  */
@@ -681,6 +685,14 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
           return true;
         }
         const nextWord = questionWords[other.end]?.word;
+        // An appositive single word, set off by commas and followed by a
+        // period or grouping phrase, or ending the sentence: "average order
+        // value, gross, in March", "revenue, gross?" (but not a list:
+        // "revenue, gross, and units", "revenue, gross, discount").
+        if (gap.length === 0 && other.end - other.start === 1 && separators.includes(',')) {
+          const after = separatorAt(other.end);
+          return !nextWord || /[.?!:]/.test(after) || (/[,)]/.test(after) && APPOSITIVE_FOLLOWING_WORDS.has(nextWord));
+        }
         return !/[,;:]/.test(separators) && !(nextWord && SEPARATE_MEASURE_WORDS.has(nextWord));
       }
       return false;

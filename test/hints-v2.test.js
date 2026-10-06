@@ -544,9 +544,25 @@ test('v2 layer: another amount demotes a metric only when it modifies the metric
     ['Average order value (gross) in March 2026.', 'average_order_value'],
     ['Average order value including tax in March 2026.', 'average_order_value'],
     ['Average order value, tax included, in March 2026.', 'average_order_value'],
+    // Re-review: one word set off by commas, or ending the sentence.
+    ['What was revenue, gross, in March 2026?', 'net_sales'],
+    ['Revenue, gross, by store in March 2026.', 'net_sales'],
+    ['What was March 2026 revenue, gross?', 'net_sales'],
+    ['What was the average order value, gross, in March 2026?', 'average_order_value'],
+    ['March 2026: average order value, gross.', 'average_order_value'],
   ]) {
     const metric = metricOf(v2Plan(question), name);
     assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+  }
+  assert.equal(rejects('What was revenue, gross, in March 2026?', `SELECT SUM(d.GrossAmount) AS revenue ${march}`), null);
+  assert.equal(rejects('What was the average order value, gross, in March 2026?', `SELECT AVG(d.GrossAmount) AS aov ${march}`), null);
+  // A comma-set word that starts a list is a separate measure.
+  for (const [question, name] of [
+    ['Show revenue, gross, and units in March 2026.', 'net_sales'],
+    ['Show revenue, gross, discount and units in March 2026.', 'net_sales'],
+    ['Show average order value, gross, and units in March 2026.', 'average_order_value'],
+  ]) {
+    assert.equal(metricOf(v2Plan(question), name).enforcement, 'enforced', question);
   }
   assert.equal(rejects('Revenue (gross) in March 2026.', `SELECT SUM(d.GrossAmount) AS revenue ${march}`), null);
   assert.equal(rejects('Average order value (gross) in March 2026.', `SELECT AVG(d.GrossAmount) AS aov ${march}`), null);
