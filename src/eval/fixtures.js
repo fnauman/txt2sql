@@ -250,6 +250,7 @@ export function buildV2Facts() {
 
   addV2cFacts(facts);
   addV2dFacts(facts);
+  addV2eFacts(facts);
   return facts;
 }
 
@@ -517,6 +518,153 @@ function addV2dFacts(facts) {
   ]) {
     facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 3, PostingDate: postingDate, DebitAmount: amount, CreditAmount: 0 });
     facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 4, PostingDate: postingDate, DebitAmount: 0, CreditAmount: amount });
+  }
+}
+
+/**
+ * v2e (the dataset review): rows aimed at plausible-wrong SQL that still
+ * survived every fixture, each listed with what it separates. The v2d rules
+ * hold: every non-canceled document has postings (core_public_006 is
+ * unchanged), no product is added to non-canceled March 2026 sales (at most
+ * nine products sell there), June 2026 stays empty everywhere (the zero-row
+ * case), and the designed first-day documents of v2d stay the only ones of
+ * their customers.
+ * - 54: Harbor Kiosk's canceled February 2026 document with a Weekend Pantry
+ *   product: a dropped cancel filter counts it as a February buyer (the
+ *   "bought in February but not March" count, also with the cancel filter on
+ *   the March side only) and adds Weekend Pantry units;
+ * - 55: a canceled March 2026 document for the second Summit Grocers (C-008):
+ *   a dropped cancel filter changes the per-code March totals;
+ * - 56: C-008 again, dated 2026-02-28 and posted 2026-03-02: March read by
+ *   PostingDate adds it (the merged-by-name February total still overtakes
+ *   the third-ranked customer);
+ * - 57-60, all dated 2026-04-01 (the day after Q1 and March): Lakeside
+ *   Wholesale's 2500.00 document at Online Fulfillment (larger than any March
+ *   document; Kitchen Towels, Cane Sugar, Protein Bar Box, Long Grain Rice and
+ *   Northstar Trail Crisps: Household, Pantry, Snacks, Sunvale Foods and
+ *   Weekend Pantry), Metro Online Store's Herbal Tea, Summit Grocers (C-005)
+ *   buying an Urban Refresh product for the first time in 2026, and a canceled
+ *   Valley Corner Shop document at North Warehouse (a customer with no April
+ *   purchase): "<= the end date" windows pick each of them up;
+ * - 61: North District Market on 2026-01-01 (the first day of Q1);
+ * - 62: Valley Corner Shop on 2025-10-01 (the first day of Q4 2025);
+ * - 63: North District Market on 2025-04-01, the day after Q1 2025, with 20
+ *   Kitchen Towels (Household, which Q1 2025 does not sell; April read by
+ *   MONTH() without YEAR() then changes April 2026's top products by units);
+ * - 64: a June 2025 sale: MONTH() = 6 without YEAR() makes the empty June 2026
+ *   non-empty;
+ * - 65: Harbor Kiosk's canceled March 2026 Credit Memo with a product line: a
+ *   dropped cancel filter lists its products and counts it as a 2026 credit
+ *   note;
+ * - 66: Harbor Kiosk's March 2024 Credit Memo: MONTH() = 3 without YEAR() lists
+ *   its products, and an all-years count of its credit notes is 1 (its only
+ *   2025 document stays the one dated 2025-12-31 and posted in 2026);
+ * - 67: a document dated 2022-12-30 and posted 2023-01-03: "net sales in 2023"
+ *   read by PostingDate is no longer empty;
+ * - manual adjustments (NULL SalesDocumentId) on 2026-02-14 and 2026-03-14
+ *   debiting Sales Revenue (4000) and crediting Accounts Receivable (1100):
+ *   "credits minus debits" on 4000 and "debits minus credits" on 1100 differ
+ *   from the plain credit and debit totals;
+ * - line 11 (Spring Water, a Clearspring Waters product, March 2026) keeps
+ *   the brand's former name 'Spring Valley Waters' as its snapshot: a filter
+ *   on BrandNameSnapshot LIKE '%Clearspring%' misses it.
+ * Documents keep v2's conventions: NetPayable = Net + 12.50, BillTotal =
+ * Gross + 7.25, line TotalAmount = Net x 1.05.
+ */
+function addV2eFacts(facts) {
+  const document = ([id, date, postingDate, customerId, storeId, typeId, campaignId, canceled, net, paid]) => {
+    const netPayable = round2(net + 12.5);
+    const gross = round2(net * 1.1);
+    return {
+      SalesDocumentId: id,
+      DocumentNo: `SD-${date.slice(0, 4)}-${String(id).padStart(4, '0')}`,
+      DocumentDate: date,
+      PostingDate: postingDate,
+      DueDate: addDays(date, 30),
+      CustomerId: customerId,
+      StoreLocationId: storeId,
+      DocumentTypeId: typeId,
+      CampaignId: campaignId,
+      IsCanceled: canceled,
+      GrossAmount: gross,
+      NetAmount: net,
+      NetPayableAmount: netPayable,
+      PaidAmount: paid,
+      BalanceAmount: round2(netPayable - paid),
+      SubtotalAmount: round2(net * 1.05),
+      BillTotalAmount: round2(gross + 7.25),
+    };
+  };
+  const v2eDocuments = [
+    [54, '2026-02-10', '2026-02-10', 7, 3, 4, 3, 1, 250.0, 0],
+    [55, '2026-03-27', '2026-03-27', 8, 2, 4, 3, 1, 125.0, 0],
+    [56, '2026-02-28', '2026-03-02', 8, 2, 4, 3, 0, 30.0, 30.0],
+    [57, '2026-04-01', '2026-04-01', 2, 3, 1, 1, 0, 2500.0, 2500.0],
+    [58, '2026-04-01', '2026-04-01', 3, 1, 4, 1, 0, 60.0, 60.0],
+    [59, '2026-04-01', '2026-04-01', 5, 2, 2, 2, 0, 120.0, 0],
+    [60, '2026-04-01', '2026-04-01', 4, 1, 1, 1, 1, 220.0, 0],
+    [61, '2026-01-01', '2026-01-01', 1, 1, 1, 1, 0, 80.0, 80.0],
+    [62, '2025-10-01', '2025-10-01', 4, 1, 4, 1, 0, 90.0, 90.0],
+    [63, '2025-04-01', '2025-04-01', 1, 2, 1, 1, 0, 1000.0, 1000.0],
+    [64, '2025-06-12', '2025-06-12', 2, 1, 1, 2, 0, 120.0, 120.0],
+    [65, '2026-03-12', '2026-03-12', 7, 2, 3, 1, 1, 30.0, 0],
+    [66, '2024-03-20', '2024-03-20', 7, 2, 3, 1, 0, 15.0, 15.0],
+    [67, '2022-12-30', '2023-01-03', 1, 1, 1, 1, 0, 110.0, 110.0],
+  ];
+  facts.SalesDocument.push(...v2eDocuments.map(document));
+
+  const line = ([id, documentId, productId, quantity, price, net]) => {
+    const { product, categoryName, brandName } = productInfo(productId);
+    return {
+      SalesDocumentLineId: id,
+      SalesDocumentId: documentId,
+      ProductId: productId,
+      ProductNameSnapshot: product.ProductName,
+      Quantity: quantity,
+      SalePrice: price,
+      TotalAmount: round2(net * 1.05),
+      NetAmount: net,
+      CategoryNameSnapshot: categoryName,
+      BrandNameSnapshot: brandName,
+    };
+  };
+  const v2eLines = [
+    [74, 54, 4, 6, 41.67, 250.0],
+    [75, 55, 12, 10, 12.5, 125.0],
+    [76, 56, 12, 2, 15, 30.0],
+    [77, 57, 6, 4, 50, 200.0],
+    [78, 57, 7, 3, 50, 150.0],
+    [79, 57, 2, 11, 100, 1100.0],
+    [80, 57, 5, 9, 100, 900.0],
+    [81, 57, 12, 12, 12.5, 150.0],
+    [82, 58, 8, 2, 30, 60.0],
+    [83, 59, 9, 4, 30, 120.0],
+    [84, 60, 10, 4, 15, 60.0],
+    [85, 60, 3, 4, 40, 160.0],
+    [86, 61, 8, 2, 40, 80.0],
+    [87, 62, 2, 1, 90, 90.0],
+    [88, 63, 6, 20, 50, 1000.0],
+    [89, 64, 3, 3, 40, 120.0],
+    [90, 65, 10, 2, 15, 30.0],
+    [91, 66, 10, 1, 15, 15.0],
+    [92, 67, 1, 2, 55, 110.0],
+  ];
+  facts.SalesDocumentLine.push(...v2eLines.map(line));
+
+  facts.SalesDocumentLine.find((row) => row.SalesDocumentLineId === 11).BrandNameSnapshot = 'Spring Valley Waters';
+
+  let postingId = Math.max(...facts.AccountingPosting.map((row) => row.AccountingPostingId)) + 1;
+  for (const values of v2eDocuments.filter((values) => values[7] === 0)) {
+    const [documentId, , postingDate, , , , , , net] = values;
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: documentId, LedgerAccountId: 2, PostingDate: postingDate, DebitAmount: net, CreditAmount: 0 });
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: documentId, LedgerAccountId: 1, PostingDate: postingDate, DebitAmount: 0, CreditAmount: net });
+  }
+  for (const [postingDate, amount] of [
+    ['2026-02-14', 15.0],
+    ['2026-03-14', 20.0],
+  ]) {
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 1, PostingDate: postingDate, DebitAmount: amount, CreditAmount: 0 });
+    facts.AccountingPosting.push({ AccountingPostingId: postingId++, SalesDocumentId: null, LedgerAccountId: 2, PostingDate: postingDate, DebitAmount: 0, CreditAmount: amount });
   }
 }
 
@@ -911,6 +1059,7 @@ export function generateV3Facts({ seed = V3_PRNG_SEED } = {}) {
 
   addV3Twins({ documents, lines, postings, tiedCustomers: [second[0], third[0]] });
   addV3dFacts({ documents, lines, postings });
+  addV3eFacts({ documents, lines, postings });
   return { SalesDocument: documents, SalesDocumentLine: lines, AccountingPosting: postings };
 }
 
@@ -986,6 +1135,66 @@ function addV3dFacts({ documents, lines, postings }) {
       DebitAmount: debit,
       CreditAmount: credit,
     });
+  }
+}
+
+/**
+ * v3e (the dataset review): three more Harbor Kiosk documents. A second one
+ * dated 2026-02-01 (posted 2026-03-03), so the only "bought in February but
+ * not March" customer has two February documents (counting documents instead
+ * of customers changes the answer) while every February document of it stays
+ * on the first day and posted in March; one on 2026-04-01, so a March window
+ * that includes its end date ("<= '2026-04-01'") makes it a March buyer; and
+ * its only 2025 document, on 2025-01-01 (a 2025 window without its first day
+ * loses a buyer).
+ */
+function addV3eFacts({ documents, lines, postings }) {
+  for (const [date, postingDate, productId, quantity, price] of [
+    ['2026-02-01', '2026-03-03', 8, 1, 30],
+    ['2026-04-01', '2026-04-01', 10, 1, 15],
+    ['2025-01-01', '2025-01-01', 6, 1, 50],
+  ]) {
+    const documentId = documents.length + 1;
+    const net = round2(quantity * price);
+    const gross = round2(net * 1.12);
+    documents.push({
+      SalesDocumentId: documentId,
+      DocumentNo: `SD-2026-${String(documentId).padStart(4, '0')}`,
+      DocumentDate: date,
+      PostingDate: postingDate,
+      DueDate: addDays(date, 30),
+      CustomerId: 7,
+      StoreLocationId: 1,
+      DocumentTypeId: 4,
+      CampaignId: 1,
+      IsCanceled: 0,
+      GrossAmount: gross,
+      NetAmount: net,
+      NetPayableAmount: round2(net + 4.95),
+      PaidAmount: round2(net + 4.95),
+      BalanceAmount: 0,
+      SubtotalAmount: net,
+      BillTotalAmount: round2(gross + 7.25),
+    });
+    const { product, categoryName, brandName } = productInfo(productId);
+    lines.push({
+      SalesDocumentLineId: lines.length + 1,
+      SalesDocumentId: documentId,
+      ProductId: productId,
+      ProductNameSnapshot: product.ProductName,
+      Quantity: quantity,
+      SalePrice: price,
+      TotalAmount: net,
+      NetAmount: net,
+      CategoryNameSnapshot: categoryName,
+      BrandNameSnapshot: brandName,
+    });
+    for (const [ledgerAccountId, debit, credit] of [
+      [2, net, 0],
+      [1, 0, net],
+    ]) {
+      postings.push({ AccountingPostingId: postings.length + 1, SalesDocumentId: documentId, LedgerAccountId: ledgerAccountId, PostingDate: postingDate, DebitAmount: debit, CreditAmount: credit });
+    }
   }
 }
 
