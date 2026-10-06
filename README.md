@@ -352,18 +352,20 @@ they are missing or drifted, verifies every gold query and the oracle controls
 `datasets/` through the product loop with 4 cases in flight and a per-case
 deadline, and writes `generated/runs/<timestamp>/all/<model>/`.
 
-The suite is 251 unique cases over 139 intents: the original core, paraphrase
-and edge cases, a templated set (`datasets/templated-public.json`, 92 intents
+The suite is 255 unique cases over 140 intents: the original core, paraphrase
+and edge cases, a templated set (`datasets/templated-public.json`, 94 intents
 with 2-3 phrasings each, built by `npm run build-eval-dataset`) and 40
 hand-written hard cases (new vocabulary, Swedish, typos, relative dates with an
 as-of date, named entities, zero-row answers, and 10 unanswerable or ambiguous
 questions where the right behaviour is to abstain or ask, reported apart from
-accuracy). Every case is `dev` or `holdout`: the 46 holdout intents use wording
-the prompt rules and the semantic layer were not tuned on, `--split holdout`
-runs them alone, and the report breaks results down by split. Some cases are
-flagged as known product gaps (the validator rejects a correct answer
-today, e.g. retrieval misses a named store's table); they still count. The
-report contains:
+accuracy). Every case is `dev` or `holdout`. The 45 holdout intents (81 cases)
+are new intents whose questions avoid every multi-word phrase of the semantic
+layer and its tuned word "revenue" (single words such as customer, store or
+units still match it), so the holdout measures new intents in partly new
+wording; `--split holdout` runs them alone, and the report breaks results down
+by split. Some cases are flagged as known product gaps (the validator rejects a
+correct answer today, e.g. retrieval misses a named store's table); they still
+count. The report contains:
 
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval

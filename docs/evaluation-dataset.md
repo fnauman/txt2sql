@@ -9,7 +9,7 @@ comparison spec, `npm run eval` and its report, and the known limits.
 | Asset | Path |
 |---|---|
 | Original benchmarks (dev) | `datasets/core-public.json` (9), `datasets/paraphrase-public.json` (9), `datasets/edge-cases-public.json` (17) |
-| Templated benchmark | `datasets/templated-public.json` (185 cases, 92 intents), built by `scripts/build-eval-dataset.mjs` (`npm run build-eval-dataset`) |
+| Templated benchmark | `datasets/templated-public.json` (189 cases, 94 intents), built by `scripts/build-eval-dataset.mjs` (`npm run build-eval-dataset`) |
 | Hard cases | `datasets/hard-cases-public.json` (40 cases, hand-written) |
 | Oracle controls (wrong and correct SQL per case) | `datasets/controls/*.json` |
 | Value-aware comparator | `compareResultsDetailed` / `compareResults` in `src/benchmark.js` |
@@ -21,7 +21,7 @@ comparison spec, `npm run eval` and its report, and the known limits.
 | Evaluation runner (one command) | `scripts/eval.js` (`npm run eval`), see [Running evaluations](#running-evaluations) |
 | Per-case scoring through the product loop | `evaluateQuestion` in `scripts/evaluate.js` |
 | Attribution, statistics, comparison, rescore | `src/eval/attribution.js`, `stats.js`, `compare.js`, `rescore.js` |
-| Dataset hygiene tests | `test/dataset-hygiene.test.js`, `test/gold-sql-validator.test.js`, `test/few-shot-leakage.test.js` |
+| Dataset hygiene tests | `test/dataset-hygiene.test.js` (with the id registry `test/fixtures/case-question-registry.json`), `test/gold-sql-validator.test.js`, `test/few-shot-leakage.test.js` |
 | Edge-dataset generator | `scripts/build-edge-dataset.mjs` (the 9 core cases + 8 edge cases) |
 
 These are synthetic regression fixtures over an owned demo schema, not a
@@ -35,26 +35,26 @@ traces, private database dumps, or customer/vendor-specific examples here.
 ## Dataset composition
 
 The default suite is every `datasets/*.json`, de-duplicated (the edge suite
-repeats the 9 core cases, which run once): **251 unique cases over 139
-intents**, 46 of them holdout.
+repeats the 9 core cases, which run once): **255 unique cases over 140
+intents**, 45 of them holdout.
 
 | Dataset | Cases | Intents | Intents of its own | Holdout intents (cases) | Behaviour cases | Known validator rejections | Cases with alternative gold |
 |---|---|---|---|---|---|---|---|
 | `core-public` | 9 | 9 | 9 | 0 | 0 | 0 | 2 |
 | `paraphrase-public` | 9 | 9 | 0 (paraphrases of core) | 0 | 0 | 0 | 2 |
 | `edge-cases-public` | 17 | 17 | 8 (+ the 9 core cases) | 0 | 0 | 0 | 3 |
-| `templated-public` | 185 | 92 | 92 | 35 (70) | 0 | 14 | 36 |
-| `hard-cases-public` | 40 | 38 | 30 (8 rephrase an existing intent) | 11 (12) | 10 (5 abstain, 5 clarify) | 13 | 8 |
-| **Suite (unique)** | **251** | **139** | **139** | **46 (82)** | **10** | **27** | |
+| `templated-public` | 189 | 94 | 94 | 35 (70) | 0 | 21 | 36 |
+| `hard-cases-public` | 40 | 37 | 29 (8 rephrase an existing intent) | 10 (11) | 10 (5 abstain, 5 clarify) | 13 | 8 |
+| **Suite (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **34** | |
 
 The original three datasets hold 17 intents; the templated and hard-case
-datasets add 122.
+datasets add 123. Dev: 174 cases over 95 intents.
 
-Strict accuracy counts the 241 answer cases (129 intents); the 10 behaviour
+Strict accuracy counts the 245 answer cases (130 intents); the 10 behaviour
 cases are reported separately (see [Behaviour cases](#behaviour-cases-abstain--clarify)).
 
-By difficulty: 16 easy, 93 medium, 142 hard. By comparison mode: 77 scalar,
-112 rowset, 52 ranked (and 10 behaviour cases without one). By
+By difficulty: 16 easy, 95 medium, 144 hard. By comparison mode: 77 scalar,
+112 rowset, 56 ranked (and 10 behaviour cases without one). By
 `failure_class` (the trap a case targets; see the
 [failure taxonomy](#failure-taxonomy)):
 
@@ -70,23 +70,25 @@ By difficulty: 16 easy, 93 medium, 142 hard. By comparison mode: 77 scalar,
 | `typo` | 4 | | `relative_date` | 5 |
 | `entity_resolution` | 5 | | `empty_result` | 4 |
 | `abstention` | 5 | | `clarification` | 5 |
-| `ambiguous_metric` | 2 | | (none) | 57 |
+| `ambiguous_metric` | 2 | | (none) | 61 |
 
-Templated coverage (cases): windows: 85 single-month, 68 quarter, 14 year, 14
-explicit date range, 4 all-time; shapes: 35 ranked (top-N or full ranking),
-58 grouped rowsets, 50 scalars, 26 month-by-month series, 4 side-by-side
-pivots.
+Templated coverage (cases): windows: 89 single-month (every month from
+November 2025 to May 2026), 68 quarter, 14 year, 14 explicit date range, 4
+all-time; shapes: 39 ranked (top-N or full ranking), 58 grouped rowsets, 50
+scalars, 26 month-by-month series, 4 side-by-side pivots.
 
 Why this size: with the original 17 intents, an exact McNemar test needed at
 least 6 unanimous case flips (about 35% of the suite) before a method change
-could show as significant. With 241 answer cases (129 intents) the same 6
-flips are 2.5% of the suite, and the intent-clustered interval is narrower.
+could show as significant. With 245 answer cases (130 intents) the same 6
+flips are 2.4% of the suite, and the intent-clustered interval is narrower.
 
 ## Splits and why the holdout matters
 
 Every case carries `split: 'dev' | 'holdout'` (a missing split reads as dev;
-any other value is an error in `normalizeBenchmarkCase` and a verify-dataset
-problem). All phrasings of an intent share its split.
+any other value is an error in `normalizeBenchmarkCase`, and verify-dataset
+names every case with one). All phrasings of an intent share its split, and
+one gold SQL belongs to one intent (so a holdout case is never a dev query in
+other words).
 
 - **dev**: the original core, paraphrase and edge cases (the prompt rules, the
   few-shot pool and the semantic layer were tuned on their wording), and the
@@ -94,22 +96,33 @@ problem). All phrasings of an intent share its split.
 - **holdout**: a new intent is holdout when the first 32 bits of
   `sha256(intentId)`, mod 100, are below 42 (`splitForIntent` in
   `scripts/build-eval-dataset.mjs`; the hard cases use the same rule). That
-  puts 46 of the 122 new intents (38%) in the holdout. A hard case that
+  puts 45 of the 123 new intents (37%) in the holdout. A hard case that
   rephrases an existing intent (a Swedish version of a core case, a typo of a
   templated one) inherits that intent's split.
-- **Holdout wording**: a holdout question contains no multi-word phrase of
-  `metadata/semantic-layer.json` (entity, metric and filter-hint synonyms,
-  value aliases, clarification triggers; whole words, plurals included).
-  The generator refuses to build otherwise and `test/dataset-hygiene.test.js`
-  checks every dataset.
+- **Holdout wording** (enforced by the generator and by
+  `test/dataset-hygiene.test.js` over every dataset): a holdout question
+  contains no multi-word phrase of `metadata/semantic-layer.json` (entity,
+  metric and filter-hint synonyms, value aliases, clarification triggers;
+  whole words, plurals included), and none of the single-word metric synonyms
+  the layer *enforces* (today only "revenue", the net-sales synonym a metric
+  guardrail acts on; master-data names such as the "Sales Revenue" account
+  aside). Holdout questions therefore say "turnover", "net takings", "net of
+  tax" or "net amount" where dev questions say "net sales" or "net revenue".
+  Single-word entity synonyms (customer, store, product, units, documents) and
+  the advisory words ("sales", "sold") still match the layer: they are the
+  only names of those things.
 
 So dev measures the product on the wording it was tuned on, and holdout on new
-intents in wording it was not. A dev score well above the holdout score is
-the tuning showing. Keep it that way: **never tune the prompt rules, the
-few-shot pool or the semantic layer on holdout wording**, and add a synonym
-that a holdout question uses only together with a fresh holdout. Limit: the
-holdout mixes two effects, unseen intents and unseen vocabulary, so a gap does
-not say which one hurts.
+intents in partly new wording. A dev score well above the holdout score is the
+tuning showing. Keep it that way: **never tune the prompt rules, the few-shot
+pool or the semantic layer on holdout wording**, and add a synonym that a
+holdout question uses only together with a fresh holdout. Limit: the holdout
+mixes two effects, unseen intents and unseen vocabulary (dev and holdout
+wording differ systematically: "revenue" versus "turnover" / "takings"), so a
+gap does not say which one hurts; several holdout questions are known
+validator rejections for exactly that reason (for "turnover" by product,
+brand, category or campaign, retrieval leaves out `SalesDocument` or
+`SalesDocumentLine`).
 
 Run one split with `npm run eval -- --split holdout` (or `dev`); report.md
 breaks every run down by split.
@@ -121,13 +134,13 @@ breaks every run down by split.
 --check` fails when the committed files differ from what it would write, and
 `test/dataset-hygiene.test.js` checks it reproduces them byte for byte.
 
-**Intents.** Each of the 92 entries of `INTENTS` composes:
+**Intents.** Each of the 94 entries of `INTENTS` composes:
 
 | Part | Values |
 |---|---|
-| Metric | document net sales (`NetAmount`), line net sales (product, brand, category, campaign breakdowns), gross amount, quantity, document count, distinct buying customers (`COUNT(DISTINCT CustomerId)`), average order value (header `AVG`), outstanding balance (`BalanceAmount`), paid amount, ledger debit / credit / net movement / posting count |
+| Metric | document net sales (`NetAmount`), line net sales (product, brand, category, campaign breakdowns), gross amount, quantity (product units), document count, distinct buying customers (`COUNT(DISTINCT CustomerId)`), average order value (header `AVG`), outstanding balance (`BalanceAmount`), paid amount, ledger debit / credit / net movement / posting count |
 | Dimensions | customer, store location, document type, product, brand, product category, campaign, ledger account, month (one or two per intent) |
-| Window | single months November 2025 - May 2026 (including months only v3 has data for), Q1 2025, Q4 2025, Q1 2026, explicit ranges (15 Feb - 15 Mar, 1-10 Mar, Nov 2025 - Feb 2026), 2025, 2026, all time |
+| Window | every single month from November 2025 to May 2026 (including months only v3 has much data for), Q1 2025, Q4 2025, Q1 2026, explicit ranges (15 Feb - 15 Mar, 1-10 Mar, Nov 2025 - Feb 2026), 2025, 2026, all time |
 | Filters | a store, brand, category, campaign, customer, product or document type, by name with `LIKE '%...%'`; a ledger account by code; manual journals |
 | Shape | top-N with a `LIMIT` that binds on v3 (`ranked`), full ranking (`ranked`), grouped rowset (`rowset`), scalar, month-by-month series, two windows side by side (pivot), plus a few one-off templates (active customers without sales, customers lost between months, last purchase date, largest document, canceled documents) |
 
@@ -135,7 +148,10 @@ breaks every run down by split.
 repo's conventions: `IFNULL(d.IsCanceled, 0) = 0`, half-open date ranges,
 `COALESCE` inside aggregates, `ROUND(..., 2)` for money and `ROUND(..., 3)`
 for quantity, line-level amounts for product / brand / category / campaign
-breakdowns, never a header amount summed over a line join, ledger questions
+breakdowns, never a header amount summed over a line join, units counted on
+product lines only (a unit total without a product dimension adds
+`l.ProductId IS NOT NULL`: the delivery-fee lines are not units sold), a
+manual-journal or one-account ledger question as one total, ledger questions
 either by the sales document's date (the core cases' convention) or, when the
 question says so, by `AccountingPosting.PostingDate`.
 
@@ -145,18 +161,24 @@ breakdowns and series, scalar for totals; `tolerance: 0.01` for line money and
 averages (rounding placement can differ by a cent); `null_as_zero` for sums
 over a window some fixture has no rows in; `column_order` and `null_as_zero`
 for pivots; ledger rowsets compare the account name and the amounts (the code
-may be left out). **Alternative gold** where a second reading or output form
-is equally correct: a month labelled `'YYYY-MM-01'`, by number or by name as
-well as `'YYYY-MM'`; postings of canceled documents left out of a
-posting-date ledger question; every customer (LEFT JOIN, 0 where none) in a
-customer pivot. Each is explained in the case's `notes`.
+may be left out; an answer with codes only fails, so those questions ask for
+the account names). **Alternative gold** where a second reading or output form
+is equally correct: a month labelled `'YYYY-MM-01'`, by number, by name (one
+calendar year only), as `'Jan 2026'` or `'January 2026'` as well as
+`'YYYY-MM'`; postings of canceled documents left out of a posting-date ledger
+question; every customer (LEFT JOIN, 0 where none) in a customer pivot; every
+customer, with no date for one that never bought, for "each customer's last
+purchase". Each is explained in the case's `notes`.
 
 **Wording** is curated, not generated: 2-3 phrasings per intent that a
-retail or distribution manager would type ("Which three clients spent the most
+retail or distribution manager would type ("Which 3 clients spent the most
 with us in December 2025, measured by net amount?", "How many units left each
-of our locations in March 2026?", "Put total net revenue for March 2025 next to
-March 2026 in one row."). Holdout phrasings avoid the semantic layer's
-vocabulary (above).
+of our locations in March 2026?", "Put total net takings for March 2025 next to
+March 2026 in one row."). A phrasing that a careful analyst could read two
+ways is reworded rather than silently resolved by the gold ("each category and
+store combination that had sales", "the customers who bought in November",
+"all document types included", "have a posting date in February"). Holdout
+phrasings follow the holdout wording rule (above).
 
 **Ids** are `tpl_<intentId>_<first 6 hex of sha256(question)>`: editing a
 question gives a new id, so an id is never reused for a different question
@@ -169,33 +191,59 @@ the generator, then `npm run verify-dataset -- --dataset templated-public
 the pins; `--check` passes).
 
 **Controls.** Every intent gets negative controls from the mutation families
-that apply to its template (622 in all), built by the same builders with one
-knob changed:
+that apply to its template (745 design controls in all), built by the same
+builders with one knob changed:
 
 | Family (`type`) | Mutation |
 |---|---|
-| `cancel` | the cancel filter dropped (inverted or dropped for canceled-document intents) |
+| `cancel` | the cancel filter dropped (inverted or dropped for canceled-document intents; applied to one month only in a two-month comparison) |
 | `date_col` | `PostingDate` for `DocumentDate` (or the other way round; `DueDate` intents get `DocumentDate`) |
-| `date_boundary` | the first day of the window excluded, or the day after included |
+| `date_boundary` | both off-by-one sides: the first day of the window excluded, and the day after included (`<=` the end date, as `BETWEEN` with the next month's first day does) |
 | `date_filter` | `MONTH(...) = m` without the year |
-| `metric` | net / gross, outstanding / payable, paid / outstanding, line Net / TotalAmount, debit / credit swapped |
+| `metric` | net / gross, outstanding / payable, paid / outstanding, line Net / TotalAmount, debit / credit swapped, debits minus credits for a one-account or manual-journal total |
 | `grain` | a header amount (or row) repeated for every line; line net summed for a document metric; the document amount summed per product |
-| `count` | `COUNT(*)` for a distinct count or a quantity; `COUNT(DISTINCT CustomerName)` (merges the two Summit Grocers) |
+| `count` | `COUNT(*)` for a distinct count or a quantity; `COUNT(DISTINCT CustomerName)` (merges the two Summit Grocers); a forgotten `DISTINCT` that counts documents instead of customers |
 | `sum_distinct` | `SUM(DISTINCT ...)` |
-| `group_by` | grouped by the customer name only (merges the two Summit Grocers) |
+| `group_by` | grouped by the customer name only (merges the two Summit Grocers); the second key of a two-key breakdown dropped from `GROUP BY` (its name still selected); the month dropped from a series' `GROUP BY` |
 | `order_limit` | ascending order; the `LIMIT` dropped |
-| `filter` | a named filter dropped |
+| `filter` | a named filter dropped; the delivery-fee lines counted as units |
 | `stale_snapshot` | grouped by `BrandNameSnapshot` / `CategoryNameSnapshot` |
 | `join_path` | brand through `ProductBrand`, category through the brand, campaign through the document header |
 | `join_type` | an inner join to `SalesDocument` that drops manual journals |
 | `shape` | the two pivot columns swapped |
 
-A family that cannot change an intent's answer is not emitted, and the
-controls file says why under `not_emitted`: grouping by a unique name (product,
-brand, category, campaign, store, document type names are unique: 30 intents),
-`COUNT(DISTINCT SalesDocumentId)` for a document count (9), and the cancel
-filter on posting-date ledger questions, where both readings are accepted (5).
-Positive controls (28) rewrite the gold of every third intent as a CTE, a
+A family that cannot change an intent's answer, or that no fixture can
+separate without breaking another designed property, is not emitted, and the
+controls file says why under `not_emitted` (`NOT_EMITTED` and the template
+rules in the generator):
+
+- equivalent here: grouping by a unique name (product, brand, category,
+  campaign, store and document type names are unique: 31 intents);
+  `COUNT(DISTINCT SalesDocumentId)` for a document count (9); the cancel filter
+  on posting-date ledger questions, where both readings are accepted (4); for
+  the manual-journal total, the cancel filter, the document date and the inner
+  join to `SalesDocument` (manual journals have no sales document) and the
+  debit / credit swap (every journal balances); `COUNT(*)` over the lost
+  customers' `SELECT DISTINCT` set;
+- fixture limits (9): the day after a window that ends on 2026-06-01 (June 2026
+  must stay empty for the zero-row case) or on 2027-01-01 (no fixture has data
+  after May 2026); the day after February for Household (v2 cannot sell a tenth
+  product in March 2026, and v3's March totals hold its tie and top-10 cut-off);
+  the first day of Q1 for "active customers without sales"; and the
+  merged-by-name count of customers lost between February and March (both
+  Summit Grocers buy in March on v2 and v3).
+
+**Held-out controls** (`h*`, `heldout: true`, 117): families the fixtures were
+deliberately *not* extended against, so their kill rate estimates how the
+oracle does on a mistake nobody designed a row for: a filter on a line
+snapshot (`ProductNameSnapshot` / `BrandNameSnapshot` / `CategoryNameSnapshot
+LIKE`) instead of the master data, grouping by `ProductNameSnapshot`,
+`QUARTER()` without `YEAR()`, the cancel filter written as `HAVING
+MAX(IsCanceled) = 0`, and a ranking ordered by another amount than the one it
+shows. They are reported, not gated (see
+[Oracle controls](#oracle-controls-and-kill-rate)).
+
+Positive controls (29) rewrite the gold of every third intent as a CTE, a
 derived table, or with another alias and no `COALESCE` inside `SUM`.
 
 ## Hard cases
@@ -205,30 +253,42 @@ on every fixture:
 
 | Category (tag) | Cases | Examples |
 |---|---|---|
-| New vocabulary (`new_vocabulary`) | 5 | "Which outlet had the highest turnover in March 2026?", "How much do our debtors still owe us for sales made in Q1 2026?" |
-| Swedish / bilingual (`swedish` 4, `bilingual` 1) | 5 | "Visa de största kunderna efter nettoförsäljning i mars 2026." (core_public_001), "Visa net sales per varumärke för March 2026, störst först." |
+| New vocabulary (`new_vocabulary`) | 5 | "Which outlet had the highest turnover in March 2026?", "How much do our debtors still owe us for sales made in Q1 2026?", "How many distinct shoppers made a purchase in April 2026?" |
+| Swedish / bilingual (`swedish` 4, `bilingual` 1) | 5 | "Visa de största kunderna efter nettoförsäljning i mars 2026." (core_public_001), "Vilka är de tio produkter som sålde flest enheter i mars 2026?" (core_public_002, with the ten its LIMIT needs), "Visa net sales per varumärke för March 2026, störst först." |
 | Typos and shorthand (`typo`) | 4 | "top custmers by net sales in Mrach 2026", "AR bal by store mar 2026", "rev by brnd Q1 26" |
 | Relative dates with an as-of date (`relative_date`) | 5 | "As of 2026-04-01, what were last month's net sales?", "Today is 15 February 2026. How many sales documents have we recorded this month so far?" |
-| Named entities beyond products (`named_entity`) | 5 | customers, campaigns, brands and the Sales Revenue account by name; "List March 2026 net revenue for each customer named Summit Grocers, with their customer codes." (two customers share that name) |
+| Named entities beyond products (`named_entity`) | 5 | customers, campaigns, brands and the Sales Revenue account by name; "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes." (two customers share that name) |
 | Zero-row answers (`zero_row`) | 4 | June 2026 by customer (empty everywhere), 2023 total (one NULL row), Harbor Kiosk's March purchases (empty), its credit notes (0) |
 | Unanswerable (`unanswerable`, abstain) | 5 | employee headcount, the weather, a forecast, competitor prices, a satisfaction score |
 | Ambiguous (`ambiguous`) | 7 | clarify: "Who is our best customer?", "How much did Summit Grocers buy in March 2026?" (two customers share the name); two readings accepted: "What were sales in March 2026?" (net or gross), "How many orders did we get in March 2026?" (all documents or Online Orders) |
 
 Cases that rephrase an existing intent (the Swedish, bilingual and most typo
-cases, and three as-of or shorthand versions of templated intents) reuse that
-intent's gold, comparison and split, so their controls resolve by intent. 45
-hand-written negative controls and 2 positives for 20 cases (in
-`datasets/controls/hard-cases-public.json`) cover the new answer intents where
-a plausible mistake exists (the relative date read as the current month, the
-duplicate name merged, the customer filter dropped from a zero-row question,
-...).
+cases, three as-of or shorthand versions of templated intents, and the
+ambiguous "sales" question, whose net-sales gold is the as-of case's) reuse
+that intent's gold, comparison and split, so their controls resolve by intent.
+Hand-written ids are bound to their question by
+`test/fixtures/case-question-registry.json`: a new question gets a new id.
+
+57 hand-written negative controls, 5 held-out ones (`xh*`) and 2 positives for
+20 cases (in `datasets/controls/hard-cases-public.json`) cover the new answer
+intents where a plausible mistake exists: the relative date read as the
+current month, the duplicate name merged, a dropped cancel filter or
+`PostingDate` for the per-code Summit Grocers totals, the brand snapshot for
+Clearspring Waters, and for the zero-row cases the mistakes that do return
+rows on a fixture (`MONTH()` without `YEAR()`, `PostingDate`, a dropped cancel
+filter, every year instead of 2026).
 
 **Zero-row answers and the comparator.** Two empty results always match,
 whatever their columns. A SUM over no rows is one row holding NULL, which
 does not equal 0 unless the column is listed in `null_as_zero` (the zero-row
 and windowed scalar cases list it). An empty result does not equal one NULL
 row, so the 2023 case accepts both forms (an alternative with `HAVING COUNT(*)
-> 0`). `test/eval-behavior.test.js` pins these rules.
+> 0`). `test/eval-behavior.test.js` pins these rules. What it means for
+scoring: an empty gold only tests that the product does not invent rows in an
+empty window. Any query that returns nothing (or 0 / NULL for a scalar)
+passes, a wrong metric or a document count included (the held-out `xh*`
+controls of the 2023 and June cases are such survivors); the design controls
+are the plausible mistakes that do return rows on some fixture.
 
 ## Behaviour cases (abstain / clarify)
 
@@ -244,7 +304,11 @@ The default, `'answer'`, is every other case.
   SQL was rejected or failed). No SQL in any attempt, because the model sent
   an empty query (`EMPTY_SQL`) or refused (`LLM_REFUSED`), is `declined`:
   handled correctly. Outages, timeouts and budget skips keep their usual
-  outcomes and do not count for the behaviour score.
+  outcomes and do not count for the behaviour score. Any SQL counts as not
+  clarifying, even SQL that hedges well: a per-customer breakdown for "How much
+  did Summit Grocers buy in March 2026?" is `answered_instead_of_clarify` (that
+  reading is scored by the answer case
+  `hard_entity_summit_grocers_by_code_mar_2026`, which asks for each namesake).
 - **Report**: never in strict accuracy, the legacy totals, the attribution
   tables, the guardrail matrix or the paired comparison; `report.json`'s
   `behavior` block and report.md's "Behaviour cases: abstain/clarify — N
@@ -266,20 +330,28 @@ changes.
 
 `known_validator_rejection: '<code>'` marks a case whose correct answers the
 production validator rejects today, a product gap the suite measures instead
-of hiding: 25 `TABLE_SCOPE` (retrieval does not pick a table the answer needs,
-so it is outside the allow-list: a named store, brand, campaign or customer;
-Swedish; typos; "units"), 2 `METRIC_COLUMN` (the words "revenue" or "Sales
-Revenue" trip the net-sales metric guardrail on a gross or ledger question).
+of hiding: 33 `TABLE_SCOPE` (retrieval does not pick a table the answer needs,
+so it is outside the allow-list: a named store, brand, campaign, product or
+customer; Swedish; typos; "units"; new vocabulary such as "turnover" or "net
+takings" for a product, brand, category or campaign breakdown), 1
+`METRIC_COLUMN` (the account name "Sales Revenue" trips the net-sales metric
+guardrail on a ledger question).
 
 - verify-dataset reports a rejection of the gold, an alternative or a positive
   control with that code as a note, and fails when the validator accepts every
   gold variant (the flag is stale and must go); `test/gold-sql-validator.test.js`
-  checks the same offline.
+  and `test/dataset-hygiene.test.js` check the same offline. The in-process
+  verification of `npm run eval` only warns about a stale flag (in the console
+  and report.md's Verification section), so a product change that closes the
+  gap can be measured, live or with `--offline --gate`, before the dataset is
+  updated; the dataset change then follows in the same pull request.
 - In a run the case counts like any other. A correct answer the validator
   throws away is a system failure: `guardrail_false_rejection`, or a
   `safety_rejection` tagged `retrieval_miss`. A case whose flag concerns only
-  an alternative reading (`hard_ambiguous_orders_mar_2026`) can still pass with
-  the gold.
+  an alternative reading (`hard_ambiguous_orders_mar_2026`: its gold passes
+  the validator, the Online-Order alternative does not) can still pass with
+  the gold; the flag stays because verify-dataset would otherwise report the
+  alternative's rejection as a problem.
 
 ## How to add a case
 
@@ -287,24 +359,32 @@ Revenue" trip the net-sales metric guardrail on a gross or ledger question).
    `INTENTS` in `scripts/build-eval-dataset.mjs` (template, metric,
    dimensions, window, filters, shape, 2-3 phrasings). Run `npm run
    build-eval-dataset`; if the intent is holdout, the build names any
-   semantic-layer phrase to remove. Then on seeded fixtures run `npm run
-   verify-dataset -- --dataset templated-public --write-pins`, run the
-   generator again, and `npm run verify-dataset`. Controls come with the
-   template; a survivor means either the family cannot change this intent's
-   answer (add it to `NOT_EMITTED` with the reason) or no fixture separates it
-   (add fact rows to v2/v3, see below).
+   semantic-layer phrase to remove (and the hygiene test any enforced metric
+   word). Then on seeded fixtures run `npm run verify-dataset -- --dataset
+   templated-public --write-pins`, run the generator again, and `npm run
+   verify-dataset`. Controls come with the template. A survivor means one of
+   three things: the family cannot change this intent's answer (add it to
+   `NOT_EMITTED` with the reason); no fixture separates it yet (add fact rows
+   to v2 or v3, see below, re-seed and re-pin); or rows that would separate it
+   break another designed property (add it to `NOT_EMITTED` with that fixture
+   limit, and list it under [Known blind spots](#known-blind-spots)).
 2. **Hand-written** (hard cases, or a shape no template covers): add the case
    to `datasets/hard-cases-public.json` with `split: splitForIntent(intentId)`
-   (or the split of the existing intent it rephrases), a gold that follows the
-   conventions above, a comparison block, `notes` for any alternative reading,
-   and tags/`failure_class`. Write pins with `--write-pins`. Add negative
-   controls under the case id in `datasets/controls/hard-cases-public.json`
-   when a plausible mistake exists (each must be killed; positives must match
-   and pass the validator).
+   (or the intent and split of the existing intent whose gold it shares), a
+   gold that follows the conventions above (a scalar gold returns one row), a
+   comparison block, `notes` for any alternative reading, and
+   tags/`failure_class`; add its id and question hash to
+   `test/fixtures/case-question-registry.json` (a changed question needs a new
+   id). Write pins with `--write-pins`. Add negative controls under the case id
+   in `datasets/controls/hard-cases-public.json` when a plausible mistake
+   exists (each must be killed; positives must match and pass the validator);
+   a mistake the fixtures were not designed against can go in as a held-out
+   control (`heldout: true`, id `xh*`), which is reported but not gated.
 3. **Abstain / clarify**: `expected_behavior` plus question, intent, split,
    tags and `notes` saying why; nothing else.
-4. Run `npm test` (hygiene: splits, holdout vocabulary, ids, leakage, pins,
-   determinism) and `npm run verify-dataset` (every gate).
+4. Run `npm test` (hygiene: splits, holdout vocabulary, one intent per gold,
+   ids, leakage, pins, determinism, mutation families) and `npm run
+   verify-dataset` (every gate).
 
 If the validator rejects a correct gold, do not bend the gold around it: add
 `known_validator_rejection` with the code (the gap is then measured), unless
@@ -346,8 +426,8 @@ counts as correct only if it returns the gold answer on **every** fixture:
 | Fixture | Database | Facts |
 |---|---|---|
 | `seed` (primary) | `demo_retail` | The original demo facts (also `npm run seed-demo`). The product loop runs here. |
-| `v2` | `demo_retail_v2` | The audit's hand-designed fixture (mutation workstream v2 + v2b), ported to code: header and line metrics separated (NetPayable = Net + 12.50, BillTotal = Gross + 7.25, line TotalAmount = Net × 1.05), header-level discounts, canceled documents in range (one with postings), month-boundary documents posted in another month, multi-line documents, a NULL-ProductId fee line, a manual journal, 2025 documents in the same months, sub-cent amounts, ties, stale snapshots. The v2c rows from the oracle review (prior-year Urban Refresh sales, same-amount twins in January-March 2026, the inactive customer and the discontinued product selling, a canceled February sale, March category totals out of ID order, Harbor Kiosk's April order). The v2d rows for the templated controls (`addV2dFacts`): Harbor Kiosk's canceled first-day Q1 document, its only 2025 document (dated 2025-12-31, posted 2026-01-02) and a document the day after Q1; first-day documents for two customers; the first Summit Grocers buying on 2026-02-01 (both namesakes then buy in February and their merged total overtakes the third-ranked customer); the largest documents around the March boundary; a canceled, partly paid March document; canceled documents in April and February; December 2025 sales (both Summit Grocers, a canceled one for the inactive customer); prior-year sales in November / December 2024 and April / May 2025; manual journals on 2026-01-01 and in April. |
-| `v3` | `demo_retail_v3` | ~260 documents from a seeded PRNG (mulberry32, `V3_PRNG_SEED = 20260331`) over January - March 2025 and November 2025 - May 2026: boundary-day dates, cancellations, NULLs, stale snapshots, a customer tie, 12 products selling in March 2026 so a top-10 `LIMIT` binds (with a clear gap at the cut-off), the inactive customer buying in January-March 2026, the discontinued product selling in March, a same-amount twin document in every month (`addV3Twins`), and Harbor Kiosk's single document (`addV3dFacts`: dated 2026-02-01, posted in March, the only customer buying in February but not in March). |
+| `v2` | `demo_retail_v2` | The audit's hand-designed fixture (mutation workstream v2 + v2b), ported to code: header and line metrics separated (NetPayable = Net + 12.50, BillTotal = Gross + 7.25, line TotalAmount = Net × 1.05), header-level discounts, canceled documents in range (one with postings), month-boundary documents posted in another month, multi-line documents, a NULL-ProductId fee line, a manual journal, 2025 documents in the same months, sub-cent amounts, ties, stale snapshots. The v2c rows from the oracle review (prior-year Urban Refresh sales, same-amount twins in January-March 2026, the inactive customer and the discontinued product selling, a canceled February sale, March category totals out of ID order, Harbor Kiosk's April order). The v2d rows for the templated controls (`addV2dFacts`): Harbor Kiosk's canceled first-day Q1 document, its only 2025 document (dated 2025-12-31, posted 2026-01-02) and a document the day after Q1; first-day documents for two customers; the first Summit Grocers buying on 2026-02-01 (both namesakes then buy in February and their merged total overtakes the third-ranked customer); the largest documents around the March boundary; a canceled, partly paid March document; canceled documents in April and February; December 2025 sales (both Summit Grocers, a canceled one for the inactive customer); prior-year sales in November / December 2024 and April / May 2025; manual journals on 2026-01-01 and in April. The v2e rows from the dataset review (`addV2eFacts`): canceled February / March documents for Harbor Kiosk (a Weekend Pantry product), the second Summit Grocers, and a customer without an April purchase; a Summit Grocers document dated in February and posted in March; documents on 2026-04-01 (Lakeside's 2500.00, the largest near March, Metro Online Store, Summit Grocers' first 2026 Urban Refresh purchase); first days of Q1 2026 and Q4 2025; 20 Kitchen Towels on 2025-04-01; a June 2025 sale, Harbor Kiosk credit memos (canceled in March 2026, live in March 2024) and a 2022-12-30 document posted in 2023 for the zero-row cases; manual adjustments debiting Sales Revenue and crediting Accounts Receivable in February and March 2026; a Clearspring Waters line in March 2026 that keeps the brand's former name as its snapshot. |
+| `v3` | `demo_retail_v3` | ~260 documents from a seeded PRNG (mulberry32, `V3_PRNG_SEED = 20260331`) over January - March 2025 and November 2025 - May 2026: boundary-day dates, cancellations, NULLs, stale snapshots, a customer tie, 12 products selling in March 2026 so a top-10 `LIMIT` binds (with a clear gap at the cut-off), the inactive customer buying in January-March 2026, the discontinued product selling in March, a same-amount twin document in every month (`addV3Twins`), and Harbor Kiosk's designed documents (`addV3dFacts`, `addV3eFacts`): two dated 2026-02-01 and posted in March (the only customer buying in February but not in March), one on 2026-04-01, and its only 2025 document on 2025-01-01. |
 
 **All fixtures share identical master data** (customers, products, brands,
 categories, campaigns, locations, document types, ledger accounts, price
@@ -407,10 +487,17 @@ Oracle rules (`scoreAgainstGold`):
   each explained in the case `notes`: the original ledger rankings without
   zero-total accounts (`core_public_005` / `009`), the `edge_public_008` pivot
   listing every customer; and, new, month-label forms of series, posting-date
-  ledger questions without canceled documents' postings, customer pivots and
-  per-name lists with every customer, both readings of "sales" and "orders",
-  month to date with or without today, "spend" with or without tax, and an
-  empty result for a year without sales.
+  ledger questions without canceled documents' postings, customer pivots,
+  per-name lists, the June 2026 zero-row case and "each customer's last
+  purchase" with every customer, both readings of "sales" and "orders", month
+  to date with or without today, "spend" with or without tax, and an empty
+  result for a year without sales.
+- **Which readings get an alternative** (one rule for the whole suite): a
+  breakdown lists the members with activity in the window; listing every
+  member with 0 or NULL is accepted only where the question invites it ("for
+  each customer", a pivot, "each customer named ...", an empty window). A
+  scalar returns one row (NULL or 0 for an empty window); an empty result is
+  accepted only by the zero-row case whose whole point is the empty year.
 
 ### Statuses and warnings
 
@@ -512,8 +599,10 @@ rate is below `--min-kill-rate` (default 0.95). The original controls:
   and 34 correct alternatives. `core_public_004/rp4` is flagged
   `validator_known_false_rejection` (the FAN_OUT guardrail rejects a boolean
   header aggregate that cannot fan out).
-- **Templated controls** (`n*`, `p*`): generated, see [the generator](#the-templated-generator).
-- **Hard-case controls** (`x*`, `xp*`): hand-written.
+- **Templated controls** (`n*` design, `h*` held-out, `p*` positive):
+  generated, see [the generator](#the-templated-generator).
+- **Hard-case controls** (`x*` design, `xh*` held-out, `xp*` positive):
+  hand-written.
 
 Measured with `npm run verify-dataset` on freshly seeded fixtures, counting
 each distinct control once ("alone" = the oracle with that single fixture):
@@ -521,52 +610,78 @@ each distinct control once ("alone" = the oracle with that single fixture):
 | Design negatives | Seed alone | v2 alone | v3 alone | All three fixtures |
 |---|---|---|---|---|
 | 152 original (edge suite, audit + review) | 59 (38.8%) | 149 (98.0%) | 137 (90.1%) | **152 (100%)** |
-| 622 templated | 154 (24.8%) | 497 (79.9%) | 549 (88.3%) | **622 (100%)** |
-| 111 resolved by the hard cases (45 hand-written) | 45 (40.5%) | 103 (92.8%) | 107 (96.4%) | **111 (100%)** |
+| 745 templated | 168 (22.6%) | 605 (81.2%) | 651 (87.4%) | **745 (100%)** |
+| 126 resolved by the hard cases (57 hand-written) | 45 (35.7%) | 117 (92.9%) | 111 (88.1%) | **126 (100%)** |
 
-Positive controls all match on every fixture (71 original, 28 templated, 24
-resolved by the hard cases); every one passes the validator except
-`core_public_004/rp4` and those of questions flagged
-`known_validator_rejection` (rejected with the same code, a note). Held-out
-mutants: 28/28 killed. Per dataset the gate counts each control once per case
-that resolves it (templated: 1255/1255; hard cases: 125/125).
+| Held-out negatives | Seed alone | v2 alone | v3 alone | All three fixtures |
+|---|---|---|---|---|
+| 28 original (audit, written after v2 was frozen) | 12 (42.9%) | 27 (96.4%) | 26 (92.9%) | **28 (100%)** |
+| 117 templated (families never designed against) | 14 (12.0%) | 78 (66.7%) | 84 (71.8%) | **92 (78.6%)** |
+| 16 resolved by the hard cases (5 hand-written) | 5 (31.3%) | 11 (68.8%) | 12 (75.0%) | **12 (75.0%)** |
 
-The held-out rate is reported without a floor (`--min-heldout-kill-rate`,
-default 0). A negative control counts as killed only when it executes on
-every fixture and does not match: one that fails to execute (a bad column, a
-timeout) is **invalid**, and one hit by an infrastructure error (a dropped
-connection) is **unscored**. Both are problems that fail `verify-dataset`,
-and both stay in the denominator as not killed, so a broken control or a lost
-connection can only lower the reported rate, never raise it. A verdict that
-rests on a column-mapping search cut off by its bound
-(`assignment_search_exhausted`: the oracle fails closed, which is right for a
-model's SQL) is **undecided** for a control: listed, and counted as not
-killed like a survivor.
+Templated held-out kill rates by family: `QUARTER()` without `YEAR()` 30/31,
+the cancel filter in `HAVING` 52/55, grouping by `ProductNameSnapshot` 4/7,
+snapshot filters 1/5, rankings ordered by another amount 5/19. Positive
+controls all match on every fixture (71 original, 29 templated, 26 resolved by
+the hard cases); every one passes the validator except `core_public_004/rp4`
+and those of questions flagged `known_validator_rejection` (rejected with the
+same code, a note). Per dataset the gate counts each control once per case
+that resolves it: templated design 1502/1502 (held-out 185/236), hard cases
+design 140/140 (held-out 15/19); the design gate (>= 0.95) passes for every
+dataset, and held-out rates are reported, not gated (`--min-heldout-kill-rate`
+defaults to 0).
 
-**Read these as fitted numbers, not a generalization estimate.** The fixtures
-were extended until the controls died: v2b after the audit's held-out mutants,
-v2c and the v3 changes after the review's survivors, and the v2d / v3d rows,
-the twins in every v3 month and the prior-year v2 rows after the templated
-controls showed survivors (cancel filters in months without canceled
-documents, first-day boundaries, distinct customers, SUM(DISTINCT ...) outside
-January-March, the merged Summit Grocers outside the top N, MONTH() without
-YEAR() in months without a prior year). The review's independent adversarial
+A negative control counts as killed only when it executes on every fixture
+and does not match: one that fails to execute (a bad column, a timeout) is
+**invalid**, and one hit by an infrastructure error (a dropped connection) is
+**unscored**. Both are problems that fail `verify-dataset`, and both stay in
+the denominator as not killed, so a broken control or a lost connection can
+only lower the reported rate, never raise it. A verdict that rests on a
+column-mapping search cut off by its bound (`assignment_search_exhausted`: the
+oracle fails closed, which is right for a model's SQL) is **undecided** for a
+control: listed, and counted as not killed like a survivor.
+
+**Read the design numbers as fitted, not as a generalization estimate.** The
+fixtures were extended until the design controls died: v2b after the audit's
+held-out mutants, v2c and the v3 changes after the review's survivors, the
+v2d / v3d rows, the twins in every v3 month and the prior-year v2 rows after
+the templated controls showed survivors, and the v2e / v3e rows after the
+dataset review (the other off-by-one side, cancel filters and `PostingDate` on
+named-entity and zero-row cases, debits minus credits, a forgotten
+`DISTINCT`, a renamed brand's snapshot). The review's independent adversarial
 set (50 wrong queries and 8 hedges written without looking at the controls)
 went from 58% to 98% killed; most of those queries are now controls too. The
-honest reading: one tiny seed catches under half of plausible-wrong SQL;
-fixtures designed against known mistake families catch nearly all of those
-families; a new family is caught only if some fixture happens to separate it.
+held-out tiers are the honest estimate: about three in four mistakes from a
+family nobody designed a row for are caught (79% templated, 75% hard cases),
+and on the seed alone about one in eight. One tiny seed catches under half of
+plausible-wrong SQL; fixtures designed against known mistake families catch
+nearly all of those families; a new family is caught only if some fixture
+happens to separate it.
 
 ### Known blind spots
 
-Kinds of wrong SQL the oracle is known to let through (none is a control):
+Kinds of wrong SQL the oracle is known to let through:
 
+- **Held-out survivors** (reported in every verify run): rankings ordered by
+  the gross amount, line `TotalAmount` or the net amount while showing
+  another (the amounts rank the same on these fixtures), filters on line
+  snapshots for products and categories whose snapshots contain the master
+  name, `HAVING MAX(IsCanceled) = 0` where no group mixes canceled and live
+  documents, `QUARTER()` without `YEAR()` where every Q1 2025 buyer also buys
+  in Q1 2026, and the empty-window survivors below.
+- **Zero-row cases**: any query that returns nothing (or 0 / NULL for a
+  scalar) passes them, a document count or the gross amount for "net sales in
+  2023" included. They only test that no rows are invented.
+- **Fixture limits recorded under `not_emitted`** (9 templated mutants): the
+  day after a window ending on 2026-06-01 or 2027-01-01, the day after
+  February for Household, the first day of Q1 for active customers without
+  sales, and `COUNT(DISTINCT CustomerName)` for the customers lost between
+  February and March (both Summit Grocers buy in March on v2 and v3).
 - **Contrived posting readings**: "only debit postings count as postings"
   (`NOT EXISTS (… AND p.DebitAmount > 0)` for `core_public_006`) passes,
   because every posted document has an AR debit.
 - **Filters equivalent on this master data**: `ProductTags LIKE '%seltzer%'`
-  alone for "sparkling water", "active = `IsActive = 1` and a segment", a
-  brand snapshot `LIKE '%Clearspring%'` (it matches the stale snapshot too).
+  alone for "sparkling water", "active = `IsActive = 1` and a segment".
   Separating them would need more master rows, which every fixture would share.
 - **Grouping by a unique name**: equivalent by construction on this master
   data, so it is not a control.
@@ -649,7 +764,7 @@ npm run eval -- --help                              # every flag
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
-comparison spec and expected behaviour): today 251 cases over 139 intents. A
+comparison spec and expected behaviour): today 255 cases over 140 intents. A
 case id with a different question or gold in two datasets is a dataset
 conflict (exit 2), also when its first appearance was dropped as a duplicate
 of another id. Filters: `--dataset a,b` or `--dataset-file`, `--split
@@ -671,7 +786,8 @@ run.
 - **Headline**: strict accuracy with its 95% CI, the number of counted cases
   and intents, repetitions, model and date; majority-pass cases with a Wilson
   interval and the intent-clustered accuracy; **by split** (dev and holdout
-  accuracy, when a run has both); the **behaviour line** ("Behaviour cases:
+  accuracy, when a run has both, with what the holdout rule enforces: no
+  multi-word semantic-layer phrase and not "revenue"); the **behaviour line** ("Behaviour cases:
   abstain/clarify — N cases, M handled correctly"); the comparison line when
   there is a baseline.
 - **Attribution** (answer cases only): who caused each outcome, per repetition
@@ -837,14 +953,35 @@ re-made whenever the datasets change.
 
 LLM cost is small: the audit's paid baseline on gpt-4o-mini cost about
 $0.0005 per question (one case repetition, up to two LLM calls), so one
-repetition of the 251-case suite is about 13 cents and `--repeat 3` about 40
+repetition of the 255-case suite is about 13 cents and `--repeat 3` about 40
 cents. `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
 
 ## Known limits
 
-- **Fitted oracle**: the kill rates above are measured on controls the
-  fixtures were designed against; see [Oracle controls](#oracle-controls-and-kill-rate).
-- **Holdout mixes two effects**: unseen intents and unseen vocabulary.
+- **Fitted oracle**: the design kill rates above are measured on controls the
+  fixtures were designed against; the held-out tiers (about 75-79%) are the
+  estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
+  and [Known blind spots](#known-blind-spots).
+- **Holdout mixes two effects**: unseen intents and unseen vocabulary. The
+  holdout avoids the semantic layer's multi-word phrases and its enforced word
+  "revenue", not its single-word entity synonyms, and its wording differs from
+  dev's systematically ("turnover", "net takings" against "net revenue").
+- **Zero-row cases** accept any empty result (or 0 / NULL for a scalar): they
+  only test that the product does not invent rows in an empty window.
+- **Every document type is a sale**: Credit Memos carry positive amounts in
+  this schema and count as sales, orders and purchases everywhere (average
+  order value, last purchase date, "spend"), a convention inherited from the
+  core cases; a reading that leaves them out fails.
+- **Breakdowns list members with activity**: a LEFT JOIN listing of every
+  member with 0 is accepted only where the question invites it; scalars must
+  return one row (see [Pins and alternative gold](#pins-and-alternative-gold)).
+- **Ledger rows are compared on the account name**: an answer with account
+  codes only fails, so the new ledger questions ask for names; the original
+  ledger cases (`core_public_005` / `009`) do not say so.
+- **Top-N without an N**: `core_public_002` / `008` and their paraphrases ask
+  for "the top products" without a number, and their gold uses the product's
+  own LIMIT 10 rule, which binds on v3 (12 products); a full ranking or a top
+  5 fails there. (The new cases name their N.)
 - **One schema, synthetic data**: every case is about the same 13-table demo
   retail schema, with tiny dimension tables (8 customers, 13 products), so
   entity questions repeat the same names.
@@ -852,7 +989,7 @@ cents. `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
   intents are regular by construction (one metric, at most two dimensions).
 - **Swedish, typos and shorthand** are a handful of cases; the product's
   ASCII-only normalization fails them today, and so does retrieval on most new
-  vocabulary and named entities (27 known validator rejections).
+  vocabulary and named entities (34 known validator rejections).
 - **Behaviour cases** are 10 and are scored only on whether SQL was produced;
   a future clarification answer will need its own check.
 - **Ambiguity is partly encoded as alternatives**: where two readings are both
