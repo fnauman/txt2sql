@@ -63,6 +63,14 @@ export function normalizeHintsVersion(option) {
   return parseHintsVersion(option, 'hintsVersion');
 }
 
+/**
+ * Whether two recorded hints versions (provenance.product.hintsVersion; null =
+ * recorded before HINTS_VERSION, i.e. version 1) are the same.
+ */
+export function sameHintsVersion(left, right) {
+  return (left ?? 1) === (right ?? 1);
+}
+
 /** One line for logs: "2 (default)" or "1". */
 export function describeHintsVersion(version) {
   if (version === undefined || version === null) {

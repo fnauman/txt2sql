@@ -237,3 +237,32 @@ test('the schema scope is in the provenance, the comparison table and the consol
   same.provenance.product = { schemaScope: { ...full, requested: 'retrieved', effective: 'retrieved', widenOnDemand: false } };
   assert.match(renderReportMarkdown(same), /\| Schema scope \| retrieved \(2,258 of 8,000 estimated tokens for the full schema; 13 in-scope tables; widen-on-demand off\) \|/);
 });
+
+test('the hints version is in the provenance, the comparison table and the console when it changed', async () => {
+  const full = { requested: 'auto', effective: 'full', fullSchemaEstimatedTokens: 2258, fullSchemaMaxTokens: 8000, widenOnDemand: true, inScopeTableCount: 13 };
+  // The committed baseline predates HINTS_VERSION (it ran hints version 1).
+  const baseline = await sampleReport();
+  baseline.provenance.product = { schemaScope: full };
+  const report = await sampleReport({ mode: 'rescore' });
+  report.provenance.product = { schemaScope: full, hintsVersion: 2 };
+  report.rescoredFrom.schemaScope = full;
+  report.rescoredFrom.hintsVersion = null;
+  report.comparison = compareReports(
+    baseline,
+    { results: report.results, model: report.model, generatedAt: report.generatedAt, provenance: report.provenance, mode: 'rescore' },
+    { baselineLabel: 'eval/baselines/gpt-4o-mini.json', resamples: 200 }
+  );
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /\| Hints version \| 2 \(default\) \|/);
+  assert.match(markdown, /\| Hints version \| not recorded \(before HINTS_VERSION: 1\) \| 2 \(default\) \|/);
+  assert.match(markdown, /\| Recorded hints version \| not recorded \(before HINTS_VERSION: 1\) \(recorded SQL re-judged with today's semantic plan; the prompts are not regenerated\) \|/);
+  assert.match(renderHeadline(report), /\n {2}hints version: not recorded \(before HINTS_VERSION: 1\) → 2 \(default\)/);
+  assert.doesNotMatch(renderHeadline(report), /schema scope:/);
+
+  // Version 1 recorded explicitly is the same as not recorded.
+  const same = await sampleReport();
+  same.provenance.product = { schemaScope: full, hintsVersion: 1 };
+  same.comparison = compareReports(baseline, { results: same.results, model: same.model, provenance: same.provenance }, { resamples: 200 });
+  assert.doesNotMatch(renderHeadline(same), /hints version:/);
+  assert.match(renderReportMarkdown(same), /\| Hints version \| 1 \|/);
+});

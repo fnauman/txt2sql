@@ -180,6 +180,19 @@ test('describeWebConfig summarizes the effective settings without the token', ()
   assert.doesNotMatch(summary, /super-secret-value/);
 });
 
+test('loadWebConfig reads HINTS_VERSION with the shared resolver and reports a bad value with the rest', () => {
+  assert.equal(loadWebConfig({}).hintsVersion, 2);
+  assert.equal(loadWebConfig({ HINTS_VERSION: '1' }).hintsVersion, 1);
+  assert.match(describeWebConfig(loadWebConfig({ HINTS_VERSION: '1' })), / hintsVersion=1$/);
+  assert.throws(
+    () => loadWebConfig({ HINTS_VERSION: 'v2', SCHEMA_SCOPE: 'tiny' }),
+    (error) =>
+      error instanceof WebConfigError &&
+      error.problems.length === 2 &&
+      error.problems.some((problem) => problem === 'HINTS_VERSION must be one of 1, 2; got "v2".')
+  );
+});
+
 test('loadWebConfig reads the schema scope with the shared resolver and reports bad values with the rest', () => {
   assert.deepEqual({ ...loadWebConfig({}).schemaScope }, { schemaScope: 'auto', fullSchemaMaxTokens: 8000, widenOnDemand: true });
   const retrieved = loadWebConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_FULL_MAX_TOKENS: '3000', SCHEMA_WIDEN_ON_DEMAND: '0' });
@@ -189,7 +202,7 @@ test('loadWebConfig reads the schema scope with the shared resolver and reports 
   assert.equal(loadWebConfig({ SCHEMA_SCOPE: 'retrieved' }).schemaScope.widenOnDemand, false);
   assert.equal(loadWebConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_WIDEN_ON_DEMAND: 'on' }).schemaScope.widenOnDemand, true);
   assert.match(describeWebConfig(retrieved), /schemaScope=retrieved\(fullMaxTokens=3000,widen=off\)/);
-  assert.match(describeWebConfig(loadWebConfig({ SCHEMA_SCOPE: 'full' })), / schemaScope=full$/);
+  assert.match(describeWebConfig(loadWebConfig({ SCHEMA_SCOPE: 'full' })), / schemaScope=full hintsVersion=2$/);
 
   assert.throws(
     () => loadWebConfig({ SCHEMA_SCOPE: 'tiny', SCHEMA_FULL_MAX_TOKENS: 'lots', WEB_API_PORT: 'x' }),

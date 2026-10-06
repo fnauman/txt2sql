@@ -31,6 +31,7 @@ import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from
 import { DOTENV_FLAG, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
 import { describeFilters, parseList, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { buildOptimizedPrompt, loadNarrowSchema, rankedTableNames, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
+import { describeHintsVersion, normalizeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { SCHEMA_SCOPES, describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -149,12 +150,13 @@ function groupByPrefix(cases) {
 }
 
 /**
- * Prompt sizes of `testCases` under one schema scope (a scope name or config).
- * Returns { schema_scope, summary, prefix_groups, cases }.
+ * Prompt sizes of `testCases` under one schema scope (a scope name or config)
+ * and hints version (default: the product default). Returns { schema_scope,
+ * hints_version, summary, prefix_groups, cases }.
  */
-export function measureScope(schema, testCases, schemaScope) {
+export function measureScope(schema, testCases, schemaScope, { hintsVersion = undefined } = {}) {
   const cases = testCases.map((testCase) => {
-    const prompt = buildOptimizedPrompt(schema, testCase.question, { schemaScope });
+    const prompt = buildOptimizedPrompt(schema, testCase.question, { schemaScope, hintsVersion });
     const promptCache = prompt.context.promptCache;
 
     return {
@@ -185,7 +187,7 @@ export function measureScope(schema, testCases, schemaScope) {
     ),
     largest_reuse_group: prefixGroups[0] ? { ...prefixGroups[0], case_ids: prefixGroups[0].case_ids.slice(0, 20) } : null,
   };
-  return { schema_scope: scope, summary, prefix_groups: prefixGroups, cases };
+  return { schema_scope: scope, hints_version: normalizeHintsVersion(hintsVersion), summary, prefix_groups: prefixGroups, cases };
 }
 
 /**
@@ -282,7 +284,7 @@ export function measurementScopes(scopeOption, env = process.env) {
 
 function printSummary(result) {
   const { summary } = result;
-  console.log(`\nSchema scope: ${describeSchemaScope(result.schema_scope)}`);
+  console.log(`\nSchema scope: ${describeSchemaScope(result.schema_scope)}; hints version ${describeHintsVersion(result.hints_version)}`);
   console.log(`  Cases: ${summary.case_count}; prompt tables per question: ${summary.average_prompt_table_count.toFixed(1)}`);
   console.log(`  Unique cacheable prefixes: ${summary.unique_cacheable_prefix_count}`);
   console.log(`  Average prompt: ${summary.average_total_chars.toFixed(0)} chars, ${summary.average_total_estimated_tokens.toFixed(1)} estimated tokens`);
@@ -302,6 +304,7 @@ async function main() {
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
   const scopes = measurementScopes(getOptionValue(argv, '--schema-scope'));
+  const hintsVersion = resolveHintsVersion();
 
   const schema = await loadNarrowSchema({
     modelsDir: MODELS_DIR,
@@ -309,7 +312,7 @@ async function main() {
     refreshSchema,
   });
   const { dataset, cases } = await loadCases(argv);
-  const results = scopes.map((schemaScope) => measureScope(schema, cases, schemaScope));
+  const results = scopes.map((schemaScope) => measureScope(schema, cases, schemaScope, { hintsVersion }));
   const report = {
     generated_at: new Date().toISOString(),
     dataset,

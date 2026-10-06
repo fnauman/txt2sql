@@ -95,6 +95,8 @@ function describeReport(report, label) {
     // The product configuration (null for a report from before it was
     // recorded, which ran the retrieved schema scope).
     schemaScope: report?.provenance?.product?.schemaScope || null,
+    // null for a report from before HINTS_VERSION (hints version 1).
+    hintsVersion: report?.provenance?.product?.hintsVersion ?? null,
     mode: report?.mode || 'run',
   };
 }

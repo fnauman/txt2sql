@@ -17,7 +17,8 @@
 // with master data identical to the shared MASTER_DATA. The fixture databases
 // are always demo_retail, demo_retail_v2 and demo_retail_v3; DB_NAME is not
 // used. The validator check follows the product configuration
-// (SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS, src/schema-scope.js); the datasets'
+// (SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS, src/schema-scope.js, and
+// HINTS_VERSION, src/hints-version.js); the datasets'
 // known_validator_rejection flags describe the default configuration.
 //
 // Usage:
@@ -48,6 +49,7 @@ import {
   verifyCase,
 } from '../src/eval/verify.js';
 import { loadNarrowSchema, resolveEffectiveSchemaScope, writeJsonFile } from '../src/pipeline.js';
+import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
 
@@ -204,7 +206,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH });
   const schemaScope = resolveSchemaScopeConfig(process.env);
-  console.log(`Schema scope: ${describeSchemaScope(resolveEffectiveSchemaScope(schema, schemaScope))}\n`);
+  const hintsVersion = resolveHintsVersion(process.env);
+  console.log(`Schema scope: ${describeSchemaScope(resolveEffectiveSchemaScope(schema, schemaScope))}`);
+  console.log(`Hints version: ${describeHintsVersion(hintsVersion)}\n`);
 
   if (process.env.DB_NAME && !FIXTURES.some((fixture) => fixture.database === process.env.DB_NAME)) {
     console.log(
@@ -216,12 +220,20 @@ export async function main(argv = process.argv.slice(2)) {
   const connections = await openFixtureConnections({ fixtures });
   const goldCache = createGoldCache();
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
-  const validate = createValidatorProbe({ schema, connection: primary.connection, schemaScope });
+  const validate = createValidatorProbe({ schema, connection: primary.connection, schemaScope, hintsVersion });
 
   let totalCases = 0;
   let totalFailures = 0;
   const gateFailures = [];
-  const report = { generatedAt: new Date().toISOString(), schemaScope: validate.schemaScope, fixtures: [], minKillRate, minHeldoutKillRate, datasets: [] };
+  const report = {
+    generatedAt: new Date().toISOString(),
+    schemaScope: validate.schemaScope,
+    hintsVersion: validate.hintsVersion,
+    fixtures: [],
+    minKillRate,
+    minHeldoutKillRate,
+    datasets: [],
+  };
 
   try {
     console.log('Fixtures (content re-hashed):');

@@ -46,6 +46,7 @@ import {
   runSignalChecks,
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
+import { normalizeHintsVersion } from '../hints-version.js';
 import { buildOptimizedPrompt, buildSemanticPlan, resolveEffectiveSchemaScope, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { resolveCaseControls } from './controls.js';
@@ -69,9 +70,11 @@ import { caseDefinitionFingerprint } from './suite.js';
  * widen-on-demand gives a retry). `validate.schemaScope` is the scope in
  * effect for `schema`.
  *
- * `schemaScope` is a scope name or config (src/schema-scope.js); omitted, the
- * product defaults (auto). Entry points pass resolveSchemaScopeConfig(env), so
- * verification validates exactly what the product would.
+ * `schemaScope` is a scope name or config (src/schema-scope.js) and
+ * `hintsVersion` a hints version (src/hints-version.js); omitted, the product
+ * defaults (auto, 2). Entry points pass resolveSchemaScopeConfig(env) and
+ * resolveHintsVersion(env), so verification validates exactly what the
+ * product would. `validate.hintsVersion` is the version in effect.
  *
  * Master-data lookup failures are handled like the product loop handles them:
  * an infrastructure failure (the database went away) is thrown, not hidden
@@ -80,16 +83,17 @@ import { caseDefinitionFingerprint } from './suite.js';
  * statement timeout) degrade to no candidates. The lookup runs under
  * `statementTimeoutMs` like the product's.
  */
-export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null, schemaScope = undefined }) {
+export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null, schemaScope = undefined, hintsVersion = undefined }) {
   const prompts = new Map();
   const effectiveScope = resolveEffectiveSchemaScope(schema, schemaScope);
+  const version = normalizeHintsVersion(hintsVersion);
   const inScopeTables = new Set(schema.tables.map((table) => table.tableName));
   const promptFor = async (question, { extraTables = [] } = {}) => {
     const extra = [...new Set(extraTables)].sort();
     const key = `${question}\u0000${extra.join(',')}`;
     if (!prompts.has(key)) {
       const pending = (async () => {
-        const semanticPlan = buildSemanticPlan(question);
+        const semanticPlan = buildSemanticPlan(question, { hintsVersion: version });
         let masterDataCandidates = [];
         if (extra.length > 0) {
           // A widened prompt reuses the question's own master-data lookup.
@@ -104,7 +108,7 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
             masterDataCandidates = [];
           }
         }
-        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan, schemaScope, extraTables: extra });
+        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan, schemaScope, extraTables: extra, hintsVersion: version });
         return {
           context: prompt.context,
           allowedTables: prompt.tables.map((table) => table.tableName),
@@ -145,6 +149,7 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
   };
   validate.promptFor = promptFor;
   validate.schemaScope = effectiveScope;
+  validate.hintsVersion = version;
   return validate;
 }
 

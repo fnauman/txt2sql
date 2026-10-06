@@ -7,6 +7,7 @@
 // loadWebConfig is pure: it validates every value, reports ALL problems in one
 // startup error, and returns a deeply frozen object.
 
+import { resolveHintsVersion } from '../../../../src/hints-version.js';
 import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
@@ -203,6 +204,14 @@ export function loadWebConfig(env = process.env) {
   if (problems.length === 0) {
     schemaScope = resolveSchemaScopeConfig(env);
   }
+  // Hints version (HINTS_VERSION), read by the same resolver as the CLI and
+  // npm run eval.
+  let hintsVersion = null;
+  try {
+    hintsVersion = resolveHintsVersion(env);
+  } catch (error) {
+    problems.push(error.message);
+  }
 
   if (problems.length > 0) {
     throw new WebConfigError(problems);
@@ -249,6 +258,7 @@ export function loadWebConfig(env = process.env) {
     },
     model: read.string('MODEL_NAME', defaults.model),
     schemaScope: { ...schemaScope },
+    hintsVersion,
     database: {
       name: read.string('DB_NAME', '') || null,
       // The query paths connect as DB_USER, defaulting to demo_readonly.
@@ -274,6 +284,7 @@ export function describeWebConfig(config) {
     `maxQuestionLength=${config.maxQuestionLength}`,
     `cache=${config.resultCache.enabled ? 'on' : 'off'}`,
     describeSchemaScopeSetting(config.schemaScope),
+    `hintsVersion=${config.hintsVersion ?? 'default'}`,
   ].join(' ');
 }
 

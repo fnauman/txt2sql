@@ -56,6 +56,7 @@ import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/set
 import { describeFilters, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
+import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
 import { calculateCost } from '../src/pricing.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
@@ -228,6 +229,23 @@ export function rescoreSchemaScopeNote(recordedScope, todayScope) {
   return (
     `  note: the recording ran with schema scope ${recordedScope ? describeSchemaScope(recordedScope) : 'retrieved, no widening (not recorded: before SCHEMA_SCOPE)'}; ` +
     `today's validator uses ${describeSchemaScope(todayScope)}, so recorded SQL is re-judged with today's scope.`
+  );
+}
+
+/**
+ * The rescore's console note when the recording ran another hints version
+ * (recordedVersion null = a report from before HINTS_VERSION: version 1); null
+ * when they are the same. Only the validator's decisions follow today's
+ * version: the recorded SQL was generated from the recorded prompts.
+ */
+export function rescoreHintsVersionNote(recordedVersion, todayVersion) {
+  if (sameHintsVersion(recordedVersion, todayVersion)) {
+    return null;
+  }
+  return (
+    `  note: the recording ran with hints version ${describeHintsVersion(recordedVersion)}; today's validator uses ` +
+    `${describeHintsVersion(todayVersion)}, so recorded SQL is re-judged with today's semantic plan (the prompts are not regenerated: ` +
+    'only validator and semantic-plan effects show).'
   );
 }
 
@@ -991,7 +1009,7 @@ function createLiveClient(options) {
   return client;
 }
 
-async function runLive({ options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
+async function runLive({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
   const model = options.model;
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
@@ -1020,6 +1038,7 @@ async function runLive({ options, cli, schema, schemaScope, selection, connectio
     model,
     runner,
     schemaScope,
+    hintsVersion,
   });
   const suite = describeSuite(selection, { repoRelative });
   // Read the baseline before spending anything: a broken file fails fast.
@@ -1075,6 +1094,7 @@ async function runLive({ options, cli, schema, schemaScope, selection, connectio
           statementTimeoutMs,
           signal,
           schemaScope,
+          hintsVersion,
         }),
       onResult: async (info) => {
         cli.log(formatProgress({ ...info, repeat: options.repeat, revealHoldout: options.revealHoldout }));
@@ -1156,7 +1176,7 @@ async function runLive({ options, cli, schema, schemaScope, selection, connectio
   }
 }
 
-async function runRescore({ options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification }) {
+async function runRescore({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification }) {
   let sourcePath = options.rescore;
   if (!sourcePath) {
     const candidate = defaultBaselinePath(options.model);
@@ -1208,13 +1228,18 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
     throw new HarnessError(thresholdRefusal, { code: 'NO_ANSWER_CASES' });
   }
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
-  const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs, schemaScope });
+  const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs, schemaScope, hintsVersion });
   const goldCache = createGoldCache();
   const recordedScope = source.provenance?.product?.schemaScope || null;
+  const recordedHintsVersion = source.provenance?.product?.hintsVersion ?? null;
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
   const scopeNote = rescoreSchemaScopeNote(recordedScope, validate.schemaScope);
   if (scopeNote) {
     cli.log(scopeNote);
+  }
+  const hintsNote = rescoreHintsVersionNote(recordedHintsVersion, validate.hintsVersion);
+  if (hintsNote) {
+    cli.log(hintsNote);
   }
   const rescored = await rescoreReportCases(source, {
     currentCases,
@@ -1275,6 +1300,7 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
     model,
     runner,
     schemaScope,
+    hintsVersion,
   });
   const generatedAt = new Date().toISOString();
   const baseline = options.compare
@@ -1311,6 +1337,7 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
       gitSha: source.provenance?.git?.sha || source.gitSha || null,
       promptVersion: source.provenance?.promptVersion || null,
       schemaScope: recordedScope,
+      hintsVersion: recordedHintsVersion,
       reportVersion: source.reportVersion || 1,
       compact: isCompactReport(source),
     },
@@ -1334,11 +1361,14 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
   // Configuration problems fail before anything is started, seeded or spent.
   await checkGateBaseline(options, cli);
   let schemaScope;
+  let hintsVersion;
   try {
-    // The product setting (SCHEMA_SCOPE, SCHEMA_FULL_MAX_TOKENS,
-    // SCHEMA_WIDEN_ON_DEMAND), read like the web server and the CLI read it;
-    // a live run, a rescore and the verification all use it.
+    // The product settings (SCHEMA_SCOPE, SCHEMA_FULL_MAX_TOKENS,
+    // SCHEMA_WIDEN_ON_DEMAND, HINTS_VERSION), read like the web server and
+    // the CLI read them; a live run, a rescore and the verification all use
+    // them.
     schemaScope = resolveSchemaScopeConfig(env);
+    hintsVersion = resolveHintsVersion(env);
   } catch (error) {
     throw new HarnessError(error.message, { code: error.code || 'INVALID_CONFIG', cause: error });
   }
@@ -1346,6 +1376,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
 
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH, refreshSchema: options.refreshSchema });
   cli.log(`Schema scope: ${describeSchemaScope(resolveEffectiveSchemaScope(schema, schemaScope))}`);
+  cli.log(`Hints version: ${describeHintsVersion(hintsVersion)}`);
 
   const database = await preflightDatabase({ env, allowDocker: options.docker, allowSeed: options.seed, repoRoot: REPO_ROOT, log: (line) => cli.log(line) });
   cli.log(`Database: ${database.status === 'started' ? 'started with docker compose' : 'reachable'}.`);
@@ -1441,7 +1472,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
           datasets: selection.datasets,
           connections,
           goldCache: createGoldCache(),
-          validate: createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs: resolveStatementTimeoutMs(), schemaScope }),
+          validate: createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs: resolveStatementTimeoutMs(), schemaScope, hintsVersion }),
           controlsIndex,
           checkControls: options.checkControls,
           minKillRate: options.minKillRate,
@@ -1467,7 +1498,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       cli.log('Verify: skipped.');
     }
 
-    const context = { options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification, client };
+    const context = { options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification, client };
     return rescoreMode ? await runRescore(context) : await runLive(context);
   } finally {
     await closeFixtureConnections(connections);

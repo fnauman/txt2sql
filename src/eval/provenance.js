@@ -15,9 +15,11 @@
 //   query), Node version and the runner flags;
 // - product: the product configuration that shapes the prompt and the
 //   validator: the schema scope (requested and effective, the full-schema
-//   token estimate and budget, widen-on-demand). Reports from before
-//   SCHEMA_SCOPE existed have no `product` block; they ran the retrieved scope
-//   without widening.
+//   token estimate and budget, widen-on-demand) and the hints version
+//   (HINTS_VERSION). Reports from before SCHEMA_SCOPE existed have no
+//   `product` block; they ran the retrieved scope without widening. Reports
+//   from before HINTS_VERSION existed have no `product.hintsVersion`; they ran
+//   hints version 1.
 // Paths are stored relative to the repository root.
 
 import { execFile } from 'node:child_process';
@@ -27,7 +29,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { BUSINESS_RULES, FEW_SHOT_EXAMPLES } from '../constants.js';
+import { businessRulesFor, FEW_SHOT_EXAMPLES } from '../constants.js';
+import { normalizeHintsVersion } from '../hints-version.js';
 import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffectiveSchemaScope } from '../pipeline.js';
 
 const execFileAsync = promisify(execFile);
@@ -91,17 +94,19 @@ export async function resolveGitState(cwd = REPO_ROOT, { run = execFileAsync } =
 /**
  * Prompt version: sha256 of what decides the prompt the model sees apart from
  * the question and the schema (hashed separately): the optimized system prompt
- * as the product builds it under `parts.schemaScope` (default: the product
- * default), the business rules, the few-shot pool and the request options.
- * `parts` lets tests vary one input. The retrieved scope's system prompt is
- * the one every run had before schema scopes existed, so its version matches
- * older reports.
+ * as the product builds it under `parts.schemaScope` and `parts.hintsVersion`
+ * (default: the product defaults), the business rules of that hints version,
+ * the few-shot pool and the request options. `parts` lets tests vary one
+ * input. The retrieved scope's version-1 system prompt is the one every run
+ * had before schema scopes existed, so its version matches older reports.
  */
 export function computePromptVersion(schema, parts = {}) {
-  const systemPrompt = parts.systemPrompt ?? buildOptimizedPrompt(schema, 'Prompt version probe', { schemaScope: parts.schemaScope }).system;
+  const hintsVersion = normalizeHintsVersion(parts.hintsVersion);
+  const systemPrompt =
+    parts.systemPrompt ?? buildOptimizedPrompt(schema, 'Prompt version probe', { schemaScope: parts.schemaScope, hintsVersion }).system;
   const material = {
     systemPrompt,
-    businessRules: parts.businessRules ?? BUSINESS_RULES,
+    businessRules: parts.businessRules ?? businessRulesFor(hintsVersion),
     fewShotExamples: parts.fewShotExamples ?? FEW_SHOT_EXAMPLES,
     requestOptions: parts.requestOptions ?? OPTIMIZED_MODEL_REQUEST_OPTIONS,
   };
@@ -135,10 +140,11 @@ export function shortHash(hash, length = 12) {
 /**
  * The product configuration block: { schemaScope: { requested, effective,
  * fullSchemaEstimatedTokens, fullSchemaMaxTokens, widenOnDemand,
- * inScopeTableCount } } for `schemaScope` (a scope name or config).
+ * inScopeTableCount }, hintsVersion } for `schemaScope` (a scope name or
+ * config) and `hintsVersion` (1 or 2; default 2).
  */
-export function describeProductConfig(schema, schemaScope = undefined) {
-  return { schemaScope: resolveEffectiveSchemaScope(schema, schemaScope) };
+export function describeProductConfig(schema, schemaScope = undefined, hintsVersion = undefined) {
+  return { schemaScope: resolveEffectiveSchemaScope(schema, schemaScope), hintsVersion: normalizeHintsVersion(hintsVersion) };
 }
 
 /**
@@ -160,6 +166,7 @@ export async function collectProvenance({
   semanticLayerPath = SEMANTIC_LAYER_PATH,
   gitState = null,
   schemaScope = undefined,
+  hintsVersion = undefined,
 } = {}) {
   const git = gitState || (await resolveGitState(repoRoot));
   const datasetEntries = [];
@@ -179,8 +186,8 @@ export async function collectProvenance({
   }));
   return {
     git,
-    promptVersion: computePromptVersion(schema, { schemaScope }),
-    product: describeProductConfig(schema, schemaScope),
+    promptVersion: computePromptVersion(schema, { schemaScope, hintsVersion }),
+    product: describeProductConfig(schema, schemaScope, hintsVersion),
     semanticLayerVersion: await hashFile(semanticLayerPath),
     schemaVersion: computeSchemaVersion(schema),
     schemaPath: repoRelative(schemaPath, repoRoot),
@@ -213,5 +220,6 @@ export function traceMetadataFromProvenance(provenance) {
     schemaScopeEffective: provenance?.product?.schemaScope?.effective ?? null,
     schemaFullEstimatedTokens: provenance?.product?.schemaScope?.fullSchemaEstimatedTokens ?? null,
     schemaWidenOnDemand: provenance?.product?.schemaScope?.widenOnDemand ?? null,
+    hintsVersion: provenance?.product?.hintsVersion ?? null,
   };
 }
