@@ -66,27 +66,107 @@ export const BUSINESS_RULES = [
 ];
 
 // Hints version 2 (src/hints-version.js, docs/experiments/02-hints-v2.md):
-// version 1's rules with the ambiguous ones rewritten. Each replacement names
-// the version-1 rule it replaces.
-const V1_TEMPORAL_RULE = BUSINESS_RULES[3];
-
+// version 1's rules with the ambiguous or misleading ones rewritten and four
+// answer-shape and account rules added. Each entry names the version-1 rule
+// it replaces (or follows) and the dev failures behind it.
 const HINTS_V2_RULE_REPLACEMENTS = new Map([
-  // Version 1 told the model not to reinterpret dates even when the resolver
-  // had turned "between 1 and 10 March 2026" into all of March. Version 2
-  // resolves only whole-month phrases it fully understands, and says so.
+  // Version 1 forbade reinterpreting even a wrong whole-month range
+  // (tpl_document_count_mar01_10_2026_785050, hard_asof_month_to_date_documents).
   [
-    V1_TEMPORAL_RULE,
+    'If the prompt resolves temporal references, use those exact normalized interpretations and do not reinterpret ambiguous dates or years.',
     'Resolved temporal references are exact for the phrases they quote: use their half-open ranges for those phrases. Date wording that is not listed there (quarters, day or month ranges, as-of or relative dates) was not resolved: work out the window from the question itself, again as a half-open range.',
+  ],
+  // "posted" must not fall back to DocumentDate (edge_public_004_posting_date_trap).
+  [
+    'For sales date questions, prefer SalesDocument.DocumentDate unless the user explicitly asks for posting date or due date.',
+    'For sales date questions, use SalesDocument.DocumentDate unless the question says posted or posting date, or due date.',
+  ],
+  // Version 1 offered both PostingDate columns as equivalent; documents were
+  // counted through AccountingPosting rows (tpl_documents_posted_feb_2026_*).
+  [
+    'Use SalesDocument.PostingDate or AccountingPosting.PostingDate for posted-date questions and SalesDocument.DueDate for aging or due-date questions.',
+    'For posted or posting-date questions about sales documents (counting, listing or summing documents), filter SalesDocument.PostingDate on SalesDocument itself and do not join AccountingPosting for it. Use AccountingPosting.PostingDate only for questions about ledger postings, debits or credits. Use SalesDocument.DueDate for aging or due-date questions.',
+  ],
+  // The filter was dropped where SalesDocument is joined only for its date
+  // or sits in an anti-join (core_public_005/009, paraphrase_public_005/009).
+  [
+    'Unless the user explicitly asks for canceled documents, exclude them with IFNULL(SalesDocument.IsCanceled, 0) = 0 when querying SalesDocument.',
+    'Unless the user explicitly asks for canceled documents, exclude them with IFNULL(SalesDocument.IsCanceled, 0) = 0 wherever SalesDocument appears: also when it is joined only for a date or a document filter (for example postings filtered by DocumentDate), inside a subquery or NOT EXISTS, and in the ON clause of a LEFT JOIN used as an anti-join.',
+  ],
+  // Version 1 listed the bill total, payable and subtotal next to NetAmount,
+  // and an unmapped money word fell back to BillTotalAmount
+  // (hard_vocab_department_turnover_feb_2026, hard_entity_lakeside_spend_q1_2026,
+  // tpl_*average_order_value* 30dc49 / 146d60 / afb751 / 820a8d).
+  [
+    'For document-level totals, prefer the explicitly named header amounts such as SalesDocument.NetAmount, SalesDocument.NetPayableAmount, SalesDocument.BillTotalAmount, or SalesDocument.SubtotalAmount based on the wording of the question.',
+    'For document-level money totals (net sales, sales, revenue, turnover, spend, order value), use SalesDocument.NetAmount. Use SalesDocument.GrossAmount only when the question says gross or tax included, and NetPayableAmount, BillTotalAmount or SubtotalAmount only when the question names that amount (payable, bill total, subtotal).',
+  ],
+  // Version 1 offered TotalAmount and NetAmount side by side for line sales.
+  [
+    'For product-level analysis, prefer SalesDocumentLine.Quantity, SalesDocumentLine.SalePrice, SalesDocumentLine.TotalAmount, and SalesDocumentLine.NetAmount.',
+    'For product-level analysis (products, brands, categories, campaigns), use SalesDocumentLine.Quantity for units and SalesDocumentLine.NetAmount for sales, revenue or turnover; use SalesDocumentLine.TotalAmount or SalePrice only when the question asks for the line total or the price.',
+  ],
+  // State the attribution convention: campaign results go through the
+  // product, never the document's own CampaignId
+  // (tpl_weekend_pantry_net_sales_monthly_q1_2026_712deb, edge_public_002).
+  [
+    'For campaign-filtered product sales, join SalesDocumentLine to Product and Product to Campaign, then filter Campaign.CampaignName with LIKE. Do not require an external campaign ID variable when Campaign is in scope.',
+    'Campaign sales, units and customers are attributed through the product: join SalesDocumentLine to Product and Product to Campaign (Product.CampaignId), then filter Campaign.CampaignName with LIKE; do not use SalesDocument.CampaignId for campaign results. Do not require an external campaign ID variable when Campaign is in scope.',
+  ],
+  // Version 1 offered the ProductBrand bridge (4 of 13 products) as an
+  // equivalent path (tpl_brand_net_sales_feb_2026_196b6b).
+  [
+    'For brand analysis, prefer Brand joined through Product.BrandId or ProductBrand instead of stale SalesDocumentLine.BrandNameSnapshot values when Brand is in scope.',
+    'For brand analysis, join Product to Brand through Product.BrandId (the current brand of every product). Do not use the ProductBrand bridge for brand results: it is an optional assignment table that covers only some products. Do not use stale SalesDocumentLine.BrandNameSnapshot values when Brand is in scope.',
+  ],
+  // "account" read as a customer, an account number put in the surrogate
+  // key, an account name in the code column (tpl_account_net_movement_feb_2026_c1256b,
+  // tpl_receivable_debits_posted_mar_2026_aab20c, hard_entity_sales_revenue_credits_feb_2026).
+  [
+    'Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested.',
+    'In questions about postings, debits, credits or the ledger, "account" means LedgerAccount, not Customer. Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested; filter an account number (such as 1100) on LedgerAccount.AccountCode, never on LedgerAccountId, and an account name with LIKE on LedgerAccount.AccountName.',
+  ],
+  // Delivery-fee lines have no product and are not units sold
+  // (tpl_total_qty_dec_2025_214320 / 12ab97, tpl_customer_qty_top3_q1_2026_2f8130 / 1d11c5).
+  [
+    'For quantity metrics (qty sold, moved), round the aggregated sum to 3 decimal places using ROUND(..., 3). Alias the aggregated sum of quantity as total_qty.',
+    'For quantity metrics (units, qty sold, moved), count product lines only: add SalesDocumentLine.ProductId IS NOT NULL (lines without a product, such as delivery fees, are not units sold). Round the aggregated sum to 3 decimal places using ROUND(..., 3). Alias the aggregated sum of quantity as total_qty.',
+  ],
+  // Version 1 put LIMIT 10 on every ranking, also on "rank" and on a
+  // singular "the highest" (hard_vocab_outlet_turnover_top1_mar_2026).
+  [
+    'For "top", "biggest", or "most" ranking queries, always apply a LIMIT 10 unless a different limit is explicitly specified.',
+    'Ranking limits: "top N", "N biggest" or "which N ..." gets LIMIT N. A singular superlative that asks for one item ("which store had the highest ...", "the single biggest document") gets LIMIT 1. Plural "top", "biggest", "most" or "highest" with no number gets LIMIT 10. "Rank", "order", "sort" or "from highest to lowest" with no number returns every row (no LIMIT).',
   ],
 ]);
 
-for (const replaced of HINTS_V2_RULE_REPLACEMENTS.keys()) {
+const HINTS_V2_ADDED_RULES = [
+  // "How many" answered with a list or a per-entity breakdown
+  // (core_public_004, paraphrase_public_004, tpl_urban_refresh_customers_q1_2026_809e2f).
+  'Count questions ("how many <entities>", "number of <entities>", "count the <entities>") return one row with one number, such as COUNT(DISTINCT Customer.CustomerId) or COUNT(*) over documents, with no GROUP BY and no name columns, unless the question also says per, by, each or every. Count entities by their ID, not by name. "How many units" is a SUM of SalesDocumentLine.Quantity, not a COUNT.',
+  // A total answered with one row per document (hard_ambiguous_sales_mar_2026).
+  'A question asking for one total ("how much ...", "what was/were <metric> ...", "total <metric> ...") with no per, by, each, every, split or time grain returns one row: aggregate without GROUP BY, also when it filters to one named customer, store, product or campaign, and do not list documents or other rows.',
+  // "Monthly" dropped or its label replaced by a name column
+  // (tpl_gross_monthly_2025_a7ccf5, tpl_distinct_customers_monthly_q1_2026_c34a0c).
+  "Time grain: \"monthly\", \"per month\", \"each month\", \"by month\" or \"month by month\" means one row per calendar month (likewise yearly or per year): select a period label such as DATE_FORMAT(date_col, '%Y-%m') with the other requested columns, GROUP BY it and ORDER BY it; never replace the period label with a name column.",
+];
+
+// The added rules follow the anti-join rule, before the ranking rules.
+const V1_ANTI_JOIN_RULE =
+  'For "not in" or "did not sell in" temporal comparison questions (anti-joins), write the query using a LEFT JOIN ... WHERE ... IS NULL or NOT EXISTS pattern. Avoid restricting the main WHERE clause to the first period if you also filter the second period there, as that removes the comparison data before the anti-join or HAVING clause can process it.';
+
+for (const replaced of [...HINTS_V2_RULE_REPLACEMENTS.keys(), V1_ANTI_JOIN_RULE]) {
   if (!BUSINESS_RULES.includes(replaced)) {
-    throw new Error(`Hints v2 replaces a business rule that is not in BUSINESS_RULES: ${replaced}`);
+    throw new Error(`Hints v2 refers to a business rule that is not in BUSINESS_RULES: ${replaced}`);
   }
 }
 
-export const BUSINESS_RULES_V2 = Object.freeze(BUSINESS_RULES.map((rule) => HINTS_V2_RULE_REPLACEMENTS.get(rule) ?? rule));
+export const BUSINESS_RULES_V2 = Object.freeze(
+  BUSINESS_RULES.flatMap((rule) => {
+    const replaced = HINTS_V2_RULE_REPLACEMENTS.get(rule) ?? rule;
+    return rule === V1_ANTI_JOIN_RULE ? [replaced, ...HINTS_V2_ADDED_RULES] : [replaced];
+  })
+);
 
 /**
  * The business rules of hints version `version` (src/hints-version.js).

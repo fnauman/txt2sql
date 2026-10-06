@@ -83,3 +83,76 @@ test('v2 temporal: the prompt shows no whole-month range for a partial phrase, a
   const system = buildOptimizedPrompt(schema, question, { hintsVersion: 2 }).system;
   assert.doesNotMatch(system, /do not reinterpret/);
 });
+
+// --- business rules: the ambiguous ones rewritten, shape rules added --------
+// Rules 7, 18 and 26 offered alternatives as equivalent or forced a LIMIT
+// (tpl_documents_posted_feb_2026_*, tpl_brand_net_sales_feb_2026_196b6b,
+// hard_vocab_outlet_turnover_top1_mar_2026); count and single-total questions
+// were answered with lists (core_public_004, paraphrase_public_004,
+// tpl_urban_refresh_customers_q1_2026_809e2f, hard_ambiguous_sales_mar_2026).
+
+const v2Rule = (pattern) => {
+  const matches = BUSINESS_RULES_V2.filter((rule) => pattern.test(rule));
+  assert.equal(matches.length, 1, String(pattern));
+  return matches[0];
+};
+
+test('v2 rules: version 1 is untouched; version 2 rewrites eleven rules and adds three, in a fixed place', () => {
+  assert.equal(BUSINESS_RULES.length, 27);
+  assert.equal(BUSINESS_RULES_V2.length, 30);
+  const removed = BUSINESS_RULES.filter((rule) => !BUSINESS_RULES_V2.includes(rule));
+  const added = BUSINESS_RULES_V2.filter((rule) => !BUSINESS_RULES.includes(rule));
+  assert.equal(removed.length, 11);
+  assert.equal(added.length, 14);
+  // Unchanged rules keep their relative order.
+  assert.deepEqual(
+    BUSINESS_RULES_V2.filter((rule) => BUSINESS_RULES.includes(rule)),
+    BUSINESS_RULES.filter((rule) => !removed.includes(rule))
+  );
+  // The three new rules follow the anti-join rule and precede the ranking rules.
+  const antiJoin = BUSINESS_RULES_V2.findIndex((rule) => rule.startsWith('For "not in" or "did not sell in"'));
+  assert.match(BUSINESS_RULES_V2[antiJoin + 1], /^Count questions/);
+  assert.match(BUSINESS_RULES_V2[antiJoin + 2], /^A question asking for one total/);
+  assert.match(BUSINESS_RULES_V2[antiJoin + 3], /^Time grain:/);
+  assert.match(BUSINESS_RULES_V2[antiJoin + 4], /^Ranking limits:/);
+
+  const v1System = buildOptimizedPrompt(schema, 'anything', { hintsVersion: 1 }).system;
+  const v2System = buildOptimizedPrompt(schema, 'anything', { hintsVersion: 2 }).system;
+  for (const rule of BUSINESS_RULES) {
+    assert.ok(v1System.includes(rule));
+  }
+  for (const rule of BUSINESS_RULES_V2) {
+    assert.ok(v2System.includes(rule));
+  }
+});
+
+test('v2 rules: posting dates, brands and ranking limits are unambiguous', () => {
+  const posting = v2Rule(/posted or posting-date questions about sales documents/);
+  assert.match(posting, /filter SalesDocument\.PostingDate on SalesDocument itself and do not join AccountingPosting/);
+  assert.match(posting, /AccountingPosting\.PostingDate only for questions about ledger postings, debits or credits/);
+  assert.doesNotMatch(posting, /SalesDocument\.PostingDate or AccountingPosting\.PostingDate/);
+  assert.match(v2Rule(/^For sales date questions/), /unless the question says posted or posting date, or due date/);
+
+  const brand = v2Rule(/^For brand analysis/);
+  assert.match(brand, /through Product\.BrandId/);
+  assert.match(brand, /Do not use the ProductBrand bridge for brand results/);
+  assert.doesNotMatch(brand, /BrandId or ProductBrand/);
+
+  const limits = v2Rule(/^Ranking limits:/);
+  assert.match(limits, /"top N".*gets LIMIT N/);
+  assert.match(limits, /singular superlative .* gets LIMIT 1/);
+  assert.match(limits, /"Rank", "order", "sort" or "from highest to lowest" with no number returns every row \(no LIMIT\)/);
+  assert.ok(!BUSINESS_RULES_V2.some((rule) => /always apply a LIMIT 10/.test(rule)));
+});
+
+test('v2 rules: count, single-total and time-grain shapes; money, unit, cancellation, campaign and account defaults', () => {
+  assert.match(v2Rule(/^Count questions/), /one row with one number.*no GROUP BY and no name columns, unless the question also says per, by, each or every\. Count entities by their ID, not by name\. "How many units" is a SUM/);
+  assert.match(v2Rule(/^A question asking for one total/), /returns one row: aggregate without GROUP BY, also when it filters to one named customer, store, product or campaign/);
+  assert.match(v2Rule(/^Time grain:/), /one row per calendar month .*DATE_FORMAT\(date_col, '%Y-%m'\).*never replace the period label with a name column/);
+  assert.match(v2Rule(/^For document-level money totals/), /turnover, spend, order value\), use SalesDocument\.NetAmount\. Use SalesDocument\.GrossAmount only when the question says gross or tax included/);
+  assert.match(v2Rule(/^For product-level analysis/), /SalesDocumentLine\.NetAmount for sales, revenue or turnover; use SalesDocumentLine\.TotalAmount or SalePrice only when the question asks/);
+  assert.match(v2Rule(/^For quantity metrics/), /SalesDocumentLine\.ProductId IS NOT NULL \(lines without a product, such as delivery fees, are not units sold\)/);
+  assert.match(v2Rule(/exclude them with IFNULL/), /wherever SalesDocument appears: also when it is joined only for a date .*inside a subquery or NOT EXISTS, and in the ON clause of a LEFT JOIN used as an anti-join/);
+  assert.match(v2Rule(/^Campaign sales, units and customers/), /do not use SalesDocument\.CampaignId for campaign results/);
+  assert.match(v2Rule(/"account" means LedgerAccount/), /LedgerAccount\.AccountCode, never on LedgerAccountId, and an account name with LIKE on LedgerAccount\.AccountName/);
+});
