@@ -25,14 +25,31 @@ import {
 } from './sql-tokenizer.js';
 import { uniqueStrings } from './utils.js';
 
-function splitWords(value) {
+function splitWordText(value) {
   return String(value || '')
     .replace(/\b([A-Z]{2,})s\b/g, (match) => match.toLowerCase())
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .toLowerCase()
+    .toLowerCase();
+}
+
+function splitWords(value) {
+  return splitWordText(value)
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+}
+
+// The words of splitWords, each with the text between it and the previous
+// word ("," or " (" ...), which splitWords drops.
+function splitWordsWithSeparators(value) {
+  const text = splitWordText(value);
+  const words = [];
+  let previousEnd = 0;
+  for (const match of text.matchAll(/[a-z0-9]+/g)) {
+    words.push({ word: match[0], separatorBefore: text.slice(previousEnd, match.index) });
+    previousEnd = match.index + match[0].length;
+  }
+  return words;
 }
 
 const STOPWORDS = new Set([
@@ -443,11 +460,12 @@ function normalizedPhrase(value) {
 }
 
 function buildQuestionWordIndex(questionContext) {
-  return splitWords(questionContext.normalizedQuestion).map((word) => ({
+  return splitWordsWithSeparators(questionContext.normalizedQuestion).map(({ word, separatorBefore }) => ({
     word,
     singular: singularTokenVariant(word),
     variants: tokenVariants(word),
     isStopword: STOPWORDS.has(word),
+    separatorBefore,
   }));
 }
 
@@ -575,6 +593,101 @@ export function detectCountOrExistenceIntent(question) {
   return COUNT_OR_EXISTENCE_INTENT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+// Words that join two separately requested measures, or are themselves a
+// measure: between a metric phrase and another amount they mean that amount is
+// asked for alongside the metric ("revenue and gross amount", "average order
+// value versus the bill total"), not that it modifies it.
+const SEPARATE_MEASURE_WORDS = new Set([
+  'and',
+  'or',
+  'nor',
+  'plus',
+  'versus',
+  'vs',
+  'against',
+  'compared',
+  'than',
+  'alongside',
+  'besides',
+  'also',
+  'both',
+  'either',
+  'amount',
+  'amounts',
+  'total',
+  'totals',
+  'value',
+  'values',
+  'sum',
+  'sums',
+  'figure',
+  'figures',
+  'number',
+  'count',
+]);
+// Words that may stand between a metric phrase and an amount word after it
+// without making that amount a separate measure: "revenue on a gross basis",
+// "revenue in gross terms", "revenue measured gross".
+const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the', 'is', 'are', 'was', 'were', 'measured', 'reported', 'stated', 'calculated', 'counted', 'taken', 'expressed', 'shown']);
+
+/**
+ * Whether one of `otherSpans` (an `advisory_when_mentioned` amount) modifies
+ * one of `metricSpans` (the metric's matched phrases), as word spans of
+ * `questionWords`:
+ * - right before it, at most two plain words apart, with no comma or
+ *   measure/conjunction word between: "gross revenue", "gross monthly
+ *   revenue", "tax inclusive revenue";
+ * - right after it, at most three glue words apart, when it is a tax phrase
+ *   ("revenue including tax", "average order value, tax included": a tax
+ *   phrase qualifies an amount and never names one), in parentheses
+ *   ("revenue (gross)"), or with no comma between and no measure word after
+ *   it ("revenue on a gross basis").
+ * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
+ * and the bill total") is a separate measure.
+ */
+function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
+  const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
+  const between = (start, end) => questionWords.slice(start, end).map((questionWord) => questionWord.word);
+  const separatorsBetween = (start, end) => {
+    let text = '';
+    for (let index = start; index <= end; index += 1) {
+      text += separatorAt(index);
+    }
+    return text;
+  };
+
+  return otherSpans.some((other) => {
+    const otherWords = between(other.start, other.end);
+    const isTaxPhrase = otherWords.includes('tax');
+    return metricSpans.some((metric) => {
+      if (other.end <= metric.start) {
+        const gap = between(other.end, metric.start);
+        return (
+          gap.length <= 2 &&
+          gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word)) &&
+          !/[,;:]/.test(separatorsBetween(other.end, metric.start))
+        );
+      }
+      if (metric.end <= other.start) {
+        const gap = between(metric.end, other.start);
+        if (gap.length > 3 || !gap.every((word) => POSTPOSITIVE_GLUE_WORDS.has(word))) {
+          return false;
+        }
+        if (isTaxPhrase) {
+          return true;
+        }
+        const separators = separatorsBetween(metric.end, other.start);
+        if (separators.includes('(')) {
+          return true;
+        }
+        const nextWord = questionWords[other.end]?.word;
+        return !/[,;:]/.test(separators) && !(nextWord && SEPARATE_MEASURE_WORDS.has(nextWord));
+      }
+      return false;
+    });
+  });
+}
+
 /**
  * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
  * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning). Both
@@ -598,14 +711,16 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
     return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
   }
   // `advisory_when_mentioned` (hints-v2 overlay): the question names another
-  // amount ("average gross order value", "revenue including tax"), so the
-  // metric's column is not what it measures. An explicit "net" phrase ("net
-  // sales") still enforces.
+  // amount for this metric ("gross revenue", "average order value including
+  // tax"), so the metric's column is not what it measures. Only wording that
+  // modifies the metric phrase counts (otherAmountModifiesMetric); another
+  // measure asked for alongside it ("revenue and gross amount") leaves the
+  // metric enforced. An explicit "net" phrase ("net sales") still enforces.
   const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
   if (
     otherAmounts.length > 0 &&
     questionWords &&
-    findSynonymSpans(otherAmounts, questionWords).length > 0 &&
+    otherAmountModifiesMetric(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(matchedSynonyms, questionWords), questionWords) &&
     !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };

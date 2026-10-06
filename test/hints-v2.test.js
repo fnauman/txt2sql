@@ -410,6 +410,64 @@ test('v2 layer: a question naming another amount, or an equivalent open-amount f
   assert.ok(!('alternativeColumnSets' in metricOf(v2Plan('Show net sales in March 2026.'), 'net_sales')));
 });
 
+test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
+  // Review finding: "gross" anywhere in the question made an explicit
+  // "revenue" / "average order value" advisory, so "Show revenue and gross
+  // amount" accepted SUM(BillTotalAmount) for revenue.
+  const rejects = (question, sql) => {
+    const prompt = buildOptimizedPrompt(schema, question);
+    try {
+      validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const march = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+  // A separate measure alongside the metric: the metric stays enforced, as in version 1.
+  for (const [question, name] of [
+    ['Show revenue and gross amount in March 2026.', 'net_sales'],
+    ['Show gross amount and revenue in March 2026.', 'net_sales'],
+    ['Show revenue, gross amount and units in March 2026.', 'net_sales'],
+    ['Revenue versus the bill total in March 2026.', 'net_sales'],
+    ['Show average order value and gross amount in March 2026.', 'average_order_value'],
+    ['Average order value and the bill total in March 2026.', 'average_order_value'],
+    ['Average order value, subtotal and units in March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricOf(v1Plan(question), name)?.enforcement ?? 'enforced', 'enforced', question);
+  }
+  assert.equal(rejects('Show revenue and gross amount in March 2026.', `SELECT SUM(d.BillTotalAmount) AS revenue, SUM(d.GrossAmount) AS gross ${march}`), 'METRIC_COLUMN');
+  assert.equal(rejects('Show revenue and gross amount in March 2026.', `SELECT SUM(d.NetAmount) AS revenue, SUM(d.GrossAmount) AS gross ${march}`), null);
+  assert.equal(rejects('Show average order value and gross amount in March 2026.', `SELECT AVG(d.BillTotalAmount) AS aov, SUM(d.GrossAmount) AS gross ${march}`), 'METRIC_COLUMN');
+  assert.equal(rejects('Show average order value and gross amount in March 2026.', `SELECT AVG(COALESCE(d.NetAmount,0)) AS aov, SUM(d.GrossAmount) AS gross ${march}`), null);
+
+  // Wording that modifies the metric phrase: before it, after it in
+  // parentheses or with glue words, or a tax phrase after it.
+  for (const [question, name] of [
+    ['What was our gross revenue in March 2026?', 'net_sales'],
+    ['Gross monthly revenue in March 2026.', 'net_sales'],
+    ['Revenue (gross) in March 2026.', 'net_sales'],
+    ['Revenue on a gross basis in March 2026.', 'net_sales'],
+    ['What was our revenue including tax in March 2026?', 'net_sales'],
+    ['Revenue, tax included, in March 2026.', 'net_sales'],
+    ['Average order value (gross) in March 2026.', 'average_order_value'],
+    ['Average order value including tax in March 2026.', 'average_order_value'],
+    ['Average order value, tax included, in March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+  }
+  assert.equal(rejects('Revenue (gross) in March 2026.', `SELECT SUM(d.GrossAmount) AS revenue ${march}`), null);
+  assert.equal(rejects('Average order value (gross) in March 2026.', `SELECT AVG(d.GrossAmount) AS aov ${march}`), null);
+  // Each metric reads its own modifier: the tax phrase after "average order
+  // value" does not demote "revenue" before it.
+  const both = v2Plan('Revenue and average order value including tax in March 2026.');
+  assert.equal(metricOf(both, 'net_sales').enforcement, 'enforced');
+  assert.equal(metricOf(both, 'average_order_value').enforcement, 'advisory');
+});
+
 test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
   const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
   assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);
