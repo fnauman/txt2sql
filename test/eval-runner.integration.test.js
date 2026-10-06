@@ -460,7 +460,8 @@ test('npm run eval --write-baseline: a run of one dataset never replaces the def
   try {
     const run = await runEval(['--dataset', 'core-public', '--model', model, '--write-baseline', '--skip-verify'], 'baseline-subset');
     assert.equal(run.code, 2, run.stdout + run.stderr);
-    assert.match(run.stdout + run.stderr, /--write-baseline refused before the run: the run selects 9 of the default suite's 26 case\(s\)/);
+    const suiteSize = (await selectSuite()).entries.length;
+    assert.match(run.stdout + run.stderr, new RegExp(`--write-baseline refused before the run: the run selects 9 of the default suite's ${suiteSize} case\\(s\\)`));
     assert.doesNotMatch(run.stdout, /^Running /m, 'nothing ran');
     await assert.rejects(fs.access(target), 'no baseline written');
   } finally {
@@ -582,16 +583,21 @@ test('--gate on a rescore exits 2 when the recorded report does not cover today\
   assert.equal(renamed.code, 2, renamed.stdout + renamed.stderr);
   assert.match(renamed.stdout, /HARNESS: --gate checked none of today's 26 suite case\(s\) against the baseline \S+: 26 not in the rescored report/);
 
-  // A one-case recorded report.
+  // A one-case recorded report (today's suite: the three datasets it was run on).
   const oneCase = path.join(outputRoot, 'one-case-report.json');
   await fs.writeFile(oneCase, JSON.stringify({ ...first.report, results: first.report.results.slice(0, 1) }));
-  const subset = await runEval(['--rescore', oneCase, '--gate', '--skip-verify'], 'gate-subset-suite');
+  const subset = await runEval(['--rescore', oneCase, '--gate', '--skip-verify', ...LEGACY], 'gate-subset-suite');
   assert.equal(subset.code, 2, subset.stdout + subset.stderr);
   assert.match(subset.stdout, /HARNESS: --gate checked only 1 of today's 26 suite case\(s\) \(below 50%\)/);
 
-  // The full recorded report covers the suite.
-  const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-full-suite');
+  // The full recorded report covers the suite it was run on, but not the
+  // whole default suite (26 of its answer cases).
+  const full = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify', ...LEGACY], 'gate-full-suite');
   assert.equal(full.code, 0, full.stdout + full.stderr);
+  const answerCases = (await selectSuite()).entries.filter((entry) => !['abstain', 'clarify'].includes(entry.testCase.expected_behavior)).length;
+  const wholeSuite = await runEval(['--rescore', first.reportPath, '--gate', '--skip-verify'], 'gate-whole-suite');
+  assert.equal(wholeSuite.code, 2, wholeSuite.stdout + wholeSuite.stderr);
+  assert.match(wholeSuite.stdout, new RegExp(`HARNESS: --gate checked only 26 of today's ${answerCases} suite case\\(s\\) \\(below 50%\\)`));
 });
 
 test('--rescore --case-id with a dropped duplicate\'s id rescores the kept case, as a live run would run it', { skip }, async () => {
