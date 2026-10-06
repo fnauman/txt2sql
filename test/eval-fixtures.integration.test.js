@@ -13,7 +13,7 @@ import { loadControlsIndex } from '../src/eval/controls.js';
 import { FACT_TABLES, MASTER_TABLES } from '../src/eval/fixture-data.js';
 import { checkFixtureContent, checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, describeFixtureContent } from '../src/eval/fixtures.js';
-import { closeFixtureConnections, createGoldCache, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
+import { closeFixtureConnections, createGoldCache, executeGoldSql, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
 import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
 import { createMariaDbConnection } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -203,13 +203,26 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
   const goldCache = createGoldCache();
   const validate = createValidatorProbe({ schema, connection: connections[0].connection });
   try {
-    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public']) {
+    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public', 'holdout-public']) {
       const { cases } = await loadBenchmarkDataset({ datasetName });
       const results = [];
       for (const testCase of cases) {
         const result = await verifyCase(testCase, { connections, goldCache, validate, controlsIndex });
         assert.deepEqual(result.problems, [], `${datasetName}/${testCase.id}`);
         results.push(result);
+      }
+      if (datasetName === 'holdout-public') {
+        // No fresh-holdout gold is degenerate: on some fixture it returns a
+        // row with a value that is neither NULL nor 0 (an empty or all-zero
+        // gold everywhere cannot tell wrong SQL apart).
+        for (const testCase of cases.filter((entry) => entry.expected_behavior === 'answer')) {
+          let informative = false;
+          for (const fixtureConnection of connections) {
+            const rows = await executeGoldSql(fixtureConnection, testCase.expected_sql, { goldCache, label: 'expected_sql' });
+            informative ||= rows.some((row) => Object.values(row).some((value) => value !== null && !(Number.isFinite(Number(value)) && Number(value) === 0)));
+          }
+          assert.ok(informative, `${testCase.id}: empty or all NULL / 0 on every fixture`);
+        }
       }
       const summary = summarizeControls(results, { fixtureNames: FIXTURES.map((fixture) => fixture.name) });
       assert.ok(summary.design.rate >= 0.95, `${datasetName} design kill rate ${summary.design.rate}`);

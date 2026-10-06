@@ -46,7 +46,7 @@ test('the manifest is not a dataset: the suite, verify-dataset and the hygiene t
   assert.equal(isDatasetFileName('notes.md'), false);
   const names = await listDatasetNames(DEFAULT_DATASETS_DIR);
   assert.ok(!names.includes('holdout-manifest'));
-  assert.deepEqual(names, ['core-public', 'edge-cases-public', 'hard-cases-public', 'paraphrase-public', 'templated-public']);
+  assert.deepEqual(names, ['core-public', 'edge-cases-public', 'hard-cases-public', 'holdout-public', 'paraphrase-public', 'templated-public']);
 });
 
 const raw = (id, overrides = {}) => ({

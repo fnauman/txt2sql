@@ -75,27 +75,38 @@ test('filters: split (missing = dev), case ids, any-of tags, intents', () => {
 test('the default suite is every committed dataset, de-duplicated to the unique cases', async () => {
   const suite = await selectSuite();
   assert.equal(suite.name, 'all');
-  assert.deepEqual(suite.datasets.map((dataset) => dataset.name), ['core-public', 'edge-cases-public', 'hard-cases-public', 'paraphrase-public', 'templated-public']);
-  assert.equal(suite.totalCaseCount, 264);
-  assert.equal(suite.uniqueCaseCount, 255);
-  assert.equal(suite.entries.length, 255);
+  assert.deepEqual(suite.datasets.map((dataset) => dataset.name), [
+    'core-public',
+    'edge-cases-public',
+    'hard-cases-public',
+    'holdout-public',
+    'paraphrase-public',
+    'templated-public',
+  ]);
+  // 255 hash-split cases (140 intents) plus the fresh holdout's 149 (77).
+  assert.equal(suite.totalCaseCount, 264 + 149);
+  assert.equal(suite.uniqueCaseCount, 255 + 149);
+  assert.equal(suite.entries.length, 255 + 149);
   assert.equal(suite.duplicates.length, 9);
   assert.ok(suite.duplicates.every((entry) => entry.reason === 'same case id' && entry.dataset === 'edge-cases-public'));
-  assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 140);
+  assert.equal(new Set(suite.entries.map((entry) => entry.testCase.intentId)).size, 140 + 77);
   // The retired holdout (81 cases, 45 intents) is dev now, tagged
-  // formerly_holdout; the holdout is what datasets/holdout-manifest.json
-  // freezes. While it is empty, --split holdout selects nothing (an empty
-  // selection is a harness error).
+  // formerly_holdout; the holdout is the fresh one (149 cases, 77 intents),
+  // exactly what datasets/holdout-manifest.json freezes.
   const frozen = (await readHoldoutManifest()).entries.map((entry) => entry.id);
-  if (frozen.length === 0) {
-    await assert.rejects(selectSuite({ split: 'holdout' }), (error) => error.code === 'EMPTY_SELECTION');
-  } else {
-    assert.deepEqual((await selectSuite({ split: 'holdout' })).entries.map((entry) => entry.testCase.id).sort(), frozen);
-  }
-  assert.equal((await selectSuite({ split: 'dev' })).entries.length, suite.entries.length - frozen.length);
+  const holdout = await selectSuite({ split: 'holdout' });
+  assert.deepEqual(holdout.entries.map((entry) => entry.testCase.id).sort(), frozen);
+  assert.equal(holdout.entries.length, 149);
+  assert.equal(new Set(holdout.entries.map((entry) => entry.testCase.intentId)).size, 77);
+  assert.equal((await selectSuite({ split: 'dev' })).entries.length, 255);
   const formerly = await selectSuite({ tags: ['formerly_holdout'] });
   assert.equal(formerly.entries.length, 81);
   assert.equal(new Set(formerly.entries.map((entry) => entry.testCase.intentId)).size, 45);
+  assert.ok(formerly.entries.every((entry) => entry.testCase.split === 'dev'));
+  // The fresh holdout alone, as `--dataset holdout-public` selects it.
+  const fresh = await selectSuite({ datasetNames: ['holdout-public'] });
+  assert.equal(fresh.entries.length, 149);
+  assert.ok(fresh.entries.every((entry) => entry.testCase.split === 'holdout'));
   // The pre-existing datasets alone are still the 26 cases over 17 intents.
   const legacy = await selectSuite({ datasetNames: ['core-public', 'paraphrase-public', 'edge-cases-public'] });
   assert.equal(legacy.entries.length, 26);

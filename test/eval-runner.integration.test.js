@@ -355,7 +355,7 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   const { reportPath, report } = await findReport(run.outputDir);
   assert.match(reportPath, /[/\\]all[/\\]gpt-4o-mini[/\\]report\.json$/);
   assert.equal(report.results.length, cases.length);
-  assert.equal(report.verification.datasets.length, 5);
+  assert.equal(report.verification.datasets.length, 6);
   assert.ok(report.verification.datasets.every((dataset) => !dataset.controls || dataset.controls.design.rate >= 0.95));
 
   // Behaviour cases: never in accuracy, reported on their own.
@@ -396,7 +396,8 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   // which scope ran.
   assert.equal(report.provenance.product.schemaScope.effective, 'full');
   assert.equal(report.attribution.system.retrievalMisses, 0);
-  assert.equal(flagged.length, 1);
+  // One in the hash-split suite, four in the fresh holdout (datasets/holdout-public.json).
+  assert.equal(flagged.length, 5);
   assert.equal(report.stats.strictAccuracy.value, Number((passes / answer.length).toFixed(4)));
   // The splits in the suite: the retired holdout is dev (formerly_holdout);
   // a fresh, blind holdout may or may not have landed.

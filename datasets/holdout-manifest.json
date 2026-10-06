@@ -1,14 +1,1511 @@
 {
   "manifestVersion": 1,
   "policy": "Error analysis and experiment design use dev failures only; holdout results are read in aggregate (report.md and the console show them by split, never per case, unless --reveal-holdout). Any change to the holdout (a case added, removed or changed) requires rewriting this manifest with a dated note (npm run holdout-manifest -- --write --note \"...\").",
-  "fingerprint": "4f53cda18c2baa0c",
-  "entries": [],
+  "fingerprint": "b1a81db0344210b3",
+  "entries": [
+    {
+      "id": "ho2_agreed_vs_charged_price_2026_dba74e",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "agreed_vs_charged_price_2026",
+      "question_fingerprint": "dba74e0a16e9e368",
+      "gold_fingerprint": "2ce54d6e5fd7f598",
+      "scoring_fingerprint": "a3064d54eb2280b2"
+    },
+    {
+      "id": "ho2_agreed_vs_charged_price_2026_f25d85",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "agreed_vs_charged_price_2026",
+      "question_fingerprint": "f25d85ae07fca678",
+      "gold_fingerprint": "2ce54d6e5fd7f598",
+      "scoring_fingerprint": "a3064d54eb2280b2"
+    },
+    {
+      "id": "ho2_agreements_in_force_2026_01_15_24f9fb",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "agreements_in_force_2026_01_15",
+      "question_fingerprint": "24f9fbe30b9163b0",
+      "gold_fingerprint": "b958cc30f19cbb76",
+      "scoring_fingerprint": "5e4426a072b1c7a0"
+    },
+    {
+      "id": "ho2_agreements_in_force_2026_01_15_c733f6",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "agreements_in_force_2026_01_15",
+      "question_fingerprint": "c733f646043d8354",
+      "gold_fingerprint": "b958cc30f19cbb76",
+      "scoring_fingerprint": "5e4426a072b1c7a0"
+    },
+    {
+      "id": "ho2_ar_ageing_asof_2026_05_31_22f54c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ar_ageing_asof_2026_05_31",
+      "question_fingerprint": "22f54cd7f6a29eb0",
+      "gold_fingerprint": "6cc4460228ec3f38",
+      "scoring_fingerprint": "71ea99df57900583"
+    },
+    {
+      "id": "ho2_ar_ageing_asof_2026_05_31_47ffd1",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ar_ageing_asof_2026_05_31",
+      "question_fingerprint": "47ffd1452382f978",
+      "gold_fingerprint": "6cc4460228ec3f38",
+      "scoring_fingerprint": "71ea99df57900583"
+    },
+    {
+      "id": "ho2_average_basket_apr_2026_5fa07e",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "average_basket_apr_2026",
+      "question_fingerprint": "5fa07ed4df029288",
+      "gold_fingerprint": "d63065804222f646",
+      "scoring_fingerprint": "368ceb1de01e9eaa"
+    },
+    {
+      "id": "ho2_avg_unit_price_by_product_q1_2026_7cef03",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "avg_unit_price_by_product_q1_2026",
+      "question_fingerprint": "7cef03c4d91bb382",
+      "gold_fingerprint": "faf7582c5bcae06b",
+      "scoring_fingerprint": "f551bc98a29f962f"
+    },
+    {
+      "id": "ho2_avg_unit_price_by_product_q1_2026_db8b15",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "avg_unit_price_by_product_q1_2026",
+      "question_fingerprint": "db8b1573ecc3185b",
+      "gold_fingerprint": "faf7582c5bcae06b",
+      "scoring_fingerprint": "f551bc98a29f962f"
+    },
+    {
+      "id": "ho2_best_month_2025_894b10",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "best_month_2025",
+      "question_fingerprint": "894b10bbe84e54b5",
+      "gold_fingerprint": "2122ceb003fa83b9",
+      "scoring_fingerprint": "4460a6d666fc3650"
+    },
+    {
+      "id": "ho2_best_month_2025_90de0a",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "best_month_2025",
+      "question_fingerprint": "90de0a4d6e042278",
+      "gold_fingerprint": "2122ceb003fa83b9",
+      "scoring_fingerprint": "4460a6d666fc3650"
+    },
+    {
+      "id": "ho2_best_seller_per_category_mar_2026_a3d10c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "best_seller_per_category_mar_2026",
+      "question_fingerprint": "a3d10c457564a7ac",
+      "gold_fingerprint": "2cc02936e618bd4e",
+      "scoring_fingerprint": "d2cccbda8f277a87"
+    },
+    {
+      "id": "ho2_best_seller_per_category_mar_2026_a6eb25",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "best_seller_per_category_mar_2026",
+      "question_fingerprint": "a6eb25b7bb4f4a90",
+      "gold_fingerprint": "2cc02936e618bd4e",
+      "scoring_fingerprint": "d2cccbda8f277a87"
+    },
+    {
+      "id": "ho2_brands_per_customer_q1_2026_843907",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "brands_per_customer_q1_2026",
+      "question_fingerprint": "843907575b84036d",
+      "gold_fingerprint": "ecbf1f0a5b58b8cc",
+      "scoring_fingerprint": "6ac316ec0ad8ac8e"
+    },
+    {
+      "id": "ho2_brands_per_customer_q1_2026_a2a504",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "brands_per_customer_q1_2026",
+      "question_fingerprint": "a2a50420319ace75",
+      "gold_fingerprint": "ecbf1f0a5b58b8cc",
+      "scoring_fingerprint": "6ac316ec0ad8ac8e"
+    },
+    {
+      "id": "ho2_busiest_day_mar_2026_1407da",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "busiest_day_mar_2026",
+      "question_fingerprint": "1407daed3094cd9e",
+      "gold_fingerprint": "5d2fd76b85ef22b4",
+      "scoring_fingerprint": "4a727bfd7f690990"
+    },
+    {
+      "id": "ho2_busiest_day_mar_2026_fb11b8",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "busiest_day_mar_2026",
+      "question_fingerprint": "fb11b86066e4d015",
+      "gold_fingerprint": "5d2fd76b85ef22b4",
+      "scoring_fingerprint": "4a727bfd7f690990"
+    },
+    {
+      "id": "ho2_campaign_units_by_store_q1_2026_076675",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "campaign_units_by_store_q1_2026",
+      "question_fingerprint": "076675158a070eb4",
+      "gold_fingerprint": "2e0f5c6533119ec0",
+      "scoring_fingerprint": "8433f5d0c510cee9"
+    },
+    {
+      "id": "ho2_campaign_units_by_store_q1_2026_144980",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "campaign_units_by_store_q1_2026",
+      "question_fingerprint": "144980197cc70c3f",
+      "gold_fingerprint": "2e0f5c6533119ec0",
+      "scoring_fingerprint": "8433f5d0c510cee9"
+    },
+    {
+      "id": "ho2_category_h1_vs_h2_2025_460db9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "category_h1_vs_h2_2025",
+      "question_fingerprint": "460db9f93343bb91",
+      "gold_fingerprint": "5c31feaa8e87d931",
+      "scoring_fingerprint": "e9535c1e1b3f80e3"
+    },
+    {
+      "id": "ho2_category_h1_vs_h2_2025_cd86f7",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "category_h1_vs_h2_2025",
+      "question_fingerprint": "cd86f703bed9ad4f",
+      "gold_fingerprint": "5c31feaa8e87d931",
+      "scoring_fingerprint": "e9535c1e1b3f80e3"
+    },
+    {
+      "id": "ho2_category_unit_mix_feb_2026_25cd12",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "category_unit_mix_feb_2026",
+      "question_fingerprint": "25cd12fb8a4d5e1d",
+      "gold_fingerprint": "b1181234cf0f723e",
+      "scoring_fingerprint": "63806824cd4efee3"
+    },
+    {
+      "id": "ho2_category_unit_mix_feb_2026_359805",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "category_unit_mix_feb_2026",
+      "question_fingerprint": "359805db640c6de6",
+      "gold_fingerprint": "b1181234cf0f723e",
+      "scoring_fingerprint": "63806824cd4efee3"
+    },
+    {
+      "id": "ho2_collection_rate_mar_2026_02cbc4",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "collection_rate_mar_2026",
+      "question_fingerprint": "02cbc459852e3bfc",
+      "gold_fingerprint": "7df0bf882767efe8",
+      "scoring_fingerprint": "bfdfc21286272d79"
+    },
+    {
+      "id": "ho2_collection_rate_mar_2026_612fa8",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "collection_rate_mar_2026",
+      "question_fingerprint": "612fa8552dd93d2b",
+      "gold_fingerprint": "7df0bf882767efe8",
+      "scoring_fingerprint": "bfdfc21286272d79"
+    },
+    {
+      "id": "ho2_credit_note_value_monthly_2026_404c34",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "credit_note_value_monthly_2026",
+      "question_fingerprint": "404c3467ad18dba7",
+      "gold_fingerprint": "7c82451e3ff73fce",
+      "scoring_fingerprint": "91607a1541abd8b1"
+    },
+    {
+      "id": "ho2_credit_note_value_monthly_2026_7dfcd3",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "credit_note_value_monthly_2026",
+      "question_fingerprint": "7dfcd3d9acf336d7",
+      "gold_fingerprint": "7c82451e3ff73fce",
+      "scoring_fingerprint": "91607a1541abd8b1"
+    },
+    {
+      "id": "ho2_cumulative_turnover_2026_94041d",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "cumulative_turnover_2026",
+      "question_fingerprint": "94041d1d659df00c",
+      "gold_fingerprint": "305e82364cdf3ce8",
+      "scoring_fingerprint": "718b7e204f59e050"
+    },
+    {
+      "id": "ho2_cumulative_turnover_2026_be4d09",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "cumulative_turnover_2026",
+      "question_fingerprint": "be4d0903ff99c0cd",
+      "gold_fingerprint": "305e82364cdf3ce8",
+      "scoring_fingerprint": "718b7e204f59e050"
+    },
+    {
+      "id": "ho2_customer_c004_gross_jan_2026_4ab958",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customer_c004_gross_jan_2026",
+      "question_fingerprint": "4ab9588892e9ceae",
+      "gold_fingerprint": "1ab40cd50cc398bb",
+      "scoring_fingerprint": "4297d705698cedb0"
+    },
+    {
+      "id": "ho2_customer_c004_gross_jan_2026_b12982",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customer_c004_gross_jan_2026",
+      "question_fingerprint": "b129827f8cd0a511",
+      "gold_fingerprint": "1ab40cd50cc398bb",
+      "scoring_fingerprint": "4297d705698cedb0"
+    },
+    {
+      "id": "ho2_customer_paid_vs_open_q1_2026_d12b6e",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customer_paid_vs_open_q1_2026",
+      "question_fingerprint": "d12b6ebaaeb6b9e7",
+      "gold_fingerprint": "d0c031d9653741cd",
+      "scoring_fingerprint": "304b7ba914a0df25"
+    },
+    {
+      "id": "ho2_customer_paid_vs_open_q1_2026_dc0ac1",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customer_paid_vs_open_q1_2026",
+      "question_fingerprint": "dc0ac130c93b4f84",
+      "gold_fingerprint": "d0c031d9653741cd",
+      "scoring_fingerprint": "304b7ba914a0df25"
+    },
+    {
+      "id": "ho2_customers_every_month_q1_2026_ca3086",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_every_month_q1_2026",
+      "question_fingerprint": "ca3086b0740e006a",
+      "gold_fingerprint": "ec6c6797f9530b5c",
+      "scoring_fingerprint": "46b157b26a3d8477"
+    },
+    {
+      "id": "ho2_customers_every_month_q1_2026_df90d5",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_every_month_q1_2026",
+      "question_fingerprint": "df90d5e39b3bec97",
+      "gold_fingerprint": "ec6c6797f9530b5c",
+      "scoring_fingerprint": "46b157b26a3d8477"
+    },
+    {
+      "id": "ho2_customers_multi_store_q1_2026_437ba9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_multi_store_q1_2026",
+      "question_fingerprint": "437ba97838ca7cca",
+      "gold_fingerprint": "321437315631dce1",
+      "scoring_fingerprint": "e6c3d6af967b4b9e"
+    },
+    {
+      "id": "ho2_customers_multi_store_q1_2026_cd72d4",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_multi_store_q1_2026",
+      "question_fingerprint": "cd72d41243c3b9d1",
+      "gold_fingerprint": "321437315631dce1",
+      "scoring_fingerprint": "e6c3d6af967b4b9e"
+    },
+    {
+      "id": "ho2_customers_over_2600_mar_2026_0f5690",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_over_2600_mar_2026",
+      "question_fingerprint": "0f56909dc31636b3",
+      "gold_fingerprint": "d0332b9208c7f2f8",
+      "scoring_fingerprint": "3f92aeb1110ac81c"
+    },
+    {
+      "id": "ho2_customers_over_2600_mar_2026_e2b3b8",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_over_2600_mar_2026",
+      "question_fingerprint": "e2b3b86a4c8ab593",
+      "gold_fingerprint": "d0332b9208c7f2f8",
+      "scoring_fingerprint": "3f92aeb1110ac81c"
+    },
+    {
+      "id": "ho2_customers_two_brands_mar_2026_3c5b39",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_two_brands_mar_2026",
+      "question_fingerprint": "3c5b393e33ecb02a",
+      "gold_fingerprint": "11356715c00c4842",
+      "scoring_fingerprint": "59e9a1824583fcaa"
+    },
+    {
+      "id": "ho2_customers_two_brands_mar_2026_f854a0",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_two_brands_mar_2026",
+      "question_fingerprint": "f854a00feaf04498",
+      "gold_fingerprint": "11356715c00c4842",
+      "scoring_fingerprint": "59e9a1824583fcaa"
+    },
+    {
+      "id": "ho2_customers_up_q1_2026_vs_q4_2025_0df28b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_up_q1_2026_vs_q4_2025",
+      "question_fingerprint": "0df28b2b87c29dc2",
+      "gold_fingerprint": "d72b286e8be0fb01",
+      "scoring_fingerprint": "6430395084ec4b3e"
+    },
+    {
+      "id": "ho2_customers_up_q1_2026_vs_q4_2025_ae0efa",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "customers_up_q1_2026_vs_q4_2025",
+      "question_fingerprint": "ae0efa547b608f1f",
+      "gold_fingerprint": "d72b286e8be0fb01",
+      "scoring_fingerprint": "6430395084ec4b3e"
+    },
+    {
+      "id": "ho2_delisted_products_sold_2026_3b7294",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "delisted_products_sold_2026",
+      "question_fingerprint": "3b7294d5c56d18ca",
+      "gold_fingerprint": "0f7ac968612e8fba",
+      "scoring_fingerprint": "9c732c6f897d8bb7"
+    },
+    {
+      "id": "ho2_delisted_products_sold_2026_97aa6b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "delisted_products_sold_2026",
+      "question_fingerprint": "97aa6b0443d6d753",
+      "gold_fingerprint": "0f7ac968612e8fba",
+      "scoring_fingerprint": "9c732c6f897d8bb7"
+    },
+    {
+      "id": "ho2_distinct_products_per_document_q1_2026_899d6c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "distinct_products_per_document_q1_2026",
+      "question_fingerprint": "899d6c04c87c87be",
+      "gold_fingerprint": "7e2916cf729984c9",
+      "scoring_fingerprint": "da018e2c9152e74e"
+    },
+    {
+      "id": "ho2_distinct_products_per_document_q1_2026_9f6f22",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "distinct_products_per_document_q1_2026",
+      "question_fingerprint": "9f6f22edc03083a1",
+      "gold_fingerprint": "7e2916cf729984c9",
+      "scoring_fingerprint": "da018e2c9152e74e"
+    },
+    {
+      "id": "ho2_documents_last_7_days_asof_2026_04_07_3a74f2",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "documents_last_7_days_asof_2026_04_07",
+      "question_fingerprint": "3a74f2f956972f5f",
+      "gold_fingerprint": "f0f3dead892e7ec9",
+      "scoring_fingerprint": "231b155ce214049f"
+    },
+    {
+      "id": "ho2_documents_last_7_days_asof_2026_04_07_8ee6c9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "documents_last_7_days_asof_2026_04_07",
+      "question_fingerprint": "8ee6c9159e78103f",
+      "gold_fingerprint": "f0f3dead892e7ec9",
+      "scoring_fingerprint": "231b155ce214049f"
+    },
+    {
+      "id": "ho2_dormant_account_monthly_2026_969da9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "dormant_account_monthly_2026",
+      "question_fingerprint": "969da939c98a2d18",
+      "gold_fingerprint": "7fd4487177430f4a",
+      "scoring_fingerprint": "9c7f5752070be0b0"
+    },
+    {
+      "id": "ho2_dormant_account_monthly_2026_a445b3",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "dormant_account_monthly_2026",
+      "question_fingerprint": "a445b3a239d47d00",
+      "gold_fingerprint": "7fd4487177430f4a",
+      "scoring_fingerprint": "9c7f5752070be0b0"
+    },
+    {
+      "id": "ho2_due_rest_of_month_asof_2026_05_10_6ce3d9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "due_rest_of_month_asof_2026_05_10",
+      "question_fingerprint": "6ce3d92e14edd75c",
+      "gold_fingerprint": "fdcec611d7ebcfe1",
+      "scoring_fingerprint": "d61f54c035cfa499"
+    },
+    {
+      "id": "ho2_due_rest_of_month_asof_2026_05_10_e5a04c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "due_rest_of_month_asof_2026_05_10",
+      "question_fingerprint": "e5a04c134abb35dd",
+      "gold_fingerprint": "fdcec611d7ebcfe1",
+      "scoring_fingerprint": "d61f54c035cfa499"
+    },
+    {
+      "id": "ho2_fee_lines_q1_2026_7c63a9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "fee_lines_q1_2026",
+      "question_fingerprint": "7c63a9be38626199",
+      "gold_fingerprint": "2286aa1dc9e85421",
+      "scoring_fingerprint": "f0ba38db31ebc595"
+    },
+    {
+      "id": "ho2_fee_lines_q1_2026_e78578",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "fee_lines_q1_2026",
+      "question_fingerprint": "e78578d62a074d69",
+      "gold_fingerprint": "2286aa1dc9e85421",
+      "scoring_fingerprint": "f0ba38db31ebc595"
+    },
+    {
+      "id": "ho2_gross_net_gap_by_kind_q1_2026_2ca3e6",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "gross_net_gap_by_kind_q1_2026",
+      "question_fingerprint": "2ca3e66beb9ae5d7",
+      "gold_fingerprint": "3683698f5f9b6b43",
+      "scoring_fingerprint": "b6e81f400c9f8738"
+    },
+    {
+      "id": "ho2_gross_net_gap_by_kind_q1_2026_cfa4af",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "gross_net_gap_by_kind_q1_2026",
+      "question_fingerprint": "cfa4af8bd8babc96",
+      "gold_fingerprint": "3683698f5f9b6b43",
+      "scoring_fingerprint": "b6e81f400c9f8738"
+    },
+    {
+      "id": "ho2_herbal_tea_buyers_q1_2026_512abb",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "herbal_tea_buyers_q1_2026",
+      "question_fingerprint": "512abb54fce29a70",
+      "gold_fingerprint": "d630eba103dc64ad",
+      "scoring_fingerprint": "63a2cefc87ff6f00"
+    },
+    {
+      "id": "ho2_herbal_tea_buyers_q1_2026_98d9b5",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "herbal_tea_buyers_q1_2026",
+      "question_fingerprint": "98d9b57b5ef19574",
+      "gold_fingerprint": "d630eba103dc64ad",
+      "scoring_fingerprint": "63a2cefc87ff6f00"
+    },
+    {
+      "id": "ho2_homebase_units_monthly_2025_088a65",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "homebase_units_monthly_2025",
+      "question_fingerprint": "088a654f6be9659a",
+      "gold_fingerprint": "b9c33803917fb9f6",
+      "scoring_fingerprint": "80b9fb22e2fb97fa"
+    },
+    {
+      "id": "ho2_homebase_units_monthly_2025_53feda",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "homebase_units_monthly_2025",
+      "question_fingerprint": "53feda5fdc3fd910",
+      "gold_fingerprint": "b9c33803917fb9f6",
+      "scoring_fingerprint": "80b9fb22e2fb97fa"
+    },
+    {
+      "id": "ho2_invoice_vs_receipt_avg_q1_2026_f969d1",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "invoice_vs_receipt_avg_q1_2026",
+      "question_fingerprint": "f969d1485359c56e",
+      "gold_fingerprint": "d6e0a21b521797ab",
+      "scoring_fingerprint": "c2a726586224fac8"
+    },
+    {
+      "id": "ho2_invoice_vs_receipt_avg_q1_2026_fbbb9b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "invoice_vs_receipt_avg_q1_2026",
+      "question_fingerprint": "fbbb9b5689ca74ff",
+      "gold_fingerprint": "d6e0a21b521797ab",
+      "scoring_fingerprint": "c2a726586224fac8"
+    },
+    {
+      "id": "ho2_lakeside_days_between_purchases_q1_2026_01c52b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lakeside_days_between_purchases_q1_2026",
+      "question_fingerprint": "01c52bd635aa5965",
+      "gold_fingerprint": "278233503b6da7f7",
+      "scoring_fingerprint": "317f6a60289a5ec3"
+    },
+    {
+      "id": "ho2_lakeside_days_between_purchases_q1_2026_f7e88c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lakeside_days_between_purchases_q1_2026",
+      "question_fingerprint": "f7e88c5acbf8c3bf",
+      "gold_fingerprint": "278233503b6da7f7",
+      "scoring_fingerprint": "317f6a60289a5ec3"
+    },
+    {
+      "id": "ho2_lapsed_customers_asof_2026_05_31_134601",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lapsed_customers_asof_2026_05_31",
+      "question_fingerprint": "134601f79ca747b9",
+      "gold_fingerprint": "dd27956b5463366e",
+      "scoring_fingerprint": "2718c7107edcc519"
+    },
+    {
+      "id": "ho2_lapsed_customers_asof_2026_05_31_592714",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lapsed_customers_asof_2026_05_31",
+      "question_fingerprint": "59271469a1f572aa",
+      "gold_fingerprint": "dd27956b5463366e",
+      "scoring_fingerprint": "2718c7107edcc519"
+    },
+    {
+      "id": "ho2_largest_line_mar_2026_238eec",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "largest_line_mar_2026",
+      "question_fingerprint": "238eecd769a8ab4a",
+      "gold_fingerprint": "1b958febe448e9b1",
+      "scoring_fingerprint": "41e93f6b894c9d22"
+    },
+    {
+      "id": "ho2_largest_line_mar_2026_d30152",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "largest_line_mar_2026",
+      "question_fingerprint": "d3015263acffd42d",
+      "gold_fingerprint": "1b958febe448e9b1",
+      "scoring_fingerprint": "41e93f6b894c9d22"
+    },
+    {
+      "id": "ho2_largest_open_items_top5_599841",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "largest_open_items_top5",
+      "question_fingerprint": "59984158f88227d0",
+      "gold_fingerprint": "49a16542ca0e08f1",
+      "scoring_fingerprint": "9db4fa50f27c97b6"
+    },
+    {
+      "id": "ho2_largest_open_items_top5_8c29c5",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "largest_open_items_top5",
+      "question_fingerprint": "8c29c5286ede3e0a",
+      "gold_fingerprint": "49a16542ca0e08f1",
+      "scoring_fingerprint": "9db4fa50f27c97b6"
+    },
+    {
+      "id": "ho2_last_week_asof_2026_04_08_0da5f7",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "last_week_asof_2026_04_08",
+      "question_fingerprint": "0da5f7d9e35d5839",
+      "gold_fingerprint": "586e749d07df742c",
+      "scoring_fingerprint": "d88352596a20239b"
+    },
+    {
+      "id": "ho2_last_week_asof_2026_04_08_cf8a38",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "last_week_asof_2026_04_08",
+      "question_fingerprint": "cf8a384c87e99a89",
+      "gold_fingerprint": "586e749d07df742c",
+      "scoring_fingerprint": "d88352596a20239b"
+    },
+    {
+      "id": "ho2_ledger_gross_margin_q1_2026_50b797",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ledger_gross_margin_q1_2026",
+      "question_fingerprint": "50b7973fd9fbe2cd",
+      "gold_fingerprint": "710386a5c9acdc70",
+      "scoring_fingerprint": "0701b6773731efc8"
+    },
+    {
+      "id": "ho2_ledger_gross_margin_q1_2026_63b552",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ledger_gross_margin_q1_2026",
+      "question_fingerprint": "63b5526cb15a1c3b",
+      "gold_fingerprint": "710386a5c9acdc70",
+      "scoring_fingerprint": "0701b6773731efc8"
+    },
+    {
+      "id": "ho2_lime_seltzer_units_by_store_2026_79793c",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lime_seltzer_units_by_store_2026",
+      "question_fingerprint": "79793c4fcac88a8b",
+      "gold_fingerprint": "eeb68ce2515e20cb",
+      "scoring_fingerprint": "42192085851be8fa"
+    },
+    {
+      "id": "ho2_lime_seltzer_units_by_store_2026_d9881b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lime_seltzer_units_by_store_2026",
+      "question_fingerprint": "d9881b56a91c41b1",
+      "gold_fingerprint": "eeb68ce2515e20cb",
+      "scoring_fingerprint": "42192085851be8fa"
+    },
+    {
+      "id": "ho2_lines_per_document_by_kind_2026_479e5d",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lines_per_document_by_kind_2026",
+      "question_fingerprint": "479e5de97c738b7a",
+      "gold_fingerprint": "e4fa402fb310f7a1",
+      "scoring_fingerprint": "28343e52033f2764"
+    },
+    {
+      "id": "ho2_lines_per_document_by_kind_2026_787513",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "lines_per_document_by_kind_2026",
+      "question_fingerprint": "7875132c9f880643",
+      "gold_fingerprint": "e4fa402fb310f7a1",
+      "scoring_fingerprint": "28343e52033f2764"
+    },
+    {
+      "id": "ho2_manual_entries_by_account_2026_587d39",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "manual_entries_by_account_2026",
+      "question_fingerprint": "587d390f3f40b711",
+      "gold_fingerprint": "297ba73afeb1f3a4",
+      "scoring_fingerprint": "b248ac847f475785"
+    },
+    {
+      "id": "ho2_manual_entries_by_account_2026_7c5a13",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "manual_entries_by_account_2026",
+      "question_fingerprint": "7c5a136d171f1869",
+      "gold_fingerprint": "297ba73afeb1f3a4",
+      "scoring_fingerprint": "b248ac847f475785"
+    },
+    {
+      "id": "ho2_march_docs_booked_april_or_later_275ffc",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "march_docs_booked_april_or_later",
+      "question_fingerprint": "275ffc087b3ebc99",
+      "gold_fingerprint": "3c3af298d0b45d89",
+      "scoring_fingerprint": "f9e1e0ba95279982"
+    },
+    {
+      "id": "ho2_march_docs_booked_april_or_later_c6e096",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "march_docs_booked_april_or_later",
+      "question_fingerprint": "c6e096a1c5c15656",
+      "gold_fingerprint": "3c3af298d0b45d89",
+      "scoring_fingerprint": "f9e1e0ba95279982"
+    },
+    {
+      "id": "ho2_metro_online_documents_by_kind_q1_2026_a3ff40",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "metro_online_documents_by_kind_q1_2026",
+      "question_fingerprint": "a3ff40a43a3dc1d2",
+      "gold_fingerprint": "9dbbc705bc53b547",
+      "scoring_fingerprint": "4ca4223237eee025"
+    },
+    {
+      "id": "ho2_metro_online_documents_by_kind_q1_2026_a48faf",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "metro_online_documents_by_kind_q1_2026",
+      "question_fingerprint": "a48faf19b65d6963",
+      "gold_fingerprint": "9dbbc705bc53b547",
+      "scoring_fingerprint": "4ca4223237eee025"
+    },
+    {
+      "id": "ho2_min_max_document_by_store_mar_2026_80605f",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "min_max_document_by_store_mar_2026",
+      "question_fingerprint": "80605f80d7024399",
+      "gold_fingerprint": "40c4a4008c093c67",
+      "scoring_fingerprint": "58b08b2355a1e525"
+    },
+    {
+      "id": "ho2_min_max_document_by_store_mar_2026_9d4782",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "min_max_document_by_store_mar_2026",
+      "question_fingerprint": "9d4782952021c5f9",
+      "gold_fingerprint": "40c4a4008c093c67",
+      "scoring_fingerprint": "58b08b2355a1e525"
+    },
+    {
+      "id": "ho2_mom_change_dec_2025_apr_2026_10583d",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "mom_change_dec_2025_apr_2026",
+      "question_fingerprint": "10583dde62e8a70e",
+      "gold_fingerprint": "de3b44b69c99ad66",
+      "scoring_fingerprint": "23db3e10c0babccc"
+    },
+    {
+      "id": "ho2_mom_change_dec_2025_apr_2026_6eaa1b",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "mom_change_dec_2025_apr_2026",
+      "question_fingerprint": "6eaa1ba15eec1e93",
+      "gold_fingerprint": "de3b44b69c99ad66",
+      "scoring_fingerprint": "23db3e10c0babccc"
+    },
+    {
+      "id": "ho2_new_customers_by_month_2026_0901f1",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "new_customers_by_month_2026",
+      "question_fingerprint": "0901f1de817e2a59",
+      "gold_fingerprint": "08f0cea9bb12ffe2",
+      "scoring_fingerprint": "623a7dafc8dc1d10"
+    },
+    {
+      "id": "ho2_new_customers_by_month_2026_edf301",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "new_customers_by_month_2026",
+      "question_fingerprint": "edf301475c354e50",
+      "gold_fingerprint": "08f0cea9bb12ffe2",
+      "scoring_fingerprint": "623a7dafc8dc1d10"
+    },
+    {
+      "id": "ho2_northstar_by_category_mar_2026_9a4ede",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "northstar_by_category_mar_2026",
+      "question_fingerprint": "9a4ede4fd636a368",
+      "gold_fingerprint": "59e83c1df9bd6024",
+      "scoring_fingerprint": "e6127e71db5a0aab"
+    },
+    {
+      "id": "ho2_northstar_by_category_mar_2026_c09f06",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "northstar_by_category_mar_2026",
+      "question_fingerprint": "c09f06c5f6f5a7ac",
+      "gold_fingerprint": "59e83c1df9bd6024",
+      "scoring_fingerprint": "e6127e71db5a0aab"
+    },
+    {
+      "id": "ho2_overdue_balance_asof_2026_04_15_29d5de",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "overdue_balance_asof_2026_04_15",
+      "question_fingerprint": "29d5de05d7c5e4a7",
+      "gold_fingerprint": "5926f598c28e55a0",
+      "scoring_fingerprint": "6ba2231d2ec79774"
+    },
+    {
+      "id": "ho2_overdue_balance_asof_2026_04_15_dd9200",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "overdue_balance_asof_2026_04_15",
+      "question_fingerprint": "dd920065bc3e7d0e",
+      "gold_fingerprint": "5926f598c28e55a0",
+      "scoring_fingerprint": "6ba2231d2ec79774"
+    },
+    {
+      "id": "ho2_overdue_by_customer_asof_2026_04_30_9a7944",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "overdue_by_customer_asof_2026_04_30",
+      "question_fingerprint": "9a7944d62cbcf441",
+      "gold_fingerprint": "d216068d59698d6d",
+      "scoring_fingerprint": "dc4e5f0580013711"
+    },
+    {
+      "id": "ho2_overdue_by_customer_asof_2026_04_30_ae2559",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "overdue_by_customer_asof_2026_04_30",
+      "question_fingerprint": "ae25591ea707f3da",
+      "gold_fingerprint": "d216068d59698d6d",
+      "scoring_fingerprint": "dc4e5f0580013711"
+    },
+    {
+      "id": "ho2_payment_terms_by_segment_2026_6cbb95",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "payment_terms_by_segment_2026",
+      "question_fingerprint": "6cbb95fc120514d9",
+      "gold_fingerprint": "232a384332f582af",
+      "scoring_fingerprint": "339838d374e274e6"
+    },
+    {
+      "id": "ho2_payment_terms_by_segment_2026_c20a29",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "payment_terms_by_segment_2026",
+      "question_fingerprint": "c20a29a5ee160efa",
+      "gold_fingerprint": "232a384332f582af",
+      "scoring_fingerprint": "339838d374e274e6"
+    },
+    {
+      "id": "ho2_posting_lag_by_store_q1_2026_4e4dbb",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "posting_lag_by_store_q1_2026",
+      "question_fingerprint": "4e4dbbdbda691428",
+      "gold_fingerprint": "76437d8bf68c1590",
+      "scoring_fingerprint": "3d3e420cc22bb874"
+    },
+    {
+      "id": "ho2_posting_lag_by_store_q1_2026_7e20fb",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "posting_lag_by_store_q1_2026",
+      "question_fingerprint": "7e20fb88c06ea8b7",
+      "gold_fingerprint": "76437d8bf68c1590",
+      "scoring_fingerprint": "3d3e420cc22bb874"
+    },
+    {
+      "id": "ho2_products_up_apr_vs_mar_2026_628f0a",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "products_up_apr_vs_mar_2026",
+      "question_fingerprint": "628f0a563206a9c3",
+      "gold_fingerprint": "d4b4757b80998c95",
+      "scoring_fingerprint": "8ab71c4d3b2f82fd"
+    },
+    {
+      "id": "ho2_receivable_net_change_monthly_2026_437536",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "receivable_net_change_monthly_2026",
+      "question_fingerprint": "4375360833c75cc7",
+      "gold_fingerprint": "b437227d5b4e6049",
+      "scoring_fingerprint": "871c661c5b69c1f3"
+    },
+    {
+      "id": "ho2_receivable_net_change_monthly_2026_c6ab70",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "receivable_net_change_monthly_2026",
+      "question_fingerprint": "c6ab701c9ecd7198",
+      "gold_fingerprint": "b437227d5b4e6049",
+      "scoring_fingerprint": "871c661c5b69c1f3"
+    },
+    {
+      "id": "ho2_repeat_customers_mar_2026_1655c7",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "repeat_customers_mar_2026",
+      "question_fingerprint": "1655c7336470486e",
+      "gold_fingerprint": "4239430b09370612",
+      "scoring_fingerprint": "fac16d8212cfb064"
+    },
+    {
+      "id": "ho2_repeat_customers_mar_2026_98a6e6",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "repeat_customers_mar_2026",
+      "question_fingerprint": "98a6e6246b2e7e3b",
+      "gold_fingerprint": "4239430b09370612",
+      "scoring_fingerprint": "fac16d8212cfb064"
+    },
+    {
+      "id": "ho2_repeat_customers_mar_2026_e0aea3",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "repeat_customers_mar_2026",
+      "question_fingerprint": "e0aea3083af336eb",
+      "gold_fingerprint": "4239430b09370612",
+      "scoring_fingerprint": "fac16d8212cfb064"
+    },
+    {
+      "id": "ho2_rice_price_range_2026_677815",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "rice_price_range_2026",
+      "question_fingerprint": "67781515602b22f2",
+      "gold_fingerprint": "cb0d0effe5df3bc3",
+      "scoring_fingerprint": "78f04e38fca52640"
+    },
+    {
+      "id": "ho2_rice_price_range_2026_c195fd",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "rice_price_range_2026",
+      "question_fingerprint": "c195fdd8eda2cfb8",
+      "gold_fingerprint": "cb0d0effe5df3bc3",
+      "scoring_fingerprint": "78f04e38fca52640"
+    },
+    {
+      "id": "ho2_sales_revenue_debits_2026_5e92ec",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "sales_revenue_debits_2026",
+      "question_fingerprint": "5e92ec7c80f8cdee",
+      "gold_fingerprint": "f07929759644402f",
+      "scoring_fingerprint": "15a08588ca58c4b7"
+    },
+    {
+      "id": "ho2_sales_revenue_debits_2026_a549e9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "sales_revenue_debits_2026",
+      "question_fingerprint": "a549e9e0351cabb1",
+      "gold_fingerprint": "f07929759644402f",
+      "scoring_fingerprint": "15a08588ca58c4b7"
+    },
+    {
+      "id": "ho2_sales_tax_booked_mar_2026_39fbe2",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "sales_tax_booked_mar_2026",
+      "question_fingerprint": "39fbe224d9fb1976",
+      "gold_fingerprint": "e70e93ef982aa0f8",
+      "scoring_fingerprint": "3bce2ffcdbd8dc3c"
+    },
+    {
+      "id": "ho2_sales_tax_booked_mar_2026_9eaf55",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "sales_tax_booked_mar_2026",
+      "question_fingerprint": "9eaf55673bb97912",
+      "gold_fingerprint": "e70e93ef982aa0f8",
+      "scoring_fingerprint": "3bce2ffcdbd8dc3c"
+    },
+    {
+      "id": "ho2_salesperson_top_closer_mar_2026_d332f9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "salesperson_top_closer_mar_2026",
+      "question_fingerprint": "d332f9b6bed1c330",
+      "gold_fingerprint": "e3b0c44298fc1c14",
+      "scoring_fingerprint": "af5c6d7c1c9e6913"
+    },
+    {
+      "id": "ho2_second_store_feb_2026_aa0152",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "second_store_feb_2026",
+      "question_fingerprint": "aa01522ec095c61d",
+      "gold_fingerprint": "3fd370eb570fefd3",
+      "scoring_fingerprint": "e5f2c8f3b5ce97b9"
+    },
+    {
+      "id": "ho2_second_store_feb_2026_dd6b8a",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "second_store_feb_2026",
+      "question_fingerprint": "dd6b8aa966ba9d77",
+      "gold_fingerprint": "3fd370eb570fefd3",
+      "scoring_fingerprint": "e5f2c8f3b5ce97b9"
+    },
+    {
+      "id": "ho2_segment_turnover_q1_2026_aa4604",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "segment_turnover_q1_2026",
+      "question_fingerprint": "aa46041df136952f",
+      "gold_fingerprint": "b1f1a48dd5eaa999",
+      "scoring_fingerprint": "831ccad293f0ed20"
+    },
+    {
+      "id": "ho2_segment_turnover_q1_2026_b6ae19",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "segment_turnover_q1_2026",
+      "question_fingerprint": "b6ae19005a1c2019",
+      "gold_fingerprint": "b1f1a48dd5eaa999",
+      "scoring_fingerprint": "831ccad293f0ed20"
+    },
+    {
+      "id": "ho2_segment_turnover_q1_2026_c30fa4",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "segment_turnover_q1_2026",
+      "question_fingerprint": "c30fa41e8ad1213f",
+      "gold_fingerprint": "b1f1a48dd5eaa999",
+      "scoring_fingerprint": "831ccad293f0ed20"
+    },
+    {
+      "id": "ho2_south_store_receipt_avg_2026_06d53d",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "south_store_receipt_avg_2026",
+      "question_fingerprint": "06d53d611a8585e9",
+      "gold_fingerprint": "602c4920316e3c66",
+      "scoring_fingerprint": "4deb76c8964bc392"
+    },
+    {
+      "id": "ho2_south_store_receipt_avg_2026_e1dca7",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "south_store_receipt_avg_2026",
+      "question_fingerprint": "e1dca744d510bdd8",
+      "gold_fingerprint": "602c4920316e3c66",
+      "scoring_fingerprint": "4deb76c8964bc392"
+    },
+    {
+      "id": "ho2_spring_essentials_buyers_2026_d4642e",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "spring_essentials_buyers_2026",
+      "question_fingerprint": "d4642e04794e1dc4",
+      "gold_fingerprint": "6611b00e1d471033",
+      "scoring_fingerprint": "b86de855ae3efe0c"
+    },
+    {
+      "id": "ho2_spring_essentials_buyers_2026_dec209",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "spring_essentials_buyers_2026",
+      "question_fingerprint": "dec2099af5ed00fd",
+      "gold_fingerprint": "6611b00e1d471033",
+      "scoring_fingerprint": "b86de855ae3efe0c"
+    },
+    {
+      "id": "ho2_stock_on_hand_cane_sugar_89df52",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "stock_on_hand_cane_sugar",
+      "question_fingerprint": "89df52a19a443bd5",
+      "gold_fingerprint": "e3b0c44298fc1c14",
+      "scoring_fingerprint": "af5c6d7c1c9e6913"
+    },
+    {
+      "id": "ho2_store_distinct_products_mar_2026_7c8561",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_distinct_products_mar_2026",
+      "question_fingerprint": "7c856131ab16cb26",
+      "gold_fingerprint": "057ecd896967aa6a",
+      "scoring_fingerprint": "dc55cc6ebf508011"
+    },
+    {
+      "id": "ho2_store_distinct_products_mar_2026_87e7a1",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_distinct_products_mar_2026",
+      "question_fingerprint": "87e7a18722b4205d",
+      "gold_fingerprint": "057ecd896967aa6a",
+      "scoring_fingerprint": "dc55cc6ebf508011"
+    },
+    {
+      "id": "ho2_store_mar_vs_apr_2026_2e0676",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_mar_vs_apr_2026",
+      "question_fingerprint": "2e0676ee70104cbc",
+      "gold_fingerprint": "da74f694c56d97a6",
+      "scoring_fingerprint": "782886519dcc8ac8"
+    },
+    {
+      "id": "ho2_store_mar_vs_apr_2026_f92aaa",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_mar_vs_apr_2026",
+      "question_fingerprint": "f92aaa556f0ad843",
+      "gold_fingerprint": "da74f694c56d97a6",
+      "scoring_fingerprint": "782886519dcc8ac8"
+    },
+    {
+      "id": "ho2_store_quarterly_turnover_q1_2025_q1_2026_c762a6",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_quarterly_turnover_q1_2025_q1_2026",
+      "question_fingerprint": "c762a6de8659a9bd",
+      "gold_fingerprint": "b239d700bd0cde04",
+      "scoring_fingerprint": "e2785e76ee1b29d8"
+    },
+    {
+      "id": "ho2_store_share_q1_2026_23b3de",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_share_q1_2026",
+      "question_fingerprint": "23b3de539431e1e4",
+      "gold_fingerprint": "1b0cdacd5f39efd0",
+      "scoring_fingerprint": "5306b6b324e04847"
+    },
+    {
+      "id": "ho2_store_share_q1_2026_897d42",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "store_share_q1_2026",
+      "question_fingerprint": "897d425f4b97b9e5",
+      "gold_fingerprint": "1b0cdacd5f39efd0",
+      "scoring_fingerprint": "5306b6b324e04847"
+    },
+    {
+      "id": "ho2_top_customer_per_store_q1_2026_402099",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "top_customer_per_store_q1_2026",
+      "question_fingerprint": "40209912ecf20c3f",
+      "gold_fingerprint": "42d3612a7bdf1cc2",
+      "scoring_fingerprint": "a330bee4db3114bd"
+    },
+    {
+      "id": "ho2_top_customer_per_store_q1_2026_9cc320",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "top_customer_per_store_q1_2026",
+      "question_fingerprint": "9cc3205ed15529bd",
+      "gold_fingerprint": "42d3612a7bdf1cc2",
+      "scoring_fingerprint": "a330bee4db3114bd"
+    },
+    {
+      "id": "ho2_trial_balance_asof_2026_03_31_53742a",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "trial_balance_asof_2026_03_31",
+      "question_fingerprint": "53742a3972c1e937",
+      "gold_fingerprint": "f6aa871fc4f2133a",
+      "scoring_fingerprint": "b23df398ec525a8e"
+    },
+    {
+      "id": "ho2_units_per_document_by_store_feb_2026_7672f4",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "units_per_document_by_store_feb_2026",
+      "question_fingerprint": "7672f4c3c3a2708e",
+      "gold_fingerprint": "08e3e6228f068978",
+      "scoring_fingerprint": "209213182950c00c"
+    },
+    {
+      "id": "ho2_units_per_document_by_store_feb_2026_d41296",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "units_per_document_by_store_feb_2026",
+      "question_fingerprint": "d41296e862de3dd3",
+      "gold_fingerprint": "08e3e6228f068978",
+      "scoring_fingerprint": "209213182950c00c"
+    },
+    {
+      "id": "ho2_valley_corner_how_many_products_q1_2026_4856ff",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "valley_corner_how_many_products_q1_2026",
+      "question_fingerprint": "4856ff7ff55c5a06",
+      "gold_fingerprint": "ae44e1cc2a2dbde2",
+      "scoring_fingerprint": "5fb79d45c316baf8"
+    },
+    {
+      "id": "ho2_valley_corner_how_many_products_q1_2026_6fec87",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "valley_corner_how_many_products_q1_2026",
+      "question_fingerprint": "6fec87f476c7d33d",
+      "gold_fingerprint": "ae44e1cc2a2dbde2",
+      "scoring_fingerprint": "5fb79d45c316baf8"
+    },
+    {
+      "id": "ho2_valley_corner_units_by_product_q1_2026_3983b9",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "valley_corner_units_by_product_q1_2026",
+      "question_fingerprint": "3983b957675cb36c",
+      "gold_fingerprint": "fff23932a590b239",
+      "scoring_fingerprint": "36943a27e003f999"
+    },
+    {
+      "id": "ho2_valley_corner_units_by_product_q1_2026_7fe326",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "valley_corner_units_by_product_q1_2026",
+      "question_fingerprint": "7fe326d7bb7b4606",
+      "gold_fingerprint": "fff23932a590b239",
+      "scoring_fingerprint": "36943a27e003f999"
+    },
+    {
+      "id": "ho2_value_bands_mar_2026_0bfcaf",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "value_bands_mar_2026",
+      "question_fingerprint": "0bfcafaa2fd6c585",
+      "gold_fingerprint": "15892067043367fb",
+      "scoring_fingerprint": "d6611b33568cfa75"
+    },
+    {
+      "id": "ho2_void_rate_by_store_q1_2026_76dc80",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "void_rate_by_store_q1_2026",
+      "question_fingerprint": "76dc8004ce175315",
+      "gold_fingerprint": "773dcf7aa939c8ae",
+      "scoring_fingerprint": "65a3cc05c9f18d44"
+    },
+    {
+      "id": "ho2_void_rate_by_store_q1_2026_9c8313",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "void_rate_by_store_q1_2026",
+      "question_fingerprint": "9c8313d963b136c9",
+      "gold_fingerprint": "773dcf7aa939c8ae",
+      "scoring_fingerprint": "65a3cc05c9f18d44"
+    },
+    {
+      "id": "ho2_weekday_turnover_q1_2026_b77ab8",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "weekday_turnover_q1_2026",
+      "question_fingerprint": "b77ab864ed7ff566",
+      "gold_fingerprint": "cc43b8c200be0e16",
+      "scoring_fingerprint": "ed92d35132bda782"
+    },
+    {
+      "id": "ho2_weekday_turnover_q1_2026_fbfc7f",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "weekday_turnover_q1_2026",
+      "question_fingerprint": "fbfc7fdb3f8c4531",
+      "gold_fingerprint": "cc43b8c200be0e16",
+      "scoring_fingerprint": "ed92d35132bda782"
+    },
+    {
+      "id": "ho2_wholesale_share_mar_2026_870321",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "wholesale_share_mar_2026",
+      "question_fingerprint": "8703211129cdf973",
+      "gold_fingerprint": "2160e79c0344f7ba",
+      "scoring_fingerprint": "3f61ef0f6bed31fb"
+    },
+    {
+      "id": "ho2_wholesale_share_mar_2026_de64b7",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "wholesale_share_mar_2026",
+      "question_fingerprint": "de64b7ffd803d062",
+      "gold_fingerprint": "2160e79c0344f7ba",
+      "scoring_fingerprint": "3f61ef0f6bed31fb"
+    },
+    {
+      "id": "ho2_ytd_vs_prior_ytd_asof_2026_03_15_28af16",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ytd_vs_prior_ytd_asof_2026_03_15",
+      "question_fingerprint": "28af16c8889e4024",
+      "gold_fingerprint": "3fcf0e00117b1273",
+      "scoring_fingerprint": "61f0001ba8340d7f"
+    },
+    {
+      "id": "ho2_ytd_vs_prior_ytd_asof_2026_03_15_94c08a",
+      "datasets": [
+        "holdout-public"
+      ],
+      "intentId": "ytd_vs_prior_ytd_asof_2026_03_15",
+      "question_fingerprint": "94c08a4f4b3b4b8f",
+      "gold_fingerprint": "3fcf0e00117b1273",
+      "scoring_fingerprint": "61f0001ba8340d7f"
+    }
+  ],
   "history": [
     {
       "date": "2026-10-06",
       "fingerprint": "4f53cda18c2baa0c",
       "cases": 0,
       "note": "Holdout retired after the Experiment 1 error analysis inspected it: its 81 cases (45 intents) are dev now, tagged formerly_holdout. Empty until the fresh holdout, authored blind, is added."
+    },
+    {
+      "date": "2026-10-06",
+      "fingerprint": "b1a81db0344210b3",
+      "cases": 149,
+      "note": "Fresh holdout (v2) added: datasets/holdout-public.json, 149 cases (147 answer, 2 abstain) over 77 intents, authored blind on eval/holdout-v2-authoring after the retired holdout became dev; frozen as authored."
     }
   ]
 }
