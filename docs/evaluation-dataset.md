@@ -136,7 +136,14 @@ other words).
   dev questions say "net sales" or "net revenue". Single-word entity synonyms
   (customer, store, product, units, documents) and the advisory words
   ("sales", "sold") still match the layer: they are the only names of those
-  things.
+  things. The rule covers both `HINTS_VERSION` arms: the multi-word phrases
+  the hints-v2 overlay (`metadata/semantic-layer.hints-v2.json`) adds are
+  refused too. The fresh holdout was authored against the base layer and
+  frozen before the overlay's vocabulary was checked against it: five of its
+  questions contain overlay phrases ("open balance" in four, "unpaid balance"
+  in one). They stay as frozen and are pinned, exactly, in
+  `FROZEN_HINTS_V2_VOCABULARY` (any other match fails the build); for the
+  version-2 arm those five cases do not measure unseen vocabulary.
 
 **The holdout freeze.** `datasets/holdout-manifest.json` (not a dataset:
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
@@ -551,17 +558,29 @@ changes.
 ## Known validator rejections
 
 `known_validator_rejection: '<code>'` marks a case whose correct answers the
-production validator rejects today, in the default product configuration, a
-product gap the suite measures instead of hiding. Five cases are flagged:
-one dev case, `METRIC_COLUMN` (`tpl_revenue_credits_monthly_q1_2026_e1b20a`:
-the account name "Sales Revenue" trips the net-sales metric guardrail on a
-ledger question), and four holdout cases, counted here and not named (the
-holdout is looked at in aggregate only).
+production validator rejects today, in the default product configuration or
+in another supported arm of an A/B switch, a product gap the suite measures
+instead of hiding. Five cases are flagged: one dev case, `METRIC_COLUMN`
+(`tpl_revenue_credits_monthly_q1_2026_e1b20a`: the account name "Sales
+Revenue" trips the net-sales metric guardrail on a ledger question), and four
+holdout cases, counted here and not named (the holdout is looked at in
+aggregate only). Every flag was measured with hints version 1's prompts.
+Hints version 2 (`HINTS_VERSION`, the default) closes the dev case's gap; the
+flag stays because version 1, the A/B control arm, still has it
+([docs/experiments/02-hints-v2.md](experiments/02-hints-v2.md)). A holdout
+flag version 2 closes stays for the same reason (the frozen holdout is not
+edited); which holdout flags version 2 closes is not listed here.
 
 - verify-dataset reports a rejection of the gold, an alternative or a positive
   control with that code as a note, and fails when the validator accepts every
-  gold variant (the flag is stale and must go); `test/gold-sql-validator.test.js`
-  and `test/dataset-hygiene.test.js` check the same offline. The in-process
+  gold variant under every supported hints version (the flag is stale and must
+  go). When only the configured version accepts it and another supported one
+  still rejects with that code, that is a note naming the version that keeps
+  the flag, so both arms of the `HINTS_VERSION` A/B verify;
+  `test/gold-sql-validator.test.js` and `test/dataset-hygiene.test.js` check
+  the same offline (every flag under version 1; under version 2 the dev
+  flag's closure, and for a holdout flag only that version 2 rejects its gold
+  variants with the flag's code or not at all). The in-process
   verification of `npm run eval` only warns about a stale flag (in the console
   and report.md's Verification section), so a product change that closes the
   gap can be measured, live or with `--offline --gate`, before the dataset is
@@ -1278,12 +1297,16 @@ rule).
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).
 - **Provenance**: git sha (and whether the tree was dirty), prompt and
-  semantic-layer versions, the schema scope (requested and effective, the
-  full-schema token estimate, widen-on-demand), schema, fixture, dataset and
-  controls hashes, model, the LLM endpoint host (never keys), Node and every
-  runner flag. The comparison table shows both reports' schema scopes (a report
-  from before the setting reads "not recorded (before SCHEMA_SCOPE: retrieved,
-  no widening)"), and so does the console when they differ.
+  semantic-layer versions (under hints version 2 the semantic-layer version
+  hashes `metadata/semantic-layer.json` and its overlay
+  `metadata/semantic-layer.hints-v2.json` together, and the overlay is named),
+  the schema scope (requested and effective, the full-schema token estimate,
+  widen-on-demand), the hints version (`product.hintsVersion`), schema,
+  fixture, dataset and controls hashes, model, the LLM endpoint host (never
+  keys), Node and every runner flag. The comparison table shows both reports'
+  schema scopes and hints versions (a report from before a setting reads "not
+  recorded (before SCHEMA_SCOPE: retrieved, no widening)" or "not recorded
+  (before HINTS_VERSION: 1)"), and so does the console when they differ.
 
 ### Statistics
 
@@ -1334,6 +1357,14 @@ as the product loop would have widened it. The console and report.md say when
 the recording ran another scope or another widen-on-demand setting.
 `SCHEMA_SCOPE=retrieved` (widen-on-demand is off by default for an explicit
 retrieved scope) re-judges a pre-scope report exactly as it ran.
+
+The hints version is today's too (`HINTS_VERSION`): the replayed SQL is
+validated against today's semantic plan (metric enforcement, join hints), so
+a guardrail change of hints version 2 shows, while its prompt changes cannot
+(the recorded SQL was generated from the recorded prompts). The console and
+report.md say when the recording ran another hints version;
+`HINTS_VERSION=1` re-judges a report from before the setting exactly as it
+ran.
 
 `--offline` runs the preflight, fixtures and verification, then rescores
 `eval/baselines/<model>.json` when it exists, or says there is none and exits 0
