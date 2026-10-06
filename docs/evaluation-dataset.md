@@ -815,14 +815,17 @@ npm run eval -- --help                              # every flag
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
 comparison spec and expected behaviour): today 255 cases over 140 intents.
-Only the kept definition runs (and is verified in process), so a duplicate is
-dropped only when dataset order cannot matter; anything else is a dataset
-conflict (exit 2). A case id that appears in two datasets must be the same
-case in every field: a different question or gold, but equally a different
-split, `known_validator_rejection`, `expected_row_counts`, `signal_checks`,
-intent, tags, expected tables or columns, difficulty or failure class is a
-conflict (whitespace and list order aside), also when its first appearance
-was dropped as a duplicate of another id. Rejecting the second definition,
+Only the kept definition runs, so a duplicate is dropped only when dataset
+order cannot matter; anything else is a dataset conflict (exit 2). A case id
+that appears in two datasets must be the same case in every field that is run,
+verified, scored, selected or reported on: a different question or gold, but
+equally a different split, `known_validator_rejection`, `expected_row_counts`,
+`signal_checks`, intent, tags, expected tables or columns, difficulty or
+failure class is a conflict, also when its first appearance was dropped as a
+duplicate of another id. Whitespace in the question and SQL and the order of
+the top-level list fields (tags, expected / disallowed columns, expected
+tables) are not differences; list order inside `signal_checks` or the
+comparison spec is. Free-text `notes` is not compared. Rejecting the second definition,
 rather than verifying both and running the first, is the conservative choice:
 no definition is left unused without a word. A question duplicate under
 another id is merged only when it also has the same split and

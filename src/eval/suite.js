@@ -9,15 +9,19 @@
 //   question with the same answer under another id is one measurement, not
 //   two. The same question and gold scored differently stays a separate case.
 // --case-id resolves a dropped duplicate to the case kept in its place.
-// Only the kept definition is run and verified in process, so a dropped one
-// must not differ in anything that would make the result depend on dataset
-// order. Dataset conflicts (they must be fixed; the run stops):
+// Only the kept definition is run (verifySuite verifies every distinct
+// definition, but the run scores one), so a dropped one must not differ in
+// anything that would make the result depend on dataset order. Dataset conflicts (they must be fixed; the run stops):
 // - a case id that appears in two datasets with definitions that are not
 //   identical: a different question, gold, alternatives or comparison spec
 //   (comparisons align cases by id), and equally a different split, known
 //   validator rejection, row-count pins, signal checks, intent, tags,
 //   expected / disallowed columns or tables, canonical question, difficulty or
-//   failure class (caseDefinitionDifferences; whitespace and list order aside).
+//   failure class (caseDefinitionDifferences). Whitespace in the question and
+//   SQL and the order of the top-level list fields (tags, expected /
+//   disallowed columns, expected tables) are not differences; list order
+//   inside signal_checks or the comparison spec is. Free-text `notes` is not
+//   compared: nothing runs, verifies, scores, selects or reports on it.
 //   Rejecting the second definition, rather than verifying both and running
 //   the first, is the conservative choice: no definition is silently unused;
 // - a question duplicate under another id that would be merged into the kept
@@ -116,8 +120,10 @@ const definitionValues = (testCase) => DEFINITION_FIELDS.map(([label, valueOf]) 
 /**
  * Which fields two definitions of a case disagree on (labels, in
  * DEFINITION_FIELDS order; empty when they are the same case). Whitespace in
- * the question and SQL, the order of list fields and a missing split (dev)
- * are not differences.
+ * the question and SQL, the order of the top-level list fields (tags,
+ * expected / disallowed columns, expected tables) and a missing split (dev)
+ * are not differences; list order inside signal_checks or the comparison spec
+ * is. Free-text notes are not compared.
  */
 export function caseDefinitionDifferences(left, right) {
   const rightValues = new Map(definitionValues(right));

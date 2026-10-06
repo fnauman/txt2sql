@@ -232,6 +232,15 @@ test('the same id with different verification metadata, split, validator flag or
   );
   // Whitespace in the question and gold is still not a difference.
   assert.deepEqual(conflictOf({}, { question: ' Q? ', expected_sql: 'SELECT  1' }), []);
+  // Free-text notes are never run, verified, scored, selected or reported on:
+  // not compared (what the docs say).
+  assert.deepEqual(conflictOf({ notes: 'one' }, { notes: 'two' }), []);
+  // Only the top-level list fields are order-insensitive: list order inside
+  // signal_checks or the comparison spec is a difference.
+  assert.deepEqual(
+    conflictOf({ signal_checks: { require_nonzero_columns: ['a', 'b'] } }, { signal_checks: { require_nonzero_columns: ['b', 'a'] } }),
+    [['x', ['a', 'b'], 'different signal_checks']]
+  );
 
   // selectSuite stops the run, whichever dataset comes first.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-suite-'));
