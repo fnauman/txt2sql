@@ -635,6 +635,33 @@ function addDerivedMetrics(metrics, semanticLayer) {
   return derivedMetrics;
 }
 
+/**
+ * Hints version 2: an entity whose every matched word lies inside the span of
+ * a matched metric measured at that entity's grain names the metric's grain,
+ * not something to list ("sales" in "What were sales in March 2026?" is
+ * net_sales over sales documents; "order" in "average order value"). Such an
+ * entity keeps its tables and default filters but loses its display columns,
+ * which invited one row per document (hard_ambiguous_sales_mar_2026,
+ * tpl_outstanding_balance_mar_2026_c15bb6). A metric phrase that names
+ * another entity ("biggest buyers": net sales per customer) keeps that
+ * entity's display columns.
+ */
+function withoutGrainDisplayColumns(entities, matches, activeSpans) {
+  const grainOf = new Map(matches.filter((match) => match.kind === 'metric').map((match) => [match.key, match.entry.grain || null]));
+  const metricSpans = activeSpans.filter((span) => span.kind === 'metric');
+  const entityKeyOf = new Map(matches.filter((match) => match.kind === 'entity').map((match) => [match.entry.name, match.key]));
+  return entities.map((entity) => {
+    const spans = activeSpans.filter((span) => span.key === entityKeyOf.get(entity.name));
+    const consumedBy = (span) =>
+      metricSpans.find((metric) => grainOf.get(metric.key) === entity.name && metric.start <= span.start && span.end <= metric.end);
+    const consumers = spans.map(consumedBy);
+    if (entity.displayColumns.length === 0 || spans.length === 0 || consumers.some((consumer) => !consumer)) {
+      return entity;
+    }
+    return { ...entity, displayColumns: [], displayColumnsSuppressedBy: uniqueStrings(consumers.map((consumer) => consumer.entryName)) };
+  });
+}
+
 function findSemanticJoinHints(joinPaths, requiredTables) {
   const required = new Set(requiredTables);
 
@@ -696,6 +723,7 @@ function matchSemanticLayer(semanticLayer, questionContext) {
 
   return {
     matches,
+    activeSpans: active,
     suppressedMatches: suppressed.map((span) => ({
       kind: span.kind,
       name: span.entryName,
@@ -719,10 +747,13 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
   const layer = semanticLayer ?? loadSemanticLayerForHintsVersion(version);
   const context = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
-  const { matches, suppressedMatches } = matchSemanticLayer(layer, context);
-  const entities = matches
+  const { matches, activeSpans, suppressedMatches } = matchSemanticLayer(layer, context);
+  let entities = matches
     .filter((match) => match.kind === 'entity')
     .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
+  if (version !== 1) {
+    entities = withoutGrainDisplayColumns(entities, matches, activeSpans);
+  }
   let metrics = matches
     .filter((match) => match.kind === 'metric')
     .map((match) => ({

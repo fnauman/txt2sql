@@ -305,3 +305,33 @@ test('v2 layer: ledger metric hints state when SalesDocument is joined and its c
   assert.match(prompt, /Metric "debit_amount" matched .*Join SalesDocument only to filter on a document column \(such as DocumentDate\), and then also apply IFNULL\(SalesDocument\.IsCanceled, 0\) = 0; a PostingDate filter needs no SalesDocument join/);
   assert.doesNotMatch(buildOptimizedPrompt(schema, 'Show the top ledger accounts by debit amount in March 2026.', { hintsVersion: 1 }).user, /Join SalesDocument only/);
 });
+
+// --- entity display columns: not for a word a metric measures ---------------
+// "What were sales in March 2026?" matched both the sales_document entity
+// (display columns DocumentNo, DocumentDate) and net_sales, and the model
+// listed one row per document (hard_ambiguous_sales_mar_2026; also
+// tpl_outstanding_balance_mar_2026_c15bb6).
+
+const entityOf = (plan, name) => plan.entities.find((entity) => entity.name === name) || null;
+
+test('v2 display columns: an entity word inside a metric of that grain loses its display columns, nothing else', () => {
+  for (const question of ['What were sales in March 2026?', 'How much is still unpaid on March 2026 sales?', 'Average order value by store location in Q1 2026.', 'Show net sales by product category in March 2026.']) {
+    assert.deepEqual(entityOf(v1Plan(question), 'sales_document').displayColumns, ['SalesDocument.DocumentNo', 'SalesDocument.DocumentDate'], question);
+    const entity = entityOf(v2Plan(question), 'sales_document');
+    assert.deepEqual(entity.displayColumns, [], question);
+    assert.deepEqual(entity.preferredTables, ['SalesDocument'], 'the tables stay');
+    assert.deepEqual(entity.defaultFilters, ['IFNULL(SalesDocument.IsCanceled, 0) = 0'], 'the default filters stay');
+    assert.ok(entity.displayColumnsSuppressedBy.length > 0);
+    assert.ok(!v2Plan(question).preferredColumns.includes('SalesDocument.DocumentNo'));
+  }
+  assert.match(
+    buildOptimizedPrompt(schema, 'What were sales in March 2026?').user,
+    /- Entity "sales_document" matched sale, sales; prefer tables SalesDocument; apply default filters IFNULL\(SalesDocument\.IsCanceled, 0\) = 0\./
+  );
+  // A document the question asks about keeps them, and so does an entity a
+  // metric phrase names as its dimension ("biggest buyers" = net sales per customer).
+  assert.deepEqual(entityOf(v2Plan('Which sales document had the highest net amount in March 2026?'), 'sales_document').displayColumns, ['SalesDocument.DocumentNo', 'SalesDocument.DocumentDate']);
+  assert.deepEqual(entityOf(v2Plan('Who are our biggest buyers in March 2026?'), 'customer').displayColumns, ['Customer.CustomerName', 'Customer.CustomerCode']);
+  assert.deepEqual(entityOf(v2Plan('Show net sales by customer for June 2026.'), 'customer').displayColumns, ['Customer.CustomerName', 'Customer.CustomerCode']);
+  assert.equal(entityOf(v1Plan('What were sales in March 2026?'), 'sales_document').displayColumnsSuppressedBy, undefined);
+});
