@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { compareResultsDetailed, findInvalidSplits, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../src/benchmark.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
-import { computeExitCode } from '../scripts/eval.js';
+import { computeExitCode, describeSuiteCoverage, formatProgress } from '../scripts/eval.js';
 import { classifyRepetition, summarizeBehavior, summarizeCaseRepetitions } from '../src/eval/attribution.js';
 import { caseOutcomesFromReport, compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
@@ -389,4 +389,44 @@ test('comparator: empty vs empty matches; scalar NULL vs 0 only with null_as_zer
   assert.equal(compareResultsDetailed(gold, [{ total: 0 }], { mode: 'scalar', null_as_zero: ['total_net_amount'] }).match, true);
   assert.equal(compareResultsDetailed(gold, [{ total: null }], { mode: 'scalar' }).match, true);
   assert.equal(compareResultsDetailed(gold, [], { mode: 'scalar', null_as_zero: ['total_net_amount'] }).reason, 'row_count');
+});
+
+test('a behavior case\'s outcome agrees with its majority, as an answer case\'s agrees with majorityPass', () => {
+  const judged = (repetition) => ({ ...repetition, ...classifyRepetition(repetition, abstainCase) });
+  const declined = judged(behaviorRep('validation_error'));
+  const answered = judged(behaviorRep('answered'));
+  const truncated = judged({ status: 'llm_error', error_code: 'LLM_TRUNCATED', attempts: [] });
+  // 2 of 4 declined is no majority: 'declined' is the most frequent single
+  // outcome, but the case was not handled, so its outcome is a failure.
+  const half = summarizeCaseRepetitions([declined, declined, answered, truncated]);
+  assert.equal(half.behavior.majorityHandled, false);
+  assert.notEqual(half.outcome, 'declined');
+  assert.equal(half.bucket, 'model');
+  // 2 of 3 declined is handled.
+  const most = summarizeCaseRepetitions([declined, answered, declined]);
+  assert.equal(most.behavior.majorityHandled, true);
+  assert.equal(most.outcome, 'declined');
+  assert.equal(most.bucket, 'pass');
+  // Nothing judged (a timeout): the usual outcome.
+  const timedOut = summarizeCaseRepetitions([judged({ status: 'aborted', timed_out: true, error_code: 'CASE_TIMEOUT', attempts: [] })]);
+  assert.equal(timedOut.behavior.majorityHandled, null);
+  assert.equal(timedOut.outcome, 'timeout');
+});
+
+test('a rescore\'s --gate coverage counts only answer cases of today\'s suite (behavior cases are never compared)', () => {
+  const record = (id) => ({ id, question: `${id}?`, gold_fingerprint: `g_${id}`, summary: { counted: 1, passes: 1, passRate: 1, majorityPass: true, outcome: 'pass' } });
+  const recorded = { results: ['a0', 'a1'].map(record) };
+  const comparison = compareReports(recorded, recorded, { resamples: 50 });
+  const coverage = describeSuiteCoverage([{ testCase: { id: 'a0' } }, { testCase: { id: 'a1' } }, { testCase: abstainCase }, { testCase: clarifyCase }], comparison);
+  assert.equal(coverage.suiteCases, 2);
+  assert.equal(coverage.paired, 2);
+  assert.deepEqual(coverage.notInReport, []);
+});
+
+test('the progress line judges a behavior case on whether it declined, and keeps a timeout a timeout', () => {
+  const line = (result) => formatProgress({ testCase: abstainCase, repetition: 1, result, completed: 1, total: 1, repeat: 1 });
+  assert.match(line(behaviorRep('validation_error')), /^\[1\/1\] ok {3}hard_abstain_headcount: declined \(expects abstain\)/);
+  assert.match(line(behaviorRep('answered')), /FAIL hard_abstain_headcount: answered_instead_of_abstain \(expects abstain\)/);
+  assert.match(line({ status: 'aborted', timed_out: true, late_status: 'answered', attempts: [] }), /FAIL hard_abstain_headcount: timeout \(finished late: answered\)/);
+  assert.match(line({ status: 'skipped_budget', attempts: [] }), /skip hard_abstain_headcount: skipped_budget/);
 });

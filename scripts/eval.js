@@ -459,7 +459,8 @@ export function gatePairingFailure(comparison, { minFraction = MIN_GATE_PAIRED_F
 }
 
 /**
- * How much of today's suite a rescore's comparison covers: { suiteCases,
+ * How much of today's suite (its answer cases: abstain / clarify cases are
+ * never compared) a rescore's comparison covers: { suiteCases,
  * paired, notInReport, goldChanged, notCounted, notInBaseline } (id lists).
  * A rescore re-judges the RECORDED cases: one whose id is no longer in the
  * suite (renamed) is rescored from its recorded definition and pairs with its
@@ -475,7 +476,9 @@ export function describeSuiteCoverage(suiteEntries, comparison) {
   const goldChanged = idsOf(comparison.excluded?.goldChanged);
   const notCounted = idsOf(comparison.excluded?.notCounted);
   const notInBaseline = idsOf(comparison.newCases);
-  const suiteIds = [...new Set(suiteEntries.map((entry) => entry.testCase.id))].sort();
+  // Abstain / clarify cases are never compared (not in strict accuracy), so
+  // they are not part of what the gate must have checked.
+  const suiteIds = [...new Set(suiteEntries.filter((entry) => !isBehaviorCase(entry.testCase)).map((entry) => entry.testCase.id))].sort();
   const pick = (set) => suiteIds.filter((id) => set.has(id));
   return {
     suiteCases: suiteIds.length,
@@ -649,7 +652,8 @@ function isGithubActions(env = process.env) {
   return env.GITHUB_ACTIONS === 'true';
 }
 
-function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
+/** One console progress line for a finished repetition (exported for tests). */
+export function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
   const width = String(total).length;
   let status =
     result.status === 'aborted' && result.timed_out
@@ -658,11 +662,15 @@ function formatProgress({ testCase, repetition, result, completed, total, repeat
         ? 'expected_sql_error (the database failed)'
         : result.status;
   let passed = status === 'pass';
-  if (isBehaviorCase(testCase) && !['skipped_budget', 'cancelled'].includes(status)) {
-    // An abstain / clarify case passes when the product returned no SQL.
-    const { outcome } = classifyRepetition(result, testCase);
-    passed = outcome === 'declined';
-    status = `${outcome} (expects ${testCase.expected_behavior})`;
+  if (isBehaviorCase(testCase)) {
+    // An abstain / clarify case passes when the product returned no SQL. A
+    // repetition that is not judged on that (a timeout, an outage, a budget
+    // skip) keeps its usual label.
+    const judged = classifyRepetition(result, testCase);
+    if (judged.behavior_counted) {
+      passed = judged.outcome === 'declined';
+      status = `${judged.outcome} (expects ${testCase.expected_behavior})`;
+    }
   }
   const label = passed ? 'ok  ' : status === 'skipped_budget' || status === 'cancelled' ? 'skip' : 'FAIL';
   const totalMs = result.timings?.totalMs;
