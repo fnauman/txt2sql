@@ -6,7 +6,15 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 
 import { BUSINESS_RULES, BUSINESS_RULES_V2, businessRulesFor, DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
-import { buildOptimizedPrompt, buildQuestionContext, buildSemanticPlan, extractTemporalReferences, validateReadOnlySql } from '../src/pipeline.js';
+import {
+  buildOptimizedPrompt,
+  buildQuestionContext,
+  buildSemanticPlan,
+  extractTemporalReferences,
+  retrieveRelevantTables,
+  scoreTableDetailed,
+  validateReadOnlySql,
+} from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import {
   applySemanticLayerOverlay,
@@ -334,4 +342,51 @@ test('v2 display columns: an entity word inside a metric of that grain loses its
   assert.deepEqual(entityOf(v2Plan('Who are our biggest buyers in March 2026?'), 'customer').displayColumns, ['Customer.CustomerName', 'Customer.CustomerCode']);
   assert.deepEqual(entityOf(v2Plan('Show net sales by customer for June 2026.'), 'customer').displayColumns, ['Customer.CustomerName', 'Customer.CustomerCode']);
   assert.equal(entityOf(v1Plan('What were sales in March 2026?'), 'sales_document').displayColumnsSuppressedBy, undefined);
+});
+
+// --- retrieval stopwords and aliases ----------------------------------------
+// Generic words matched column comments and names by accident: "both days
+// included" put NetPayableAmount in the relevance hint
+// (tpl_total_net_sales_feb15_mar15_2026_40ae9d), "total" BillTotalAmount
+// (edge_public_002_campaign_net_sales_march_2026), "units" SalePrice; and
+// "account" was a Customer alias (tpl_account_net_movement_feb_2026_c1256b).
+
+const hintOf = (question, hintsVersion) => {
+  const user = buildOptimizedPrompt(schema, question, { hintsVersion }).user;
+  return user.split('Retrieval relevance hint (a ranking only; every allowed table may be used):\n')[1].split('\n')[0];
+};
+
+test('v2 retrieval: generic words no longer pull accidental columns into the relevance hint', () => {
+  const included = 'What was our turnover from 15 February 2026 through 15 March 2026, both days included?';
+  assert.match(hintOf(included, 1), /NetPayableAmount/);
+  assert.doesNotMatch(hintOf(included, 2), /NetPayableAmount/);
+  const total = 'What were the total sales for the Urban Refresh campaign in March 2026?';
+  assert.match(hintOf(total, 1), /BillTotalAmount/);
+  assert.doesNotMatch(hintOf(total, 2), /BillTotalAmount|TotalAmount/);
+  const units = 'Which three customers bought the most units in Q1 2026?';
+  assert.match(hintOf(units, 1), /SalePrice/);
+  assert.doesNotMatch(hintOf(units, 2), /SalePrice/);
+  assert.match(hintOf('How many distinct customers did we sell to in 2025?', 1), /NetPayableAmount/);
+  assert.doesNotMatch(hintOf('How many distinct customers did we sell to in 2025?', 2), /NetPayableAmount/);
+
+  const v2Tokens = buildQuestionContext(included, { hintsVersion: 2 }).questionTokens;
+  const v1Tokens = buildQuestionContext(included, { hintsVersion: 1 }).questionTokens;
+  assert.ok(v1Tokens.includes('included') && !v2Tokens.includes('included'));
+  // Only those words go: everything else is the same token list.
+  assert.deepEqual(v2Tokens, v1Tokens.filter((token) => token !== 'included'));
+  // The semantic plan does not read them: "units" still matches quantity_sold.
+  assert.ok(metricOf(v2Plan(units), 'quantity_sold'));
+});
+
+test('v2 retrieval: "account" is no Customer alias, so ledger questions do not rank Customer', () => {
+  const question = 'Total debits posted to account 1100 in March 2026.';
+  const customer = schema.tables.find((table) => table.tableName === 'Customer');
+  const tokens = buildQuestionContext(question, { hintsVersion: 2 }).questionTokens;
+  assert.ok(scoreTableDetailed(customer, tokens, { hintsVersion: 1 }).matches.some((match) => match.reasons.includes('table_alias')));
+  assert.ok(!scoreTableDetailed(customer, tokens, { hintsVersion: 2 }).matches.some((match) => match.reasons.includes('table_alias')));
+  // Only the table description ("account") still scores, after the ledger tables.
+  const score = (hintsVersion) => retrieveRelevantTables(schema, question, { hintsVersion }).tableScores.find((entry) => entry.tableName === 'Customer');
+  assert.ok(score(2).lexicalScore < score(1).lexicalScore);
+  assert.ok(score(2).semanticScore < score(1).semanticScore, 'and the customer entity no longer matches');
+  assert.deepEqual(retrieveRelevantTables(schema, question, { hintsVersion: 2 }).initialTableNames.slice(0, 2), ['LedgerAccount', 'AccountingPosting']);
 });

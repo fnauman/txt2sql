@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { getOptionValue, hasOptionFlag } from '../src/env.js';
 import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, isBehaviorCase, loadBenchmarkDataset } from '../src/benchmark.js';
+import { resolveHintsVersion } from '../src/hints-version.js';
 import { extractTablesFromSql, loadNarrowSchema, retrieveRelevantTables, writeJsonFile } from '../src/pipeline.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,12 +30,14 @@ function ratio(hitCount, totalCount) {
  * Table-retrieval recall of answer cases. Abstain / clarify cases have no
  * gold and so no expected tables (0 of 0 would read as full recall): they are
  * not scored, and are returned apart in `behaviorCases` with the tables
- * retrieval would offer for them. Returns { summary, cases, behaviorCases }.
+ * retrieval would offer for them. `hintsVersion` (src/hints-version.js;
+ * default 2) selects the semantic layer and tokens retrieval reads. Returns
+ * { summary, cases, behaviorCases }.
  */
-export function evaluateRetrieval(schema, testCases) {
+export function evaluateRetrieval(schema, testCases, { hintsVersion = undefined } = {}) {
   const nameToTableName = new Map(schema.tables.map((table) => [table.name, table.tableName]));
   const tablesFor = (question) => {
-    const retrieval = retrieveRelevantTables(schema, question);
+    const retrieval = retrieveRelevantTables(schema, question, { hintsVersion });
     return { retrieval, baseTables: retrieval.initialTableNames.map((name) => nameToTableName.get(name) || name), expandedTables: retrieval.expandedTableNames };
   };
   const behaviorCases = testCases.filter(isBehaviorCase).map((testCase) => {
@@ -119,7 +122,7 @@ async function main() {
     caseId,
     tag,
   });
-  const { summary, cases, behaviorCases } = evaluateRetrieval(schema, datasetInfo.cases);
+  const { summary, cases, behaviorCases } = evaluateRetrieval(schema, datasetInfo.cases, { hintsVersion: resolveHintsVersion() });
 
   const report = {
     generated_at: new Date().toISOString(),

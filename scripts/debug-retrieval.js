@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ENV_OPTIONS_WITH_VALUES, getOptionValue, getPositionalArgs, hasOptionFlag } from '../src/env.js';
 import { caseMatchesId, DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../src/benchmark.js';
+import { resolveHintsVersion } from '../src/hints-version.js';
 import {
   extractTablesFromSql,
   loadNarrowSchema,
@@ -104,7 +105,9 @@ async function main() {
     refreshSchema,
   });
 
-  const retrieval = retrieveRelevantTables(schema, questionInfo.question);
+  // HINTS_VERSION (src/hints-version.js) decides the semantic layer and tokens.
+  const hintsVersion = resolveHintsVersion();
+  const retrieval = retrieveRelevantTables(schema, questionInfo.question, { hintsVersion });
   const examples = retrieveRelevantExamples(questionInfo.question, {
     maxExamples: 3,
     minScore: 1,
@@ -169,7 +172,7 @@ async function main() {
   console.log('Top table scores:');
   for (const entry of retrieval.tableScores.slice(0, 8)) {
     const table = schema.tables.find((candidate) => candidate.name === entry.name);
-    const detail = scoreTableDetailed(table, retrieval.questionTokens);
+    const detail = scoreTableDetailed(table, retrieval.questionTokens, { hintsVersion });
     const reasons = detail.matches
       .map((match) => `${match.token} (+${match.score}: ${match.reasons.join(', ')})`)
       .join('; ');

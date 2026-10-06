@@ -94,6 +94,37 @@ const STOPWORDS = new Set([
   'without',
 ]);
 
+// Hints version 2: words retrieval ignores. Each one matched a column name or
+// comment only by accident and pointed the relevance hint (and the retrieved
+// scope's column order) at the wrong column: "included" and "distinct" at
+// NetPayableAmount ("Net payable amount; included as an intentionally
+// distinct metric", tpl_total_net_sales_feb15_mar15_2026_40ae9d), "total" at
+// BillTotalAmount and line TotalAmount (edge_public_002), "units" at
+// SalePrice ("Unit sale price"), "recorded" at AccountingPosting.PostingDate,
+// "used", "column" and "row" at the decoy DocumentTypeClass and posting
+// comments, "as" at several comments. The semantic plan does not read these
+// tokens: "units" still matches quantity_sold.
+const RETRIEVAL_STOPWORDS_V2 = new Set([
+  'as',
+  'include',
+  'included',
+  'including',
+  'inclusive',
+  'distinct',
+  'total',
+  'totals',
+  'unit',
+  'units',
+  'record',
+  'records',
+  'recorded',
+  'used',
+  'column',
+  'columns',
+  'row',
+  'rows',
+]);
+
 function singularTokenVariant(token) {
   if (token.length <= 3) {
     return token;
@@ -360,10 +391,11 @@ export function buildQuestionContext(question, { hintsVersion = undefined } = {}
   const temporalReferences = extractTemporalReferences(originalQuestion, { hintsVersion: version });
   const normalizedQuestion = normalizeQuestionTemporalText(originalQuestion, temporalReferences);
 
+  const tokens = normalizeTokens(normalizedQuestion);
   return {
     originalQuestion,
     normalizedQuestion,
-    questionTokens: normalizeTokens(normalizedQuestion),
+    questionTokens: version === 1 ? tokens : tokens.filter((token) => !RETRIEVAL_STOPWORDS_V2.has(token)),
     temporalReferences,
   };
 }
@@ -874,18 +906,29 @@ function scoreColumn(column, questionTokens) {
   return score;
 }
 
-function buildTableIndex(table) {
+// Hints version 2: "account" is not a Customer alias (in this schema it names
+// a ledger account; tpl_account_net_movement_feb_2026_c1256b read "each
+// account" as each customer), matching the overlay's customer entity.
+const TABLE_ALIAS_REMOVALS_V2 = { Customer: new Set(['account', 'accounts']) };
+
+function tableAliases(tableName, hintsVersion) {
+  const aliases = TABLE_ALIASES[tableName] || [];
+  const removed = hintsVersion === 1 ? null : TABLE_ALIAS_REMOVALS_V2[tableName];
+  return removed ? aliases.filter((alias) => !removed.has(alias)) : aliases;
+}
+
+function buildTableIndex(table, hintsVersion = 1) {
   return {
     nameTokens: normalizeTokens(table.name),
     descriptionTokens: normalizeTokens(table.description || ''),
-    aliasTokens: normalizeTokens((TABLE_ALIASES[table.name] || []).join(' ')),
+    aliasTokens: normalizeTokens(tableAliases(table.name, hintsVersion).join(' ')),
     columnNameTokens: normalizeTokens(table.columns.map((column) => column.name).join(' ')),
     columnCommentTokens: normalizeTokens(table.columns.map((column) => column.comment || '').join(' ')),
   };
 }
 
-export function scoreTableDetailed(table, questionTokens) {
-  const index = buildTableIndex(table);
+export function scoreTableDetailed(table, questionTokens, { hintsVersion = undefined } = {}) {
+  const index = buildTableIndex(table, normalizeHintsVersion(hintsVersion));
   let score = 0;
   const matches = [];
 
@@ -930,8 +973,8 @@ export function scoreTableDetailed(table, questionTokens) {
   };
 }
 
-function scoreTable(table, questionTokens) {
-  return scoreTableDetailed(table, questionTokens).score;
+function scoreTable(table, questionTokens, hintsVersion) {
+  return scoreTableDetailed(table, questionTokens, { hintsVersion }).score;
 }
 
 function getImportantColumns(table, questionTokens, limit = 24) {
@@ -1193,7 +1236,7 @@ export function retrieveRelevantTables(
   const semanticBoosts = buildSemanticTableBoosts(resolvedSemanticPlan);
   const scored = schema.tables
     .map((table) => {
-      const lexicalScore = scoreTable(table, questionTokens);
+      const lexicalScore = scoreTable(table, questionTokens, version);
       const semanticBoost = semanticBoosts.get(table.tableName) || semanticBoosts.get(table.name) || { score: 0, matches: [] };
 
       return {
