@@ -23,11 +23,15 @@
 //   slow gold never looks like a model failure, and is cached per fixture.
 // - The prediction runs as the read-only query user with the statement timeout
 //   and a row cap of (largest gold row count + 1): more rows than the gold is
-//   already a mismatch, so nothing beyond that is ever read.
+//   already a mismatch, so nothing beyond that is ever read. Under the
+//   ignore_all_zero_rows relaxation extra all-zero rows are allowed, so the
+//   cap grows by ALL_ZERO_ROWS_ALLOWANCE and a prediction that reaches it is a
+//   row-count mismatch (its unread rows could hold a non-zero one).
 // - Signal checks (resolved through the assignment) and the disallowed-column
 //   lint are reported as warnings; they never change the verdict.
 
 import {
+  comparisonRelaxations,
   findDisallowedColumnsUsed,
   findSharedAssignment,
   isCutByLimit,
@@ -48,6 +52,12 @@ export const GOLD_STATEMENT_TIMEOUT_MS = 30_000;
 // with its last row (ties at the cut-off). A tie group longer than this is
 // only partly known, so a prediction picking one of the unread items fails.
 export const GOLD_TIE_LOOKAHEAD_ROWS = 1000;
+
+// How many rows past the gold's a prediction may return under the
+// ignore_all_zero_rows relaxation (members listed with 0 everywhere). One
+// that returns more is a row-count mismatch: the rows it was not read for
+// could hold a non-zero metric.
+export const ALL_ZERO_ROWS_ALLOWANCE = 1000;
 
 // The same row in the same column order (the gold and its run past the LIMIT).
 function sameRow(left, right) {
@@ -263,10 +273,12 @@ export async function scoreAgainstGold({
     )
   );
 
+  const { ignoreAllZeroRows } = comparisonRelaxations(comparison);
   const predictions = await Promise.all(
     connections.map((fixtureConnection, fixtureIndex) => {
       const largestGold = Math.max(...goldRows.map((rowsByFixture) => rowsByFixture[fixtureIndex].length));
-      return executePrediction(fixtureConnection, predictedSql, { timeoutMs, maxRows: largestGold + 1, signal });
+      const maxRows = largestGold + 1 + (ignoreAllZeroRows ? ALL_ZERO_ROWS_ALLOWANCE : 0);
+      return executePrediction(fixtureConnection, predictedSql, { timeoutMs, maxRows, signal });
     })
   );
 
@@ -276,6 +288,10 @@ export async function scoreAgainstGold({
       const gold = goldRows[variantIndex][fixtureIndex];
       if (prediction.error) {
         return { match: false, reason: 'execution_error', assignments: [], goldColumns: [], empty: false, truncated: false };
+      }
+      if (ignoreAllZeroRows && prediction.truncated) {
+        // More rows than the relaxation reads: the rest are unknown.
+        return { match: false, reason: 'row_count', assignments: [], goldColumns: [], empty: false, truncated: true };
       }
       // Per-fixture verdict and reason; the shared mapping is searched below.
       return matchResultSets(gold, prediction.rows, comparison, { limit: 1, goldTies: goldTies[variantIndex][fixtureIndex] });

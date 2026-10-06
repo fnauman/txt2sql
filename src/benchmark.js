@@ -820,6 +820,8 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //     column_order: [..gold column names]      // these must keep their relative
 //                                              // SELECT-list order in the prediction
 //     null_as_zero: [..gold column names]      // NULL counts as 0 in these columns
+//     ignore_all_zero_rows: true               // relaxation (rowset): extra all-zero rows are ignored
+//     empty_as_zero: true                      // relaxation (scalar): no rows equals one NULL / 0 row
 //   }
 //
 // Cells are compared by kind:
@@ -874,6 +876,20 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //   (a conditional SUM without ELSE 0 returns NULL for a month with no sales),
 //   in the ranking check too: a ranked metric listed here is ranked with its
 //   NULLs as 0, the values it was matched with.
+// - Scoring relaxations (opt-in per case, each a documented policy choice;
+//   both need null_as_zero, see docs/evaluation-dataset.md):
+//   - ignore_all_zero_rows (rowset mode): a prediction row with no counterpart
+//     in the gold is ignored when every compared null_as_zero column it
+//     carries is 0 (NULL read as 0) under the column assignment: a breakdown
+//     or pivot that also lists members without activity (0 in every metric)
+//     gives the same answer. Every gold row must still pair with a distinct
+//     prediction row, and every prediction row that holds a non-zero metric
+//     must pair with a gold row. An empty gold stays strict (no rows tell
+//     which prediction columns are metrics).
+//   - empty_as_zero (scalar mode): an empty prediction equals a gold of one
+//     row whose compared cells are all NULL, or 0 in a null_as_zero column
+//     (a SUM over an empty window). The reverse (an empty gold) is not
+//     relaxed.
 // - scalar rule: when the gold is a single value (one row, one compared
 //   column) and the prediction has several columns, the column carrying the
 //   gold value must be the one named exactly like the gold column when there
@@ -1141,6 +1157,93 @@ function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples
     return false;
   }
   return hasPerfectMatching(adjacency, actualTuples.length + standIns.length);
+}
+
+// A compared cell that reads as zero: a number equal to 0 after rounding (or,
+// with a tolerance, within it of 0). NULL cells of a null_as_zero column were
+// already read as 0.
+function isZeroCell(cell, tolerance) {
+  if (cell.kind !== 'num') {
+    return false;
+  }
+  return tolerance > 0 ? Math.abs(cell.num) <= tolerance + 1e-9 : cell.key === 'n:0';
+}
+
+// ignore_all_zero_rows (see the spec above): every gold row pairs with a
+// distinct, equal prediction row, and every prediction row left over is an
+// all-zero row (`isZeroTuple`). Without a tolerance equality is exact, so
+// equal tuples are interchangeable: remove one prediction tuple per gold
+// tuple and check what is left. With a tolerance it is a perfect matching
+// (Hopcroft-Karp) between the gold rows plus one stand-in per surplus row
+// and the prediction rows; a stand-in pairs with any all-zero prediction row.
+function matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, tolerance) {
+  if (actualTuples.length < goldTuples.length) {
+    return false;
+  }
+  if (tolerance <= 0) {
+    const remaining = new Map();
+    for (const tuple of actualTuples) {
+      const key = tupleKey(tuple);
+      const entry = remaining.get(key) || { tuple, count: 0 };
+      entry.count += 1;
+      remaining.set(key, entry);
+    }
+    for (const tuple of goldTuples) {
+      const entry = remaining.get(tupleKey(tuple));
+      if (!entry || entry.count === 0) {
+        return false;
+      }
+      entry.count -= 1;
+    }
+    return [...remaining.values()].every((entry) => entry.count === 0 || isZeroTuple(entry.tuple));
+  }
+  const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
+  const zeroRows = actualTuples.map((tuple, index) => (isZeroTuple(tuple) ? index : -1)).filter((index) => index !== -1);
+  const surplus = actualTuples.length - goldTuples.length;
+  if (zeroRows.length < surplus) {
+    return false;
+  }
+  const adjacency = [
+    ...goldTuples.map((gold) => actualTuples.map((actual, j) => (tuplesEqual(gold, actual) ? j : -1)).filter((j) => j !== -1)),
+    ...Array.from({ length: surplus }, () => zeroRows),
+  ];
+  if (adjacency.some((neighbours) => neighbours.length === 0)) {
+    return false;
+  }
+  return hasPerfectMatching(adjacency, actualTuples.length);
+}
+
+// empty_as_zero (see the spec above): the gold is one row whose compared
+// cells are all NULL, or 0 in a null_as_zero column.
+function isZeroGoldRow(expected, goldColumns, nullAsZero, decimals) {
+  return (
+    expected.length === 1 &&
+    goldColumns.length > 0 &&
+    goldColumns.every((column) => {
+      const value = expected[0]?.[column];
+      if (value === null || value === undefined) {
+        return true;
+      }
+      return nullAsZero.has(column) && describeCell(value, decimals).key === 'n:0';
+    })
+  );
+}
+
+/**
+ * The scoring relaxations a comparison spec opts into, as they apply (see
+ * the spec above): `ignoreAllZeroRows` (rowset mode, null_as_zero) and
+ * `emptyAsZero` (scalar mode, null_as_zero).
+ */
+export function comparisonRelaxations(comparison) {
+  if (!comparison || typeof comparison !== 'object') {
+    return { ignoreAllZeroRows: false, emptyAsZero: false };
+  }
+  const mode = comparison.mode || 'rowset';
+  const nullAsZero = Array.isArray(comparison.null_as_zero) && comparison.null_as_zero.length > 0;
+  return {
+    ignoreAllZeroRows: comparison.ignore_all_zero_rows === true && mode === 'rowset' && nullAsZero,
+    emptyAsZero: comparison.empty_as_zero === true && mode === 'scalar' && nullAsZero,
+  };
 }
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
@@ -1458,18 +1561,7 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
       ? comparison.compare_columns
       : Object.keys(expected[0] ?? {});
   const fail = (reason) => ({ outcome: { match: false, goldColumns, assignments: [], reason, truncated: false, empty: false } });
-
-  if (expected.length !== actual.length) {
-    return fail('row_count');
-  }
-  if (expected.length === 0 || goldColumns.length === 0) {
-    return { outcome: { match: true, goldColumns, assignments: [], reason: 'match', truncated: false, empty: true } };
-  }
-
-  const actualColumns = Object.keys(actual[0] ?? {});
-  if (actualColumns.length < goldColumns.length) {
-    return fail('missing_columns');
-  }
+  const emptyMatch = { outcome: { match: true, goldColumns, assignments: [], reason: 'match', truncated: false, empty: true } };
 
   const tolerance = toComparableNumber(comparison.tolerance) ?? 0;
   const decimals = Number.isInteger(comparison.decimals) ? comparison.decimals : DEFAULT_DECIMALS;
@@ -1477,6 +1569,32 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
   const order = String(comparison.order || 'desc').toLowerCase();
   const columnOrder = Array.isArray(comparison.column_order) ? comparison.column_order : [];
   const nullAsZero = new Set(Array.isArray(comparison.null_as_zero) ? comparison.null_as_zero : []);
+  const relaxations = comparisonRelaxations(comparison);
+  // ignore_all_zero_rows: the compared null_as_zero columns decide whether a
+  // prediction row is all zero; without one compared, nothing is relaxed.
+  const zeroIndexes = relaxations.ignoreAllZeroRows
+    ? goldColumns.map((column, index) => (nullAsZero.has(column) ? index : -1)).filter((index) => index !== -1)
+    : [];
+
+  if (expected.length !== actual.length) {
+    if (relaxations.emptyAsZero && actual.length === 0 && isZeroGoldRow(expected, goldColumns, nullAsZero, decimals)) {
+      return emptyMatch;
+    }
+    if (!(zeroIndexes.length > 0 && expected.length > 0 && actual.length > expected.length)) {
+      return fail('row_count');
+    }
+  }
+  if (expected.length === 0 || goldColumns.length === 0) {
+    return emptyMatch;
+  }
+  // Prediction rows beyond the gold's (ignore_all_zero_rows only).
+  const surplus = actual.length - expected.length;
+
+  const actualColumns = Object.keys(actual[0] ?? {});
+  if (actualColumns.length < goldColumns.length) {
+    return fail('missing_columns');
+  }
+
   const scalarSingleValue = mode === 'scalar' && expected.length === 1 && goldColumns.length === 1;
 
   const goldCells = goldColumns.map((column) => describeColumn(expected, column, decimals, { nullAsZero: nullAsZero.has(column) }));
@@ -1526,11 +1644,16 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     return sameName.length === 1 ? sameName[0] : null;
   });
   const pinnedColumns = new Set(pinned.filter(Boolean));
+  // With surplus rows (ignore_all_zero_rows) a carrier holds the gold column's
+  // cells plus those of the rows that are ignored.
   const compatible = (cells, goldIndex, column) =>
     isBoundary
       ? columnContains(aboveBoundary(cells), cellsFor(goldIndex, column), tolerance) &&
         columnContains(cellsFor(goldIndex, column), withTies(cells, goldIndex), tolerance)
-      : columnsCompatible(cells, cellsFor(goldIndex, column), tolerance);
+      : surplus > 0
+        ? columnContains(cells, cellsFor(goldIndex, column), tolerance)
+        : columnsCompatible(cells, cellsFor(goldIndex, column), tolerance);
+  const isZeroTuple = (tuple) => zeroIndexes.every((index) => isZeroCell(tuple[index], tolerance));
   const candidates = goldCells.map((cells, goldIndex) =>
     (pinned[goldIndex] ? [pinned[goldIndex]] : actualColumns.filter((column) => !pinnedColumns.has(column))).filter((column) =>
       compatible(cells, goldIndex, column)
@@ -1541,7 +1664,9 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     const actualTuples = actual.map((_row, rowIndex) => assignment.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex]));
     const valuesMatch = isBoundary
       ? matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples, rankIndexes, tolerance)
-      : matchRowsUnordered(goldTuples, actualTuples, tolerance);
+      : surplus > 0
+        ? matchRowsIgnoringZeroRows(goldTuples, actualTuples, isZeroTuple, tolerance)
+        : matchRowsUnordered(goldTuples, actualTuples, tolerance);
     if (!valuesMatch) {
       return 'values';
     }
@@ -1574,6 +1699,10 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
           const actualKeys = actual
             .map((_row, rowIndex) => tupleKey(partial.map((column, goldIndex) => cellsFor(goldIndex, column)[rowIndex])))
             .sort();
+          if (surplus > 0) {
+            // Every gold row pairs with a distinct prediction row.
+            return containsSortedKeys(actualKeys, goldTuples.map((tuple) => prefixKey(tuple, partial.length)).sort());
+          }
           if (!isBoundary) {
             return sameList(goldTuples.map((tuple) => prefixKey(tuple, partial.length)).sort(), actualKeys);
           }
@@ -1805,6 +1934,25 @@ function normalizeComparison(comparison) {
   }
   if (nullAsZero.length > 0) {
     normalized.null_as_zero = nullAsZero;
+  }
+  // Scoring relaxations: present only when switched on, so a spec without
+  // them keeps its scoring fingerprint. A flag that could never apply is a
+  // dataset error, not a silent no-op.
+  for (const [flag, wantedMode] of [
+    ['ignore_all_zero_rows', 'rowset'],
+    ['empty_as_zero', 'scalar'],
+  ]) {
+    const value = comparison[flag];
+    if (value === undefined || value === null || value === false) {
+      continue;
+    }
+    if (value !== true) {
+      throw new Error(`comparison.${flag} must be true or absent; got ${JSON.stringify(value)}.`);
+    }
+    if (mode !== wantedMode || nullAsZero.length === 0) {
+      throw new Error(`comparison.${flag} applies to ${wantedMode} mode with null_as_zero only (mode ${mode}, null_as_zero ${nullAsZero.length ? 'set' : 'empty'}).`);
+    }
+    normalized[flag] = true;
   }
   return normalized;
 }

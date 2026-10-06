@@ -526,6 +526,22 @@ Oracle rules (`scoreAgainstGold`):
   scalar returns one row (NULL or 0 for an empty window); an empty result is
   accepted only by the zero-row case whose whole point is the empty year.
 
+### Scoring relaxations
+
+Two comparison-spec flags relax the oracle on purpose. Each is opt-in per
+case, so the cases that use it are listed by their `comparison` block, and
+each changes the case's scoring fingerprint, so a comparison with a report
+scored without it excludes the case (`goldChanged`, "alternatives or
+comparison spec changed") instead of counting a free flip.
+
+| Flag | Applies to | Relaxation |
+|---|---|---|
+| `ignore_all_zero_rows` | rowset mode with `null_as_zero` | prediction rows whose `null_as_zero` metrics are all 0 / NULL and that have no counterpart in the gold are ignored |
+| `empty_as_zero` | scalar mode with `null_as_zero` | an empty prediction equals a gold of one NULL / 0 row |
+
+The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
+`test/comparison-relaxations.test.js` pins them.
+
 ### Statuses and warnings
 
 The benchmark status depends on values only: `pass`, `result_mismatch`, or
@@ -567,7 +583,9 @@ comparison: {
   decimals: number,                       // rounding precision, default 2 (matches gold ROUND(.., 2))
   tolerance: number,                      // absolute numeric tolerance; default 0
   column_order: [..gold column names],    // these keep their relative SELECT-list order in the prediction
-  null_as_zero: [..gold column names]     // NULL counts as 0 in these columns, on both sides
+  null_as_zero: [..gold column names],    // NULL counts as 0 in these columns, on both sides
+  ignore_all_zero_rows: true,             // relaxation, rowset + null_as_zero: extra all-zero rows are ignored
+  empty_as_zero: true                     // relaxation, scalar + null_as_zero: no rows = one NULL / 0 row
 }
 ```
 
@@ -626,6 +644,22 @@ comparison: {
   pivot's month without sales, a SUM over an empty window), in a ranked case's
   order check too (a NULL between 10 and 5 in a descending ranking is a 0 out
   of place). Without it a NULL gold never equals 0.
+- **Scoring relaxations** (opt-in per case; each is a policy choice listed
+  under [Scoring relaxations](#scoring-relaxations)):
+  - `ignore_all_zero_rows` (rowset mode with `null_as_zero`): a prediction
+    row with no counterpart in the gold is ignored when every compared
+    `null_as_zero` column it carries (under the column assignment) is 0 or
+    NULL. Every gold row must still pair with a distinct prediction row, and
+    a prediction row with any non-zero metric must pair with a gold row. An
+    empty gold stays strict. The oracle reads up to
+    `ALL_ZERO_ROWS_ALLOWANCE` (1000) rows past the gold for such a case; a
+    prediction longer than that is a `row_count` mismatch.
+  - `empty_as_zero` (scalar mode with `null_as_zero`): an empty prediction
+    equals a gold of one row whose compared cells are all NULL, or 0 in a
+    `null_as_zero` column. An empty gold is not relaxed the other way.
+  - A flag on a case of another mode or without `null_as_zero` is a dataset
+    error (`normalizeBenchmarkCase` throws); a flag that is absent (or false)
+    leaves the case's scoring fingerprint as it was.
 - **Scalar rule**: when the gold is a single value and the prediction has
   several columns, the carrier must be the column named exactly like the gold
   column when there is one, else the only column of the value's kind, else the
