@@ -113,10 +113,12 @@ other words).
   only names of those things.
 
 So dev measures the product on the wording it was tuned on, and holdout on new
-intents in partly new wording. A dev score well above the holdout score is the
-tuning showing. Keep it that way: **never tune the prompt rules, the few-shot
-pool or the semantic layer on holdout wording**, and add a synonym that a
-holdout question uses only together with a fresh holdout. Limit: the holdout
+intents in partly new wording. A dev score well above the holdout score is
+what the tuning would show, but the splits also differ in their intents, so it
+does not prove it (see the limit below). Keep it that way: **never tune the
+prompt rules, the few-shot pool or the semantic layer on holdout wording**,
+and add a synonym that a holdout question uses only together with a fresh
+holdout. Limit: the holdout
 mixes two effects, unseen intents and unseen vocabulary (dev and holdout
 wording differ systematically: "revenue" versus "turnover" / "takings"), so a
 gap does not say which one hurts; several holdout questions are known
@@ -1048,8 +1050,11 @@ cases), compact file 1.33 MB.
 How to read it: the known-validator-rejection flags cap strict accuracy at
 86.5% (dev 89.3%, holdout 80.5%) even with perfect SQL, and the 92 system
 failures are exactly those retrieval-scope rejections. The holdout gap
-(60.6% vs 72.6%) measures how much of today's accuracy depends on vocabulary
-the semantic layer and prompt rules were tuned on. Guardrails no longer reject
+(60.6% vs 72.6%) reflects performance on new intents in partly new wording:
+the holdout differs from dev in its intents as well as its wording, so the gap
+does not say how much of it comes from vocabulary the semantic layer and
+prompt rules were tuned on and how much from the questions themselves (see
+[Known limits](#known-limits)). Guardrails no longer reject
 correct SQL, but they catch only about a quarter of wrong SQL; most wrong
 answers are semantically wrong SQL that is still valid.
 

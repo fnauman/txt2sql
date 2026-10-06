@@ -406,10 +406,12 @@ whole suite, 3 repetitions, measured on 2026-10-06):
 | Abstain / clarify cases handled | 0 of 10 (the product always answers; not in accuracy) |
 | Cost and latency | $0.37 total · $0.00073 per correct answer · p50 2.4 s, p95 5.4 s |
 
-The 12-point dev/holdout gap is the cost of new vocabulary; the system failures
-are retrieval misses that the validator then enforces as table-scope rejections
-(34 cases are flagged as known gaps, capping accuracy at 86.5% even with
-perfect SQL). These are measurements of today's product, not targets.
+The 12-point dev/holdout gap reflects performance on new intents in partly new
+wording (the splits differ in both, so it does not measure the cost of new
+vocabulary alone); the system failures are retrieval misses that the validator
+then enforces as table-scope rejections (34 cases are flagged as known gaps,
+capping accuracy at 86.5% even with perfect SQL). These are measurements of
+today's product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
