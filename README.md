@@ -291,10 +291,10 @@ one suite of 255 unique cases over 140 intents (see [Evaluation](#evaluation)):
 - `core-public` (9 cases) and `paraphrase-public` (9 rephrasings of them): the
   original smoke cases, the wording the prompt rules and the semantic layer
   were tuned on (all `dev`);
-- `edge-cases-public` (17 cases): the 9 core cases plus 8 targeted edge cases,
-  one per `failure_class` (metric/column confusion, header↔detail grain, wrong
-  date column, stale snapshot fields, two join-path traps, master-data
-  resolution, aggregation shape), built by `npm run build-edge-dataset`;
+- `edge-cases-public` (17 cases): the 9 core cases plus 8 targeted edge cases
+  (metric/column confusion, header↔detail grain, wrong date column, stale
+  snapshot fields, two join-path traps, a fuzzy product term, aggregation
+  shape), built by `npm run build-edge-dataset`;
 - `templated-public` (189 cases over 94 intents): metrics, dimensions, time
   windows, filters and result shapes composed into 2-3 phrasings per intent,
   generated deterministically with their oracle controls by
@@ -307,9 +307,11 @@ one suite of 255 unique cases over 140 intents (see [Evaluation](#evaluation)):
 Every answer case is execution-verified on the three fixture databases (seed,
 v2, v3) with its row counts pinned, and resolves oracle controls in
 `datasets/controls/`: plausible wrong SQL the oracle must reject and correct
-alternatives it must accept. New intents are `dev` or `holdout` by a stable
-hash of the intent id. With one case per failure class in the edge suite,
-per-class results there are examples, not rates.
+alternatives it must accept. Every case in these datasets is `dev`: the
+holdout the error analysis of Experiment 1 inspected was retired to dev
+(tagged `formerly_holdout`), and a fresh holdout, authored blind, is frozen by
+`datasets/holdout-manifest.json`. With one or two cases per failure class in
+the edge suite, per-class results there are examples, not rates.
 
 It relies on a value-aware comparator (`compareResults` in `src/benchmark.js`):
 results are matched on **values**, not column names, so a different aggregate
@@ -379,20 +381,35 @@ with 2-3 phrasings each, built by `npm run build-eval-dataset`) and 40
 hand-written hard cases (new vocabulary, Swedish, typos, relative dates with an
 as-of date, named entities, zero-row answers, and 10 unanswerable or ambiguous
 questions where the right behaviour is to abstain or ask, reported apart from
-accuracy). Every case is `dev` or `holdout`. The 45 holdout intents (81 cases)
-are new intents whose questions avoid every multi-word phrase of the semantic
-layer and its tuned word "revenue" (single words such as customer, store or
-units still match it), so the holdout measures new intents in partly new
-wording; `--split holdout` runs them alone, and the report breaks results down
-by split. A case can be flagged as a known product gap (the validator rejects
-a correct answer today; one case, where a guardrail misreads a ledger account
-name); it still counts. The report contains:
+accuracy). Every case is `dev` or `holdout`, and today every case is dev: the
+45 intents (81 cases) that were holdout were read during the error analysis
+of Experiment 1, so they are dev now, tagged `formerly_holdout`. A fresh
+holdout (new intents, wording that avoids the semantic layer) is authored
+blind and frozen by `datasets/holdout-manifest.json`: a test fails when a
+holdout case is added, removed or changed without a reviewed manifest update
+(`npm run holdout-manifest -- --write --note "..."`). Error analysis and
+experiment design use dev failures only; report.md and the console show the
+holdout in aggregate (accuracy by split), never per case, unless
+`--reveal-holdout`. `--split dev|holdout` runs one split.
+
+The golds encode written-down conventions (net amounts, header vs line
+grain, campaign attribution through the product, the cancel filter, units on
+product lines, top-N and ranking rules), and two documented scoring
+relaxations are opt-in per case: a customer pivot may also list customers
+with 0 everywhere, and a scalar total may be empty where the gold is NULL /
+0 (see [docs/evaluation-dataset.md](docs/evaluation-dataset.md#gold-conventions)).
+A case can be flagged as a known product gap (the validator rejects every
+correct answer today; one case, where a guardrail misreads a ledger account
+name); it still counts in accuracy, and its failures are system errors. The
+report contains:
 
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval
-  miss, infrastructure), the guardrail confusion matrix, the abstain / clarify
-  cases handled, a per-case table, cost / latency / retries / tokens, and the
-  provenance (git sha, prompt, semantic-layer, fixture and dataset hashes);
+  miss, known validator rejection, infrastructure), the guardrail confusion
+  matrix, the abstain / clarify cases handled, a per-case table (dev cases;
+  holdout ones only with `--reveal-holdout`), cost / latency / retries /
+  tokens, and the provenance (git sha, prompt, semantic-layer, fixture and
+  dataset hashes);
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
@@ -408,14 +425,18 @@ whole suite, 3 repetitions, full-schema prompting via the default
 | Abstain / clarify cases handled | 0 of 10 (the product always answers; not in accuracy) |
 | Cost and latency | $0.33 total · $0.00062 per correct answer · p50 2.6 s, p95 5.3 s · 91.5% of prompt tokens cached |
 
+This baseline was measured before the measurement-hygiene changes (the
+scoring relaxations, the "spend" reading, the relabelled failure classes,
+known validator rejections counted as system errors, and the holdout
+retired to dev); its split numbers are those of the retired holdout. It is
+re-made on the current datasets before the next experiment is measured.
+
 The previous baseline used the retrieved tables as the validator's allow-list
 and scored 68.8% (dev 72.6%, holdout 60.6%) with 92 system failures, all
 retrieval misses; switching to full-schema prompting is
 [Experiment 1](docs/experiments/01-schema-scope.md) (+4.0 pts, paired
 bootstrap CI +0.1 to +7.9, exact McNemar p = 0.064 — a likely but not yet
-significant improvement). The 6-point dev/holdout gap reflects performance on
-new intents in partly new wording (the splits differ in both, so it does not
-measure the cost of new vocabulary alone). With perfect SQL the suite's ceiling
+significant improvement). With perfect SQL the suite's ceiling
 is now 99.6%; the remaining failures are model errors — mostly metric-column
 confusion, distractor joins and result shape — which the next experiments
 target. These are measurements of the product, not targets.
@@ -428,7 +449,7 @@ so `--min-accuracy` is refused with exit 2). Harness, database and
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
-`--case-id`, `--split`. One repetition of the whole suite costs about 11
+`--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole suite costs about 11
 cents on gpt-4o-mini (the committed baseline: $0.33 for 3 repetitions). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
@@ -665,7 +686,7 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - Missing foreign keys are ignored on purpose rather than guessed.
 - The local bootstrap uses the copied models to create a practical starter schema, not a byte-for-byte production clone.
 - Generated files are written to `generated/` and are excluded from git.
-- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`) and `hard-cases-public` (hand-written, including abstain / clarify cases), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits; their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
+- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`) and `hard-cases-public` (hand-written, including abstain / clarify cases), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits (every case is dev until the blind holdout lands; `datasets/holdout-manifest.json` freezes the holdout); their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
 - The *why* behind the pipeline and the web app — design decisions, trade-offs, and the invariants — is in `docs/architecture.md`.
 - Measured product changes (one variable, paired against the committed baseline) are written up in `docs/experiments/` (protocol in `docs/experiments/README.md`).
 

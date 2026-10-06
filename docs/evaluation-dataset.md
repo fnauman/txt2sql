@@ -338,8 +338,7 @@ is credited with a convention it happened to change. They were reviewed
 after the error analysis of the Experiment 1 failures: the golds were kept,
 one alternative reading was added (`hard_entity_lakeside_spend_q1_2026`,
 below; the committed baseline answered it with the bill total, so a rescore
-passes it: 184 → 185 majority-pass cases, a gold decision, not a model
-gain), and where the analysis found another reading defensible but the
+passes it: a gold decision, not a model gain), and where the analysis found another reading defensible but the
 gold stays, the reason is given.
 
 | Convention | Rule | Other reading, and the decision |
@@ -653,10 +652,11 @@ The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
   sold nothing, and one NULL row is what the gold returns there.
 
 Rescoring the committed gpt-4o-mini baseline (no LLM calls) with and without
-them: strict accuracy 72.8% → 74.8%, majority-pass cases 179 → 184, five
-improvements (the three customer pivots, `tpl_net_sales_south_store_mar_2026`
-×2) and no regression. A comparison with a report scored before them excludes
-these 43 cases (scoring fingerprint changed).
+them flips five of its failing cases to pass (the three customer pivots and
+`tpl_net_sales_south_store_mar_2026` ×2) and none the other way; a gain from
+the relaxations is a measurement change, not a model gain. A comparison with
+a report scored before them excludes these 43 cases (scoring fingerprint
+changed).
 
 ### Statuses and warnings
 
@@ -924,6 +924,7 @@ in its dataset file.
 npm run eval                                        # the whole suite, once
 npm run eval -- --repeat 3                          # three repetitions per case
 npm run eval -- --split holdout                     # only the holdout (or --split dev)
+npm run eval -- --offline --reveal-holdout          # list holdout cases one by one (a deliberate look)
 npm run eval -- --dataset hard-cases-public         # one dataset
 npm run eval -- --dataset edge-cases-public --tag join_path
 npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
@@ -1249,6 +1250,15 @@ unset (`auto` → `full`, 2,258 of 8,000 estimated tokens), prompt version
 | Cost | $0.3331 total · $0.00044 per question · $0.00062 per correct answer · 91.5% of prompt tokens cached |
 | Latency | p50 2.64 s · p95 5.25 s (product loop) · retry rate 5.6% |
 
+This baseline predates the measurement-hygiene changes: the
+[scoring relaxations](#scoring-relaxations), the billed-total reading of
+"spend" ([Gold conventions](#gold-conventions)), the corrected failure
+classes, failures of known validator rejections counted as system errors,
+and the retired holdout (its "holdout" numbers below are those of the 77
+answer cases that are dev now, tagged `formerly_holdout`). A rescore applies
+all of them to its recorded SQL, and it is re-made on the current datasets
+before the next experiment is measured.
+
 How to read it: with the full in-scope schema as the allow-list there are no
 retrieval misses, and with perfect SQL the suite's ceiling is 99.6% (one
 `METRIC_COLUMN` known validator rejection remains). Every failure is now a
@@ -1257,11 +1267,9 @@ near-synonyms (net vs payable vs bill total vs balance), joins through bridge
 tables (`ProductBrand`) and wrong result shapes. The two `hard_zero_harbor_kiosk_*`
 cases have an empty or zero gold on every fixture, so the oracle cannot tell
 right from wrong SQL there; treat their outcomes as unscored. The holdout gap
-(68.8% vs 74.6%) reflects performance on new intents in partly new wording:
-the holdout differs from dev in its intents as well as its wording, so the gap
-does not say how much of it comes from vocabulary the semantic layer and
-prompt rules were tuned on and how much from the questions themselves (see
-[Known limits](#known-limits)). Guardrails never reject correct SQL, but they
+of that run (68.8% vs 74.6%) mixed new intents and new wording, and the
+holdout has since been inspected and retired (see
+[Splits and the holdout policy](#splits-and-the-holdout-policy)). Guardrails never reject correct SQL, but they
 catch only about a fifth of wrong SQL; most wrong answers are semantically
 wrong SQL that is still valid.
 
@@ -1299,10 +1307,13 @@ $0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` ca
   fixtures were designed against; the held-out tiers (about 75-79%) are the
   estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
   and [Known blind spots](#known-blind-spots).
-- **Holdout mixes two effects**: unseen intents and unseen vocabulary. The
-  holdout avoids the semantic layer's multi-word phrases and its enforced word
-  "revenue", not its single-word entity synonyms, and its wording differs from
-  dev's systematically ("turnover", "net takings" against "net revenue").
+- **No holdout yet**: the inspected holdout was retired to dev
+  (`formerly_holdout`); until the blind one lands there is no generalization
+  estimate, only dev accuracy. **A holdout mixes two effects**: unseen intents
+  and unseen vocabulary. It avoids the semantic layer's multi-word phrases and
+  its enforced word "revenue", not its single-word entity synonyms, so its
+  wording differs from dev's systematically (the retired one said "turnover"
+  and "net takings" where dev says "net revenue").
 - **Zero-row cases** accept any empty result (or 0 / NULL for a scalar): they
   only test that the product does not invent rows in an empty window.
 - **Every document type is a sale**: Credit Memos carry positive amounts in
