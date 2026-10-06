@@ -27,7 +27,7 @@ Most text-to-SQL demos stop at "dump the schema into the prompt, parse whatever 
 
 | Typical demo | This repo |
 |---|---|
-| Whole schema pasted into every prompt | **Rule-based semantic retrieval** narrows the prompt to the highest-scoring in-scope tables (plus the tables on the foreign-key paths between them) using lexical scoring and the hand-curated `metadata/semantic-layer.json`, so the prompt does not carry the whole schema. It narrows rather than picks a minimal set: "How many active customers do we have?" still retrieves 5 of the 13 tables |
+| Whole schema pasted into every prompt, or a retrieval guess that cannot be undone | **A schema scope sized to the schema** (`SCHEMA_SCOPE`, default `auto`): when the whole in-scope schema fits a token budget (8,000 estimated tokens; the 13-table demo is about 2,300) it is sent as one stable, cacheable prompt prefix and every in-scope table is allowed, while **rule-based semantic retrieval** (lexical scoring plus the hand-curated `metadata/semantic-layer.json`) only ranks tables and columns as a one-line hint. A larger schema is narrowed by retrieval to the highest-scoring tables plus the tables on the foreign-key paths between them, and a table it missed is added on demand when the model's SQL needs it |
 | Model output trusted and executed | **Deterministic guardrails** (optimized pipeline) re-validate the SQL against the schema context the model saw: qualified table/column references must exist, joins must match in-scope foreign keys or declared join hints, explicitly named metrics must use their canonical columns, `SUM`/`AVG` over a parent table's column while a 1:N child is joined is rejected as a fan-out, and product ID literals must come from the resolved candidate list |
 | "Read-only" assumed | **Read-only checked, then enforced by grants**: a validator built on one MariaDB-faithful tokenizer allows a single `SELECT`/`WITH` statement with no comments and no `WITH RECURSIVE`, rejects cross-database and metadata-schema references, and denylists DML/DDL, `INTO OUTFILE`, locking reads, `@`/`@@` variables and timing/exfiltration functions. By default the query then runs as a `SELECT`-only user under a statement timeout |
 | Entity names guessed by the model | **Bounded master-data resolution**: ambiguous product terms are resolved against whitelisted columns *before* generation, and only the top candidate rows are passed to the prompt — the full product master never enters the context |
@@ -35,7 +35,7 @@ Most text-to-SQL demos stop at "dump the schema into the prompt, parse whatever 
 | "It got the right answer once" | **Evaluation you can trust**: a value-aware comparator scores every answer on three fixture databases; `npm run eval` reports case-level accuracy with confidence intervals over repeated runs, says whether each failure was the model's, the guardrails' or the infrastructure's, and compares runs with a paired McNemar test |
 | Cost ignored | **Cache-aware prompt layout** plus per-call token/cost accounting, with an offline prompt-cache-prefix estimator |
 
-The guiding idea: the LLM proposes, but a small, testable, deterministic layer disposes. Retrieval is *enforced* (optimized SQL may only use the retrieved tables), and safety is *checked* in the application and *enforced* by the database grants, not assumed.
+The guiding idea: the LLM proposes, but a small, testable, deterministic layer disposes. Table scope is *enforced* (optimized SQL may only use in-scope tables: all of them in the full schema scope, the retrieved ones, widened on demand, in the retrieved scope), and safety is *checked* in the application and *enforced* by the database grants, not assumed.
 
 ## Repo Layout
 
@@ -179,6 +179,7 @@ Common variables:
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
+- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default `1`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt) and, with widen-on-demand, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=0` reproduces the product loop of the committed baseline. See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -383,9 +384,9 @@ are new intents whose questions avoid every multi-word phrase of the semantic
 layer and its tuned word "revenue" (single words such as customer, store or
 units still match it), so the holdout measures new intents in partly new
 wording; `--split holdout` runs them alone, and the report breaks results down
-by split. Some cases are flagged as known product gaps (the validator rejects a
-correct answer today, e.g. retrieval misses a named store's table); they still
-count. The report contains:
+by split. A case can be flagged as a known product gap (the validator rejects
+a correct answer today; one case, where a guardrail misreads a ledger account
+name); it still counts. The report contains:
 
 - `report.md`: strict accuracy with a 95% confidence interval, accuracy by
   split, who caused each failure (model, guardrail false rejection, retrieval
@@ -408,10 +409,16 @@ whole suite, 3 repetitions, measured on 2026-10-06):
 
 The 12-point dev/holdout gap reflects performance on new intents in partly new
 wording (the splits differ in both, so it does not measure the cost of new
-vocabulary alone); the system failures are retrieval misses that the validator
-then enforces as table-scope rejections (34 cases are flagged as known gaps,
-capping accuracy at 86.5% even with perfect SQL). These are measurements of
-today's product, not targets.
+vocabulary alone). The baseline ran
+the retrieved schema scope (the only one before `SCHEMA_SCOPE` existed): its 92
+system failures are repetitions where retrieval did not pick a table the answer
+needs, which the validator then enforced; with perfect SQL that scope caps
+accuracy at 86.5%. The default scope is now `auto` (full at 13 tables), whose
+ceiling with perfect SQL is 99.6%; re-judging the baseline's recorded SQL under
+it with zero LLM calls (`npm run eval -- --offline`) gives 69.8%, and the paid
+comparison belongs in
+[docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md).
+These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
@@ -493,7 +500,7 @@ This runs the unit tests in `test/` and `apps/web/test/`, including retrieval, s
 
 ## Semantic Retrieval And Master Data
 
-The optimized pipeline uses `metadata/semantic-layer.json` at runtime to map business phrasing to in-scope tables, joins, metrics, filters, and clarification hints. This is deliberately **rule-based / hand-curated semantic retrieval**, not an embedding model and not a vector database. The runtime combines lexical token scoring with curated semantic boosts, so prompts such as `biggest buyers`, `SKUs moved`, and synthetic product requests retrieve the right demo context without exposing every table.
+The optimized pipeline uses `metadata/semantic-layer.json` at runtime to map business phrasing to in-scope tables, joins, metrics, filters, and clarification hints. This is deliberately **rule-based / hand-curated semantic retrieval**, not an embedding model and not a vector database. The runtime combines lexical token scoring with curated semantic boosts, so prompts such as `biggest buyers`, `SKUs moved`, and synthetic product requests rank the right demo tables first. In the full schema scope that ranking is a hint next to the whole in-scope schema; in the retrieved scope (large schemas) it decides which tables the prompt shows.
 
 This has a useful failure mode for a reference project: when a business term is missing, the fix is visible in metadata and tests. The tradeoff is that new vocabulary must be added deliberately. Embedding or hybrid retrieval is not implemented.
 
@@ -577,20 +584,21 @@ Notes:
 - You can combine both flags to trace to stdout and a file at the same time
 - All events share a `runId` for correlating events from the same run
 - Each event includes `timestamp` and duration timings (`startedAt`, `endedAt`, `durationMs`)
-- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching
+- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching, and `schemaScope` (requested and effective scope, the full-schema token estimate, widened tables); a widen-on-demand retry emits `prompt.widened` with the rejected and added tables
 - LLM cost output includes cached input token counts and percentages when the provider returns `prompt_tokens_details.cached_tokens`
 
 ## Prompt Cache Measurement
 
-The optimized prompt is arranged so stable instructions and the selected schema context appear before volatile question-specific context. This lets repeated questions with the same retrieved tables reuse a much longer provider prompt-cache prefix without sending the full product master.
+The optimized prompt is arranged so stable instructions and the schema context appear before volatile question-specific context. In the full schema scope (the default for this schema) that schema block is the same for every question, so every question shares one provider prompt-cache prefix; in the retrieved scope questions with the same retrieved tables share one. The product master never enters the prompt either way.
 
 Measure the cache-aware prompt layout without making model calls:
 
 ```bash
+npm run measure-prompt-cache -- --suite --schema-scope all
 npm run measure-prompt-cache -- --dataset paraphrase-public --results-file generated/prompt-cache-paraphrase-public.json
 ```
 
-The report includes estimated total tokens, cacheable-prefix tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups across benchmark cases. It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
+The report includes average characters and estimated tokens, cacheable-prefix and question-part tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups, per schema scope. Over the 255-question suite the full scope averages 4,127 estimated tokens per prompt with 1 distinct prefix (451 tokens per question outside it), the retrieved scope 3,800 with 48 prefixes (1,312 outside them). It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
 
 ## Structured Output And Guardrails
 
@@ -601,12 +609,12 @@ The optimized pipeline requests a provider-enforced JSON schema with `sql`, `exp
 - A single `SELECT` or `WITH` statement (one trailing `;` is allowed; the query may open with parentheses).
 - No SQL comments at all: `--`, `#` and `/* */` are rejected as `SQL_COMMENT`, and `/*! */` / `/*M! */` as `EXECUTABLE_COMMENT`. The prompts tell the model not to write them.
 - Non-recursive CTEs, including column lists and CTE chains, are accepted: CTE names are query-local, and the tables inside CTE bodies are checked like any other. `WITH RECURSIVE` is rejected (`RECURSIVE_CTE`).
-- Every table must be in the allowed set (`TABLE_SCOPE`). Any database-qualified table or `db.function()` is rejected (`CROSS_DATABASE`), as are metadata schemas such as `information_schema`, `mysql` and `sys`, bare or backtick-quoted (`METADATA_SCHEMA`).
+- Every table must be in the allowed set (`TABLE_SCOPE`): every in-scope table in the full schema scope, the retrieved tables (widened on demand) in the retrieved scope. Any database-qualified table or `db.function()` is rejected (`CROSS_DATABASE`), as are metadata schemas such as `information_schema`, `mysql` and `sys`, bare or backtick-quoted (`METADATA_SCHEMA`).
 - Denylisted: DML/DDL keywords, any `INTO` (including `INTO OUTFILE`/`DUMPFILE`), `SET` (except `CHARACTER SET`), `PROCEDURE`, locking reads, index hints, `FOR SYSTEM_TIME`, table functions such as `JSON_TABLE`, `@`/`@@` variables, and timing, locking, file, sequence and session-information functions (`SLEEP`, `BENCHMARK`, `GET_LOCK`, `LOAD_FILE`, `NEXTVAL`, `CURRENT_USER`, ...), also when backtick-quoted.
 
 **Layer 2, guardrails** (`validateSqlGuardrails` in `src/sql-guardrails.js`; optimized pipeline only, against the prompt context the model saw):
 
-- Qualified table and column references (`c.CustomerName`) must exist in the retrieved schema context. Unqualified names are only partly checked: an unknown mixed-case identifier such as `FooBar` is rejected, but an unknown lower-case one such as `foobar` is not (MariaDB then fails it at execution).
+- Qualified table and column references (`c.CustomerName`) must exist in the prompt's schema context. Unqualified names are only partly checked: an unknown mixed-case identifier such as `FooBar` is rejected, but an unknown lower-case one such as `foobar` is not (MariaDB then fails it at execution).
 - Cross-table equality joins must match in-scope foreign keys or semantic join hints.
 - Explicitly named metrics ("net sales", "revenue", "units sold", ...) must use their preferred columns, for example net sales uses `SalesDocument.NetAmount` and product (line-grain) net sales uses `SalesDocumentLine.NetAmount`. Metrics matched only through generic words ("sales", "sold") or in count/list questions are advisory: a missing preferred column is recorded in `guardrails.warnings[]` (`METRIC_COLUMN_NOT_USED`) instead of rejecting the SQL.
 - Fan-out: in each `SELECT` scope, `SUM`/`AVG` over a parent table's column while a 1:N child table is joined is rejected (`FAN_OUT`), because the join repeats the parent row. `COUNT`/`MIN`/`MAX`, children used only in `EXISTS`/`IN` or pre-aggregated in a subquery, and anti-joins (`child.col IS NULL`) are allowed.
