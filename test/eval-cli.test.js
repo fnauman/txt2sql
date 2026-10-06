@@ -18,6 +18,7 @@ import {
   runEval,
   validateBaselineReport,
   verificationRefusal,
+  writesDefaultBaseline,
 } from '../scripts/eval.js';
 import { compareReports } from '../src/eval/compare.js';
 
@@ -494,10 +495,24 @@ test('--write-baseline never replaces the default baseline with a filtered or pa
     assert.match(messageOf(['--write-baseline', ...argv]), /--write-baseline would replace eval\/baselines\/gpt-4o-mini\.json with a subset run .*--baseline-file <path>/, argv.join(' '));
   }
   // ...unless the subset baseline goes to a file of its own.
-  const subset = parseEvalArgs(['--write-baseline', '--case-id', 'core_public_001', '--baseline-file', 'eval/baselines/subset.json'], { env: {} });
-  assert.match(subset.baselineFile, /eval\/baselines\/subset\.json$/);
+  const subset = parseEvalArgs(['--write-baseline', '--case-id', 'core_public_001', '--baseline-file', 'eval/subsets/subset.json'], { env: {} });
+  assert.match(subset.baselineFile, /eval\/subsets\/subset\.json$/);
+  assert.equal(writesDefaultBaseline(subset), false);
   // Naming the default file explicitly is the default file.
   assert.match(messageOf(['--write-baseline', '--tag', 'count', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']), /would replace eval\/baselines\/gpt-4o-mini\.json/);
+  // Every file in eval/baselines/ is a default baseline: another model's is never
+  // overwritten (subset or not), and no file there is named after another model.
+  assert.match(
+    messageOf(['--write-baseline', '--model', 'gpt-4.1-mini', '--case-id', 'core_public_001', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']),
+    /--baseline-file eval\/baselines\/gpt-4o-mini\.json is inside eval\/baselines, which holds only each model's default baseline; this run's model gpt-4\.1-mini writes eval\/baselines\/gpt-4\.1-mini\.json/
+  );
+  assert.match(messageOf(['--write-baseline', '--model', 'gpt-4.1-mini', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']), /is inside eval\/baselines/);
+  assert.match(messageOf(['--write-baseline', '--case-id', 'core_public_001', '--baseline-file', 'eval/baselines/subset.json']), /is inside eval\/baselines/);
+  assert.match(messageOf(['--write-baseline', '--baseline-file', 'eval/baselines/nested/gpt-4o-mini.json']), /is inside eval\/baselines/);
+  const ownFull = parseEvalArgs(['--write-baseline', '--model', 'gpt-4.1-mini', '--baseline-file', 'eval/baselines/gpt-4.1-mini.json'], { env: {} });
+  assert.equal(writesDefaultBaseline(ownFull), true, 'the full suite still goes through the suite check after selection');
+  assert.equal(writesDefaultBaseline({ writeBaseline: true, baselineFile: null, model: 'gpt-4o-mini' }), true);
+  assert.equal(writesDefaultBaseline({ writeBaseline: false, model: 'gpt-4o-mini' }), false);
   assert.match(messageOf(['--baseline-file', 'x.json']), /--baseline-file only applies with --write-baseline/);
   assert.equal(messageOf(['--write-baseline', '--fixtures', 'seed,v2,v3']), null, 'every fixture is the full set');
 

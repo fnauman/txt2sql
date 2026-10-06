@@ -20,7 +20,10 @@ alone. It refuses, before the run starts, to replace `<model>.json` with a
 subset: filters (`--case-id`, `--tag`, `--intent`, `--split`), fewer
 `--fixtures`, or a suite (`--dataset`, `--dataset-file`, `--datasets-dir`)
 whose cases are not exactly the default suite's. A subset can be saved with
-`--baseline-file <path>` and compared with `--compare <path>`. It warns on a
+`--baseline-file <path>` outside this directory and compared with
+`--compare <path>`; every file here is a model's default baseline, so
+`--baseline-file` refuses a path in here other than the run's own
+`<model>.json` (it would replace another model's baseline). It warns on a
 dirty working tree. Check the run's `report.md` before committing the file, and
 commit it in its own change with a note on what was measured (model, prompt
 version, repetitions).

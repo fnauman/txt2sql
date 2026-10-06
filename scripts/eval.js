@@ -100,7 +100,8 @@ Compare and gate:
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X
   --write-baseline            also save report.json as eval/baselines/<model>.json (only from a clean
                               run of the whole default suite on every fixture)
-  --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset)
+  --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset;
+                              never inside eval/baselines/, which holds only full default baselines)
 No LLM calls:
   --rescore <report.json>     re-validate, re-execute and re-score a recorded report
   --offline                   preflight + fixtures + verify, then rescore the default baseline if present
@@ -326,6 +327,14 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   if (options.baselineFile && !options.writeBaseline) {
     throw usageError('--baseline-file only applies with --write-baseline.');
   }
+  if (writesDefaultBaseline(options) && path.resolve(baselineTarget(options)) !== defaultBaselinePath(options.model)) {
+    // eval/baselines/<model>.json is what runs of <model> pair with: another
+    // name there would replace another model's baseline (or invent one).
+    throw usageError(
+      `--baseline-file ${repoRelative(options.baselineFile)} is inside ${repoRelative(DEFAULT_BASELINES_DIR)}, which holds only each model's default baseline; ` +
+        `this run's model ${options.model} writes ${repoRelative(defaultBaselinePath(options.model))}. Save elsewhere, or run with --model matching the file name.`
+    );
+  }
   if (writesDefaultBaseline(options)) {
     // The committed baseline is what later runs pair with: a subset would
     // hide regressions in every case it leaves out.
@@ -335,7 +344,7 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     ].filter(Boolean);
     if (subset.length > 0) {
       throw usageError(
-        `--write-baseline would replace ${repoRelative(defaultBaselinePath(options.model))} with a subset run (${subset.join('; ')}); ` +
+        `--write-baseline would replace ${repoRelative(baselineTarget(options))} with a subset run (${subset.join('; ')}); ` +
           'the default baseline covers the whole default suite on every fixture. Drop the filters, or pass --baseline-file <path> to save this subset elsewhere.'
       );
     }
@@ -343,9 +352,22 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   return options;
 }
 
-/** Whether --write-baseline targets the default baseline eval/baselines/<model>.json. */
+/** Where --write-baseline writes: --baseline-file, else eval/baselines/<model>.json. */
+export function baselineTarget(options) {
+  return options.baselineFile || defaultBaselinePath(options.model);
+}
+
+/**
+ * Whether --write-baseline targets a default baseline: any file inside
+ * eval/baselines/ (every model's, not only this run's), since later runs of
+ * that model pair with it.
+ */
 export function writesDefaultBaseline(options) {
-  return Boolean(options.writeBaseline) && (!options.baselineFile || path.resolve(options.baselineFile) === defaultBaselinePath(options.model));
+  if (!options.writeBaseline) {
+    return false;
+  }
+  const relative = path.relative(DEFAULT_BASELINES_DIR, path.resolve(baselineTarget(options)));
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 /**
@@ -1004,7 +1026,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
       ? { code: 130, reasons: [`interrupted by ${stop.interruptedBy}; ${run.stopped ? 'the report is partial' : 'the run had finished, the report is complete'}`] }
       : computeExitCode(report, options);
     if (options.writeBaseline) {
-      const target = options.baselineFile || defaultBaselinePath(model);
+      const target = baselineTarget(options);
       const refusal = baselineRefusal(report, exit);
       if (refusal) {
         cli.log(`Baseline NOT written: ${refusal}; ${repoRelative(target)} is left as it was.`);
@@ -1218,7 +1240,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     const refusal = baselineSuiteRefusal(selection, defaultSelection);
     if (refusal) {
       throw new HarnessError(
-        `--write-baseline refused before the run: ${refusal}. ${repoRelative(defaultBaselinePath(options.model))} would no longer cover the default suite; ` +
+        `--write-baseline refused before the run: ${refusal}. ${repoRelative(baselineTarget(options))} would no longer cover the default suite; ` +
           'run without --dataset/--dataset-file/--datasets-dir, or pass --baseline-file <path> to save this subset elsewhere.',
         { code: 'BASELINE_SUBSET' }
       );
