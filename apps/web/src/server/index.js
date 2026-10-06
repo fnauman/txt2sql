@@ -46,6 +46,7 @@ export function createDefaultRuntimeFactory(config) {
       refreshSchema,
       connectionLimit: config.dbConnectionLimit,
       clientOptions: { timeoutMs: config.openAi.timeoutMs, maxRetries: config.openAi.maxRetries },
+      schemaScope: config.schemaScope,
       trace: createBufferedTraceLogger({ enabled: false, pipeline: 'web-runtime' }),
     });
 }
@@ -531,6 +532,8 @@ export function createApp({
         rowLimit: config.rowLimit,
         statementTimeoutMs: config.statementTimeoutMs,
         maxRetries: config.maxRetries,
+        // From the web config (SCHEMA_SCOPE & co.), never process.env.
+        schemaScope: config.schemaScope,
         signal,
       });
       if (signal.aborted && result.success) {

@@ -179,3 +179,21 @@ test('describeWebConfig summarizes the effective settings without the token', ()
   assert.match(summary, /rateLimit=off/);
   assert.doesNotMatch(summary, /super-secret-value/);
 });
+
+test('loadWebConfig reads the schema scope with the shared resolver and reports bad values with the rest', () => {
+  assert.deepEqual({ ...loadWebConfig({}).schemaScope }, { schemaScope: 'auto', fullSchemaMaxTokens: 8000, widenOnDemand: true });
+  const retrieved = loadWebConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_FULL_MAX_TOKENS: '3000', SCHEMA_WIDEN_ON_DEMAND: '0' });
+  assert.deepEqual({ ...retrieved.schemaScope }, { schemaScope: 'retrieved', fullSchemaMaxTokens: 3000, widenOnDemand: false });
+  assert.ok(Object.isFrozen(retrieved.schemaScope));
+  assert.match(describeWebConfig(retrieved), /schemaScope=retrieved\(fullMaxTokens=3000,widen=off\)/);
+  assert.match(describeWebConfig(loadWebConfig({ SCHEMA_SCOPE: 'full' })), / schemaScope=full$/);
+
+  assert.throws(
+    () => loadWebConfig({ SCHEMA_SCOPE: 'tiny', SCHEMA_FULL_MAX_TOKENS: 'lots', WEB_API_PORT: 'x' }),
+    (error) =>
+      error instanceof WebConfigError &&
+      error.problems.length === 3 &&
+      error.problems.some((problem) => /SCHEMA_SCOPE must be one of retrieved, full, auto; got "tiny"/.test(problem)) &&
+      error.problems.some((problem) => /SCHEMA_FULL_MAX_TOKENS must be an integer/.test(problem))
+  );
+});
