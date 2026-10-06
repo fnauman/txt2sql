@@ -282,15 +282,33 @@ npm run benchmark -- --dataset edge-cases-public --tag join_path
 
 `npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run. The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
 
-### Edge-case suite and the scoring oracle
+### Datasets and the scoring oracle
 
-`datasets/edge-cases-public.json` is a public edge-case suite of 17 cases: the 9
-core cases plus 8 targeted edge cases, one per `failure_class` (metric/column
-confusion, header↔detail grain, wrong date column, stale snapshot fields, two
-join-path traps, master-data resolution, aggregation shape). Many cases also
-exercise date ranges and fuzzy entity names. Every case is execution-verified
-against the public demo database. With one case per failure class, per-class
-results are examples, not rates.
+`datasets/` holds five public datasets, which `npm run eval` de-duplicates into
+one suite of 255 unique cases over 140 intents (see [Evaluation](#evaluation)):
+
+- `core-public` (9 cases) and `paraphrase-public` (9 rephrasings of them): the
+  original smoke cases, the wording the prompt rules and the semantic layer
+  were tuned on (all `dev`);
+- `edge-cases-public` (17 cases): the 9 core cases plus 8 targeted edge cases,
+  one per `failure_class` (metric/column confusion, header↔detail grain, wrong
+  date column, stale snapshot fields, two join-path traps, master-data
+  resolution, aggregation shape), built by `npm run build-edge-dataset`;
+- `templated-public` (189 cases over 94 intents): metrics, dimensions, time
+  windows, filters and result shapes composed into 2-3 phrasings per intent,
+  generated deterministically with their oracle controls by
+  `npm run build-eval-dataset`;
+- `hard-cases-public` (40 hand-written cases): new vocabulary, Swedish, typos,
+  relative dates with an explicit as-of date, named entities, zero-row
+  answers, and 10 unanswerable or ambiguous questions whose right behaviour is
+  to abstain or ask (no gold SQL; reported apart from accuracy).
+
+Every answer case is execution-verified on the three fixture databases (seed,
+v2, v3) with its row counts pinned, and resolves oracle controls in
+`datasets/controls/`: plausible wrong SQL the oracle must reject and correct
+alternatives it must accept. New intents are `dev` or `holdout` by a stable
+hash of the intent id. With one case per failure class in the edge suite,
+per-class results there are examples, not rates.
 
 It relies on a value-aware comparator (`compareResults` in `src/benchmark.js`):
 results are matched on **values**, not column names, so a different aggregate
@@ -301,11 +319,12 @@ so a correct answer under a different alias can be scored `low_signal_success`
 instead of `pass`. Cases opt in via a `comparison` block
 (`scalar` / `rowset` / `ranked`); datasets without one keep the legacy exact-row
 behavior. See `docs/evaluation-dataset.md` for the full taxonomy, the comparison
-spec, the current baseline, and documented coverage limits.
+spec, the multi-fixture oracle and its controls, and documented coverage
+limits.
 
-Validate every gold query against the public demo database without spending any LLM
-calls (run this after schema/data changes to separate dataset rot from model
-regressions):
+Validate every gold query on the three fixture databases and measure the
+oracle with its controls, without spending any LLM calls (run this after
+schema/data changes to separate dataset rot from model regressions):
 
 ```bash
 npm run verify-dataset                          # all datasets in datasets/
@@ -333,9 +352,10 @@ confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
 still written for older consumers, labelled as such. A repeated run is a
 measurement and does not fail the process on run-to-run variance.
 
-The committed datasets are intentionally small and cover a limited set of
-intents; treat their numbers as smoke signals and grow `datasets/` (with
-execution-verified `expected_sql`) before making any reliability claim.
+Even the whole suite (255 cases over 140 intents) is small next to real
+usage, and one dataset alone is a smoke test; read a single dataset's numbers
+as smoke signals, and use the whole suite with repetitions (`npm run eval --
+--repeat 3`) for any reliability claim.
 
 ## Evaluation
 
@@ -602,8 +622,9 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - [scripts/measure-prompt-cache.js](scripts/measure-prompt-cache.js): estimates optimized prompt cache-prefix size across benchmark datasets without model calls
 - [scripts/eval.js](scripts/eval.js): the one-command evaluation (`npm run eval`): database preflight, fixture seeding, gold and controls verification, the run, failure attribution, statistics, baseline comparison, and `report.json` + `report.md` + `trace.jsonl` under `generated/runs/`; `--rescore` / `--offline` re-judge recorded runs with no LLM calls
 - [scripts/evaluate.js](scripts/evaluate.js): scores one case through the product loop and the multi-fixture oracle (`evaluateQuestion`); its CLI (`npm run benchmark` / `npm run evaluate`) is `scripts/eval.js` with the benchmark profile
-- [scripts/verify-dataset.js](scripts/verify-dataset.js): validates every dataset's gold `expected_sql` against the public demo database (no LLM) and checks gold-vs-gold self-consistency under each case's `comparison` spec
+- [scripts/verify-dataset.js](scripts/verify-dataset.js): validates every dataset's gold `expected_sql` on the three fixture databases (no LLM), checks the pinned row counts and gold-vs-gold self-consistency under each case's `comparison` spec, and measures the oracle with the controls in `datasets/controls/` (kill-rate gate)
 - [scripts/build-edge-dataset.mjs](scripts/build-edge-dataset.mjs): regenerates the public edge-case benchmark dataset (`datasets/edge-cases-public.json`) from the core public cases plus the inline edge cases (`npm run build-edge-dataset`)
+- [scripts/build-eval-dataset.mjs](scripts/build-eval-dataset.mjs): generates the templated dataset (`datasets/templated-public.json`) and its oracle controls deterministically (`npm run build-eval-dataset`; `-- --check` fails when the committed files are out of date)
 - [scripts/seed-public-db.js](scripts/seed-public-db.js): seeds the `demo_retail` database with the bundled synthetic retail data (`npm run seed-demo`)
 
 ## Notes
@@ -615,7 +636,7 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - Missing foreign keys are ignored on purpose rather than guessed.
 - The local bootstrap uses the copied models to create a practical starter schema, not a byte-for-byte production clone.
 - Generated files are written to `generated/` and are excluded from git.
-- Benchmark datasets live under `datasets/`: `core-public` and `paraphrase-public` (smoke/paraphrase) plus `edge-cases-public` (public edge-case suite). Scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
+- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`) and `hard-cases-public` (hand-written, including abstain / clarify cases), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits; their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
 - The *why* behind the pipeline and the web app — design decisions, trade-offs, and the invariants — is in `docs/architecture.md`.
 
 ## License
