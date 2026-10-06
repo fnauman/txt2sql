@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { compareResultsDetailed, findInvalidSplits, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../src/benchmark.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
-import { computeExitCode, describeSuiteCoverage, formatProgress } from '../scripts/eval.js';
+import { computeExitCode, describeSuiteCoverage, formatProgress, minAccuracyRefusal } from '../scripts/eval.js';
 import { classifyRepetition, summarizeBehavior, summarizeCaseRepetitions } from '../src/eval/attribution.js';
 import { caseOutcomesFromReport, compareReports } from '../src/eval/compare.js';
 import { createGoldCache } from '../src/eval/oracle.js';
@@ -303,6 +303,23 @@ test('benchmark profile: an abstain / clarify case the model answered is a faile
   // With --repeat the benchmark profile does not fail on single cases (as before).
   const repeated = reportOf(await recordsOf([{ entry: { testCase: abstainCase, datasets: ['hard'] }, repetitions: [behaviorRep('answered'), behaviorRep('answered')] }]));
   assert.deepEqual(computeExitCode(repeated, { failOnAnyFailure: true }), { code: 0, reasons: [] });
+});
+
+test('--min-accuracy with only abstain / clarify cases selected is refused (exit 2), never compared with a missing accuracy', async () => {
+  const records = await sampleRecords();
+  const behaviorOnly = reportOf(records.filter((record) => record.expected_behavior !== 'answer'));
+  assert.equal(behaviorOnly.stats.strictAccuracy.value, null);
+  const refused = computeExitCode(behaviorOnly, { gate: true, minAccuracy: 0.8 });
+  assert.equal(refused.code, 2);
+  assert.match(refused.reasons[0], /--min-accuracy 0\.8 cannot be checked: no answer case was selected/);
+  // Without a threshold the behaviour-only gate is not a failure.
+  assert.deepEqual(computeExitCode(behaviorOnly, { gate: true }), { code: 0, reasons: [] });
+  // The same refusal before the run (no LLM call is made for it).
+  const message = minAccuracyRefusal({ gate: true, minAccuracy: 0.8 }, [abstainCase, clarifyCase]);
+  assert.match(message, /--min-accuracy 0\.8 cannot be checked: no answer case was selected \(only 2 abstain \/ clarify case\(s\), which are scored apart from strict accuracy\)/);
+  assert.equal(minAccuracyRefusal({ gate: true, minAccuracy: 0.8 }, [abstainCase, answerCase]), null);
+  assert.equal(minAccuracyRefusal({ gate: true, minAccuracy: null }, [abstainCase]), null);
+  assert.equal(minAccuracyRefusal({ gate: true, minAccuracy: 0 }, [abstainCase]) !== null, true, 'a threshold of 0 is a threshold too');
 });
 
 test('evaluateQuestion runs no gold and no oracle for a behavior case; executed SQL is status answered', async () => {

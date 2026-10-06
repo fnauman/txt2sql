@@ -966,7 +966,10 @@ flips with their questions.
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`, when
 strict accuracy is below X. `--gate` with nothing to compare with stops with
-exit 2 (with `--min-accuracy` it only warns). A loaded baseline must be an
+exit 2 (with `--min-accuracy` it only warns). A selection of only abstain /
+clarify cases has no strict accuracy, so `--min-accuracy` is refused for it
+with exit 2 before any LLM call (and before a rescore), instead of comparing a
+missing accuracy with the threshold. A loaded baseline must be an
 evaluation report (a non-empty `results[]` of cases with ids, a known
 `reportVersion`), else exit 2. `--gate` also exits 2, not 0, when the
 comparison pairs no case or fewer than half of the run's answer cases
@@ -981,9 +984,10 @@ Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
 case); 2 harness, dataset or infrastructure failure (unreachable database,
 fixtures that cannot be seeded, failed verification, bad flags, any
 `expected_sql_error`, `harness_error`, `infra_error`, `llm_outage`, `timeout`,
-`aborted` or `cancelled` repetition, a run stopped early, or a run with no
-counted answer case unless only behaviour cases were selected); 130 when
-interrupted. Exit 2 wins over 1.
+`aborted` or `cancelled` repetition, a run stopped early, a run with no
+counted answer case unless only behaviour cases were selected, or
+`--min-accuracy` with only behaviour cases selected); 130 when interrupted.
+Exit 2 wins over 1.
 
 ### Baselines
 

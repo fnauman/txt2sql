@@ -21,7 +21,9 @@
 // fixtures, verification gates, gold errors, infra errors, provider outages or
 // case deadlines during the run); with --gate also 1 when the candidate is significantly
 // worse than the baseline (exact McNemar p < 0.05 with more regressions than
-// improvements) or strict accuracy is below --min-accuracy.
+// improvements) or strict accuracy is below --min-accuracy (a selection of only
+// abstain / clarify cases has no strict accuracy, so --min-accuracy is refused
+// for it with exit 2).
 //
 // `npm run benchmark` / `npm run evaluate` run this with --profile benchmark:
 // one dataset (default core-public), no Docker start, no seeding (stale
@@ -100,7 +102,8 @@ Compare and gate:
   --compare <report.json>     baseline to compare with (default eval/baselines/<model>.json when present)
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
-  --min-accuracy X            with --gate: exit 1 when strict accuracy < X
+  --min-accuracy X            with --gate: exit 1 when strict accuracy < X (exit 2 when
+                              only abstain / clarify cases are selected: no accuracy)
   --write-baseline            also save a compact copy of report.json (what rescore, compare and gate
                               read) as eval/baselines/<model>.json (only from a clean run of the
                               whole default suite on every fixture)
@@ -518,6 +521,27 @@ export function gateSuiteCoverageFailure(coverage, { minFraction = MIN_GATE_PAIR
   );
 }
 
+function minAccuracyWithoutAnswerCases(minAccuracy, behaviorCases) {
+  return (
+    `--min-accuracy ${minAccuracy} cannot be checked: no answer case was selected ` +
+    `(only ${behaviorCases} abstain / clarify case(s), which are scored apart from strict accuracy), so there is no accuracy to compare; ` +
+    'select answer cases or drop --min-accuracy'
+  );
+}
+
+/**
+ * Why --gate --min-accuracy cannot run on these (selected, normalized) cases,
+ * or null: with only abstain / clarify cases selected there is no strict
+ * accuracy, so the threshold would compare nothing. Checked before any LLM
+ * call (and again by computeExitCode); exit 2.
+ */
+export function minAccuracyRefusal({ gate = false, minAccuracy = null } = {}, testCases = []) {
+  if (!gate || minAccuracy == null || testCases.length === 0 || testCases.some((testCase) => !isBehaviorCase(testCase))) {
+    return null;
+  }
+  return minAccuracyWithoutAnswerCases(minAccuracy, testCases.length);
+}
+
 /**
  * Exit code of a finished run: { code, reasons }. 2 for harness, dataset or
  * infrastructure failures, and for a --gate whose baseline pairs too few cases
@@ -557,10 +581,15 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (report.stopped?.reason) {
     harness.push(`the run was stopped early: ${report.stopped.reason}`);
   }
-  // A selection of only abstain / clarify cases has no accuracy by design.
+  // A selection of only abstain / clarify cases has no accuracy by design,
+  // so an accuracy threshold has nothing to compare with.
   const answerCases = (report.stats?.cases?.selected ?? 0) - (report.stats?.cases?.behavior ?? 0);
-  if (report.stats?.strictAccuracy?.value == null && (answerCases > 0 || !(report.behavior?.cases > 0))) {
-    harness.push('no case was counted, so there is no accuracy to report');
+  if (report.stats?.strictAccuracy?.value == null) {
+    if (answerCases > 0 || !(report.behavior?.cases > 0)) {
+      harness.push('no case was counted, so there is no accuracy to report');
+    } else if (gate && minAccuracy != null) {
+      harness.push(minAccuracyWithoutAnswerCases(minAccuracy, report.behavior.cases));
+    }
   }
   if (gate && report.comparison) {
     const pairing = gatePairingFailure(report.comparison);
@@ -1133,6 +1162,10 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     source = { ...recorded, results: recorded.results.filter((record) => kept.has(record.id)) };
     cli.log(`Rescoring ${source.results.length} of ${recorded.results.length} recorded case(s) (${describeFilters(filters)}).`);
   }
+  const thresholdRefusal = minAccuracyRefusal(options, source.results.map((record) => currentCases.get(record.id) || testCaseFromRecord(record)));
+  if (thresholdRefusal) {
+    throw new HarnessError(thresholdRefusal, { code: 'NO_ANSWER_CASES' });
+  }
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
   const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs });
   const goldCache = createGoldCache();
@@ -1285,6 +1318,11 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       `(${selection.totalCaseCount} in ${selection.datasets.map((dataset) => dataset.name).join(', ')}; ${selection.duplicates.length} duplicate(s) dropped)` +
       (filters ? `; filters ${filters}` : '')
   );
+  // A rescore applies the filters to the recorded cases (runRescore checks there).
+  const thresholdRefusal = rescoreMode ? null : minAccuracyRefusal(options, selection.entries.map((entry) => entry.testCase));
+  if (thresholdRefusal) {
+    throw new HarnessError(thresholdRefusal, { code: 'NO_ANSWER_CASES' });
+  }
   if (writesDefaultBaseline(options)) {
     // Checked before any verification or spend: the default baseline is
     // replaced only by a run of the whole default suite.

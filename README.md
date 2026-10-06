@@ -413,7 +413,9 @@ perfect SQL). These are measurements of today's product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
-`--gate` makes a significantly worse run exit 1. Harness, database and
+`--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,
+a run below X; with only abstain / clarify cases selected there is no accuracy,
+so `--min-accuracy` is refused with exit 2). Harness, database and
 provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
