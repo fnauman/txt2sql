@@ -684,6 +684,9 @@ function findSelectListRange(walker, block) {
   }
   let end = block.tokenIndexes[block.tokenIndexes.length - 1] + 1;
   for (const index of indexes.slice(selectAt + 1)) {
+    if (isWithinGroup(tokens, index)) {
+      continue;
+    }
     if (index >= start && (isKeywordToken(tokens[index], 'FROM', ...WHERE_CLAUSE_TERMINATORS) || isPunctToken(tokens[index], ';'))) {
       end = index;
       break;
@@ -701,17 +704,170 @@ function extractTableContext(sql, knownTables, promptContext = {}) {
   };
 }
 
-function extractOutputAliases(sql) {
-  const aliases = new Set();
-  const cleaned = stripSqlLiterals(sql);
-  const aliasRegex = /\bAS\s+`?([A-Za-z][A-Za-z0-9_]*)`?/gi;
-  let match;
+function significantTokensOf(sql) {
+  return tokenizeSql(String(sql || ''), { tolerant: true }).filter(
+    (token) => token.type !== 'whitespace' && token.type !== 'comment' && token.type !== 'executable_comment'
+  );
+}
 
-  while ((match = aliasRegex.exec(cleaned)) !== null) {
-    aliases.add(normalizeIdentifier(match[1]));
+function identifierTokenName(token) {
+  if (token?.type === 'quoted_identifier') {
+    return token.name;
+  }
+  return token?.type === 'word' ? token.value : null;
+}
+
+// Keywords after which an implicit alias can follow (`CASE ... END total`,
+// `NULL AS x` is explicit anyway).
+const EXPRESSION_END_KEYWORDS = new Set(['END', 'NULL', 'TRUE', 'FALSE']);
+
+// Operator words missing from SQL_KEYWORDS (MULTIPLICATIVE_KEYWORDS and the
+// rest of OPERAND_SEPARATOR_KEYWORDS, plus BINARY and ESCAPE): the name after
+// one is an operand (`a DIV b`), never an alias.
+const OPERATOR_WORDS = new Set(['DIV', 'MOD', 'XOR', 'REGEXP', 'RLIKE', 'SOUNDS', 'BINARY', 'ESCAPE']);
+
+// SELECT modifiers missing from SQL_KEYWORDS (DISTINCTROW, HIGH_PRIORITY,
+// STRAIGHT_JOIN, SQL_*): the name after one is the first select item
+// (`SELECT DISTINCTROW CustomerKey LIMIT 1`), never an alias.
+const SELECT_OPTION_WORD_SET = new Set(SELECT_OPTION_WORDS);
+
+function endsExpression(token) {
+  if (!token) {
+    return false;
+  }
+  if (token.type === 'punct') {
+    return token.value === ')';
+  }
+  if (token.type === 'number' || token.type === 'string' || token.type === 'quoted_identifier') {
+    return true;
+  }
+  if (token.type === 'word') {
+    return (
+      token.afterDot ||
+      EXPRESSION_END_KEYWORDS.has(token.upper) ||
+      (!SQL_KEYWORDS.has(token.upper) && !OPERATOR_WORDS.has(token.upper) && !SELECT_OPTION_WORD_SET.has(token.upper))
+    );
+  }
+  return false;
+}
+
+// `WITHIN GROUP (ORDER BY ...)` of an ordered-set aggregate
+// (PERCENTILE_CONT(0.5) WITHIN GROUP (...)): that GROUP does not end the
+// SELECT list. `index` points at GROUP in a token list that may hold
+// whitespace and comments.
+function isWithinGroup(tokens, index) {
+  if (!isKeywordToken(tokens[index], 'GROUP') || tokens[index].afterDot) {
+    return false;
+  }
+  let previous = index - 1;
+  while (previous >= 0 && ['whitespace', 'comment', 'executable_comment'].includes(tokens[previous].type)) {
+    previous -= 1;
+  }
+  return isKeywordToken(tokens[previous], 'WITHIN') && !tokens[previous].afterDot;
+}
+
+// Does tokens[index] end the SELECT list at its own depth (FROM, WHERE, GROUP,
+// ORDER, LIMIT, UNION, ...), the GROUP of WITHIN GROUP aside?
+function endsSelectList(tokens, index) {
+  const token = tokens[index];
+  return token?.type === 'word' && !token.afterDot && SELECT_LIST_END_KEYWORDS.has(token.upper) && !isWithinGroup(tokens, index);
+}
+
+// The token at `index`, right after an implicit alias, ends its select item:
+// ',', the end of the statement or of a subquery, or a keyword that ends the
+// SELECT list (`... TotalCount ORDER BY TotalCount`, `... x UNION SELECT ...`).
+function closesSelectItem(tokens, index) {
+  const token = tokens[index];
+  return !token || (token.type === 'punct' && [',', ')', ';'].includes(token.value)) || endsSelectList(tokens, index);
+}
+
+// Keywords that end a SELECT list at its own parenthesis depth (a SELECT
+// without FROM ends at WHERE, ORDER, LIMIT, UNION, ... or the end).
+const SELECT_LIST_END_KEYWORDS = new Set([
+  'FROM',
+  'WHERE',
+  'GROUP',
+  'HAVING',
+  'ORDER',
+  'LIMIT',
+  'UNION',
+  'EXCEPT',
+  'INTERSECT',
+  'INTO',
+  'WINDOW',
+  'FOR',
+  'LOCK',
+]);
+
+// For each significant token: is it inside a SELECT list (after SELECT and
+// before the keyword that ends the list, at the SELECT's own depth)?
+function selectListMask(tokens) {
+  const mask = new Array(tokens.length).fill(false);
+  const open = [false];
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (isPunctToken(token, '(')) {
+      depth += 1;
+      open[depth] = false;
+      continue;
+    }
+    if (isPunctToken(token, ')')) {
+      open[depth] = false;
+      depth = Math.max(0, depth - 1);
+      mask[index] = Boolean(open[depth]);
+      continue;
+    }
+    if (isKeywordToken(token, 'SELECT')) {
+      open[depth] = true;
+      continue;
+    }
+    if (endsSelectList(tokens, index)) {
+      open[depth] = false;
+    }
+    mask[index] = Boolean(open[depth]);
+  }
+  return mask;
+}
+
+/**
+ * Output alias definitions in significant tokens (no whitespace or comments),
+ * as Map(token index -> alias name): `expr AS alias` anywhere, and the
+ * implicit `expr alias` form at the end of a select item (followed by ',',
+ * ')', the end, or a keyword that ends the SELECT list: FROM, WHERE, GROUP,
+ * HAVING, ORDER, LIMIT, WINDOW, UNION, ...) inside a SELECT list only, so a
+ * stray identifier after a string literal or a number in WHERE / LIMIT is
+ * never taken for an alias, nor is the operand after DIV, MOD, XOR, ....
+ * Quoted aliases keep their full name, spaces included (`AS \`Total Net\``).
+ * Also used by the benchmark's disallowed-column lint.
+ */
+export function outputAliasDefinitions(tokens) {
+  const definitions = new Map();
+  const inSelectList = selectListMask(tokens);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const name = identifierTokenName(tokens[index]);
+    if (!name || tokens[index].afterDot) {
+      continue;
+    }
+    const previous = tokens[index - 1];
+    if (isKeywordToken(previous, 'AS')) {
+      definitions.set(index, name);
+      continue;
+    }
+    if (tokens[index].type === 'word' && SQL_KEYWORDS.has(tokens[index].upper)) {
+      continue;
+    }
+    if (inSelectList[index] && endsExpression(previous) && !isPunctToken(tokens[index + 1], '.') && closesSelectItem(tokens, index + 1)) {
+      definitions.set(index, name);
+    }
   }
 
-  return aliases;
+  return definitions;
+}
+
+function extractOutputAliases(sql) {
+  return new Set(outputAliasDefinitions(significantTokensOf(sql)).values());
 }
 
 export function extractCteNames(sql) {
@@ -789,32 +945,33 @@ function validateQualifiedColumns(analysis, knownTables, model) {
 }
 
 function validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, qualifiers, derivedTables) {
-  const cleaned = stripSqlLiterals(sql);
   const knownColumns = new Set([...knownTables.values()].flatMap((columns) => [...columns]));
   const knownIdentifiers = new Set([
     ...knownTables.keys(),
     ...qualifiers,
     ...knownColumns,
     ...[...derivedTables.values()].flatMap((table) => [...(table.columns || [])]),
-    ...extractOutputAliases(cleaned),
-    ...extractCteNames(cleaned),
+    ...extractOutputAliases(sql),
+    ...extractCteNames(sql),
   ]);
-  const identifierRegex = /`?([A-Za-z][A-Za-z0-9_]*)`?/g;
-  let match;
+  // Tokens, not a regex over the text: string literals and comments are
+  // skipped, and a quoted identifier is one name even when it contains spaces.
+  const tokens = significantTokensOf(sql);
 
-  while ((match = identifierRegex.exec(cleaned)) !== null) {
-    const identifier = normalizeIdentifier(match[1]);
-    const upper = identifier.toUpperCase();
-    const before = cleaned.slice(Math.max(0, match.index - 2), match.index);
-    const after = cleaned.slice(match.index + match[0].length, match.index + match[0].length + 2);
-
-    if (before.includes('.') || after.includes('.')) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const identifier = identifierTokenName(tokens[index]);
+    if (!identifier) {
       continue;
     }
+    // Qualified references are checked by validateQualifiedColumns.
+    if (isPunctToken(tokens[index - 1], '.') || isPunctToken(tokens[index + 1], '.')) {
+      continue;
+    }
+    const upper = identifier.toUpperCase();
     if (SQL_KEYWORDS.has(upper) || knownIdentifiers.has(identifier)) {
       continue;
     }
-    if (KNOWN_SQL_FUNCTIONS.has(upper) && /^\s*\(/.test(cleaned.slice(match.index + match[0].length))) {
+    if (KNOWN_SQL_FUNCTIONS.has(upper) && isPunctToken(tokens[index + 1], '(')) {
       continue;
     }
     if (/[A-Z]/.test(identifier) && !/^[A-Z_]+$/.test(identifier)) {

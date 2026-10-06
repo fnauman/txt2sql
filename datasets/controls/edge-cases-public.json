@@ -1,0 +1,750 @@
+{
+  "edge_public_001_brand_net_sales_march_2026": {
+    "intentId": "brand_net_sales_march_2026",
+    "gold_fingerprint": "fe1ae3a01c7e6ebc",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "join_path",
+        "note": "BrandNameSnapshot (stale)",
+        "sql": "SELECT l.BrandNameSnapshot AS BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.BrandNameSnapshot IS NOT NULL GROUP BY l.BrandNameSnapshot ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, l.BrandNameSnapshot ASC LIMIT 10"
+      },
+      {
+        "id": "m2",
+        "type": "join_path",
+        "note": "ProductBrand bridge",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN ProductBrand pb ON pb.ProductId = l.ProductId JOIN Brand b ON pb.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "m3",
+        "type": "join_path",
+        "note": "Brand via Brand.ProductCategoryId = Product.ProductCategoryId",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON b.ProductCategoryId = p.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "m4",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "m5",
+        "type": "grain",
+        "note": "header NetAmount per line",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "m6",
+        "type": "metric",
+        "note": "line TotalAmount",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "m7",
+        "type": "date_col",
+        "note": "PostingDate",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "h17",
+        "type": "group_by",
+        "note": "GROUP BY ProductId (product grain labelled by brand)",
+        "heldout": true,
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH() = 3 without YEAR() (prior-year leakage)",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      },
+      {
+        "id": "r2",
+        "type": "sum_distinct",
+        "note": "review: SUM(DISTINCT line Net) (N32)",
+        "sql": "SELECT b.BrandName, ROUND(SUM(DISTINCT l.NetAmount), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY 2 DESC, 1 LIMIT 10"
+      },
+      {
+        "id": "r3",
+        "type": "filter",
+        "note": "review: invented p.IsActive = 1 filter",
+        "sql": "SELECT b.BrandName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId WHERE p.IsActive = 1 AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, b.BrandName ASC LIMIT 10"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "join_order",
+        "sql": "SELECT b.BrandName, ROUND(SUM(l.NetAmount), 2) AS total_net_amount FROM Brand b JOIN Product p ON p.BrandId = b.BrandId JOIN SalesDocumentLine l ON l.ProductId = p.ProductId JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandId, b.BrandName ORDER BY 2 DESC LIMIT 10"
+      },
+      {
+        "id": "rp1",
+        "note": "review: GROUP BY BrandName, per-line ROUND (P15)",
+        "sql": "SELECT b.BrandName, ROUND(SUM(ROUND(l.NetAmount, 2)), 2) AS net_sales FROM Brand b JOIN Product p ON p.BrandId = b.BrandId JOIN SalesDocumentLine l ON l.ProductId = p.ProductId JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY b.BrandName ORDER BY net_sales DESC, b.BrandName LIMIT 10"
+      }
+    ]
+  },
+  "edge_public_002_campaign_net_sales_march_2026": {
+    "intentId": "campaign_net_sales_march_2026",
+    "gold_fingerprint": "c1f3ba66ccf55ce7",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "join_path",
+        "note": "header campaign via d.CampaignId (alias form)",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Campaign c ON d.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "m2",
+        "type": "join_path",
+        "note": "header campaign + header NetAmount, written SalesDocument.CampaignId",
+        "sql": "SELECT ROUND(SUM(COALESCE(SalesDocument.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument JOIN Campaign ON SalesDocument.CampaignId = Campaign.CampaignId WHERE Campaign.CampaignName LIKE '%Urban Refresh%' AND IFNULL(SalesDocument.IsCanceled, 0) = 0 AND SalesDocument.DocumentDate >= '2026-03-01' AND SalesDocument.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "m3",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "m4",
+        "type": "grain",
+        "note": "header NetAmount of docs containing campaign products",
+        "sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND d.SalesDocumentId IN (SELECT l.SalesDocumentId FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%')"
+      },
+      {
+        "id": "m5",
+        "type": "metric",
+        "note": "line TotalAmount",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "m6",
+        "type": "date_col",
+        "note": "PostingDate",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "h18",
+        "type": "metric",
+        "note": "SUM(Quantity)",
+        "heldout": true,
+        "sql": "SELECT ROUND(SUM(COALESCE(l.Quantity, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "h19",
+        "type": "rounding",
+        "note": "ROUND(..., 0)",
+        "heldout": true,
+        "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 0) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH()=3 without YEAR (prior-year leakage) (N07)",
+        "sql": "SELECT ROUND(SUM(l.NetAmount), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND d.IsCanceled = 0 AND MONTH(d.DocumentDate) = 3"
+      },
+      {
+        "id": "r2",
+        "type": "filter",
+        "note": "review: invented p.IsActive = 1 filter",
+        "sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE p.IsActive = 1 AND c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "r3",
+        "type": "hedge",
+        "note": "review: hedge: header campaign total + line campaign total, both *_net_amount (H05)",
+        "sql": "SELECT ROUND(SUM(d.NetAmount), 2) AS header_total_net_amount, (SELECT ROUND(SUM(l.NetAmount), 2) FROM SalesDocumentLine l JOIN SalesDocument d2 ON d2.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId JOIN Campaign c2 ON c2.CampaignId = p.CampaignId WHERE c2.CampaignName LIKE '%Urban Refresh%' AND d2.IsCanceled = 0 AND d2.DocumentDate >= '2026-03-01' AND d2.DocumentDate < '2026-04-01') AS product_total_net_amount FROM SalesDocument d JOIN Campaign c ON c.CampaignId = d.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "exact_name",
+        "sql": "SELECT ROUND(SUM(l.NetAmount), 2) AS total_net_amount FROM Campaign c JOIN Product p ON p.CampaignId = c.CampaignId JOIN SalesDocumentLine l ON l.ProductId = p.ProductId JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId WHERE c.CampaignName = 'Urban Refresh' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "a2",
+        "note": "alias+extra_cols",
+        "sql": "SELECT c.CampaignName, ROUND(SUM(l.NetAmount), 2) AS urban_refresh_sales FROM Campaign c JOIN Product p ON p.CampaignId = c.CampaignId JOIN SalesDocumentLine l ON l.ProductId = p.ProductId JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CampaignId, c.CampaignName"
+      },
+      {
+        "id": "rp1",
+        "note": "review: single column, per-line ROUND (P17)",
+        "sql": "SELECT ROUND(SUM(ROUND(l.NetAmount, 2)), 2) AS urban_refresh_sales FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName = 'Urban Refresh' AND d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      }
+    ]
+  },
+  "edge_public_003_sparkling_water_master_data": {
+    "intentId": "sparkling_water_master_data",
+    "gold_fingerprint": "d4e36ddaa4da8545",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "filter",
+        "note": "name LIKE '%sparkling water%' only (ignores tags)",
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE p.ProductName LIKE '%sparkling water%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "m2",
+        "type": "filter",
+        "note": "over-broad LIKE '%water%'",
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%water%' OR p.ProductTags LIKE '%water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "m3",
+        "type": "filter",
+        "note": "dropped March date filter",
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 ORDER BY p.ProductName"
+      },
+      {
+        "id": "m4",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "m5",
+        "type": "logic",
+        "note": "catalog lookup, no sales join",
+        "sql": "SELECT p.ProductName FROM Product p WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') ORDER BY p.ProductName"
+      },
+      {
+        "id": "m6",
+        "type": "count",
+        "note": "missing DISTINCT",
+        "sql": "SELECT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "m7",
+        "type": "join_path",
+        "note": "ProductNameSnapshot instead of Product",
+        "sql": "SELECT DISTINCT l.ProductNameSnapshot AS ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE (l.ProductNameSnapshot LIKE '%sparkling water%' OR l.ProductNameSnapshot LIKE '%seltzer%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY 1"
+      },
+      {
+        "id": "h20",
+        "type": "filter",
+        "note": "LIKE '%sparkling%' on name or tags",
+        "heldout": true,
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling%' OR p.ProductTags LIKE '%sparkling%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "h21",
+        "type": "filter",
+        "note": "Beverages category instead of seltzer terms",
+        "heldout": true,
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE pc.CategoryName LIKE '%Beverage%' AND p.ProductName LIKE '%Water%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH()=3 without YEAR (prior-year leakage) (N08)",
+        "sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%') AND d.IsCanceled = 0 AND MONTH(d.DocumentDate) = 3 ORDER BY p.ProductName"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "extra_cols+group_by_instead_of_distinct",
+        "sql": "SELECT p.ProductCode, p.ProductName, ROUND(SUM(l.Quantity), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductCode, p.ProductName"
+      },
+      {
+        "id": "a2",
+        "note": "label_alias",
+        "sql": "SELECT DISTINCT p.ProductName AS product FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "rp1",
+        "note": "review: GROUP BY with extra qty column, DESC order (P19)",
+        "sql": "SELECT p.ProductName, SUM(l.Quantity) AS qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%' OR p.ProductTags LIKE '%fizzy water%') AND d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY p.ProductName DESC"
+      }
+    ]
+  },
+  "edge_public_004_posting_date_trap": {
+    "intentId": "posting_date_document_count",
+    "gold_fingerprint": "2efb18d21bd97f33",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "date_col",
+        "note": "DocumentDate (the trap)",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"
+      },
+      {
+        "id": "m2",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "m3",
+        "type": "date_col",
+        "note": "DueDate",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DueDate >= '2026-03-01' AND d.DueDate < '2026-04-01'"
+      },
+      {
+        "id": "m4",
+        "type": "join_path",
+        "note": "distinct docs with an AccountingPosting in March",
+        "sql": "SELECT COUNT(DISTINCT p.SalesDocumentId) AS document_count FROM AccountingPosting p JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "m5",
+        "type": "date_boundary",
+        "note": "<= '2026-04-01'",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate <= '2026-04-01'"
+      },
+      {
+        "id": "m6",
+        "type": "count",
+        "note": "COUNT(DISTINCT CustomerId)",
+        "sql": "SELECT COUNT(DISTINCT d.CustomerId) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "h22",
+        "type": "date_filter",
+        "note": "MONTH(PostingDate)=3 without YEAR",
+        "heldout": true,
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.PostingDate) = 3"
+      },
+      {
+        "id": "h23",
+        "type": "join_path",
+        "note": "COUNT(*) over postings joined to docs (fan-out)",
+        "heldout": true,
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d JOIN AccountingPosting p ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "r1",
+        "type": "hedge",
+        "note": "review: hedge: both readings, both aliased *document_count (prompt alias rule) (H01)",
+        "sql": "SELECT SUM(d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01') AS posted_document_count, SUM(d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01') AS dated_document_count FROM SalesDocument d WHERE d.IsCanceled = 0"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "date_form",
+        "sql": "SELECT COUNT(*) AS document_count FROM SalesDocument d WHERE d.IsCanceled = 0 AND d.PostingDate BETWEEN '2026-03-01' AND '2026-03-31'"
+      },
+      {
+        "id": "a2",
+        "note": "alias",
+        "sql": "SELECT COUNT(*) AS posted_documents FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      },
+      {
+        "id": "rp1",
+        "note": "review: COUNT(DISTINCT pk), BETWEEN, alias posted_documents (P21)",
+        "sql": "SELECT COUNT(DISTINCT d.SalesDocumentId) AS posted_documents FROM SalesDocument d WHERE d.IsCanceled = 0 AND d.PostingDate BETWEEN '2026-03-01' AND '2026-03-31'"
+      },
+      {
+        "id": "rp2",
+        "note": "review: period label + count (only numeric column) (P22)",
+        "sql": "SELECT '2026-03' AS posting_month, COUNT(*) AS n FROM SalesDocument d WHERE d.IsCanceled = 0 AND YEAR(d.PostingDate) = 2026 AND MONTH(d.PostingDate) = 3"
+      },
+      {
+        "id": "rp3",
+        "note": "review: scalar with extra numeric column whose name contains gold name (P35)",
+        "sql": "SELECT COUNT(*) AS document_count, ROUND(SUM(d.NetAmount), 2) AS net_amount FROM SalesDocument d WHERE d.IsCanceled = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01'"
+      }
+    ]
+  },
+  "edge_public_005_customer_gross_amount_march_2026": {
+    "intentId": "customer_gross_amount_march_2026",
+    "gold_fingerprint": "12cfd8198672da4d",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "metric",
+        "note": "BillTotalAmount",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.BillTotalAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.BillTotalAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m2",
+        "type": "metric",
+        "note": "NetAmount",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m3",
+        "type": "metric",
+        "note": "SubtotalAmount",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.SubtotalAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.SubtotalAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m4",
+        "type": "grain",
+        "note": "SUM(line TotalAmount) as gross",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m5",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m6",
+        "type": "date_col",
+        "note": "PostingDate",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "m7",
+        "type": "group_by",
+        "note": "GROUP BY CustomerName only",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "h24",
+        "type": "count",
+        "note": "header Gross after joining lines (fan-out)",
+        "heldout": true,
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH() = 3 without YEAR() (prior-year leakage)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "r2",
+        "type": "sum_distinct",
+        "note": "review: SUM(DISTINCT ...) of the measure",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT COALESCE(d.GrossAmount, 0)), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(DISTINCT COALESCE(d.GrossAmount, 0)) DESC, c.CustomerName ASC LIMIT 10"
+      },
+      {
+        "id": "r3",
+        "type": "filter",
+        "note": "review: hallucinated c.IsActive = 1 filter (N39)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.IsCanceled = 0 AND c.IsActive = 1 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(d.GrossAmount) DESC, c.CustomerName LIMIT 10"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "alias",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_sales FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY total_gross_sales DESC LIMIT 10"
+      },
+      {
+        "id": "a2",
+        "note": "prompt-alias (total_net_amount rule misapplied to gross)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(d.GrossAmount), 2) AS total_gross_amount_value FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY 2 DESC LIMIT 10"
+      },
+      {
+        "id": "a3",
+        "note": "CamelCase output aliases without AS (guardrail false rejection fixed in this PR)",
+        "sql": "SELECT c.CustomerName CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) TotalGrossAmount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY TotalGrossAmount DESC LIMIT 10"
+      },
+      {
+        "id": "rp1",
+        "note": "review: raw SUM, alias gross_sales, extra CustomerCode (P23)",
+        "sql": "SELECT c.CustomerCode, c.CustomerName, SUM(d.GrossAmount) AS gross_sales FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate <= '2026-03-31' GROUP BY c.CustomerId, c.CustomerCode, c.CustomerName ORDER BY gross_sales DESC, c.CustomerCode LIMIT 10"
+      }
+    ]
+  },
+  "edge_public_006_category_line_net_sales_march_2026": {
+    "intentId": "category_line_net_sales_march_2026",
+    "gold_fingerprint": "b8ed7a13192da099",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "grain",
+        "note": "header NetAmount per line",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "m2",
+        "type": "join_path",
+        "note": "CategoryNameSnapshot (stale)",
+        "sql": "SELECT l.CategoryNameSnapshot AS CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.CategoryNameSnapshot IS NOT NULL GROUP BY l.CategoryNameSnapshot ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, l.CategoryNameSnapshot ASC"
+      },
+      {
+        "id": "m3",
+        "type": "metric",
+        "note": "line TotalAmount",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.TotalAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.TotalAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "m4",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "m5",
+        "type": "join_path",
+        "note": "category via Brand.ProductCategoryId",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId JOIN ProductCategory pc ON b.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "m6",
+        "type": "date_col",
+        "note": "PostingDate",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-03-01' AND d.PostingDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "h25",
+        "type": "join_type",
+        "note": "LEFT JOIN Product/Category (NULL category row)",
+        "heldout": true,
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId LEFT JOIN Product p ON l.ProductId = p.ProductId LEFT JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH() = 3 without YEAR() (prior-year leakage)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "r2",
+        "type": "sum_distinct",
+        "note": "review: SUM(DISTINCT line Net) by category (N33)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(DISTINCT l.NetAmount), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY 2 DESC, 1"
+      },
+      {
+        "id": "r3",
+        "type": "filter",
+        "note": "review: invented p.IsActive = 1 filter",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE p.IsActive = 1 AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, pc.CategoryName ASC"
+      },
+      {
+        "id": "r4",
+        "type": "hedge",
+        "note": "review: hedge: header-grain headline + line-grain column (ordered by line) (H04)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(l.NetAmount), 2) AS line_net_amount, ROUND(SUM(d.NetAmount), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId JOIN ProductCategory pc ON pc.ProductCategoryId = p.ProductCategoryId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(l.NetAmount) DESC"
+      },
+      {
+        "id": "r5",
+        "type": "order_limit",
+        "note": "review: no ORDER BY (N50)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(l.NetAmount), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "rounding (per-line ROUND)",
+        "sql": "SELECT pc.CategoryName, SUM(ROUND(l.NetAmount, 2)) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY total_net_amount DESC"
+      },
+      {
+        "id": "rp1",
+        "note": "review: per-line ROUND, category subquery (P24)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(ROUND(l.NetAmount, 2)), 2) AS category_net_sales FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId JOIN ProductCategory pc ON pc.ProductCategoryId = p.ProductCategoryId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.CategoryName ORDER BY 2 DESC"
+      }
+    ]
+  },
+  "edge_public_007_category_quantity_current_join": {
+    "intentId": "category_quantity_current_join",
+    "gold_fingerprint": "8246b28520ccfd01",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "join_path",
+        "note": "CategoryNameSnapshot (stale)",
+        "sql": "SELECT l.CategoryNameSnapshot AS CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.CategoryNameSnapshot IS NOT NULL GROUP BY l.CategoryNameSnapshot ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, l.CategoryNameSnapshot ASC LIMIT 10"
+      },
+      {
+        "id": "m2",
+        "type": "join_path",
+        "note": "category via Brand.ProductCategoryId",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Brand b ON p.BrandId = b.BrandId JOIN ProductCategory pc ON b.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "m3",
+        "type": "metric",
+        "note": "COUNT(lines) instead of SUM(Quantity)",
+        "sql": "SELECT pc.CategoryName, COUNT(*) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY COUNT(*) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "m4",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "m5",
+        "type": "order_limit",
+        "note": "ORDER ASC",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) ASC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "m6",
+        "type": "date_boundary",
+        "note": "< '2026-03-31'",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-03-31' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "h26",
+        "type": "group_by",
+        "note": "GROUP BY ProductId (product grain)",
+        "heldout": true,
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "r1",
+        "type": "date_filter",
+        "note": "review: MONTH() = 3 without YEAR() (prior-year leakage)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) = 3 GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "r2",
+        "type": "sum_distinct",
+        "note": "review: SUM(DISTINCT ...) of the measure",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(DISTINCT COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(DISTINCT COALESCE(l.Quantity, 0)) DESC, pc.CategoryName ASC LIMIT 10"
+      },
+      {
+        "id": "r3",
+        "type": "filter",
+        "note": "review: hallucinated p.IsActive = 1 filter (N43)",
+        "sql": "SELECT pc.CategoryName, ROUND(SUM(l.Quantity), 3) AS total_qty FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE d.IsCanceled = 0 AND p.IsActive = 1 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY SUM(l.Quantity) DESC, pc.CategoryName LIMIT 10"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "alias",
+        "sql": "SELECT pc.CategoryName, SUM(l.Quantity) AS total_quantity FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN ProductCategory pc ON p.ProductCategoryId = pc.ProductCategoryId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.ProductCategoryId, pc.CategoryName ORDER BY total_quantity DESC LIMIT 10"
+      },
+      {
+        "id": "rp1",
+        "note": "review: raw SUM(Quantity), no LIMIT (4 categories) (P25)",
+        "sql": "SELECT pc.CategoryName, SUM(l.Quantity) AS units FROM SalesDocumentLine l JOIN SalesDocument d ON d.SalesDocumentId = l.SalesDocumentId JOIN Product p ON p.ProductId = l.ProductId JOIN ProductCategory pc ON pc.ProductCategoryId = p.ProductCategoryId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY pc.CategoryName ORDER BY units DESC LIMIT 10"
+      }
+    ]
+  },
+  "edge_public_008_customer_month_columns_jan_feb_2026": {
+    "intentId": "customer_month_columns_jan_feb_2026",
+    "gold_fingerprint": "0c8518fc76afcbbd",
+    "negative": [
+      {
+        "id": "m1",
+        "type": "shape",
+        "note": "long format: one row per customer-month",
+        "sql": "SELECT c.CustomerName, DATE_FORMAT(d.DocumentDate, '%Y-%m') AS sales_month, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName, DATE_FORMAT(d.DocumentDate, '%Y-%m') ORDER BY c.CustomerName, sales_month"
+      },
+      {
+        "id": "m2",
+        "type": "shape",
+        "note": "month columns swapped (Jan values labeled feb_net_amount)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "m3",
+        "type": "cancel",
+        "note": "dropped the IsCanceled filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "m4",
+        "type": "date_col",
+        "note": "PostingDate",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.PostingDate >= '2026-01-01' AND d.PostingDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.PostingDate >= '2026-02-01' AND d.PostingDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.PostingDate >= '2026-01-01' AND d.PostingDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "m5",
+        "type": "date_boundary",
+        "note": "January end < '2026-01-31'",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-01-31' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "m6",
+        "type": "metric",
+        "note": "GrossAmount",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.GrossAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.GrossAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "m7",
+        "type": "grain",
+        "note": "SUM(line NetAmount)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN COALESCE(l.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN SalesDocumentLine l ON l.SalesDocumentId = d.SalesDocumentId JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "h27",
+        "type": "group_by",
+        "note": "GROUP BY CustomerName only",
+        "heldout": true,
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "h28",
+        "type": "date_filter",
+        "note": "MONTH()=1/2 without YEAR",
+        "heldout": true,
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND MONTH(d.DocumentDate) IN (1, 2) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "r1",
+        "type": "sum_distinct",
+        "note": "review: SUM(DISTINCT) pivots (N47)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(DISTINCT CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(DISTINCT CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "r2",
+        "type": "filter",
+        "note": "review: invented c.IsActive = 1 filter",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE c.IsActive = 1 AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "r3",
+        "type": "scope",
+        "note": "review: customers with any 2026 document, 0/0 where none in Jan/Feb (N36)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.IsCanceled = 0 AND YEAR(d.DocumentDate) = 2026 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "r4",
+        "type": "scope",
+        "note": "review: customers with any non-canceled document at any date, 0/0 where none in Jan/Feb (formerly accepted as an alternative reading; the set depends on unrelated months)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      }
+    ],
+    "positive": [
+      {
+        "id": "a1",
+        "note": "alias+column_order",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS january_net, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS february_net FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName"
+      },
+      {
+        "id": "a2",
+        "note": "label_alias",
+        "sql": "SELECT c.CustomerName AS customer, ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName"
+      },
+      {
+        "id": "a4",
+        "note": "alternative reading: every customer, 0/0 included (LEFT JOIN from Customer)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+      },
+      {
+        "id": "rp1",
+        "note": "review: IF(MONTH()) pivots, backtick aliases with spaces, total column (P26)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(IF(MONTH(d.DocumentDate) = 1, d.NetAmount, 0)), 2) AS `Jan 2026 Net`, ROUND(SUM(IF(MONTH(d.DocumentDate) = 2, d.NetAmount, 0)), 2) AS `Feb 2026 Net`, ROUND(SUM(d.NetAmount), 2) AS `Total` FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "rp2",
+        "note": "review: name column last (P27)",
+        "sql": "SELECT ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS january, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS february, c.CustomerName FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName"
+      },
+      {
+        "id": "rp3",
+        "note": "review: correctly LABELED but Feb column before Jan (column_order FN?) (P28)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "rp4",
+        "note": "review: no ELSE 0: NULL for a month without sales (P29)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate < '2026-02-01' THEN d.NetAmount END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' THEN d.NetAmount END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "rp5",
+        "note": "review: monthly CTE then pivot with COALESCE (P30)",
+        "sql": "WITH monthly AS (SELECT d.CustomerId, MONTH(d.DocumentDate) AS m, SUM(d.NetAmount) AS net FROM SalesDocument d WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY d.CustomerId, MONTH(d.DocumentDate)) SELECT c.CustomerName, ROUND(COALESCE(SUM(CASE WHEN m.m = 1 THEN m.net END), 0), 2) AS jan_net_amount, ROUND(COALESCE(SUM(CASE WHEN m.m = 2 THEN m.net END), 0), 2) AS feb_net_amount FROM monthly m JOIN Customer c ON c.CustomerId = m.CustomerId GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "rp6",
+        "note": "review: CASE on MONTH() with WHERE range, Jan/Feb columns named jan/feb, NULL-safe (P38)",
+        "sql": "SELECT c.CustomerName AS customer, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN d.NetAmount ELSE 0 END), 2) AS jan_2026, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN d.NetAmount ELSE 0 END), 2) AS feb_2026 FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName"
+      }
+    ]
+  }
+}

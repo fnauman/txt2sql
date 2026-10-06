@@ -44,7 +44,11 @@
         "CustomerName": 4
       }
     },
-    "expected_row_count": 4
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 7,
+      "v3": 7
+    }
   },
   {
     "id": "core_public_002",
@@ -89,7 +93,11 @@
         "ProductName": 5
       }
     },
-    "expected_row_count": 5
+    "expected_row_counts": {
+      "seed": 5,
+      "v2": 9,
+      "v3": 10
+    }
   },
   {
     "id": "core_public_003",
@@ -134,7 +142,11 @@
         "DocumentTypeName": 3
       }
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "core_public_004",
@@ -166,7 +178,11 @@
         "product_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_005",
@@ -180,7 +196,11 @@
       "ranking",
       "temporal"
     ],
+    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
+    "alternative_expected_sql": [
+      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.DebitAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
+    ],
     "expected_tables": [
       "AccountingPosting",
       "LedgerAccount",
@@ -210,7 +230,11 @@
         "AccountName"
       ]
     },
-    "expected_row_count": 2
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 4,
+      "v3": 4
+    }
   },
   {
     "id": "core_public_006",
@@ -243,7 +267,11 @@
         "document_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_007",
@@ -271,7 +299,11 @@
         "active_customer_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "core_public_008",
@@ -302,7 +334,8 @@
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 5,
@@ -313,7 +346,11 @@
         "ProductName"
       ]
     },
-    "expected_row_count": 5
+    "expected_row_counts": {
+      "seed": 5,
+      "v2": 9,
+      "v3": 10
+    }
   },
   {
     "id": "core_public_009",
@@ -327,7 +364,11 @@
       "ranking",
       "temporal"
     ],
+    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
+    "alternative_expected_sql": [
+      "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.CreditAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
+    ],
     "expected_tables": [
       "AccountingPosting",
       "LedgerAccount",
@@ -357,6 +398,10 @@
         "AccountName"
       ]
     },
-    "expected_row_count": 2
+    "expected_row_counts": {
+      "seed": 2,
+      "v2": 4,
+      "v3": 4
+    }
   }
 ]

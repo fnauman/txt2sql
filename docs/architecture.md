@@ -336,11 +336,11 @@ one error listing every problem.
   allowlist, product-only and literal-only master-data ID checks, partial
   unqualified-column checks); see the guardrails section above. The database
   grants and execution bounds are what cover them.
-- Some valid SQL is still rejected on the optimized path: an implicit alias
-  (no `AS`) or a backtick-quoted alias with spaces is rejected as
-  `UNKNOWN_IDENTIFIER` when it brings in a mixed-case word the schema does not
-  know, e.g. `COUNT(*) ActiveCount` or `` AS `Customer Name` ``, because the
-  unqualified-identifier check reads it as a column.
+- The unqualified-identifier check knows output aliases (`AS alias`,
+  `` AS `Customer Name` ``, and an implicit `expr alias` at the end of a select
+  item, before `,`, `)`, the end or any keyword that ends the SELECT list, e.g.
+  `COUNT(*) ActiveCount ORDER BY ActiveCount`) for the whole statement, so an
+  alias referenced in WHERE passes validation and only fails at execution.
 - The benchmark has its own orchestration loop rather than calling
   `runOptimizedQuestion`, so its retry behavior can drift from the web/CLI path.
 

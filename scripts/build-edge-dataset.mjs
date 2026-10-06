@@ -46,7 +46,8 @@ const PUBLIC_EDGE_CASES = [
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -57,7 +58,11 @@ const PUBLIC_EDGE_CASES = [
         "BrandName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 4,
+      "v3": 5
+    }
   },
   {
     "id": "edge_public_002_campaign_net_sales_march_2026",
@@ -89,7 +94,8 @@ const PUBLIC_EDGE_CASES = [
     ],
     "comparison": {
       "mode": "scalar",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 1,
@@ -97,7 +103,11 @@ const PUBLIC_EDGE_CASES = [
         "total_net_amount"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "edge_public_003_sparkling_water_master_data",
@@ -133,7 +143,11 @@ const PUBLIC_EDGE_CASES = [
         "ProductName"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 2,
+      "v3": 3
+    }
   },
   {
     "id": "edge_public_004_posting_date_trap",
@@ -164,7 +178,11 @@ const PUBLIC_EDGE_CASES = [
         "document_count"
       ]
     },
-    "expected_row_count": 1
+    "expected_row_counts": {
+      "seed": 1,
+      "v2": 1,
+      "v3": 1
+    }
   },
   {
     "id": "edge_public_005_customer_gross_amount_march_2026",
@@ -213,7 +231,11 @@ const PUBLIC_EDGE_CASES = [
         "CustomerName": 4
       }
     },
-    "expected_row_count": 4
+    "expected_row_counts": {
+      "seed": 4,
+      "v2": 7,
+      "v3": 7
+    }
   },
   {
     "id": "edge_public_006_category_line_net_sales_march_2026",
@@ -252,7 +274,8 @@ const PUBLIC_EDGE_CASES = [
         "total_net_amount"
       ],
       "order": "desc",
-      "decimals": 2
+      "decimals": 2,
+      "tolerance": 0.01
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -263,7 +286,11 @@ const PUBLIC_EDGE_CASES = [
         "CategoryName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "edge_public_007_category_quantity_current_join",
@@ -310,7 +337,11 @@ const PUBLIC_EDGE_CASES = [
         "CategoryName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 3,
+      "v3": 4
+    }
   },
   {
     "id": "edge_public_008_customer_month_columns_jan_feb_2026",
@@ -324,8 +355,11 @@ const PUBLIC_EDGE_CASES = [
       "net_sales"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset.",
+    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Two readings are accepted: the gold lists the customers with non-canceled January or February 2026 sales, and alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0/0 where it had none, the other reading of \"by customer\". A customer set that depends on other months (customers with any document, or any 2026 document) is neither reading and fails. comparison.column_order keeps the January column before the February column unless the columns are named like the gold columns, because values alone cannot tell the two months apart; comparison.null_as_zero accepts NULL for a month without sales (SUM(CASE ... END) without ELSE 0).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
+    "alternative_expected_sql": [
+      "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+    ],
     "expected_tables": [
       "SalesDocument",
       "Customer"
@@ -342,7 +376,15 @@ const PUBLIC_EDGE_CASES = [
         "jan_net_amount",
         "feb_net_amount"
       ],
-      "decimals": 2
+      "decimals": 2,
+      "column_order": [
+        "jan_net_amount",
+        "feb_net_amount"
+      ],
+      "null_as_zero": [
+        "jan_net_amount",
+        "feb_net_amount"
+      ]
     },
     "signal_checks": {
       "min_row_count": 3,
@@ -350,7 +392,11 @@ const PUBLIC_EDGE_CASES = [
         "CustomerName"
       ]
     },
-    "expected_row_count": 3
+    "expected_row_counts": {
+      "seed": 3,
+      "v2": 7,
+      "v3": 7
+    }
   }
 ];
 

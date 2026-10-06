@@ -46,7 +46,8 @@
     "web:typecheck": "npm --workspace @text-to-sql/web run typecheck",
     "web:test": "npm --workspace @text-to-sql/web run test",
     "web:start": "npm --workspace @text-to-sql/web run server --",
-    "seed-demo": "node scripts/seed-public-db.js"
+    "seed-demo": "node scripts/seed-public-db.js",
+    "seed-fixtures": "node scripts/seed-fixtures.js"
   },
   "dependencies": {
     "dotenv": "^16.4.0",

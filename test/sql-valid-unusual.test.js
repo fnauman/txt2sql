@@ -218,6 +218,60 @@ const VALID = [
   ],
   [Q_LIST, 'an alias named minus', 'SELECT minus.CustomerName FROM Customer minus ORDER BY minus.CustomerName'],
   [Q_LIST, 'an alias that is a non-reserved keyword', 'SELECT year.CustomerName FROM Customer year ORDER BY year.CustomerName'],
+  // Positive controls of the evaluation oracle (datasets/controls) that the
+  // unknown-identifier guardrail used to reject: an output alias in backticks
+  // with a space was split at the space ("unknown identifier Name"), and an
+  // output alias without AS was not known at all (SAFE-8).
+  [
+    Q_CUST,
+    'backtick output aliases with spaces (control core_public_001/a5)',
+    "SELECT c.CustomerName AS `Customer Name`, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS `Total Net Sales` FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY `Total Net Sales` DESC, `Customer Name` ASC LIMIT 10",
+  ],
+  [
+    'Show the top customers by gross amount in March 2026.',
+    'CamelCase output alias without AS (control edge_public_005/a3)',
+    "SELECT c.CustomerName CustomerName, ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) TotalGrossAmount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY TotalGrossAmount DESC LIMIT 10",
+  ],
+  [Q_LIST, 'implicit alias after a quoted expression', 'SELECT c.CustomerName `Display Name`, c.CustomerCode Code FROM Customer c ORDER BY `Display Name`'],
+  [
+    Q_LIST,
+    'implicit aliases after a scalar subquery and a CASE, used in ORDER BY',
+    "SELECT (SELECT COUNT(*) FROM Customer x) TotalCount, CASE WHEN c.IsActive = 1 THEN 'yes' ELSE 'no' END ActiveFlag FROM Customer c ORDER BY ActiveFlag, TotalCount",
+  ],
+  // An implicit alias ends its select item at any keyword that ends the
+  // SELECT list, not only FROM (a SELECT without FROM).
+  [Q_LIST, 'implicit alias before ORDER BY, used there', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount ORDER BY TotalCount'],
+  [Q_LIST, 'implicit alias before LIMIT', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount LIMIT 1'],
+  [Q_LIST, 'implicit alias before HAVING, used there', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount HAVING TotalCount > 0'],
+  [Q_LIST, 'implicit alias before WHERE', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount WHERE 1 = 1'],
+  [
+    Q_LIST,
+    'implicit alias before UNION ALL, used in the ORDER BY',
+    'SELECT (SELECT COUNT(*) FROM Customer) TotalCount UNION ALL SELECT (SELECT COUNT(*) FROM Product) ORDER BY TotalCount',
+  ],
+  [Q_LIST, 'implicit alias before EXCEPT', 'SELECT (SELECT COUNT(*) FROM Customer) TotalCount EXCEPT SELECT 0 ORDER BY TotalCount'],
+  [
+    Q_LIST,
+    'implicit alias before INTERSECT',
+    'SELECT (SELECT COUNT(*) FROM Customer) TotalCount INTERSECT SELECT (SELECT COUNT(*) FROM Customer) ORDER BY TotalCount',
+  ],
+  [Q_LIST, 'implicit alias before WINDOW', "SELECT 'x' Label, (SELECT COUNT(*) FROM Customer) TotalCount WINDOW w AS (ORDER BY 1)"],
+  // A SELECT modifier is not an expression: the alias after the first item
+  // still counts.
+  [Q_LIST, 'DISTINCTROW with an implicit alias used in ORDER BY', 'SELECT DISTINCTROW c.CustomerName Nm FROM Customer c ORDER BY Nm'],
+  [Q_LIST, 'SQL_NO_CACHE before a bare column', 'SELECT SQL_NO_CACHE CustomerName FROM Customer'],
+  // The GROUP of an ordered-set aggregate's WITHIN GROUP does not end the
+  // SELECT list: the implicit alias after it counts, also in a derived table.
+  [
+    Q_NET,
+    'implicit alias after PERCENTILE_CONT ... WITHIN GROUP (...) OVER (), used in ORDER BY',
+    'SELECT d.SalesDocumentId, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.NetAmount) OVER () MedianNet FROM SalesDocument d ORDER BY MedianNet',
+  ],
+  [
+    Q_NET,
+    'derived columns after a WITHIN GROUP aggregate',
+    'SELECT t.MedianNet, t.Doc FROM (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.NetAmount) OVER () MedianNet, d.SalesDocumentId Doc FROM SalesDocument d) t',
+  ],
   [Q_LIST, 'WINDOW clause', 'SELECT c.CustomerName, ROW_NUMBER() OVER w AS rn FROM Customer c WINDOW w AS (ORDER BY c.CustomerName)'],
   [
     Q_LINES,
