@@ -26,14 +26,19 @@
 //   Rejecting the second definition, rather than verifying both and running
 //   the first, is the conservative choice: no definition is silently unused;
 // - a question duplicate under another id that would be merged into the kept
-//   case but has a different split, known validator rejection, intent or tags:
-//   the split decides which split's accuracy counts the measurement, the flag
-//   how its verification treats a validator rejection, the intent and tags
-//   what --intent / --tag select and how the statistics group the case (only
-//   the kept case's are read, so a different one would make them depend on
-//   dataset order). An intent left out defaults to the case's own id, so two
-//   ids merge only under an explicit shared intentId. (Its other fields are
-//   verified under its own id, and the kept case's are reported.)
+//   case but differs in any other compared field: split, known validator
+//   rejection, row-count pins, signal checks, intent, tags, expected /
+//   disallowed columns or tables, canonical question (ignoring letter case,
+//   as the question is), difficulty or failure class. Only the kept case's
+//   are read: the split decides which split's accuracy counts the
+//   measurement, the flag how verification treats a validator rejection, the
+//   intent and tags what --intent / --tag select, intent, tags, difficulty and
+//   failure class how the statistics group the case, the expected tables the
+//   retrieval_miss attribution, signal checks and disallowed columns the
+//   warnings, and the case record carries all of them, so any difference
+//   would make the result depend on dataset order. An intent left out
+//   defaults to the case's own id, so two ids merge only under an explicit
+//   shared intentId.
 // The id of a dropped duplicate is registered too, with the definition it was
 // dropped with, so a later dataset cannot reuse it for another question.
 //
@@ -158,8 +163,21 @@ export function caseDefinitionFingerprint(testCase) {
 }
 
 // A question duplicate under another id is merged into the kept case only when
-// these agree (see the file comment).
-const QUESTION_DUPLICATE_FIELDS = Object.freeze(['split', 'known_validator_rejection', 'intentId', 'tags']);
+// every field but the ones the merge key already equates agrees (see the file
+// comment). The canonical question is compared ignoring letter case, as the
+// question is: a defaulted one is the question itself.
+const QUESTION_KEY_FIELDS = new Set(['question', 'gold SQL', 'alternatives or comparison spec']);
+const QUESTION_DUPLICATE_FIELDS = Object.freeze(
+  DEFINITION_FIELDS.filter(([label]) => !QUESTION_KEY_FIELDS.has(label)).map(([label, valueOf]) => [
+    label,
+    label === 'canonicalQuestion' ? (testCase) => valueOf(testCase).toLowerCase() : valueOf,
+  ])
+);
+
+function questionDuplicateDifferences(kept, testCase) {
+  const valueOf = (read, value) => stableStringify(read(value) ?? null);
+  return QUESTION_DUPLICATE_FIELDS.filter(([, read]) => valueOf(read, kept) !== valueOf(read, testCase)).map(([label]) => label);
+}
 
 function describeDifferences(differs) {
   return differs.length <= 2 ? differs.join(' and ') : `${differs.slice(0, -1).join(', ')} and ${differs[differs.length - 1]}`;
@@ -235,7 +253,7 @@ export function dedupeSuiteCases(datasets) {
       }
       const sameQuestion = byQuestion.get(questionKey(testCase));
       if (sameQuestion) {
-        const differs = caseDefinitionDifferences(sameQuestion.testCase, testCase).filter((label) => QUESTION_DUPLICATE_FIELDS.includes(label));
+        const differs = questionDuplicateDifferences(sameQuestion.testCase, testCase);
         if (differs.length > 0) {
           conflicts.push({
             id: testCase.id,

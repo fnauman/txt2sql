@@ -292,7 +292,7 @@ test('a question duplicate under another id must agree on split and validator fl
   assert.deepEqual([same.conflicts, same.duplicates.map((entry) => [entry.id, entry.keptAs])], [[], [['b', 'a']]]);
 });
 
-test('a question duplicate under another id must agree on tags and intent, so selections never depend on dataset order', async () => {
+test('a question duplicate under another id must agree on every case field (tags, intent, difficulty, expected tables, ...), so nothing depends on dataset order', async () => {
   const shared = { intentId: 'count_customers' };
   const dedupe = (order, extraA, extraB) => {
     const byName = {
@@ -319,6 +319,37 @@ test('a question duplicate under another id must agree on tags and intent, so se
     for (const filter of [{ tags: ['t1'] }, { tags: ['t2'] }, { intents: ['count_customers'] }]) {
       assert.equal(filterSuiteEntries(same.entries, filter).length, 1, `${order.join(',')} ${JSON.stringify(filter)}`);
     }
+  }
+
+  // Every other field the kept case's record carries (and statistics,
+  // attribution, warnings or verification read) must agree too: difficulty
+  // and failure class group the statistics, expected tables decide the
+  // retrieval_miss attribution, signal checks and disallowed columns the
+  // warnings. Each difference is a conflict in both orders.
+  const differing = [
+    ['difficulty', { difficulty: 'easy' }, { difficulty: 'hard' }],
+    ['failure_class', { failure_class: 'fc1' }, { failure_class: 'fc2' }],
+    ['expected_tables', { expected_tables: ['Customer', 'Document'] }, { expected_tables: ['Customer', 'Document', 'DocumentLine'] }],
+    ['signal_checks', {}, { signal_checks: { min_row_count: 1 } }],
+    ['disallowed_columns', {}, { disallowed_columns: ['NetPayableAmount'] }],
+    ['expected_columns', { expected_columns: ['n'] }, { expected_columns: ['count'] }],
+    ['expected_row_counts', { expected_row_counts: { seed: 1 } }, { expected_row_counts: { seed: 2 } }],
+    ['canonicalQuestion', { canonicalQuestion: 'How many customers?' }, { canonicalQuestion: 'Count the customers.' }],
+  ];
+  for (const order of orders) {
+    const [first, second] = order.map((name) => (name === 'd1' ? 'a' : 'b'));
+    for (const [label, extraA, extraB] of differing) {
+      const result = dedupe(order, extraA, extraB);
+      assert.deepEqual(
+        [result.conflicts, result.duplicates],
+        [[{ id: second, datasets: order, reason: `different ${label} than ${first} (same question and gold SQL)` }], []],
+        `${label} ${order.join(',')}`
+      );
+    }
+    // The canonical question follows the question's letter case, which the
+    // merge already ignores: Q1? and q1? with defaulted canonical questions
+    // are still one case.
+    assert.deepEqual(dedupe(order, {}, {}).conflicts, [], order.join(','));
   }
 
   // selectSuite stops the run in both orders.
