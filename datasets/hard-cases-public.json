@@ -106,8 +106,8 @@
     "id": "hard_vocab_shoppers_apr_2026",
     "intentId": "distinct_customers_apr_2026",
     "split": "dev",
-    "question": "How many distinct shoppers placed an order in April 2026?",
-    "canonicalQuestion": "How many distinct shoppers placed an order in April 2026?",
+    "question": "How many distinct shoppers made a purchase in April 2026?",
+    "canonicalQuestion": "How many distinct shoppers made a purchase in April 2026?",
     "difficulty": "hard",
     "tags": [
       "hard_case",
@@ -116,7 +116,7 @@
       "scalar"
     ],
     "failure_class": "vocabulary",
-    "notes": "\"Shoppers\" is not in the semantic layer: distinct customers with a non-canceled document in April 2026 (any document type).",
+    "notes": "\"Shoppers\" is not in the semantic layer: distinct customers with a non-canceled document in April 2026 (any document type). The question says \"made a purchase\", not \"placed an order\", so it does not raise the all-documents-or-Online-Orders ambiguity of hard_ambiguous_orders_mar_2026.",
     "expected_sql": "SELECT COUNT(DISTINCT d.CustomerId) AS customer_count FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-04-01' AND d.DocumentDate < '2026-05-01'",
     "expected_tables": [
       "SalesDocument"
@@ -258,7 +258,7 @@
     "id": "hard_sv_products_most_units_mar_2026",
     "intentId": "product_qty_sold_march_2026",
     "split": "dev",
-    "question": "Vilka produkter sålde flest enheter i mars 2026?",
+    "question": "Vilka är de tio produkter som sålde flest enheter i mars 2026?",
     "canonicalQuestion": "Show the top products by quantity sold in March 2026.",
     "difficulty": "hard",
     "tags": [
@@ -269,7 +269,7 @@
       "ranking"
     ],
     "failure_class": "multilingual",
-    "notes": "Swedish for core_public_002 (\"Which products sold the most units in March 2026?\"); same gold and scoring (top 10).",
+    "notes": "Swedish for core_public_002 with the number spelled out (\"Which are the ten products that sold the most units in March 2026?\"): the gold LIMIT 10 binds on v3, where 12 products sell, so the question names it. Same gold and scoring as core_public_002.",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 10",
     "expected_tables": [
       "SalesDocumentLine",
@@ -885,8 +885,8 @@
     "id": "hard_entity_summit_grocers_by_code_mar_2026",
     "intentId": "summit_grocers_net_sales_by_code_mar_2026",
     "split": "holdout",
-    "question": "List March 2026 net revenue for each customer named Summit Grocers, with their customer codes.",
-    "canonicalQuestion": "List March 2026 net revenue for each customer named Summit Grocers, with their customer codes.",
+    "question": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
+    "canonicalQuestion": "List the March 2026 net takings of each customer named Summit Grocers, with their customer codes.",
     "difficulty": "hard",
     "tags": [
       "hard_case",
@@ -934,7 +934,7 @@
     ],
     "failure_class": "clarification",
     "expected_behavior": "clarify",
-    "notes": "Two different customers are named Summit Grocers (C-005 and C-008): a correct product asks which one is meant (or says that the name is shared) instead of silently summing or picking one."
+    "notes": "Two different customers are named Summit Grocers (C-005 and C-008), so the name alone does not say whose purchases are meant (in the master data every fixture shares, whatever their March sales). A correct product asks which one is meant. Under the behaviour scoring any SQL counts as not clarifying, a per-customer breakdown included: that reading is scored as the answer case hard_entity_summit_grocers_by_code_mar_2026, whose question asks for each namesake."
   },
   {
     "id": "hard_zero_customers_jun_2026",
@@ -951,7 +951,7 @@
       "aggregation"
     ],
     "failure_class": "empty_result",
-    "notes": "No fixture has a document in June 2026, so the answer is empty (two empty results match). Listing every customer with 0 (LEFT JOIN from Customer) is accepted too (alternative_expected_sql), as in edge_public_008.",
+    "notes": "No fixture has a document in June 2026, so the answer is empty (two empty results match). Listing every customer with 0 or NULL (LEFT JOIN from Customer) is accepted too (alternative_expected_sql, null_as_zero), as in edge_public_008. An empty gold only tests that no rows are invented for the empty window: any query that returns nothing passes (see the controls for the plausible mistakes that do return rows).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-06-01' AND d.DocumentDate < '2026-07-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, c.CustomerName ASC",
     "alternative_expected_sql": [
       "SELECT c.CustomerName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-06-01' AND d.DocumentDate < '2026-07-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
@@ -962,7 +962,10 @@
     ],
     "comparison": {
       "mode": "rowset",
-      "decimals": 2
+      "decimals": 2,
+      "null_as_zero": [
+        "total_net_amount"
+      ]
     },
     "expected_row_counts": {
       "seed": 0,
@@ -1161,7 +1164,7 @@
     ],
     "failure_class": "clarification",
     "expected_behavior": "clarify",
-    "notes": "No as-of date and a static demo database: \"last month\" cannot be resolved (and \"sales\" could be net or gross) without asking."
+    "notes": "No as-of date over a static demo database: \"last month\" cannot be resolved without asking (the as-of cases give the date; net vs gross \"sales\" alone is answerable, see hard_ambiguous_sales_mar_2026)."
   },
   {
     "id": "hard_clarify_best_customer",
@@ -1210,8 +1213,8 @@
   },
   {
     "id": "hard_ambiguous_sales_mar_2026",
-    "intentId": "sales_mar_2026_net_or_gross",
-    "split": "holdout",
+    "intentId": "total_net_sales_mar_2026",
+    "split": "dev",
     "question": "What were sales in March 2026?",
     "canonicalQuestion": "What were sales in March 2026?",
     "difficulty": "medium",
@@ -1222,7 +1225,7 @@
       "scalar"
     ],
     "failure_class": "ambiguous_metric",
-    "notes": "\"Sales\" without a qualifier: net sales (the gold, the business rule) and the gross amount including tax (alternative_expected_sql) are both accepted.",
+    "notes": "\"Sales\" without a qualifier: net sales (the gold, the business rule) and the gross amount including tax (alternative_expected_sql) are both accepted. Same gold as hard_asof_last_month_net_sales, so it shares that intent (total_net_sales_mar_2026) and its dev split.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "alternative_expected_sql": [
       "SELECT ROUND(SUM(COALESCE(d.GrossAmount, 0)), 2) AS total_net_amount FROM SalesDocument d WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'"

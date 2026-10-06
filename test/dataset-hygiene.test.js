@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -17,6 +18,7 @@ import {
 import { CASE_SPLITS, normalizeBenchmarkCase } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import { goldFingerprint, loadControlsIndex, normalizeSqlText, resolveCaseControls } from '../src/eval/controls.js';
+import { MASTER_DATA } from '../src/eval/fixture-data.js';
 import { FIXTURES } from '../src/eval/fixtures.js';
 import { dedupeSuiteCases, scoringFingerprint } from '../src/eval/suite.js';
 import { createValidatorProbe } from '../src/eval/verify.js';
@@ -83,6 +85,22 @@ test('(d) every intent has one split across all its phrasings and datasets', () 
   }
 });
 
+test('(d) one gold SQL belongs to one intent (so a holdout intent is never a dev query in other words)', () => {
+  const intentOf = new Map();
+  for (const { dataset, testCase } of allCases) {
+    if (!testCase.expected_sql) {
+      continue;
+    }
+    const key = normalizeSqlText(testCase.expected_sql).toLowerCase();
+    const previous = intentOf.get(key);
+    if (previous) {
+      assert.equal(testCase.intentId, previous.intentId, `${dataset}/${testCase.id} has the gold of ${previous.where} under another intent`);
+    } else {
+      intentOf.set(key, { intentId: testCase.intentId, where: `${dataset}/${testCase.id}` });
+    }
+  }
+});
+
 test('(a) holdout questions contain no multi-word phrase of the semantic layer', () => {
   const phrases = layerPhrases();
   assert.ok(phrases.includes('net sales') && phrases.includes('sales documents') && phrases.includes('credit memo'));
@@ -96,6 +114,49 @@ test('(a) holdout questions contain no multi-word phrase of the semantic layer',
   // The matcher itself: whole words, plurals included.
   assert.ok(words('How many credit memos?').includes(`${words('credit memo').trimEnd()}s `));
   assert.ok(!words('net salesperson').includes(`${words('net sales').trimEnd()} `));
+});
+
+// The single-word metric synonyms the semantic layer ENFORCES (a metric
+// guardrail rejects SQL without the metric's column): synonyms that are not
+// advisory. Today that is "revenue" (net sales); "sales", "sold" and the
+// like are advisory, and "debit" / "credit" are the only names of those
+// measures (advisory in count questions).
+function enforcedSingleWordSynonyms() {
+  const enforced = new Set();
+  for (const metric of layer.metrics || []) {
+    const advisory = new Set([...(metric.advisory_synonyms || []), ...(metric.count_advisory_synonyms || [])].map((word) => word.toLowerCase()));
+    for (const synonym of metric.synonyms || []) {
+      const word = synonym.toLowerCase().trim();
+      if (!word.includes(' ') && !advisory.has(word)) {
+        enforced.add(word);
+      }
+    }
+  }
+  return [...enforced].sort();
+}
+
+test('(a) holdout questions avoid the enforced single-word metric synonyms too (master-data names aside)', () => {
+  const enforced = enforcedSingleWordSynonyms();
+  assert.deepEqual(enforced, ['revenue'], 'the semantic layer changed: review the holdout wording rule');
+  // A master-data name is a value, not a metric word ("Sales Revenue" is a
+  // ledger account): strip those before matching.
+  const names = [
+    ...MASTER_DATA.LedgerAccount.map((row) => row.AccountName),
+    ...MASTER_DATA.Product.map((row) => row.ProductName),
+    ...MASTER_DATA.Brand.map((row) => row.BrandName),
+    ...MASTER_DATA.Customer.map((row) => row.CustomerName),
+    ...MASTER_DATA.StoreLocation.map((row) => row.LocationName),
+    ...MASTER_DATA.Campaign.map((row) => row.CampaignName),
+  ].map((name) => words(name).trim());
+  const holdout = allCases.filter(({ testCase }) => testCase.split === 'holdout');
+  for (const { dataset, testCase } of holdout) {
+    let text = words(testCase.question);
+    for (const name of names) {
+      text = text.split(` ${name} `).join(' ');
+    }
+    const found = enforced.filter((word) => text.includes(` ${word} `) || text.includes(` ${word}s `));
+    assert.deepEqual(found, [], `${dataset}/${testCase.id}: "${testCase.question}"`);
+  }
 });
 
 test('(b) no dataset question or gold SQL is a few-shot example (and none is close)', () => {
@@ -126,6 +187,16 @@ test('(c) ids are unique across datasets unless the cases are identical, and a t
   }
   for (const testCase of datasets['templated-public']) {
     assert.equal(testCase.id, caseIdFor(testCase.intentId, testCase.question), `${testCase.id}: the id embeds a hash of its question`);
+  }
+  // Hand-written ids are bound to their question by a committed registry
+  // (id -> first 12 hex of sha256 of the whitespace-normalized question):
+  // editing a question in place under the same id fails here; give the new
+  // question a new id. A registry entry without a case is a retired id.
+  const registry = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'test/fixtures/case-question-registry.json'), 'utf8')).ids;
+  const questionHash = (question) => crypto.createHash('sha256').update(normalizeSqlText(question)).digest('hex').slice(0, 12);
+  for (const { dataset, testCase } of allCases.filter((entry) => entry.dataset !== 'templated-public')) {
+    assert.ok(registry[testCase.id], `${dataset}/${testCase.id} is not in test/fixtures/case-question-registry.json: add it (a new id)`);
+    assert.equal(questionHash(testCase.question), registry[testCase.id], `${dataset}/${testCase.id} changed its question: use a new id for the new question`);
   }
   // Ids recorded in committed reports keep their question.
   const recorded = [path.join(REPO_ROOT, 'test/fixtures/eval-recorded-report.json')];
@@ -247,6 +318,26 @@ test('controls: every templated intent and every hard case with controls resolve
   for (const entry of Object.values(controls)) {
     assert.equal(entry.gold_fingerprint, goldFingerprint(datasets['templated-public'].find((testCase) => testCase.intentId === entry.intentId).expected_sql));
   }
+  // Mutation families per template: a dropped GROUP BY key for every intent
+  // with two grouping keys or a month series; both off-by-one sides of every
+  // window, each either emitted or recorded under not_emitted with its
+  // reason; held-out mutants marked as such.
+  const byIntent = new Map(INTENT_CATALOGUE.map((intent) => [intent.intentId, intent]));
+  for (const entry of Object.values(controls)) {
+    const intent = byIntent.get(entry.intentId);
+    const notes = (type) => [...entry.negative.filter((control) => control.type === type).map((control) => control.note), ...(entry.not_emitted || []).filter((skip) => skip.type === type).map((skip) => skip.note || skip.reason)];
+    if ((intent.dims || []).length > 1 || intent.series) {
+      assert.ok(notes('group_by').some((note) => /dropped from GROUP BY/.test(note)), `${intent.intentId}: a missing GROUP BY key mutant`);
+    }
+    if (intent.window || intent.windows) {
+      const sides = notes('date_boundary');
+      assert.ok(sides.some((note) => /first day/.test(note)) && sides.some((note) => /day after/.test(note)), `${intent.intentId}: both off-by-one sides (${sides.join(' | ')})`);
+    }
+    for (const control of entry.negative) {
+      assert.equal(control.heldout === true, control.id.startsWith('h'), `${intent.intentId}/${control.id}: h* ids are exactly the held-out mutants`);
+    }
+  }
+  assert.ok(Object.values(controls).some((entry) => entry.negative.some((control) => control.heldout)), 'a held-out tier exists');
 });
 
 // The offline twin of verify-dataset's validator check for the new datasets:
