@@ -673,30 +673,26 @@ function addDerivedMetrics(metrics, semanticLayer) {
   return derivedMetrics;
 }
 
-// Metrics measured on ledger postings (the debit and credit metrics).
-const LEDGER_METRIC_GRAINS = new Set(['accounting_posting']);
+// Hints version 2: an account named after its code, "account 4000 (Sales
+// Revenue)" or 'account 4000 "Sales Revenue"', is one ledger-account
+// reference. Its span consumes the metric words inside the name, exactly as
+// the "sales revenue account" synonym does for "the Sales Revenue ledger
+// account", so "revenue" there is not the net_sales metric
+// (tpl_revenue_credits_monthly_q1_2026_e1b20a, flagged known_validator_rejection:
+// METRIC_COLUMN under version 1). Sales words anywhere else in the question
+// ("net sales and total credits") still match and enforce.
+const ACCOUNT_CODE_NAME_PATTERN =
+  /\b(?:ledger\s+|gl\s+)?accounts?\s+(?:(?:code|number|no\.?|#)\s*)?\d[\d.-]*\s*(?:\([^()]*\)|"[^"]*"|\u201c[^\u201d]*\u201d)/gi;
 
-/**
- * Hints version 2: in a question about ledger postings (a debit or credit
- * metric matched), a sales metric is not what the question measures: its
- * words name an account ("account 4000 (Sales Revenue)") or a document
- * filter ("postings of sales dated ..."). Such a sales metric stays a prompt
- * hint but no longer enforces (enforcementReason 'ledger_metric_context'), so
- * the METRIC_COLUMN guardrail cannot reject every correct ledger answer
- * (tpl_revenue_credits_monthly_q1_2026_e1b20a, flagged
- * known_validator_rejection: METRIC_COLUMN under version 1). The derived
- * line-level metric inherits the demotion.
- */
-function withLedgerContextArbitration(metrics, matches) {
-  const grainOf = new Map(matches.filter((match) => match.kind === 'metric').map((match) => [match.entry.name, match.entry.grain || null]));
-  if (!metrics.some((metric) => LEDGER_METRIC_GRAINS.has(grainOf.get(metric.name)))) {
-    return metrics;
+function findAccountReferenceSpans(normalizedQuestion) {
+  const text = String(normalizedQuestion || '');
+  const spans = [];
+  for (const match of text.matchAll(ACCOUNT_CODE_NAME_PATTERN)) {
+    const start = splitWords(text.slice(0, match.index ?? 0)).length;
+    const end = start + splitWords(match[0]).length;
+    spans.push({ synonym: match[0], start, end });
   }
-  return metrics.map((metric) =>
-    metric.enforcement === 'enforced' && !LEDGER_METRIC_GRAINS.has(grainOf.get(metric.name))
-      ? { ...metric, enforcement: 'advisory', enforcementReason: 'ledger_metric_context' }
-      : metric
-  );
+  return spans;
 }
 
 /**
@@ -752,7 +748,7 @@ function findMatchedClarificationRules(clarificationRules, questionContext) {
     .filter((rule) => rule.matchedTriggers.length > 0);
 }
 
-function matchSemanticLayer(semanticLayer, questionContext) {
+function matchSemanticLayer(semanticLayer, questionContext, { hintsVersion = 1 } = {}) {
   const questionWords = buildQuestionWordIndex(questionContext);
   const sources = [
     ...(semanticLayer.entities || []).map((entry) => ({ kind: 'entity', entry, matchEntry: entry })),
@@ -776,6 +772,14 @@ function matchSemanticLayer(semanticLayer, questionContext) {
       entryName: source.entry.name,
     }))
   );
+  const ledgerAccount = sources.find((source) => source.kind === 'entity' && source.entry.name === 'ledger_account');
+  if (hintsVersion !== 1 && ledgerAccount) {
+    // Only the span takes part in arbitration; the entity is matched by its
+    // own "account" synonym, which lies inside it.
+    for (const span of findAccountReferenceSpans(questionContext.normalizedQuestion)) {
+      candidates.push({ ...span, key: ledgerAccount.key, kind: 'entity', entryName: 'ledger_account' });
+    }
+  }
   const { active, suppressed } = arbitrateSemanticSpans(candidates);
 
   const matches = sources
@@ -811,7 +815,7 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
   const layer = semanticLayer ?? loadSemanticLayerForHintsVersion(version);
   const context = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
-  const { matches, activeSpans, suppressedMatches } = matchSemanticLayer(layer, context);
+  const { matches, activeSpans, suppressedMatches } = matchSemanticLayer(layer, context, { hintsVersion: version });
   let entities = matches
     .filter((match) => match.kind === 'entity')
     .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
@@ -824,9 +828,6 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
       ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
       ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
     }));
-  if (version !== 1) {
-    metrics = withLedgerContextArbitration(metrics, matches);
-  }
   const filterHints = matches
     .filter((match) => match.kind === 'filter')
     .map((match) => [match.entry, removeSubsumedAliasMatches(match.matchedSynonyms, match.matchEntry.aliasOnlyValues)])
@@ -1411,9 +1412,6 @@ function advisoryMetricNote(metric, hintsVersion) {
   }
   if (metric.enforcementReason === 'count_or_existence_intent') {
     return ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)';
-  }
-  if (metric.enforcementReason === 'ledger_metric_context') {
-    return ' (weak match: the question is about ledger postings, so these words name an account or a filter; use this measure only if the question also asks for it)';
   }
   return ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
 }

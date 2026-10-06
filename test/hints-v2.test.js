@@ -406,7 +406,7 @@ test('v2 retrieval: "account" is no Customer alias, so ledger questions do not r
   assert.deepEqual(retrieveRelevantTables(schema, question, { hintsVersion: 2 }).initialTableNames.slice(0, 2), ['LedgerAccount', 'AccountingPosting']);
 });
 
-// --- METRIC_COLUMN: sales metrics do not enforce in a ledger question --------
+// --- METRIC_COLUMN: an account name is not a sales metric --------------------
 // "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026."
 // enforced net_sales on "revenue", so the guardrail rejected the gold, every
 // alternative and the positive control (tpl_revenue_credits_monthly_q1_2026_e1b20a,
@@ -430,20 +430,47 @@ function validateUnder(question, sql, hintsVersion) {
   }
 }
 
-test('v2 METRIC_COLUMN: in a ledger question a sales metric is a hint, the ledger metric still enforces', () => {
+test('v2 METRIC_COLUMN: "account <code> (<name>)" consumes the metric words in the account name', () => {
   assert.equal(metricOf(v1Plan(LEDGER_QUESTION), 'net_sales').enforcement, 'enforced');
-  const sales = metricOf(v2Plan(LEDGER_QUESTION), 'net_sales');
-  assert.deepEqual([sales.enforcement, sales.enforcementReason], ['advisory', 'ledger_metric_context']);
+  assert.equal(metricOf(v2Plan(LEDGER_QUESTION), 'net_sales'), null);
   assert.equal(metricOf(v2Plan(LEDGER_QUESTION), 'credit_amount').enforcement, 'enforced');
-  assert.match(buildOptimizedPrompt(schema, LEDGER_QUESTION).user, /Metric "net_sales" matched sales, sale, revenue \(weak match: the question is about ledger postings, so these words name an account or a filter/);
+  assert.ok(v2Plan(LEDGER_QUESTION).entities.some((entity) => entity.name === 'ledger_account'));
+  assert.doesNotMatch(buildOptimizedPrompt(schema, LEDGER_QUESTION).user, /Metric "net_sales"/);
+  // A quoted account name after the code is one reference too.
+  assert.equal(metricOf(v2Plan('Credits posted to account 4000 "Sales Revenue" in March 2026.'), 'net_sales'), null);
 
   assert.equal(validateUnder(LEDGER_QUESTION, LEDGER_GOLD, 1), 'METRIC_COLUMN');
   assert.equal(validateUnder(LEDGER_QUESTION, LEDGER_GOLD, 2), null);
   // Leaving out the ledger measure is still rejected.
   const noCredit = "SELECT ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId WHERE a.AccountCode = '4000'";
   assert.equal(validateUnder(LEDGER_QUESTION, noCredit, 2), 'METRIC_COLUMN');
-  // Without a ledger metric, an explicit sales phrase still enforces.
+  // Without an account reference, an explicit sales phrase still enforces.
   assert.equal(metricOf(v2Plan('Which products brought in the most revenue in March 2026?'), 'net_sales').enforcement, 'enforced');
+});
+
+test('v2 METRIC_COLUMN: a question asking for a sales measure and a ledger measure enforces both', () => {
+  // Review finding: demoting every sales metric once a debit or credit
+  // metric matched let a wrong sales column through.
+  const credits = 'What were net sales and total credits in March 2026?';
+  const creditsWrong =
+    "SELECT ROUND(SUM(COALESCE(d.BillTotalAmount,0)),2) AS net_sales, (SELECT ROUND(SUM(COALESCE(p.CreditAmount,0)),2) FROM AccountingPosting p WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01') AS credits FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+  const creditsRight = creditsWrong.replace('d.BillTotalAmount', 'd.NetAmount');
+  const debits = 'Show net sales and debits for March 2026.';
+  const debitsWrong =
+    "SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS net_sales, (SELECT SUM(p.DebitAmount) FROM AccountingPosting p WHERE p.PostingDate >= '2026-03-01' AND p.PostingDate < '2026-04-01') AS debits FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+  for (const hintsVersion of [1, 2]) {
+    assert.equal(validateUnder(credits, creditsWrong, hintsVersion), 'METRIC_COLUMN', `v${hintsVersion} credits`);
+    assert.equal(validateUnder(credits, creditsRight, hintsVersion), null, `v${hintsVersion} credits, right column`);
+    assert.equal(validateUnder(debits, debitsWrong, hintsVersion), 'METRIC_COLUMN', `v${hintsVersion} debits`);
+  }
+  assert.equal(metricOf(v2Plan(credits), 'net_sales').enforcement, 'enforced');
+  // The derived line-level metric keeps its enforcement as well.
+  const products = v2Plan('Top products by net sales in March 2026, and their credits.');
+  assert.equal(metricOf(products, 'line_net_sales').enforcement, 'enforced');
+  // Sales words outside the account name still match next to an account reference.
+  const both = v2Plan('Net sales and credits to account 4000 (Sales Revenue) in March 2026.');
+  assert.equal(metricOf(both, 'net_sales').enforcement, 'enforced');
+  assert.ok(!metricOf(both, 'net_sales').matchedSynonyms.includes('revenue'));
 });
 
 test('verification: a flag the default hints version no longer needs but version 1 does is a note, not a stale flag', async () => {

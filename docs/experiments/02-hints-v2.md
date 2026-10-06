@@ -112,7 +112,7 @@ vocabulary entry, not a fix for one wording.
 | `brand` prefers `Brand` only (no `ProductBrand`, so no bridge join hints) | `196b6b`; `d343eb`, `025f70` (holdout) |
 | `customer` (and the `Customer` table alias) without "account" / "accounts" | `c1256b`; noise in `e1b20a` |
 | metric default filters (cancellation) and notes printed in the hint; the debit / credit notes say to join `SalesDocument` only for a document column and then filter cancellations, and that a `PostingDate` filter needs no join (their preferred tables keep `SalesDocument`: the `DocumentDate` ledger golds need it) | `core_public_005`, `paraphrase_public_005`, `core_public_009`, `paraphrase_public_009`; `tpl_account_debit_credit_posted_apr_2026_2218ff` (holdout) |
-| an advisory metric says which kind of weak match it is (generic wording, a count question, a ledger question), so "How many units did we sell" is not told that counts do not need the quantity | supports the units changes |
+| an advisory metric says which kind of weak match it is (generic wording or a count question), so "How many units did we sell" is not told that counts do not need the quantity | supports the units changes |
 
 **Plan, retrieval and guardrail:**
 
@@ -120,7 +120,7 @@ vocabulary entry, not a fix for one wording.
 |---|---|
 | An entity whose every matched word lies inside a matched metric measured at that entity's grain loses its display columns (keeps tables and default filters): "sales" in "What were sales…" is net sales over documents, not a document list. A metric phrase that names another entity ("biggest buyers") keeps that entity's columns. 55 questions lose `DocumentNo` / `DocumentDate`; no gold selects them. | `hard_ambiguous_sales_mar_2026`; `c15bb6` (holdout) |
 | Retrieval ignores words that matched columns by accident: included, distinct, total, units, recorded, used, column, row, as (and inflections). 51 relevance hints lose an accidental column. The semantic plan does not read them. | `edge_public_002` ("total" → `BillTotalAmount`); `40ae9d` (holdout: "included" → `NetPayableAmount`) |
-| In a ledger question (a debit or credit metric matched), an enforced sales metric becomes advisory (`enforcementReason: ledger_metric_context`); the ledger metric still enforces. Only `e1b20a` changes. | `tpl_revenue_credits_monthly_q1_2026_e1b20a` (holdout; the gold, all alternatives and the positive control were rejected) |
+| An account named after its code, "account 4000 (Sales Revenue)" (or with a quoted name), is one ledger-account reference whose span consumes the metric words in the name, as the existing "sales revenue account" synonym does for "the Sales Revenue ledger account". Sales words outside the name still match and enforce, so "net sales and total credits" enforces both measures. Only `e1b20a` changes. (A first version demoted every enforced sales metric once a debit or credit metric matched; review showed it accepted `BillTotalAmount` for "What were net sales and total credits…", so it was replaced; `test/hints-v2.test.js` pins both questions.) | `tpl_revenue_credits_monthly_q1_2026_e1b20a` (holdout; the gold, all alternatives and the positive control were rejected) |
 
 **Considered and not done:**
 
