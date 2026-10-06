@@ -71,6 +71,29 @@ test('v2 temporal: a day range, an as-of day, a month range or a shared year res
   }
 });
 
+test('v2 temporal: a shared-year month list with a serial (Oxford) comma resolves nothing', () => {
+  // Review finding: "February, and" before "March 2026" matched neither the
+  // comma nor the conjunction alone, so March was resolved as a whole month.
+  for (const question of [
+    'Net sales for January, February, and March 2026.',
+    'Net sales for January, February, or March 2026.',
+    'Net sales for Jan, Feb, & Mar 2026.',
+    'Net sales for January,and February 2026.',
+    'Net sales for January , and February 2026.',
+  ]) {
+    assert.deepEqual(texts(question, 2), [], question);
+    assert.ok(texts(question, 1).length > 0, `version 1 resolved a whole month: ${question}`);
+  }
+  // The forms without the serial comma are unchanged.
+  for (const question of ['Net sales for January, February and March 2026.', 'Net sales for January, February, March 2026.']) {
+    assert.deepEqual(texts(question, 2), [], question);
+  }
+  // A month with its own year after a serial comma still resolves, as in version 1.
+  const ownYears = 'Compare net sales in March 2025, and March 2026.';
+  assert.deepEqual(texts(ownYears, 2), ['March 2025', 'March 2026']);
+  assert.deepEqual(extractTemporalReferences(ownYears, { hintsVersion: 2 }), extractTemporalReferences(ownYears, { hintsVersion: 1 }));
+});
+
 test('v2 temporal: a part of a month, a period ending in it, an open range or a to-date tail resolves nothing', () => {
   // Review finding: the first version still resolved these to the whole
   // month, and kept only the start month of "from <month> to the end of
