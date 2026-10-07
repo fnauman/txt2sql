@@ -675,6 +675,44 @@ test('v2 METRIC_COLUMN: an open-balance difference used as an IF() condition, or
   }
 });
 
+// The verdict on `sql` for the open-amount question: null when it passes,
+// else the code.
+function openAmountVerdict(sql) {
+  const prompt = buildOptimizedPrompt(schema, 'Total open amount on documents with a due date in April 2026.');
+  try {
+    validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+    return null;
+  } catch (error) {
+    return error.code;
+  }
+}
+const aprilDueDocuments = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
+
+test('v2 METRIC_COLUMN: a difference in a later UNION branch is named by the first branch, and DOUBLE PRECISION keeps the decimals', () => {
+  // Fourth review: following derived-table columns named the difference from
+  // its own select item, but a later UNION branch's columns take the first
+  // branch's names, so a correct balance there was rejected (it passed
+  // before); CAST(... AS DOUBLE PRECISION) was read as no float type.
+  const april = aprilDueDocuments;
+  for (const sql of [
+    `SELECT SUM(bal) AS open_amount FROM (SELECT 0 AS bal UNION ALL SELECT d.NetPayableAmount - d.PaidAmount ${april}) t`,
+    `SELECT SUM(t.bal) AS open_amount FROM (SELECT 0 AS bal UNION ALL SELECT d.NetPayableAmount - d.PaidAmount AS other ${april}) t`,
+    `SELECT SUM(t.bal) AS open_amount FROM (SELECT 0 AS np, 0 AS bal UNION ALL SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) t`,
+    `WITH t AS (SELECT 0 AS bal UNION ALL SELECT d.NetPayableAmount - d.PaidAmount ${april}) SELECT SUM(bal) AS open_amount FROM t`,
+    `SELECT SUM(bal) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april} UNION ALL SELECT 0) t`,
+    `SELECT CAST(SUM(d.NetPayableAmount - d.PaidAmount) AS DOUBLE PRECISION) AS open_amount ${april}`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), null, sql);
+  }
+  // The first branch's name decides which column is only filtered on.
+  for (const sql of [
+    `SELECT SUM(t.np) AS open_amount FROM (SELECT 0 AS np, 0 AS bal UNION ALL SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) t WHERE t.bal > 0`,
+    `SELECT SUM(t.np) AS open_amount FROM (SELECT 0 AS np, 0 AS bal UNION ALL SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount AS np ${april}) t WHERE t.bal > 0`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
+  }
+});
+
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
   // Review finding: "gross" anywhere in the question made an explicit
   // "revenue" / "average order value" advisory, so "Show revenue and gross

@@ -1181,11 +1181,12 @@ function isIntegerLiteral(tokens, start, end) {
 }
 
 // Whether tokens[start..end] names a number type that keeps the decimals: a
-// floating-point type ("DOUBLE", "FLOAT") or a decimal type with a scale of
-// at least one and an integer digit ("DECIMAL(12,2)"). A bare DECIMAL is
-// DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED, UNSIGNED or INTEGER
-// drop the decimals. (A precision too small for the amounts, which
-// overflows, is not caught: the check does not know the columns' types.)
+// floating-point type ("DOUBLE", "DOUBLE PRECISION", "FLOAT") or a decimal
+// type with a scale of at least one and an integer digit ("DECIMAL(12,2)").
+// A bare DECIMAL is DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED,
+// UNSIGNED or INTEGER drop the decimals. (A precision too small for the
+// amounts, which overflows, is not caught: the check does not know the
+// columns' types.)
 function isValueKeepingCastType(tokens, start, end, parens) {
   const typeName = tokens[start];
   if (typeName?.type !== 'word') {
@@ -1193,7 +1194,7 @@ function isValueKeepingCastType(tokens, start, end, parens) {
   }
   const hasArguments = isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end;
   if (DIFFERENCE_FLOAT_CAST_TYPES.has(typeName.upper)) {
-    return start === end || hasArguments;
+    return start === end || hasArguments || (typeName.upper === 'DOUBLE' && end === start + 1 && isKeywordToken(tokens[end], 'PRECISION'));
   }
   if (!DIFFERENCE_DECIMAL_CAST_TYPES.has(typeName.upper) || !hasArguments) {
     return false;
@@ -1493,15 +1494,14 @@ function groupOperandStart(tokens, open) {
   return isFunctionCallName(tokens, open - 1) ? open - 1 : open;
 }
 
-// The select-list item of the SELECT at tokens[selectIndex] that contains
-// tokens[start..end] (same parenthesis level): { position (0-based), from,
-// to (exclusive) }, or null.
-function selectItemAround(tokens, selectIndex, start, end, parens) {
+// The select-list items of the SELECT at tokens[selectIndex], each as
+// { from, to (exclusive) }.
+function selectListItems(tokens, selectIndex, parens) {
+  const items = [];
   let from = selectIndex + 1;
   while (isKeywordToken(tokens[from], ...SELECT_OPTION_WORDS)) {
     from += 1;
   }
-  let position = 0;
   for (let at = from; at <= tokens.length; at += 1) {
     const token = tokens[at];
     if (isPunctToken(token, '(') && parens.closeOf.has(at)) {
@@ -1509,17 +1509,42 @@ function selectItemAround(tokens, selectIndex, start, end, parens) {
       continue;
     }
     if (!token || isPunctToken(token, ',') || isPunctToken(token, ')') || isPunctToken(token, ';') || endsSelectList(tokens, at)) {
-      if (from <= start && end < at) {
-        return { position, from, to: at };
-      }
+      items.push({ from, to: at });
       if (!isPunctToken(token, ',')) {
-        return null;
+        break;
       }
-      position += 1;
       from = at + 1;
     }
   }
-  return null;
+  return items;
+}
+
+// The select-list item of the SELECT at tokens[selectIndex] that contains
+// tokens[start..end] (same parenthesis level): { position (0-based), from,
+// to (exclusive) }, or null.
+function selectItemAround(tokens, selectIndex, start, end, parens) {
+  const items = selectListItems(tokens, selectIndex, parens);
+  const position = items.findIndex(({ from, to }) => from <= start && end < to);
+  return position < 0 ? null : { position, ...items[position] };
+}
+
+// The first SELECT of the set operation (UNION, INTERSECT, EXCEPT) whose
+// later branch is the SELECT at tokens[selectIndex], inside the group opened
+// at tokens[open]; selectIndex itself when it is no later branch. A later
+// branch's columns take the first branch's names.
+function firstSetOperationSelect(tokens, selectIndex, open, parens) {
+  let first = -1;
+  let setOperation = false;
+  for (let at = open + 1; at < selectIndex; at += 1) {
+    if (isPunctToken(tokens[at], '(') && parens.closeOf.has(at)) {
+      at = parens.closeOf.get(at);
+    } else if (first < 0 && isKeywordToken(tokens[at], 'SELECT') && !tokens[at].afterDot) {
+      first = at;
+    } else if (first >= 0 && isKeywordToken(tokens[at], 'UNION', 'INTERSECT', 'EXCEPT') && !tokens[at].afterDot) {
+      setOperation = true;
+    }
+  }
+  return first >= 0 && setOperation ? first : selectIndex;
 }
 
 // The name of the column the select-list item tokens[from..to) outputs: its
@@ -1682,7 +1707,10 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
             return false;
           }
           const item = selectItemAround(tokens, at, start, end, parens);
-          const itemName = item ? selectItemColumnName(tokens, item.from, item.to) : null;
+          // In a later branch of a UNION the column is named by the first.
+          const firstSelect = firstSetOperationSelect(tokens, at, open, parens);
+          const namingItem = item && firstSelect !== at ? selectListItems(tokens, firstSelect, parens)[item.position] : item;
+          const itemName = namingItem ? selectItemColumnName(tokens, namingItem.from, namingItem.to) : null;
           nextSelectItem = item ? { position: item.position, name: itemName === '*' ? passedName : itemName, star: itemName === '*' } : null;
           next = [groupOperandStart(tokens, open), close];
         } else if (word === 'FROM' || word === 'JOIN') {
