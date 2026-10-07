@@ -1493,22 +1493,137 @@ function groupOperandStart(tokens, open) {
   return isFunctionCallName(tokens, open - 1) ? open - 1 : open;
 }
 
+// The select-list item of the SELECT at tokens[selectIndex] that contains
+// tokens[start..end] (same parenthesis level): { position (0-based), from,
+// to (exclusive) }, or null.
+function selectItemAround(tokens, selectIndex, start, end, parens) {
+  let from = selectIndex + 1;
+  while (isKeywordToken(tokens[from], ...SELECT_OPTION_WORDS)) {
+    from += 1;
+  }
+  let position = 0;
+  for (let at = from; at <= tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(') && parens.closeOf.has(at)) {
+      at = parens.closeOf.get(at);
+      continue;
+    }
+    if (!token || isPunctToken(token, ',') || isPunctToken(token, ')') || isPunctToken(token, ';') || endsSelectList(tokens, at)) {
+      if (from <= start && end < at) {
+        return { position, from, to: at };
+      }
+      if (!isPunctToken(token, ',')) {
+        return null;
+      }
+      position += 1;
+      from = at + 1;
+    }
+  }
+  return null;
+}
+
+// The name of the column the select-list item tokens[from..to) outputs: its
+// alias ("x AS bal", "x bal") or, for a bare column reference, the column's
+// name; '*' for `*` and `q.*`; null for an unnamed expression.
+function selectItemColumnName(tokens, from, to) {
+  const last = tokens[to - 1];
+  if (isOperatorToken(last, '*') && (to - from === 1 || (to - from === 3 && isPunctToken(tokens[from + 1], '.')))) {
+    return '*';
+  }
+  if (to - from >= 3 && isKeywordToken(tokens[to - 2], 'AS') && (identifierTokenName(last) || last.type === 'string')) {
+    return last.type === 'string' ? last.value.slice(1, -1) : identifierTokenName(last);
+  }
+  const alias = to - from >= 2 ? trailingAliasName(tokens, from, to) : null;
+  if (alias !== null) {
+    return alias;
+  }
+  for (let index = from; index < to; index += 1) {
+    const expectIdentifier = (index - from) % 2 === 0;
+    if (expectIdentifier ? !isPlainIdentifierToken(tokens[index]) : !isPunctToken(tokens[index], '.')) {
+      return null;
+    }
+  }
+  return (to - from) % 2 === 1 ? identifierTokenName(last) : null;
+}
+
+// How deep a derived-table or CTE column is followed through the queries
+// that read it (each level a derived table, a CTE or a `*` passing it on),
+// and how many references one difference may follow in all.
+const MAX_DERIVED_COLUMN_DEPTH = 8;
+const MAX_DERIVED_COLUMN_REFERENCES = 256;
+
 /**
- * Whether the expression tokens[start..end] is a computed value: it reaches a
- * SELECT list (of the query, a derived table, a CTE or a scalar subquery
- * there) through function arguments, arithmetic and CASE results, without
- * being an operand of a comparison or logical operator, inside a cast that
- * drops the decimals (CAST(... AS SIGNED)), or sitting in a WHERE, HAVING,
- * ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND
- * NetPayableAmount - PaidAmount > 0" computes no value.
+ * Whether the column `name` that a derived table or CTE body (the
+ * parenthesized group tokens[body[0]..body[1]]) outputs reaches a computed
+ * value in the query that reads it (tokens[scope[0]..scope[1]], the body
+ * left out): a reference to the column, bare or qualified, that is a
+ * computed value (expressionIsComputedValue), or a `*` / `q.*` select item
+ * that passes it on and is one. A column only used to filter, join, group or
+ * order rows computes nothing ("WHERE t.bal > 0" next to SUM(t.other)).
  */
-function expressionIsComputedValue(tokens, start, end, parens) {
+function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, budget) {
+  const wanted = String(name).toLowerCase();
+  for (let at = scope[0]; at <= scope[1]; at += 1) {
+    if (at === body[0]) {
+      at = body[1];
+      continue;
+    }
+    const token = tokens[at];
+    if (isOperatorToken(token, '*')) {
+      const start = isPunctToken(tokens[at - 1], '.') ? at - 2 : at;
+      const before = tokens[start - 1];
+      if (
+        (isKeywordToken(before, 'SELECT', ...SELECT_OPTION_WORDS) || isPunctToken(before, ',')) &&
+        expressionIsComputedValue(tokens, start, at, parens, depth + 1, name, budget)
+      ) {
+        return true;
+      }
+      continue;
+    }
+    const tokenName = token?.type === 'word' || token?.type === 'quoted_identifier' ? identifierTokenName(token) : null;
+    if (!tokenName || String(tokenName).toLowerCase() !== wanted || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
+      continue;
+    }
+    const qualified = isPunctToken(tokens[at - 1], '.');
+    // Not an alias of the same name ("SUM(x) AS bal", "FROM docs bal").
+    if (!qualified && (isKeywordToken(tokens[at - 1], 'AS') || endsExpression(tokens[at - 1]))) {
+      continue;
+    }
+    if (expressionIsComputedValue(tokens, qualified ? operandStartBefore(tokens, at, parens) : at, at, parens, depth + 1, null, budget)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether the expression tokens[start..end] is a computed value: it reaches
+ * the query's SELECT list through function arguments, arithmetic, CASE
+ * results, scalar subqueries, and derived-table and CTE columns that the
+ * query reading them uses as values (derivedColumnReachesValue), without
+ * being an operand of a comparison or logical operator, the condition of an
+ * IF(), an argument NULLIF() compares, inside a cast that drops the decimals
+ * (CAST(... AS SIGNED)), or in a WHERE, HAVING, ON, GROUP BY, ORDER BY or
+ * CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
+ * 0" computes no value. `passedName` is the column name a `*` select item
+ * passes on when that `*` is the expression (see derivedColumnReachesValue);
+ * `budget` bounds the references followed (past it the answer is no).
+ */
+function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passedName = null, budget = { references: MAX_DERIVED_COLUMN_REFERENCES }) {
+  budget.references -= 1;
+  if (depth > MAX_DERIVED_COLUMN_DEPTH || budget.references < 0) {
+    return false;
+  }
+  // Set when the previous step left a subquery's select list: the item's
+  // position and output column name.
+  let selectItem = null;
   for (let guard = 0; guard <= tokens.length; guard += 1) {
     if (continuesIntoPredicate(tokens, end, parens)) {
       return false;
     }
     let sameExpression = true;
     let next = null;
+    let nextSelectItem = null;
     for (let at = start - 1; at >= 0 && !next; at -= 1) {
       const token = tokens[at];
       if (isPunctToken(token, ')')) {
@@ -1522,8 +1637,13 @@ function expressionIsComputedValue(tokens, start, end, parens) {
         if (close === undefined) {
           return false;
         }
-        // A cast to a type without decimals drops the value.
-        if (isFunctionCallName(tokens, at - 1) && DIFFERENCE_CAST_FUNCTIONS.has(tokens[at - 1].upper) && !valueKeepingCastOperand(tokens, at, parens)) {
+        const functionName = isFunctionCallName(tokens, at - 1) ? tokens[at - 1].upper : null;
+        // IF(<condition>, ...) and NULLIF(x, <compared>) use the expression
+        // as a condition; a cast to a type without decimals drops the value.
+        if ((functionName === 'IF' && sameExpression) || (functionName === 'NULLIF' && !sameExpression)) {
+          return false;
+        }
+        if (DIFFERENCE_CAST_FUNCTIONS.has(functionName) && !valueKeepingCastOperand(tokens, at, parens)) {
           return false;
         }
         next = [groupOperandStart(tokens, at), close];
@@ -1560,10 +1680,40 @@ function expressionIsComputedValue(tokens, start, end, parens) {
           if (close === undefined) {
             return false;
           }
+          const item = selectItemAround(tokens, at, start, end, parens);
+          const itemName = item ? selectItemColumnName(tokens, item.from, item.to) : null;
+          nextSelectItem = item ? { position: item.position, name: itemName === '*' ? passedName : itemName, star: itemName === '*' } : null;
           next = [groupOperandStart(tokens, open), close];
-        } else if (word === 'FROM' || word === 'JOIN' || word === 'AS') {
-          // A derived table ("FROM (SELECT ...)") or a CTE body ("AS (...)").
-          return true;
+        } else if (word === 'FROM' || word === 'JOIN') {
+          // A derived table ("FROM (SELECT ...) t"): its column must be a
+          // value in the query around it.
+          if (!selectItem?.name || !isPunctToken(tokens[start], '(')) {
+            return false;
+          }
+          const open = enclosingOpenParen(tokens, at, parens);
+          const scope = open < 0 ? [0, tokens.length - 1] : [open + 1, (parens.closeOf.get(open) ?? tokens.length) - 1];
+          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, budget);
+        } else if (word === 'AS') {
+          // A CTE body ("name [(columns)] AS (SELECT ...)"), read by the rest
+          // of its statement; any other AS names an alias.
+          if (at !== start - 1 || !isPunctToken(tokens[start], '(')) {
+            continue;
+          }
+          if (!selectItem) {
+            return false;
+          }
+          let columnName = selectItem.name;
+          if (isPunctToken(tokens[at - 1], ')') && parens.openOf.get(at - 1) !== undefined) {
+            const columns = splitTopLevelArguments(tokens, parens.openOf.get(at - 1) + 1, at - 2, parens);
+            const column = selectItem.star ? null : columns[selectItem.position];
+            columnName = column && column[0] === column[1] ? identifierTokenName(tokens[column[0]]) : null;
+          }
+          if (!columnName) {
+            return false;
+          }
+          const open = enclosingOpenParen(tokens, start, parens);
+          const scopeEnd = open < 0 ? tokens.length - 1 : (parens.closeOf.get(open) ?? tokens.length) - 1;
+          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, budget);
         } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
           return false;
         } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {
@@ -1575,6 +1725,7 @@ function expressionIsComputedValue(tokens, start, end, parens) {
       return false;
     }
     [start, end] = next;
+    selectItem = nextSelectItem;
   }
   return false;
 }
@@ -1588,10 +1739,12 @@ function expressionIsComputedValue(tokens, start, end, parens) {
  * summed and rounded alike), and neither operand bound to a
  * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
  * difference must be a computed value (expressionIsComputedValue): in a
- * SELECT list, a derived table's included, not in a filter, join, grouping,
- * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count) nor
- * inside a cast that drops the decimals. A difference of aliases of the two
- * columns ("np - pa") does not count.
+ * SELECT list, directly or through a derived-table or CTE column the query
+ * reads as a value, not in a filter, join, grouping, ordering, CASE WHEN or
+ * IF() condition ("WHERE a - b > 0" does not count) nor inside a cast that
+ * drops the decimals. A difference of aliases of the two columns ("np - pa")
+ * does not count, and neither do the sum forms "a + (-b)" and "-b + a" (the
+ * rejection names the difference, so a retry writes it plainly).
  */
 function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
   const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();

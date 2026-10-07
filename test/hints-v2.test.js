@@ -561,6 +561,59 @@ test('v2 METRIC_COLUMN: an open-balance difference cast without its decimals com
   }
 });
 
+test('v2 METRIC_COLUMN: an open-balance difference used as an IF() condition, or a derived column only filtered on, computes no balance', () => {
+  // Third review: each of these returned SUM(NetPayableAmount) over the open
+  // documents and passed.
+  const open = 'Total open amount on documents with a due date in April 2026.';
+  const prompt = buildOptimizedPrompt(schema, open);
+  const allowed = prompt.tables.map((table) => table.tableName);
+  const rejects = (sql) => {
+    try {
+      validateReadOnlySql(sql, allowed, { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const april = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
+  const others = 'FROM SalesDocument x';
+  for (const sql of [
+    // The first argument of IF() is a condition; NULLIF() compares.
+    `SELECT ROUND(SUM(IF(d.NetPayableAmount - d.PaidAmount, d.NetPayableAmount, 0)), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(IF(GREATEST(d.NetPayableAmount - d.PaidAmount, 0), d.NetPayableAmount, 0)), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(NULLIF(d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount)), 2) AS open_amount ${april}`,
+    // A CTE or derived-table difference column used only to filter or join.
+    `WITH docs AS (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount AS open_amount ${april}) SELECT SUM(NetPayableAmount) AS open_amount FROM docs WHERE open_amount > 0`,
+    `SELECT SUM(t.NetPayableAmount) AS open_amount FROM (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount AS bal ${april}) t WHERE t.bal > 0`,
+    `SELECT SUM(t.NetPayableAmount) AS open_amount FROM (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) t`,
+    `WITH t (np, bal) AS (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) SELECT SUM(np) AS open_amount FROM t WHERE bal > 0`,
+    `SELECT SUM(d.NetPayableAmount) AS open_amount FROM SalesDocument d JOIN (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t ON t.SalesDocumentId = d.SalesDocumentId AND t.bal > 0 WHERE IFNULL(d.IsCanceled,0)=0`,
+    `SELECT SUM(d.NetPayableAmount) AS open_amount ${april} AND d.SalesDocumentId IN (SELECT t.SalesDocumentId FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t WHERE t.bal > 0)`,
+    `SELECT SUM(d.NetPayableAmount) AS open_amount ${april} AND EXISTS (SELECT 1 FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t WHERE t.SalesDocumentId = d.SalesDocumentId AND t.bal > 0)`,
+    `SELECT SUM(CAST(t.bal AS SIGNED)) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    // Not accepted: the sum forms (the rejection names the plain difference).
+    `SELECT SUM(d.NetPayableAmount + (-d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT SUM(-d.PaidAmount + d.NetPayableAmount) AS open_amount ${april}`,
+  ]) {
+    assert.equal(rejects(sql), 'METRIC_COLUMN', sql);
+  }
+  // The difference as a value: an IF() result, a NULLIF() operand, or a
+  // derived-table or CTE column the query sums, selects or passes on with `*`.
+  for (const sql of [
+    `SELECT ROUND(SUM(IF(d.IsCanceled = 1, 0, d.NetPayableAmount - d.PaidAmount)), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(NULLIF(d.NetPayableAmount - d.PaidAmount, 0)), 2) AS open_amount ${april}`,
+    `SELECT SUM(t.bal) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount bal ${april}) t WHERE t.bal > 0`,
+    `SELECT SUM(t.\`bal\`) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS \`bal\` ${april}) AS t`,
+    `WITH t (np, bal) AS (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) SELECT SUM(bal) AS open_amount FROM t WHERE bal > 0`,
+    `SELECT d.CustomerId, SUM(t.bal) AS open_amount FROM SalesDocument d JOIN (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t ON t.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled,0)=0 GROUP BY d.CustomerId`,
+    `SELECT * FROM (SELECT d.SalesDocumentId, d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    `SELECT SUM(u.bal) AS open_amount FROM (SELECT t.* FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t) u`,
+    `WITH a AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}), b AS (SELECT * FROM a) SELECT SUM(bal) AS open_amount FROM b`,
+  ]) {
+    assert.equal(rejects(sql), null, sql);
+  }
+});
+
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
   // Review finding: "gross" anywhere in the question made an explicit
   // "revenue" / "average order value" advisory, so "Show revenue and gross
