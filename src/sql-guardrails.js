@@ -1187,12 +1187,14 @@ function isIntegerLiteral(tokens, start, end) {
 }
 
 // Whether tokens[start..end] names a number type that keeps the decimals: a
-// floating-point type ("DOUBLE", "DOUBLE PRECISION", "FLOAT") or a decimal
-// type with a scale of at least one and an integer digit ("DECIMAL(12,2)").
-// A bare DECIMAL is DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED,
-// UNSIGNED or INTEGER drop the decimals. (A precision too small for the
-// amounts, which overflows, is not caught: the check does not know the
-// columns' types.)
+// floating-point type ("DOUBLE", "FLOAT") or a decimal type with a scale of
+// at least one and an integer digit ("DECIMAL(12,2)"). A bare DECIMAL is
+// DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED, UNSIGNED or INTEGER
+// drop the decimals. (A precision too small for the amounts, which
+// overflows, is not caught: the check does not know the columns' types.
+// "DOUBLE PRECISION", which MariaDB's CAST does not take, passes as it did
+// before this check, so the database reports its own syntax error rather
+// than a METRIC_COLUMN rejection naming a difference the SQL computes.)
 function isValueKeepingCastType(tokens, start, end, parens) {
   const typeName = tokens[start];
   if (typeName?.type !== 'word') {

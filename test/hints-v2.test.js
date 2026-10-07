@@ -688,11 +688,13 @@ function openAmountVerdict(sql) {
 }
 const aprilDueDocuments = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
 
-test('v2 METRIC_COLUMN: a difference in a later UNION branch is named by the first branch, and DOUBLE PRECISION keeps the decimals', () => {
+test('v2 METRIC_COLUMN: a difference in a later UNION branch is named by the first branch', () => {
   // Fourth review: following derived-table columns named the difference from
   // its own select item, but a later UNION branch's columns take the first
   // branch's names, so a correct balance there was rejected (it passed
-  // before); CAST(... AS DOUBLE PRECISION) was read as no float type.
+  // before). CAST(... AS DOUBLE PRECISION), which MariaDB's CAST does not
+  // take, passes as it did before, so the database reports the syntax error
+  // instead of a METRIC_COLUMN rejection naming the difference it computes.
   const april = aprilDueDocuments;
   for (const sql of [
     `SELECT SUM(bal) AS open_amount FROM (SELECT 0 AS bal UNION ALL SELECT d.NetPayableAmount - d.PaidAmount ${april}) t`,
