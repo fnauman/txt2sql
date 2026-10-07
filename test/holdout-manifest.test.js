@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -333,13 +334,19 @@ test('the definition fingerprint covers every field a dataset case carries, exce
   }
 });
 
-// The fingerprint scheme 2 note records a scheme change only. The holdout of
-// SCHEME_2_BASE (the commit it was written on) fingerprints to exactly the
-// state the note was written for, and while that note is the manifest's
-// current state every holdout case definition, and the controls that apply
-// to it, is byte-identical to that commit's. Needs the git history (CI
-// clones shallowly; skipped there).
+// The fingerprint scheme 2 note records a scheme change only: while that
+// note is the manifest's current state, every holdout case definition, and
+// the controls that apply to it, is byte-identical to SCHEME_2_BASE's (the
+// commit the note was written on). The sha256 of both at that commit is
+// pinned below, so the check needs no git history (CI clones shallowly);
+// where the history is available, a second test recomputes the pins and the
+// note's fingerprint from that commit.
 const SCHEME_2_BASE = 'e8403d0';
+const SCHEME_2_BASE_HOLDOUT = Object.freeze({
+  cases: 149,
+  definitionsSha256: '2f7569048926eeea51945bf699f3b4632f36c9c7c8a24aa6ae1cf535587c92fe',
+  controlsSha256: 'b4f073b3061785e7f8adfe39351857fa4c4dbe616939db8d1f64e7a97c0970dd',
+});
 
 // Every holdout case object of a datasets directory as written, notes
 // included, and the oracle controls that apply to each (from its controls/).
@@ -359,14 +366,35 @@ async function holdoutControls(datasetsDir) {
   }
   return [...new Set(controls)].sort();
 }
+const sha256Of = (lines) => crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
 
-test('the fingerprint scheme 2 note changed no holdout case: the definitions and their controls are byte-identical to e8403d0', async (t) => {
+// The scheme 2 note, or null (the test skips) once a later note records a
+// later holdout state; that change has its own note.
+async function currentScheme2Note(t) {
   const manifest = await readHoldoutManifest();
   assert.equal(manifest.manifestVersion, MANIFEST_VERSION);
   const note = manifest.history.find((entry) => entry.note.includes('fingerprint scheme extended; no case definition changed'));
   assert.ok(note, 'the manifest records the scheme change with its note');
   if (manifest.fingerprint !== note.fingerprint) {
     t.skip('a later note records a later holdout state');
+    return null;
+  }
+  return note;
+}
+
+test('the fingerprint scheme 2 note changed no holdout case: the definitions and their controls are byte-identical to e8403d0', async (t) => {
+  if (!(await currentScheme2Note(t))) {
+    return;
+  }
+  const definitions = await holdoutDefinitions(DEFAULT_DATASETS_DIR);
+  assert.equal(definitions.length, SCHEME_2_BASE_HOLDOUT.cases);
+  assert.equal(sha256Of(definitions), SCHEME_2_BASE_HOLDOUT.definitionsSha256, `a holdout case definition differs from ${SCHEME_2_BASE}'s`);
+  assert.equal(sha256Of(await holdoutControls(DEFAULT_DATASETS_DIR)), SCHEME_2_BASE_HOLDOUT.controlsSha256, `a holdout case's controls differ from ${SCHEME_2_BASE}'s`);
+});
+
+test('the e8403d0 pins and the scheme 2 note fingerprint are that commit\'s holdout (with the git history)', async (t) => {
+  const note = await currentScheme2Note(t);
+  if (!note) {
     return;
   }
   const git = (...args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -376,7 +404,7 @@ test('the fingerprint scheme 2 note changed no holdout case: the definitions and
     files = git('ls-tree', '--name-only', `${SCHEME_2_BASE}:datasets`).split('\n').filter(isDatasetFileName);
     controlsFiles = git('ls-tree', '--name-only', `${SCHEME_2_BASE}:datasets/controls`).split('\n').filter((name) => name.endsWith('.json'));
   } catch {
-    t.skip(`the git history of ${SCHEME_2_BASE} is not available`);
+    t.skip(`the git history of ${SCHEME_2_BASE} is not available (the pinned hashes are checked without it)`);
     return;
   }
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'holdout-scheme-'));
@@ -388,14 +416,12 @@ test('the fingerprint scheme 2 note changed no holdout case: the definitions and
     for (const file of controlsFiles) {
       await fs.writeFile(path.join(dir, 'controls', file), git('show', `${SCHEME_2_BASE}:datasets/controls/${file}`));
     }
+    const definitions = await holdoutDefinitions(dir);
+    assert.equal(definitions.length, SCHEME_2_BASE_HOLDOUT.cases);
+    assert.equal(sha256Of(definitions), SCHEME_2_BASE_HOLDOUT.definitionsSha256);
+    assert.equal(sha256Of(await holdoutControls(dir)), SCHEME_2_BASE_HOLDOUT.controlsSha256);
     const before = computeHoldoutEntries(await loadSuiteDatasets({ datasetsDir: dir }), { controls: await loadFreezeControls(path.join(dir, 'controls')) });
     assert.equal(holdoutEntriesFingerprint(before), note.fingerprint);
-    // Byte for byte: every holdout case object, notes included, of every
-    // dataset, and every control that applies to a holdout case.
-    const today = await holdoutDefinitions(DEFAULT_DATASETS_DIR);
-    assert.equal(today.length, manifest.entries.length);
-    assert.deepEqual(today, await holdoutDefinitions(dir));
-    assert.deepEqual(await holdoutControls(DEFAULT_DATASETS_DIR), await holdoutControls(dir));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
