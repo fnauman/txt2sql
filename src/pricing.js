@@ -33,7 +33,9 @@
 // 'provider', also kept as providerCost) whether or not the model has a price
 // here: run totals and the --budget-usd pool (src/eval/pool.js) count it. For
 // a priced model the local estimate stays beside it: inputCost / outputCost
-// are the estimate's split and estimatedCost its sum.
+// are the estimate's split and estimatedCost its sum. A merged total
+// (mergeCosts) keeps source 'provider' when every cost in it was reported,
+// and has source 'mixed' when only some were.
 const BASE_MODEL_PRICING = Object.freeze({
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
@@ -398,6 +400,8 @@ export function mergeCosts(costs = []) {
   let hasReplacedEstimate = false;
   let estimateKnown = true;
   let estimatedCost = 0;
+  // How many costs were the provider's, estimates, or already mixed.
+  const sources = { provider: 0, estimate: 0, mixed: 0 };
 
   for (const cost of costs) {
     if (!cost) {
@@ -446,6 +450,7 @@ export function mergeCosts(costs = []) {
     if ((cost.source !== undefined && cost.source !== null) || typeof cost.estimatedCost === 'number') {
       hasReplacedEstimate = true;
     }
+    sources[cost.source === 'provider' || cost.source === 'mixed' ? cost.source : 'estimate'] += 1;
   }
 
   if (!hasCost) {
@@ -453,6 +458,13 @@ export function mergeCosts(costs = []) {
   }
 
   totals.currency = totals.currency ?? 'USD';
+  // The source of the total: 'provider' when every cost was reported by the
+  // provider, 'mixed' when only some were, none (an estimate) otherwise.
+  if (sources.provider > 0 && sources.estimate === 0 && sources.mixed === 0) {
+    totals.source = 'provider';
+  } else if (sources.mixed > 0 || (sources.provider > 0 && sources.estimate > 0)) {
+    totals.source = 'mixed';
+  }
   if (hasTokenBreakdown) {
     totals.promptTokens = promptTokens;
     totals.cachedPromptTokens = cachedPromptTokens;
@@ -486,7 +498,12 @@ export function formatUsageAndCost({ usage = null, cost = null, model = null } =
       : '';
   const reasoningText = reasoningTokens !== null && reasoningTokens > 0 ? ` incl. ${formatTokenCount(reasoningTokens)} reasoning` : '';
   const estimateText = Number.isFinite(cost?.estimatedCost) ? ` (local estimate $${cost.estimatedCost.toFixed(6)})` : '';
-  const sourceText = cost?.source === 'provider' ? `, cost reported by the provider${estimateText}` : '';
+  const sourceText =
+    cost?.source === 'provider'
+      ? `, cost reported by the provider${estimateText}`
+      : cost?.source === 'mixed'
+        ? `, cost partly reported by the provider${estimateText}`
+        : '';
 
   if (cost) {
     return `$${cost.totalCost.toFixed(6)} (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens${reasoningText}, ${resolvedModel}${sourceText})`;

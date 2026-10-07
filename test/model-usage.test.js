@@ -71,6 +71,35 @@ test('mergeUsage and mergeCosts sum the reasoning tokens and the provider cost a
   assert.equal(costs.estimatedCost, 0.0097176);
 });
 
+test('merged costs keep the source: provider when every cost is provider-reported, mixed when only some are', () => {
+  // A model with no price here: every call's cost is the provider's.
+  const unpriced = calculateCost('acme/sql-1', reasoningUsage({ cost: 0.01 }));
+  const question = mergeCosts([unpriced, unpriced]);
+  assert.deepEqual([question.source, question.totalCost, question.providerCost], ['provider', 0.02, 0.02]);
+  assert.equal('estimatedCost' in question, false, 'no price here: no estimate to sum');
+  const run = mergeCosts([question, question]);
+  assert.deepEqual([run.source, run.totalCost], ['provider', 0.04]);
+  assert.match(
+    formatUsageAndCost({ usage: mergeUsage([reasoningUsage({ cost: 0.01 }), reasoningUsage({ cost: 0.01 })]), cost: question, model: 'acme/sql-1' }),
+    /^\$0\.020000 \(4000 input.*, acme\/sql-1, cost reported by the provider\)$/
+  );
+
+  // Some calls reported, some estimated: the total says it is mixed.
+  const reported = calculateCost('gpt-5.4-mini', reasoningUsage({ cost: 0.0042 }));
+  const estimated = calculateCost('gpt-5.4-mini', reasoningUsage());
+  const mixed = mergeCosts([reported, estimated]);
+  assert.deepEqual([mixed.source, mixed.totalCost, mixed.estimatedCost], ['mixed', 0.0090588, 0.0097176]);
+  assert.match(
+    formatUsageAndCost({ usage: mergeUsage([reasoningUsage({ cost: 0.0042 }), reasoningUsage()]), cost: mixed, model: 'gpt-5.4-mini' }),
+    /, gpt-5\.4-mini, cost partly reported by the provider \(local estimate \$0\.009718\)\)$/
+  );
+  assert.equal(mergeCosts([mixed, question]).source, 'mixed');
+  assert.equal(mergeCosts([question, estimated]).source, 'mixed');
+  assert.equal(mergeCosts([reported, null, reported]).source, 'provider');
+  // Estimates only: no source, the shape the committed baseline was recorded with.
+  assert.equal('source' in mergeCosts([estimated, estimated]), false);
+});
+
 test('the CLI cost line names the reasoning tokens and a provider-reported cost', () => {
   const usage = reasoningUsage();
   assert.equal(
@@ -191,6 +220,23 @@ test('the product loop keeps each call\'s reasoning tokens and sums them over re
     trace.events.filter((event) => event.event === 'llm.completed').map((event) => event.response.usage.completion_tokens_details.reasoning_tokens),
     [640, 300]
   );
+});
+
+test('a question and a run of a model priced only by the provider keep the provider label', async () => {
+  const usage = reasoningUsage({ cost: 0.01 });
+  const result = await runOptimizedQuestion({
+    client: reasoningClient([usage, usage]),
+    connection: { query: async () => [[{ CustomerName: 'Acme' }]] },
+    schema,
+    model: 'acme/sql-1',
+    question: 'List customer names',
+    maxRetries: 1,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, result.error?.message);
+  assert.deepEqual(result.llmCalls.map((entry) => entry.cost.source), ['provider', 'provider']);
+  assert.deepEqual([result.llmCost.source, result.llmCost.totalCost], ['provider', 0.02]);
+  assert.match(formatUsageAndCost({ usage: result.llmUsage, cost: mergeCosts([result.llmCost]), model: 'acme/sql-1' }), /, acme\/sql-1, cost reported by the provider\)$/);
 });
 
 const compactRepetition = (repetition) => compactReport({ results: [{ id: 'case_1', repetitions: [repetition] }] }).results[0].repetitions[0];
