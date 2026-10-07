@@ -64,6 +64,7 @@ import {
   completionSettingsOf,
   DEFAULT_MODEL,
   describeModelConfig,
+  describeModelNotices,
   describeReasoningEffort,
   modelFileLabel,
   modelLabel,
@@ -1569,8 +1570,8 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): ${rescoreMode ? 'configured ' : ''}${describeModelConfig(modelConfig)}; ` +
       `fixtures ${fixtures.map((fixture) => fixture.name).join(', ')}`
   );
-  for (const notice of modelConfig.notices) {
-    cli.log(`  note: ${notice}`);
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
   }
   // Configuration problems fail before anything is started, seeded or spent.
   await checkGateBaseline(options, cli);

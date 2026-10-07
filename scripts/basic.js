@@ -17,7 +17,7 @@ import {
   resolveStatementTimeoutMs,
   validateReadOnlySql,
 } from '../src/pipeline.js';
-import { DEFAULT_MODEL, describeModelConfig, resolveModelConfig } from '../src/model-config.js';
+import { DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
@@ -138,6 +138,9 @@ async function main() {
   const allowedTables = schema.tables.map((table) => table.tableName);
 
   cli.log(`Model: ${describeModelConfig(modelConfig)}`);
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
+  }
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`In-scope tables: ${allowedTables.join(', ')}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);

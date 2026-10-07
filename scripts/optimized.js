@@ -16,7 +16,7 @@ import {
 } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
-import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, resolveModelConfig } from '../src/model-config.js';
+import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
@@ -146,6 +146,9 @@ async function main() {
   await reportQueryUserPrivileges(connection);
 
   cli.log(`Model: ${describeModelConfig(modelConfig)}`);
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
+  }
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);
   cli.log(`Schema scope: ${describeSchemaScope(effectiveSchemaScope)}`);

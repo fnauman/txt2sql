@@ -589,8 +589,9 @@ host is openrouter.ai. `OPENAI_API_KEY` wins whenever it is set, on OpenRouter
 too: remove it from the env file (or set it to your OpenRouter key, or clear
 it for one run with an empty `OPENAI_API_KEY=` on the command line) when
 `OPENAI_BASE_URL` points at OpenRouter, or your OpenAI key is sent to
-openrouter.ai and the calls fail authentication. The eval header and the web
-startup log print a note when both keys are set for OpenRouter.
+openrouter.ai and the calls fail authentication. The eval header, the web
+startup log and the `basic` / `optimized` CLIs (under their `Model:` line)
+print a note when both keys are set for OpenRouter.
 
 The capability map and the price list strip the vendor prefix, so
 `openai/gpt-6-luna` gets the `gpt-6-luna` request options and price. On

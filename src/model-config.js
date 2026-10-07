@@ -426,6 +426,16 @@ export function describeModelConfig(config) {
   );
 }
 
+/**
+ * The notices of a model config as the run headers print them, one line each
+ * under the model line ("  note: --model gpt-6-luna overrides MODEL_NAME=...");
+ * none when there are none. The eval header and the basic and optimized CLIs
+ * print these; the web server logs the same notices at startup.
+ */
+export function describeModelNotices(config) {
+  return (config?.notices || []).map((notice) => `  note: ${notice}`);
+}
+
 /** "gpt-6-luna" or, with an effort, "gpt-6-luna (reasoning effort low)": a short label for reports. */
 export function modelLabel(model, reasoningEffort = null) {
   return reasoningEffort ? `${model} (reasoning effort ${reasoningEffort})` : String(model);
