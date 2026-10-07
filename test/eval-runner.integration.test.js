@@ -411,7 +411,17 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   assert.deepEqual(report.stats.bySplit.map((entry) => entry.cases), [answer.length - holdoutAnswers.length, holdoutAnswers.length]);
 
   const markdown = await fs.readFile(reportPath.replace(/report\.json$/, 'report.md'), 'utf8');
-  assert.match(markdown, new RegExp(`Behaviour cases: abstain/clarify — ${behavior.length} cases, 1 handled correctly\\.`));
+  // With the holdout hidden, report.md counts dev behaviour cases only and
+  // names the holdout ones without their outcomes (report.json keeps all).
+  const holdoutBehavior = behavior.filter((testCase) => testCase.split === 'holdout');
+  assert.equal(holdoutBehavior.length, 2);
+  assert.match(
+    markdown,
+    new RegExp(
+      `Behaviour cases: abstain/clarify — ${behavior.length - holdoutBehavior.length} cases, 1 handled correctly\\. ` +
+        `Not counted here: ${holdoutBehavior.length} holdout abstain/clarify case\\(s\\), outcomes not shown\\.`
+    )
+  );
   assert.match(markdown, new RegExp(`By split: dev [\\d.]+% \\(${answer.length - holdoutAnswers.length} cases\\) · holdout [\\d.]+% \\(${holdoutAnswers.length} cases\\)\\.`));
   // The holdout in aggregate only: report.md and the console name no holdout
   // case (and so no holdout verdict); report.json keeps every one.
