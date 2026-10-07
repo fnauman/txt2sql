@@ -190,7 +190,9 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   holdout accuracy by split, never per case and never as flipped cases or
   flip counts (a comparison with a baseline covers the paired dev cases),
   unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
-  documented look, for example when retiring a holdout). `report.json` keeps
+  documented look, for example when retiring a holdout) or, for the paired
+  holdout cases' counts and test in one aggregate line,
+  `--holdout-summary` (below). `report.json` keeps
   every case for the rescore, the comparison and the gate, and `trace.jsonl`
   (printed on stdout with `--trace`) logs every case's events and the run's
   all-case statistics; opening either, or running with `--trace`, is
@@ -218,6 +220,41 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   repetitions) count every repetition. Both are kept on purpose: the
   benchmark gate fails on any failed case, and an exit 2 run is not a
   measurement and cannot become a baseline.
+- **Concluding a pre-registered experiment: `--holdout-summary`.** The
+  holdout's paired test is the out-of-sample evidence an experiment
+  concludes with (Experiment 2: 17 improvements and 6 regressions over 147
+  paired holdout cases, exact McNemar p = 0.035). With a comparison that
+  pairs at least one holdout case, `npm run eval -- --holdout-summary` adds
+  **one line** to report.md's comparison section and to the console's
+  comparison: the number of paired holdout cases, their improvements and
+  regressions, the exact McNemar p with the usual verdict wording, and
+  strict accuracy on those cases, baseline → candidate, with the change and
+  its paired bootstrap 95% CI ("Holdout in aggregate (`--holdout-summary`):
+  147 paired holdout case(s); 17 improvement(s), 6 regression(s); exact
+  McNemar p = 0.035 → significantly better than the baseline; strict
+  accuracy … → …, Δ … (95% CI …)"). The figures come from `summarizePairs`
+  over the comparison's paired holdout cases with the comparison's alpha and
+  bootstrap settings, so the counts, accuracies, change and p are those of
+  the holdout cases in the full comparison `--reveal-holdout` lists; the
+  bootstrap draws the holdout pairs in a canonical order of their outcomes
+  instead of by id, so the interval (like every other figure on the line)
+  depends only on the paired outcomes, never on which cases they are.
+  Nothing else about the holdout is shown: no ids, no per-case verdicts, no
+  attribution, behaviour, guardrail or cost figures, no pass-rate changes.
+  Without a comparison, or when no holdout case is paired, it prints nothing
+  extra; without the flag nothing changes, and `--gate` and its reasons are
+  the same either way. Use it **only to conclude a pre-registered
+  experiment** (hypothesis, arms and decision rule written down before the
+  run, see [docs/experiments/README.md](experiments/README.md)), never while
+  designing or tuning a change: a holdout figure read between iterations
+  becomes a target. Error analysis stays dev-only. Pass it on the concluding
+  run, or afterwards, with zero LLM calls, on a rescore of that run against
+  the same baseline (`npm run eval -- --rescore <its report.json> --compare
+  <baseline report.json> --holdout-summary`: today's code re-judges the
+  recorded SQL, the same verdicts when nothing changed since). With
+  `--reveal-holdout` (which lists every case and gives the all-case
+  comparison) the same line is printed too: it is the holdout subset's own
+  test, which the all-case comparison does not give.
 - **Any change to the holdout** (a case added, removed, reworded, re-scored,
   re-labelled, for example a `known_validator_rejection` flag, or moved to
   dev) requires a manifest update with a note saying what and
@@ -1177,6 +1214,7 @@ npm run eval                                        # the whole suite, once
 npm run eval -- --repeat 3                          # three repetitions per case
 npm run eval -- --split holdout                     # only the holdout (or --split dev)
 npm run eval -- --offline --reveal-holdout          # list holdout cases one by one (a deliberate look)
+npm run eval -- --repeat 3 --holdout-summary        # conclude a pre-registered experiment: + the paired holdout test, one line
 npm run eval -- --dataset hard-cases-public         # one dataset
 npm run eval -- --dataset edge-cases-public --tag join_path
 npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
@@ -1339,7 +1377,10 @@ rule).
   accuracy and the legacy pooled rate, and the holdout's split row shows no
   majority passes ("not shown");
   holdout behaviour cases are counted, without their outcomes (they are not
-  in the split accuracy). `--reveal-holdout` lists them. See
+  in the split accuracy). `--reveal-holdout` lists them;
+  `--holdout-summary` adds one aggregate line for the comparison's paired
+  holdout cases (counts, McNemar p, accuracy change with its CI) to conclude
+  a pre-registered experiment. See
   [Splits and the holdout policy](#splits-and-the-holdout-policy).
 - **Cases**: id, question, passes / counted repetitions (declined / counted
   for behaviour cases), the case outcome and its attribution. The case
@@ -1454,7 +1495,11 @@ flips with their questions. While the holdout is hidden, both recompute all
 of it over the paired dev cases and leave the holdout cases out of every
 list, saying only how many there are ("Dev cases only: the comparison's N
 holdout case(s) are left out ..."); `--gate` still decides on every paired
-case, holdout included.
+case, holdout included. `--holdout-summary` adds one line for the paired
+holdout cases in aggregate (their number, improvements, regressions, exact
+McNemar p and verdict, accuracy change with its CI; see the
+[holdout policy](#splits-and-the-holdout-policy)), only to conclude a
+pre-registered experiment.
 
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`, when
