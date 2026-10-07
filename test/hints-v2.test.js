@@ -112,6 +112,26 @@ test('v2 temporal: a shared-year month list joined by any list connector resolve
     'Compare January vs February 2026 net sales.',
     'Compare January vs. February 2026 net sales.',
     'Compare January versus February 2026 net sales.',
+    // Fourth review: a slash, plus or bar between the months, and the
+    // longer connectors, still resolved the last month alone.
+    'Net sales for Jan/Feb 2026.',
+    'Net sales for Jan/Feb/Mar 2026.',
+    'Net sales for January / February / March 2026.',
+    'Net sales for January, February / March 2026.',
+    'Net sales for Jan + Feb 2026.',
+    'Net sales for January | February | March 2026.',
+    'Net sales for January, February or/and March 2026.',
+    'Net sales for January, February, along with March 2026.',
+    'Net sales for January, February, together with March 2026.',
+    'Net sales for January, February, alongside March 2026.',
+    'Net sales for January, February, then March 2026.',
+    'Net sales for January, February, and finally March 2026.',
+    'Net sales for January, February, and lastly March 2026.',
+    'Net sales for January, February, but also March 2026.',
+    'Net sales for January, February, and in March 2026.',
+    'Net sales in January, in February and in March 2026.',
+    'Compare January compared with February 2026 net sales.',
+    'Net sales for January, February, as against March 2026.',
   ]) {
     assert.deepEqual(texts(question, 2), [], question);
     assert.ok(texts(question, 1).length > 0, `version 1 resolved a whole month: ${question}`);
@@ -122,6 +142,10 @@ test('v2 temporal: a shared-year month list joined by any list connector resolve
     ['Compare net sales in March 2025 plus March 2026.', ['March 2025', 'March 2026']],
     ['Compare net sales in March 2025 vs March 2026.', ['March 2025', 'March 2026']],
     ['Compare net sales in March 2025; and March 2026.', ['March 2025', 'March 2026']],
+    ['Compare net sales in March 2025/March 2026.', ['March 2025', 'March 2026']],
+    ['Compare net sales in March 2025 + March 2026.', ['March 2025', 'March 2026']],
+    ['Compare net sales in March 2025, and in March 2026.', ['March 2025', 'March 2026']],
+    ['Revenue / units in March 2026.', ['March 2026']],
     ['Revenue plus units in March 2026.', ['March 2026']],
     ['Revenue, gross, as well as units in March 2026.', ['March 2026']],
   ]) {
