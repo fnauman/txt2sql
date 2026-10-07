@@ -2094,20 +2094,27 @@ function isLinkedWithin(adjacency, within, from, to) {
 }
 
 // Retrieved scope, widen-on-demand: the retrieved tables plus `extraTables`
-// (in-scope table names) and their connector tables. First, as before, the
-// shortest foreign-key path from each added table to each retrieved one
-// within three hops (the retrieval join-path bound). Then every retrieved
-// table the foreign-key graph links to the added table but the widened set
-// does not yet link to it gets the shortest path at any length (a simple path
-// has fewer hops than the in-scope schema has tables), nearest first (ties in
-// retrieval order), skipping tables an earlier path already linked. Large
-// schemas (where auto falls back to retrieved) are the ones whose retrieved
-// set can be split into parts more than three hops apart; without the long
-// paths the retry could not join the added table to the part its SQL needs
-// without being rejected again. Where the three-hop paths already link
-// everything the prompt is unchanged. Each long path is one shortest path
-// (findShortestJoinPath breaks ties by table name), not the union of tied
-// ones, which on hub-heavy schemas could pull in much of the schema.
+// (in-scope table names) and their connector tables. Each added table is
+// widened on its own: first, as before, the shortest foreign-key path from it
+// to each retrieved table within three hops (the retrieval join-path bound);
+// then every retrieved table the foreign-key graph links to it but its
+// widening does not yet link to it gets the shortest path at any length (a
+// simple path has fewer hops than the in-scope schema has tables), nearest
+// first (ties in retrieval order), skipping tables an earlier path already
+// linked. Large schemas (where auto falls back to retrieved) are the ones
+// whose retrieved set can be split into parts more than three hops apart;
+// without the long paths the retry could not join the added table to the
+// part its SQL needs without being rejected again. Where the three-hop paths
+// already link everything the prompt is unchanged. Each long path is one
+// shortest path (findShortestJoinPath breaks ties by table name), not the
+// union of tied ones, which on hub-heavy schemas could pull in much of the
+// schema.
+// The widened set is the union of the added tables' own widenings, so it
+// depends on the set of added tables only, not on their order (the live loop
+// passes them in rejection order, verify.js and rescore sorted), and a later
+// widening with more tables keeps every table an earlier one allowed (a retry
+// never loses a connector its previous attempt could use). They are processed
+// in name order, so the connector list is stable too.
 // Unknown or already retrieved names are ignored. Null when nothing is added.
 function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
@@ -2122,16 +2129,14 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const { adjacency } = buildForeignKeyGraph(schema.tables);
   const expanded = new Set([...current, ...added]);
   const connectors = new Set();
-  const addPath = (path) => {
-    for (const pathName of path) {
-      if (!expanded.has(pathName)) {
-        connectors.add(pathName);
-      }
-      expanded.add(pathName);
-    }
-  };
   const anyLength = schema.tables.length;
-  for (const addedName of added) {
+  for (const addedName of [...added].sort()) {
+    const own = new Set([...current, addedName]);
+    const addPath = (path) => {
+      for (const pathName of path) {
+        own.add(pathName);
+      }
+    };
     for (const currentName of current) {
       const path = findShortestJoinPath(adjacency, addedName, currentName);
       if (path) {
@@ -2139,13 +2144,19 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
       }
     }
     const longPaths = [...current]
-      .filter((currentName) => !isLinkedWithin(adjacency, expanded, addedName, currentName))
+      .filter((currentName) => !isLinkedWithin(adjacency, own, addedName, currentName))
       .map((currentName) => findShortestJoinPath(adjacency, addedName, currentName, anyLength))
       .filter(Boolean)
       .sort((left, right) => left.length - right.length);
     for (const path of longPaths) {
-      if (!isLinkedWithin(adjacency, expanded, addedName, path[path.length - 1])) {
+      if (!isLinkedWithin(adjacency, own, addedName, path[path.length - 1])) {
         addPath(path);
+      }
+    }
+    for (const name of own) {
+      if (!expanded.has(name)) {
+        connectors.add(name);
+        expanded.add(name);
       }
     }
   }
@@ -2203,7 +2214,9 @@ function resolvePromptHintsVersion(hintsVersion, semanticPlan) {
  *   all; 'retrieved' shows and allows the retrieved tables (the prompt every
  *   question had before schema scopes existed, byte for byte);
  * - extraTables: retrieved scope only, in-scope tables to add (widen-on-demand
- *   after a TABLE_SCOPE rejection; see tablesToWidenFor);
+ *   after a TABLE_SCOPE rejection; see tablesToWidenFor). The widened
+ *   allow-list depends on the set of tables, not their order, and grows with
+ *   it (widenRetrievedTables);
  * - hintsVersion: 1 or 2 (src/hints-version.js; default: the plan's, else 2).
  *   Version 1 is the prompt every question had before HINTS_VERSION existed,
  *   byte for byte.

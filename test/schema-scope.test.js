@@ -15,6 +15,8 @@ import {
   validateReadOnlySql,
   validateSqlSafety,
 } from '../src/pipeline.js';
+import { createValidatorProbe } from '../src/eval/verify.js';
+import { createPrng } from '../src/eval/prng.js';
 import { createBufferedTraceLogger, runOptimizedQuestion } from '../src/query-service.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 import {
@@ -580,4 +582,215 @@ test('widen-on-demand recovers a table near one retrieved table and far from ano
   assert.equal(result.attemptCount, 2);
   assert.deepEqual(result.schemaScope.widenedTables, ['Zone']);
   assert.deepEqual(result.promptTables, ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone', 'Territory', 'Region']);
+});
+
+// --- widening is a function of the set of added tables -----------------------
+
+// A ring of foreign keys: Shipment -> Depot -> Hub -> Corridor -> Zone ->
+// Territory -> Lane -> Dock -> Shipment, plus an off-ring Carrier. Zone is
+// four hops from Shipment (one long path, through Depot), Territory three
+// (through Lane and Dock).
+const RING_SCHEMA = {
+  tables: [
+    chainTable('Shipment', [chainColumn('ShipmentWeight')], [['DepotId', 'Depot'], ['DockId', 'Dock'], ['CarrierId', 'Carrier']]),
+    chainTable('Carrier'),
+    chainTable('Depot', [], [['HubId', 'Hub']]),
+    chainTable('Hub', [], [['CorridorId', 'Corridor']]),
+    chainTable('Corridor', [], [['ZoneId', 'Zone']]),
+    chainTable('Zone', [], [['TerritoryId', 'Territory']]),
+    chainTable('Territory', [chainColumn('TerritoryLabel', { type: 'STRING(50)' })], [['LaneId', 'Lane']]),
+    chainTable('Lane', [], [['DockId', 'Dock']]),
+    chainTable('Dock'),
+  ],
+};
+const RING_TABLES = RING_SCHEMA.tables.map((table) => table.tableName);
+const RING_PATH_SQL =
+  'SELECT t.TerritoryLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Depot d ON s.DepotId = d.DepotId JOIN Hub h ON d.HubId = h.HubId JOIN Corridor c ON h.CorridorId = c.CorridorId JOIN Zone z ON c.ZoneId = z.ZoneId JOIN Territory t ON z.TerritoryId = t.TerritoryId GROUP BY t.TerritoryLabel';
+
+function ringAllowList(extraTables) {
+  return buildOptimizedPrompt(RING_SCHEMA, CHAIN_QUESTION, { semanticPlan: buildSemanticPlan(CHAIN_QUESTION), schemaScope: CHAIN_AUTO_RETRIEVED, extraTables }).tables.map(
+    (table) => table.tableName
+  );
+}
+
+test('widening depends on the set of added tables, not their order, and never shrinks when the set grows', () => {
+  // Review finding: the long-path pass skipped tables an earlier added
+  // table's paths had linked, so ["Zone", "Territory"] widened to the whole
+  // ring and ["Territory", "Zone"] (the order verify.js and rescore sort to)
+  // left out Depot, Hub and Corridor.
+  assert.deepEqual(ringAllowList([]), ['Shipment']);
+  const zone = ringAllowList(['Zone']);
+  const territory = ringAllowList(['Territory']);
+  assert.deepEqual(zone, ['Shipment', 'Depot', 'Hub', 'Corridor', 'Zone']);
+  assert.deepEqual(territory, ['Shipment', 'Territory', 'Lane', 'Dock']);
+  const ring = RING_TABLES.filter((name) => name !== 'Carrier');
+  assert.deepEqual(ringAllowList(['Zone', 'Territory']), ring);
+  assert.deepEqual(ringAllowList(['Territory', 'Zone']), ring);
+  for (const smaller of [zone, territory]) {
+    assert.deepEqual(smaller.filter((name) => !ring.includes(name)), [], 'a larger widening keeps every table a smaller one allowed');
+  }
+  // The connector list does not depend on the order either.
+  const connectors = (extraTables) =>
+    buildOptimizedPrompt(RING_SCHEMA, CHAIN_QUESTION, { semanticPlan: buildSemanticPlan(CHAIN_QUESTION), schemaScope: CHAIN_AUTO_RETRIEVED, extraTables }).context.schemaScope
+      .widenConnectorTables;
+  assert.deepEqual(connectors(['Zone', 'Territory']), connectors(['Territory', 'Zone']));
+});
+
+test('the offline verifier widens exactly as the live loop did, whatever order the loop added the tables in', async () => {
+  // The first attempt joins Zone straight to Shipment: Zone is rejected, and
+  // Zone and Territory are widened in that order. The retry joins along the
+  // Depot path, which the verifier (which sorts the tables) must accept too.
+  const guess = 'SELECT t.TerritoryLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Zone z ON s.ShipmentId = z.ZoneId JOIN Territory t ON z.TerritoryId = t.TerritoryId GROUP BY t.TerritoryLabel';
+  const result = await runOptimizedQuestion({
+    client: scriptedClient([guess, RING_PATH_SQL], RING_TABLES),
+    connection: fakeConnection(),
+    schema: RING_SCHEMA,
+    question: CHAIN_QUESTION,
+    trace: createBufferedTraceLogger(),
+    maxRetries: 1,
+    schemaScope: CHAIN_AUTO_RETRIEVED,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, `${result.errorCode}: ${result.error?.message}`);
+  assert.deepEqual(result.schemaScope.widenedTables, ['Zone', 'Territory']);
+  const validate = createValidatorProbe({ schema: RING_SCHEMA, schemaScope: CHAIN_AUTO_RETRIEVED });
+  const offline = await validate.promptFor(CHAIN_QUESTION, { extraTables: result.schemaScope.widenedTables });
+  assert.deepEqual(offline.allowedTables, result.promptTables);
+  assert.equal(await validate(CHAIN_QUESTION, RING_PATH_SQL, { extraTables: result.schemaScope.widenedTables }), null);
+});
+
+// Shipment and Region are retrieved, four hops apart. Zone reaches each by one
+// four-hop path: Shipment through Pier, Node and Quay, Region through Canal,
+// Channel and Cove. Yard sits next to Node and Region, so once Yard is in the
+// widened set Zone also reaches Region through Pier, Node and Yard.
+const HARBOUR_SCHEMA = {
+  tables: [
+    chainTable('Shipment', [chainColumn('ShipmentWeight')], [['QuayId', 'Quay']]),
+    chainTable('Quay', [], [['NodeId', 'Node']]),
+    chainTable('Node'),
+    chainTable('Pier', [], [['NodeId', 'Node']]),
+    chainTable('Zone', [], [['PierId', 'Pier'], ['CanalId', 'Canal']]),
+    chainTable('Canal', [], [['ChannelId', 'Channel']]),
+    chainTable('Channel', [], [['CoveId', 'Cove']]),
+    chainTable('Cove'),
+    chainTable('Region', [chainColumn('RegionLabel', { type: 'STRING(50)' })], [['CoveId', 'Cove'], ['YardId', 'Yard']]),
+    chainTable('Yard', [chainColumn('YardCode', { type: 'STRING(20)' })], [['NodeId', 'Node']]),
+  ],
+};
+const HARBOUR_TABLES = HARBOUR_SCHEMA.tables.map((table) => table.tableName);
+
+test('a second widening keeps the connector tables the previous retry was allowed', async () => {
+  // Review finding: widening Zone allowed its path to Region through Canal,
+  // Channel and Cove; widening Zone and Yard then skipped that path (Zone was
+  // already linked to Region through Yard), so a retry reusing it was
+  // rejected again.
+  const prompt = (extraTables) =>
+    buildOptimizedPrompt(HARBOUR_SCHEMA, REGION_QUESTION, { semanticPlan: buildSemanticPlan(REGION_QUESTION), schemaScope: CHAIN_AUTO_RETRIEVED, extraTables });
+  assert.deepEqual(prompt([]).tables.map((table) => table.tableName), ['Shipment', 'Region']);
+  const zone = prompt(['Zone']).tables.map((table) => table.tableName);
+  assert.deepEqual(zone, ['Shipment', 'Quay', 'Node', 'Pier', 'Zone', 'Canal', 'Channel', 'Cove', 'Region']);
+  const zoneAndYard = prompt(['Zone', 'Yard']).tables.map((table) => table.tableName);
+  assert.deepEqual(zone.filter((name) => !zoneAndYard.includes(name)), []);
+  assert.deepEqual(zoneAndYard, HARBOUR_TABLES);
+
+  // The product loop with two retries: Zone is widened, then Yard; the last
+  // attempt reuses the Canal path and must pass.
+  const guess = 'SELECT r.RegionLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Zone z ON s.ShipmentId = z.ZoneId JOIN Region r ON z.ZoneId = r.RegionId GROUP BY r.RegionLabel';
+  const withYard =
+    'SELECT y.YardCode, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Quay q ON s.QuayId = q.QuayId JOIN Node n ON q.NodeId = n.NodeId JOIN Pier p ON p.NodeId = n.NodeId JOIN Zone z ON z.PierId = p.PierId JOIN Canal c ON z.CanalId = c.CanalId JOIN Channel ch ON c.ChannelId = ch.ChannelId JOIN Cove co ON ch.CoveId = co.CoveId JOIN Region r ON r.CoveId = co.CoveId JOIN Yard y ON r.YardId = y.YardId GROUP BY y.YardCode';
+  const trace = createBufferedTraceLogger();
+  const result = await runOptimizedQuestion({
+    client: scriptedClient([guess, withYard, withYard], HARBOUR_TABLES),
+    connection: fakeConnection(),
+    schema: HARBOUR_SCHEMA,
+    question: REGION_QUESTION,
+    trace,
+    maxRetries: 2,
+    schemaScope: CHAIN_AUTO_RETRIEVED,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, `${result.errorCode}: ${result.error?.message}`);
+  assert.equal(result.attemptCount, 3);
+  assert.deepEqual(result.schemaScope.widenedTables, ['Zone', 'Yard']);
+  const widenings = trace.events.filter((event) => event.event === 'prompt.widened');
+  assert.equal(widenings.length, 2);
+  assert.deepEqual(widenings[0].allowedTables.filter((name) => !widenings[1].allowedTables.includes(name)), []);
+});
+
+test('widening keeps the same allow-list for every order and only grows with the set (seeded random schemas)', () => {
+  const random = createPrng(20261007);
+  const words = ['Alder', 'Birch', 'Cedar', 'Elm', 'Fir', 'Hazel', 'Juniper', 'Larch', 'Maple', 'Oak', 'Pine', 'Rowan', 'Spruce', 'Teak', 'Walnut', 'Yew', 'Aspen', 'Beech', 'Cypress', 'Holly'];
+  const permutations = (values) => (values.length <= 1 ? [values] : values.flatMap((value, index) => permutations(values.filter((_, other) => other !== index)).map((rest) => [value, ...rest])));
+  let checked = 0;
+  for (let graph = 0; graph < 40; graph += 1) {
+    // Mostly long chains (each table joins one of the two before it), a few
+    // shortcuts, sometimes a split: paths of four and more hops are common.
+    const names = ['Shipment', ...words.slice(0, random.int(6, words.length)), 'Region'];
+    const edges = [];
+    for (let index = 1; index < names.length; index += 1) {
+      if (random.chance(0.9)) {
+        edges.push([names[index], names[random.int(Math.max(0, index - 2), index - 1)]]);
+      }
+    }
+    for (let extra = random.int(0, 4); extra > 0; extra -= 1) {
+      const [from, to] = [random.pick(names), random.pick(names)];
+      if (from !== to && !edges.some(([a, b]) => (a === from && b === to) || (a === to && b === from))) {
+        edges.push([from, to]);
+      }
+    }
+    const randomSchema = {
+      tables: names.map((name) =>
+        chainTable(
+          name,
+          name === 'Shipment' ? [chainColumn('ShipmentWeight')] : name === 'Region' ? [chainColumn('RegionLabel', { type: 'STRING(50)' })] : [],
+          edges.filter(([from]) => from === name).map(([, to]) => [`${to}Id`, to])
+        )
+      ),
+    };
+    const adjacency = new Map(names.map((name) => [name, new Set()]));
+    for (const [from, to] of edges) {
+      adjacency.get(from).add(to);
+      adjacency.get(to).add(from);
+    }
+    const linked = (within, from, to) => {
+      const seen = new Set([from]);
+      const queue = [from];
+      while (queue.length > 0) {
+        const name = queue.shift();
+        if (name === to) {
+          return true;
+        }
+        for (const next of adjacency.get(name)) {
+          if (within.has(next) && !seen.has(next)) {
+            seen.add(next);
+            queue.push(next);
+          }
+        }
+      }
+      return false;
+    };
+    const allow = (extraTables) =>
+      buildOptimizedPrompt(randomSchema, REGION_QUESTION, { semanticPlan: buildSemanticPlan(REGION_QUESTION), schemaScope: CHAIN_AUTO_RETRIEVED, extraTables }).tables.map(
+        (table) => table.tableName
+      );
+    const retrieved = allow([]);
+    const candidates = names.filter((name) => !retrieved.includes(name));
+    for (let trial = 0; trial < 8 && candidates.length > 1; trial += 1) {
+      const added = [...new Set(Array.from({ length: random.int(1, Math.min(3, candidates.length)) }, () => random.pick(candidates)))];
+      const widened = allow(added);
+      for (const order of permutations(added)) {
+        assert.deepEqual(allow(order), widened, `graph ${graph}: ${order.join(', ')}`);
+      }
+      const more = random.pick(candidates);
+      assert.deepEqual(widened.filter((name) => !allow([...added, more]).includes(name)), [], `graph ${graph}: ${added.join(', ')} + ${more}`);
+      const within = new Set(widened);
+      for (const name of added) {
+        for (const target of retrieved) {
+          assert.equal(linked(within, name, target), linked(new Set(names), name, target), `graph ${graph}: ${name} -> ${target}`);
+        }
+      }
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 100, `${checked} widenings checked`);
 });
