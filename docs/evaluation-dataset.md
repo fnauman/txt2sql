@@ -1505,7 +1505,8 @@ ran.
 ### Compare and gate
 
 `--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
-when present, the effort only when one is set and a `/` in the model id
+when present, with the effort when one is set or the model family has a
+reasoning default (`medium` for `gpt-6*`), and a `/` in the model id
 written `__`; `--no-baseline` turns that off) aligns cases by id. When the two
 reports ran another model or reasoning effort the comparison says so
 (`modelChange`; a "Model change" line in report.md, a `model:` line on the

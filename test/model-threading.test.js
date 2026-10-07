@@ -262,7 +262,7 @@ test('the eval header names the model and the effort with their sources and the 
   );
   assert.equal(
     describeModelConfig(resolveModelConfig({ env: { MODEL_NAME: 'gpt-6-luna' }, envFile: { path: '/x/.env', vars: ['MODEL_NAME'] } })),
-    'model gpt-6-luna (MODEL_NAME from /x/.env); reasoning effort provider default (default); endpoint api.openai.com'
+    'model gpt-6-luna (MODEL_NAME from /x/.env); reasoning effort medium (default); endpoint api.openai.com'
   );
 });
 
@@ -361,6 +361,12 @@ test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in 
   assert.match(defaultBaselinePath('openai/gpt-6-luna', 'medium'), /eval\/baselines\/openai__gpt-6-luna\.medium\.json$/);
   assert.match(defaultBaselineForEnv({}), /eval\/baselines\/gpt-4o-mini\.json$/);
   assert.match(defaultBaselineForEnv({ MODEL_NAME: 'openai/gpt-6-luna', REASONING_EFFORT: 'low' }), /eval\/baselines\/openai__gpt-6-luna\.low\.json$/);
+  // No effort set: gpt-6's default effort names the file, like --reasoning-effort medium.
+  const defaulted = parseEvalArgs(['--model', 'gpt-6-luna'], { env: {} });
+  assert.deepEqual([defaulted.reasoningEffort, defaulted.reasoningEffortSource], ['medium', 'default']);
+  assert.equal(baselineTarget(defaulted), baselineTarget(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'medium'], { env: {} })));
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-6-luna' }), /eval\/baselines\/gpt-6-luna\.medium\.json$/);
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-5.4-mini' }), /eval\/baselines\/gpt-5\.4-mini\.json$/);
 
   // --write-baseline writes the model's and effort's own file, and refuses another model's.
   const write = parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--write-baseline'], { env: {} });

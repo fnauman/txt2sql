@@ -100,7 +100,8 @@ identical question + gold):
 Run:
   --model <name>              default MODEL_NAME, else ${DEFAULT_MODEL}
   --reasoning-effort <v>      ${REASONING_EFFORTS.join('|')}, checked per model family (default
-                              REASONING_EFFORT; unset: no reasoning_effort sent)
+                              REASONING_EFFORT; unset: the family's default, e.g. medium for
+                              gpt-6*, or none sent)
   --repeat N                  repetitions per case, all kept (default 1)
   --concurrency N             cases in flight (default ${DEFAULT_CONCURRENCY})
   --case-timeout-ms N         per-case deadline, 0 disables (default ${DEFAULT_CASE_TIMEOUT_MS})
@@ -1208,7 +1209,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
 
   const entries = selection.entries;
   cli.log(
-    `\nRunning ${entries.length} case(s) × ${options.repeat} repetition(s) with ${model} (reasoning effort ${describeReasoningEffort(model, reasoningEffort)}) ` +
+    `\nRunning ${entries.length} case(s) × ${options.repeat} repetition(s) with ${model} (reasoning effort ${describeReasoningEffort(reasoningEffort)}) ` +
       `on ${options.concurrency} worker(s); ` +
       `case deadline ${options.caseTimeoutMs ? `${options.caseTimeoutMs} ms` : 'off'}; budget ${options.budgetUsd != null ? `$${options.budgetUsd}` : 'none'}; ` +
       `retries ${maxRetries}; statement timeout ${statementTimeoutMs} ms.`

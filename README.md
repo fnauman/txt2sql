@@ -523,21 +523,25 @@ Each model family gets the request it accepts (`src/model-config.js`; the
 capability map is keyed by the model id without a vendor prefix, so
 `openai/gpt-6-luna` is `gpt-6-luna`):
 
-| Family | Reasoning | `REASONING_EFFORT` values | Request |
+| Family | Reasoning | `REASONING_EFFORT` values | With no effort set |
 |---|---|---|---|
 | `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the committed baseline's request, byte for byte |
-| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium` (provider default), `high`, `xhigh`, `max` | see below |
-| `gpt-5*` | yes | `none`, `low`, `medium`, `high` | see below |
-| o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | see below |
-| anything else | unknown | unset, or `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | unset: the `gpt-4o*` request |
+| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-5.2*` and later (e.g. `gpt-5.4-mini`) | yes | `none`, `low`, `medium`, `high`, `xhigh` | the provider default is `none`: the `gpt-4o*` request |
+| `gpt-5.1*` | yes | `none`, `low`, `medium`, `high` | the provider default is `none`: the `gpt-4o*` request |
+| `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
+| o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
+| anything else (also the `gpt-5*-chat` models) | unknown | `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | the `gpt-4o*` request |
 
-With reasoning on (a reasoning model at any effort but `none`) the request
-drops `temperature` / `top_p`, sends `reasoning_effort` when one is set (unset:
-none is sent and the provider's default applies) and raises
+With reasoning on (any effort but `none`, set or the family's default) the
+request drops `temperature` / `top_p`, sends `reasoning_effort` and raises
 `max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
-because reasoning tokens count against that limit and 3200 would truncate. At
-effort `none` the request keeps `temperature: 0` and the 1200 / 3200 limits,
-plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
+because reasoning tokens count against that limit and 3200 would truncate. A
+family's default effort is sent and recorded like a set one (source
+`default`), so `gpt-6-luna` with no effort and with `REASONING_EFFORT=medium`
+is the same run with the same baseline file, and a provider changing its
+default cannot change a run unseen. At effort `none` the request keeps
+`temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
 does not list, stops every entry point before anything starts, with the
 allowed values in the message. (An effort set in an env file can be cleared
 for one run with an empty `REASONING_EFFORT=` in the shell.) Without

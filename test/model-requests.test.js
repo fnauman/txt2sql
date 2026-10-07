@@ -151,6 +151,15 @@ test('gpt-6-luna: effort none keeps temperature 0; low and medium drop it, send 
   assert.equal(basic, wire({ model: 'gpt-6-luna', max_completion_tokens: 16000, reasoning_effort: 'medium', messages }));
 });
 
+test('no effort set: gpt-6-luna sends its default effort (medium) explicitly; gpt-5.4-mini (default none) keeps the base request', async () => {
+  const client = localClient();
+  const settings = { ...resolveCompletionSettings({}), reasoningEffort: null };
+  const luna = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-6-luna', prompt, modelConfig: settings }));
+  assert.equal(luna, wire({ model: 'gpt-6-luna', max_completion_tokens: 16000, response_format: RESPONSE_FORMAT, reasoning_effort: 'medium', messages }));
+  const mini = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-5.4-mini', prompt, modelConfig: settings }));
+  assert.equal(mini, wire({ model: 'gpt-5.4-mini', temperature: 0, max_completion_tokens: 3200, response_format: RESPONSE_FORMAT, messages }));
+});
+
 test('an unknown model keeps the request every model had before; with an effort it is treated as a reasoning model', async () => {
   const client = localClient();
   const plain = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'acme-sql-1', prompt, modelConfig: resolveCompletionSettings({}) }));

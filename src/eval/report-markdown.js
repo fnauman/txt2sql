@@ -247,7 +247,7 @@ function schemaScopeText(scope) {
 
 // A comparison side's effort (a report from before REASONING_EFFORT sent none).
 function comparisonEffortText(side) {
-  return side.model ? describeReasoningEffort(side.model, side.reasoningEffort ?? null) : side.reasoningEffort || 'n/a';
+  return side.model ? describeReasoningEffort(side.reasoningEffort ?? null) : side.reasoningEffort || 'n/a';
 }
 
 // The report's model with its reasoning effort when one was set
@@ -263,7 +263,6 @@ function modelSettingsRows(provenance) {
   if (!product || !('modelSource' in product)) {
     return [];
   }
-  const model = product.model || provenance.model;
   const request = product.requestOptions
     ? Object.entries(product.requestOptions)
         .map(([key, value]) => `${key} ${typeof value === 'object' ? JSON.stringify(value) : value}`)
@@ -272,7 +271,7 @@ function modelSettingsRows(provenance) {
   return [
     [
       'Model settings',
-      `model from ${product.modelSource || 'n/a'}; reasoning effort ${describeReasoningEffort(model, product.reasoningEffort)} ` +
+      `model from ${product.modelSource || 'n/a'}; reasoning effort ${describeReasoningEffort(product.reasoningEffort)} ` +
         `(${product.reasoningEffortSource || 'n/a'}); request options: ${request}`,
     ],
   ];

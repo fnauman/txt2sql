@@ -8,6 +8,7 @@ import {
   baseModelId,
   buildCompletionOptions,
   DEFAULT_MODEL,
+  defaultReasoningEffort,
   DEFAULT_REASONING_MAX_COMPLETION_TOKENS,
   modelCapabilities,
   normalizeReasoningEffort,
@@ -102,8 +103,15 @@ test('the capability map is keyed by the model id without a vendor prefix or var
     ['gpt-6-luna', 'gpt-6', true],
     ['openai/gpt-6-sol', 'gpt-6', true],
     ['gpt-6', 'gpt-6', true],
-    ['gpt-5.4-mini', 'gpt-5', true],
     ['gpt-5', 'gpt-5', true],
+    ['gpt-5-mini', 'gpt-5', true],
+    ['gpt-5-nano-2025-08-07', 'gpt-5', true],
+    ['gpt-5.1', 'gpt-5.1', true],
+    ['gpt-5.1-codex', 'gpt-5.1', true],
+    ['gpt-5.2', 'gpt-5.2+', true],
+    ['gpt-5.4-mini', 'gpt-5.2+', true],
+    ['openai/gpt-5.4', 'gpt-5.2+', true],
+    ['gpt-5.10', 'gpt-5.2+', true],
     ['o3-mini', 'o-series', true],
     ['o4-mini-2025-04-16', 'o-series', true],
   ]) {
@@ -111,11 +119,21 @@ test('the capability map is keyed by the model id without a vendor prefix or var
     assert.equal(capability.family, family, model);
     assert.equal(capability.reasoning, reasoning, model);
   }
-  // Not a family: a lookalike prefix, or a model the map does not know.
-  for (const model of ['gpt-4omni', 'gpt-60', 'omni-1', 'anthropic/claude-sonnet-4.5', 'acme-sql-1']) {
-    assert.deepEqual(modelCapabilities(model), { id: baseModelId(model), family: null, reasoning: null, efforts: UNKNOWN_FAMILY_REASONING_EFFORTS }, model);
+  // Not a family: a lookalike prefix, a gpt-5.x chat model (it takes no
+  // effort), or a model the map does not know.
+  for (const model of ['gpt-4omni', 'gpt-60', 'gpt-50', 'omni-1', 'gpt-5-chat-latest', 'gpt-5.1-chat-latest', 'anthropic/claude-sonnet-4.5', 'acme-sql-1']) {
+    assert.deepEqual(
+      modelCapabilities(model),
+      { id: baseModelId(model), family: null, reasoning: null, efforts: UNKNOWN_FAMILY_REASONING_EFFORTS, defaultEffort: null },
+      model
+    );
   }
   assert.deepEqual(modelCapabilities('gpt-6-luna').efforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  // The efforts each gpt-5 generation takes: no none for the original
+  // gpt-5 / -mini / -nano, xhigh from gpt-5.2 on.
+  assert.deepEqual(modelCapabilities('gpt-5-mini').efforts, ['low', 'medium', 'high']);
+  assert.deepEqual(modelCapabilities('gpt-5.1').efforts, ['none', 'low', 'medium', 'high']);
+  assert.deepEqual(modelCapabilities('gpt-5.4-mini').efforts, ['none', 'low', 'medium', 'high', 'xhigh']);
   assert.deepEqual(REASONING_EFFORTS, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 });
 
@@ -137,9 +155,28 @@ test('normalizeReasoningEffort validates the effort per family and fails with th
   invalid('gpt-4o-mini', 'none', /not a reasoning model/);
   invalid('gpt-4.1-mini', 'medium', /the gpt-4\.1 family is not a reasoning model/);
   // An effort the family does not list.
-  invalid('gpt-5.4-mini', 'xhigh', /REASONING_EFFORT "xhigh" is not supported by gpt-5\.4-mini \(the gpt-5 family\); allowed: none, low, medium, high\./);
+  invalid('gpt-5.4-mini', 'max', /REASONING_EFFORT "max" is not supported by gpt-5\.4-mini \(the gpt-5\.2\+ family\); allowed: none, low, medium, high, xhigh\./);
+  invalid('gpt-5.1', 'xhigh', /\(the gpt-5\.1 family\); allowed: none, low, medium, high\./);
+  invalid('gpt-5-mini', 'none', /REASONING_EFFORT "none" is not supported by gpt-5-mini \(the gpt-5 family\); allowed: low, medium, high\./);
   invalid('o3-mini', 'none', /allowed: low, medium, high\./);
   invalid('acme-sql-1', 'max', /a model outside the capability map\); allowed: none, low, medium, high\./);
+  assert.equal(normalizeReasoningEffort('gpt-5.4-mini', 'xhigh'), 'xhigh');
+});
+
+test('with no effort set, a family whose provider default reasons runs at it explicitly; a none default keeps the base request', () => {
+  for (const [model, effort] of [
+    ['gpt-6-luna', 'medium'],
+    ['openai/gpt-6-sol', 'medium'],
+    ['gpt-5-mini', 'medium'],
+    ['o3', 'medium'],
+    ['gpt-5.1', null],
+    ['gpt-5.4-mini', null],
+    ['gpt-4o-mini', null],
+    ['acme-sql-1', null],
+  ]) {
+    assert.equal(defaultReasoningEffort(model), effort, model);
+    assert.equal(reasoningEnabled(model), effort !== null, model);
+  }
 });
 
 test('resolveCompletionSettings: endpoint host, OpenRouter, require_parameters and the reasoning token limit', () => {
@@ -178,9 +215,24 @@ test('buildCompletionOptions keeps the base options for non-reasoning models and
       reasoning_effort: effort,
     });
   }
-  // A reasoning model with no effort set reasons at the provider's default:
-  // no reasoning_effort is sent, but temperature still goes and the limit rises.
-  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-6-luna', maxCompletionTokens: 9000 }), { max_completion_tokens: 9000, response_format: { type: 'json_object' } });
+  // A reasoning model with no effort set runs at its family's default effort,
+  // sent explicitly (gpt-6: medium) ...
+  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-6-luna', maxCompletionTokens: 9000 }), {
+    max_completion_tokens: 9000,
+    response_format: { type: 'json_object' },
+    reasoning_effort: 'medium',
+  });
+  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-5-mini' }), { max_completion_tokens: 16000, response_format: { type: 'json_object' }, reasoning_effort: 'medium' });
+  // ... unless that default is none (gpt-5.1 and later): the base request,
+  // as these models got before the capability map, until an effort is set.
+  assert.equal(buildCompletionOptions(base, { model: 'gpt-5.4-mini' }), base);
+  assert.equal(buildCompletionOptions(base, { model: 'gpt-5-chat-latest' }), base);
+  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-5.4-mini', reasoningEffort: 'xhigh' }), {
+    max_completion_tokens: 16000,
+    response_format: { type: 'json_object' },
+    reasoning_effort: 'xhigh',
+  });
+  assert.throws(() => buildCompletionOptions(base, { model: 'gpt-5-mini', reasoningEffort: 'none' }), { code: 'INVALID_CONFIG' });
   // An unknown model with an effort is treated as a reasoning model.
   assert.deepEqual(buildCompletionOptions(base, { model: 'acme-sql-1', reasoningEffort: 'high' }), {
     max_completion_tokens: 16000,
@@ -199,5 +251,6 @@ test('buildCompletionOptions keeps the base options for non-reasoning models and
   assert.deepEqual(base, { temperature: 0, top_p: 1, max_completion_tokens: 3200, response_format: { type: 'json_object' } });
   assert.equal(reasoningEnabled('gpt-6-luna'), true);
   assert.equal(reasoningEnabled('gpt-6-luna', 'none'), false);
+  assert.equal(reasoningEnabled('gpt-5.4-mini', 'low'), true);
   assert.equal(reasoningEnabled('gpt-4o-mini'), false);
 });

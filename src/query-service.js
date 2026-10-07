@@ -20,7 +20,7 @@ import {
 import { normalizeHintsVersion, resolveHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
-import { normalizeReasoningEffort, resolveCompletionSettings, resolveModelName } from './model-config.js';
+import { defaultReasoningEffort, normalizeReasoningEffort, resolveCompletionSettings, resolveModelName } from './model-config.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
 import { clearSemanticLayerCache } from './semantic-layer.js';
 import { createTimer, serializeError } from './trace.js';
@@ -296,17 +296,20 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
  * The model settings of a run: the caller's, else MODEL_NAME (DEFAULT_MODEL),
  * REASONING_EFFORT and the endpoint settings (OPENAI_BASE_URL,
  * OPENROUTER_REQUIRE_PARAMETERS, LLM_MAX_COMPLETION_TOKENS) from the env.
- * `reasoningEffort` null means none (the env is not read); either way the
- * effort is validated for the model, so a bad one fails before any work.
+ * `reasoningEffort` null means none set (the env is not read); either way the
+ * effort is validated for the model, so a bad one fails before any work, and
+ * with none set the model family's default effort applies
+ * (defaultReasoningEffort: medium for gpt-6*, null for gpt-4o-mini).
  */
 export function resolveRunModelSettings({ model = undefined, reasoningEffort = undefined, completionSettings = undefined } = {}, env = process.env) {
   const resolvedModel = model ?? resolveModelName(env).model;
   const fromEnv = reasoningEffort === undefined;
   return {
     model: resolvedModel,
-    reasoningEffort: normalizeReasoningEffort(resolvedModel, fromEnv ? env.REASONING_EFFORT : reasoningEffort, {
-      source: fromEnv ? 'REASONING_EFFORT' : 'reasoningEffort',
-    }),
+    reasoningEffort:
+      normalizeReasoningEffort(resolvedModel, fromEnv ? env.REASONING_EFFORT : reasoningEffort, {
+        source: fromEnv ? 'REASONING_EFFORT' : 'reasoningEffort',
+      }) ?? defaultReasoningEffort(resolvedModel),
     completionSettings: completionSettings ?? resolveCompletionSettings(env),
   };
 }

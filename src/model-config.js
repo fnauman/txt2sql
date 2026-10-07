@@ -14,6 +14,12 @@
 //   outside the map keeps the request every model got before this module
 //   existed, unless a reasoning effort is set (then it is treated as a
 //   reasoning model with the conservative effort list).
+// - With no effort set, a family whose provider default reasons (gpt-6*,
+//   gpt-5 / -mini / -nano, the o-series: medium) runs at that default, sent
+//   and recorded explicitly, so a provider changing its default cannot change
+//   a run unseen and `medium` set or defaulted is the same run. A family whose
+//   default is `none` (gpt-5.1 and later) keeps the base request until an
+//   effort is set.
 // - The reasoning effort (REASONING_EFFORT, or --reasoning-effort in npm run
 //   eval) is validated per family before anything is started: an unknown
 //   value, an effort the family does not list, or any effort for a known
@@ -52,17 +58,51 @@ export const DEFAULT_REASONING_MAX_COMPLETION_TOKENS = 16_000;
 const MAX_COMPLETION_TOKENS_LIMIT = 1_000_000;
 
 // The capability map, first match wins. `efforts` lists what the family
-// accepts (null: no reasoning effort at all). gpt-6: verified on 2026-10-07
+// accepts (null: no reasoning effort at all); `defaultEffort` is the effort
+// the provider applies when none is sent. gpt-6: verified on 2026-10-07
 // (developers.openai.com/api/docs/models/gpt-6-luna and gpt-6-sol: none, low,
-// medium (default), high, xhigh, max). gpt-5 and the o-series: the efforts
-// their snapshots have in common; a snapshot that accepts more needs a map
+// medium (default), high, xhigh, max). gpt-5: the original gpt-5, -mini and
+// -nano take minimal (not offered here), low, medium (default) and high, and
+// no `none`; gpt-5.1 added `none` and made it the default; gpt-5.2 and later
+// add xhigh. The -chat models of gpt-5.x take no effort and stay outside the
+// map (the request they always had). A snapshot that differs needs its own
 // entry here.
 export const MODEL_FAMILIES = Object.freeze([
-  Object.freeze({ family: 'gpt-4o', label: 'gpt-4o*', pattern: /^gpt-4o(?:-|$)/, reasoning: false, efforts: null }),
-  Object.freeze({ family: 'gpt-4.1', label: 'gpt-4.1*', pattern: /^gpt-4\.1(?:-|$)/, reasoning: false, efforts: null }),
-  Object.freeze({ family: 'gpt-6', label: 'gpt-6*', pattern: /^gpt-6(?:[.-]|$)/, reasoning: true, efforts: REASONING_EFFORTS }),
-  Object.freeze({ family: 'gpt-5', label: 'gpt-5*', pattern: /^gpt-5(?:[.-]|$)/, reasoning: true, efforts: Object.freeze(['none', 'low', 'medium', 'high']) }),
-  Object.freeze({ family: 'o-series', label: 'o1*, o3*, o4*, ...', pattern: /^o\d+(?:-|$)/, reasoning: true, efforts: Object.freeze(['low', 'medium', 'high']) }),
+  Object.freeze({ family: 'gpt-4o', label: 'gpt-4o*', pattern: /^gpt-4o(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
+  Object.freeze({ family: 'gpt-4.1', label: 'gpt-4.1*', pattern: /^gpt-4\.1(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
+  Object.freeze({ family: 'gpt-6', label: 'gpt-6*', pattern: /^gpt-6(?:[.-]|$)/, reasoning: true, efforts: REASONING_EFFORTS, defaultEffort: 'medium' }),
+  Object.freeze({
+    family: 'gpt-5.2+',
+    label: 'gpt-5.2* and later',
+    pattern: /^gpt-5\.(?:[2-9]|[1-9]\d+)(?:-(?!chat)|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['none', 'low', 'medium', 'high', 'xhigh']),
+    defaultEffort: 'none',
+  }),
+  Object.freeze({
+    family: 'gpt-5.1',
+    label: 'gpt-5.1*',
+    pattern: /^gpt-5\.1(?:-(?!chat)|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['none', 'low', 'medium', 'high']),
+    defaultEffort: 'none',
+  }),
+  Object.freeze({
+    family: 'gpt-5',
+    label: 'gpt-5, gpt-5-mini, gpt-5-nano',
+    pattern: /^gpt-5(?:-(?!chat)|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['low', 'medium', 'high']),
+    defaultEffort: 'medium',
+  }),
+  Object.freeze({
+    family: 'o-series',
+    label: 'o1*, o3*, o4*, ...',
+    pattern: /^o\d+(?:-|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['low', 'medium', 'high']),
+    defaultEffort: 'medium',
+  }),
 ]);
 
 function configError(message) {
@@ -103,17 +143,30 @@ export function baseModelId(model) {
 }
 
 /**
- * What the capability map says about a model: { id, family, reasoning, efforts }.
- * reasoning is true / false for a listed family and null for an unknown model
- * (family null, efforts the conservative list).
+ * What the capability map says about a model: { id, family, reasoning,
+ * efforts, defaultEffort }. reasoning is true / false for a listed family and
+ * null for an unknown model (family null, efforts the conservative list,
+ * defaultEffort null).
  */
 export function modelCapabilities(model) {
   const id = baseModelId(model);
   const entry = MODEL_FAMILIES.find((candidate) => candidate.pattern.test(id));
   if (!entry) {
-    return { id, family: null, reasoning: null, efforts: UNKNOWN_FAMILY_REASONING_EFFORTS };
+    return { id, family: null, reasoning: null, efforts: UNKNOWN_FAMILY_REASONING_EFFORTS, defaultEffort: null };
   }
-  return { id, family: entry.family, reasoning: entry.reasoning, efforts: entry.efforts };
+  return { id, family: entry.family, reasoning: entry.reasoning, efforts: entry.efforts, defaultEffort: entry.defaultEffort };
+}
+
+/**
+ * The effort a run of `model` uses when none is set: its family's provider
+ * default when that default reasons (medium for gpt-6*, gpt-5 / -mini /
+ * -nano and the o-series), sent and recorded like a set one; null for a
+ * family whose default is `none` (gpt-5.1 and later keep the base request),
+ * a non-reasoning family and a model outside the map.
+ */
+export function defaultReasoningEffort(model) {
+  const { reasoning, defaultEffort } = modelCapabilities(model);
+  return reasoning === true && defaultEffort && defaultEffort !== 'none' ? defaultEffort : null;
 }
 
 /**
@@ -147,15 +200,13 @@ export function normalizeReasoningEffort(model, effort, { source = 'REASONING_EF
 }
 
 /**
- * Whether a request for `model` at `reasoningEffort` reasons: a reasoning
- * family at any effort but `none` (no effort: the provider's default, which
- * reasons), or an unknown model with an effort other than `none`.
+ * Whether a request for `model` at `reasoningEffort` reasons: any effort but
+ * `none` (for an unknown model too); with no effort, the family's default
+ * effort decides (defaultReasoningEffort).
  */
 export function reasoningEnabled(model, reasoningEffort = null) {
-  if (reasoningEffort) {
-    return reasoningEffort !== 'none';
-  }
-  return modelCapabilities(model).reasoning === true;
+  const effort = reasoningEffort || defaultReasoningEffort(model);
+  return Boolean(effort) && effort !== 'none';
 }
 
 /**
@@ -242,7 +293,9 @@ export function resolveCompletionSettings(env = process.env) {
  * the file comment). `settings`: { model, reasoningEffort, isOpenRouter,
  * requireParameters, maxCompletionTokens }; a resolved model config (or the
  * completion settings plus model and effort) fits. The effort is validated
- * for the model. Unchanged base options are returned as the same object.
+ * for the model; with none set, the family's default effort applies
+ * (defaultReasoningEffort). Unchanged base options are returned as the same
+ * object.
  */
 export function buildCompletionOptions(base, settings = {}) {
   const {
@@ -252,11 +305,11 @@ export function buildCompletionOptions(base, settings = {}) {
     requireParameters = true,
     maxCompletionTokens = DEFAULT_REASONING_MAX_COMPLETION_TOKENS,
   } = settings;
-  const effort = normalizeReasoningEffort(model, reasoningEffort, { source: 'reasoningEffort' });
+  const effort = normalizeReasoningEffort(model, reasoningEffort, { source: 'reasoningEffort' }) ?? defaultReasoningEffort(model);
   let options = base;
   if (reasoningEnabled(model, effort)) {
     const rest = Object.fromEntries(Object.entries(base).filter(([key]) => key !== 'temperature' && key !== 'top_p'));
-    options = { ...rest, max_completion_tokens: maxCompletionTokens, ...(effort ? { reasoning_effort: effort } : {}) };
+    options = { ...rest, max_completion_tokens: maxCompletionTokens, reasoning_effort: effort };
   } else if (effort) {
     // Effort `none`: no reasoning, so the deterministic base options stay.
     options = { ...base, reasoning_effort: effort };
@@ -276,7 +329,8 @@ function sourceLabel(source, file, name) {
  * flags ({ model: --model, reasoningEffort: --reasoning-effort }; null or
  * undefined when absent):
  * { model, modelSource ('--model' | 'MODEL_NAME' | 'default'),
- *   reasoningEffort (null when unset), reasoningEffortSource
+ *   reasoningEffort (unset: the family's default effort, null when that is
+ *   none or the model is not a known reasoning model), reasoningEffortSource
  *   ('--reasoning-effort' | 'REASONING_EFFORT' | 'default'),
  *   modelSourceFile / reasoningEffortSourceFile (the env file a variable came
  *   from, when `envFile` = { path, vars } says so; else null),
@@ -289,10 +343,11 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
   const flagEffort = nonBlank(flags.reasoningEffort);
   const envEffort = nonBlank(env.REASONING_EFFORT);
   const reasoningEffortSource = flagEffort ? '--reasoning-effort' : envEffort ? 'REASONING_EFFORT' : 'default';
-  const reasoningEffort = normalizeReasoningEffort(model, flagEffort ?? envEffort, {
-    source: reasoningEffortSource === 'default' ? 'REASONING_EFFORT' : reasoningEffortSource,
-  });
   const fromFile = (name) => (envFile?.path && (envFile.vars || []).includes(name) ? envFile.path : null);
+  const reasoningEffort =
+    normalizeReasoningEffort(model, flagEffort ?? envEffort, {
+      source: reasoningEffortSource === 'default' ? 'REASONING_EFFORT' : reasoningEffortSource,
+    }) ?? defaultReasoningEffort(model);
   const notices = [];
   const envModel = nonBlank(env.MODEL_NAME);
   if (modelSource === '--model' && envModel && envModel !== model) {
@@ -327,14 +382,12 @@ export function completionSettingsOf(config) {
 }
 
 /**
- * The effort as logs show it: the effort, else `provider default` for a
- * reasoning model (no reasoning_effort is sent) or `unset`.
+ * The effort as logs show it: the effort, else `unset` (no reasoning_effort
+ * is sent: a non-reasoning or unknown model, or a family whose default is
+ * none; a reasoning model's default effort is resolved up front).
  */
-export function describeReasoningEffort(model, reasoningEffort) {
-  if (reasoningEffort) {
-    return reasoningEffort;
-  }
-  return modelCapabilities(model).reasoning === true ? 'provider default' : 'unset';
+export function describeReasoningEffort(reasoningEffort) {
+  return reasoningEffort || 'unset';
 }
 
 /**
@@ -348,7 +401,7 @@ export function describeModelConfig(config) {
     : `${config.baseUrlHost ?? 'unparseable OPENAI_BASE_URL'}`;
   return (
     `model ${config.model} (${sourceLabel(config.modelSource, config.modelSourceFile, 'MODEL_NAME')}); ` +
-    `reasoning effort ${describeReasoningEffort(config.model, config.reasoningEffort)} ` +
+    `reasoning effort ${describeReasoningEffort(config.reasoningEffort)} ` +
     `(${sourceLabel(config.reasoningEffortSource, config.reasoningEffortSourceFile, 'REASONING_EFFORT')}); ` +
     `endpoint ${endpoint}`
   );

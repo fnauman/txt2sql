@@ -2,7 +2,8 @@
 
 `npm run eval` compares every run with `eval/baselines/<model>[.<effort>].json`
 when that file exists (for example `gpt-4o-mini.json`; a reasoning model run at
-an explicit effort pairs with its own file, e.g. `gpt-6-luna.low.json`, and a
+an effort pairs with its own file, e.g. `gpt-6-luna.low.json`, also at its
+family's default effort when none is set, e.g. `gpt-6-luna.medium.json`, and a
 `/` in the model id is written `__`, e.g. `openai__gpt-6-luna.low.json`), and
 `npm run eval -- --offline`
 (the CI `db` job) rescores it with no LLM calls. The committed baseline is

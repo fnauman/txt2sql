@@ -290,7 +290,7 @@ export function describeWebConfig(config) {
   const hosts = config.hostCheck ? ['localhost', '127.0.0.1', '[::1]', ...config.allowedHosts].join(',') : 'unchecked';
   return [
     `model=${config.model}(${config.modelSource})`,
-    `reasoningEffort=${describeReasoningEffort(config.model, config.reasoningEffort).replace(/ /g, '-')}(${config.reasoningEffortSource})`,
+    `reasoningEffort=${describeReasoningEffort(config.reasoningEffort)}(${config.reasoningEffortSource})`,
     describeEndpointSetting(config.completionSettings),
     `auth=${config.authEnabled ? 'on' : 'off'}`,
     `debug=${config.allowDebug ? 'allowed' : 'denied'}`,
