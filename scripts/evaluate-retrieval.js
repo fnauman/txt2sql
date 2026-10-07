@@ -1,16 +1,35 @@
+// Table-retrieval recall over a dataset, without any LLM call:
+//
+//   npm run evaluate-retrieval -- [--dataset <name> | --dataset-file <path>] [--datasets-dir <dir>]
+//                                 [--case-id <id>] [--tag <tag>] [--results-file <path>] [--refresh-schema]
+//
+// Retrieval reads the semantic layer of the hints version (HINTS_VERSION,
+// src/hints-version.js), so the report records the version it ran
+// (`hints_version`) and the product configuration block the evaluation
+// reports record (`product`: the schema scope and the hints version; the
+// schema scope does not change what retrieval returns, only whether the
+// product prompts with it). The default output file names the version
+// (generated/retrieval-evaluation-hints-v<N>.json), so the two arms of an
+// A/B never overwrite each other; --results-file writes elsewhere.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getOptionValue, hasOptionFlag } from '../src/env.js';
 import { DEFAULT_DATASET_NAME, DEFAULT_DATASETS_DIR, isBehaviorCase, loadBenchmarkDataset } from '../src/benchmark.js';
-import { resolveHintsVersion } from '../src/hints-version.js';
+import { describeProductConfig } from '../src/eval/provenance.js';
+import { describeHintsVersion, normalizeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { extractTablesFromSql, loadNarrowSchema, retrieveRelevantTables, writeJsonFile } from '../src/pipeline.js';
+import { resolveSchemaScopeConfig } from '../src/schema-scope.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MODELS_DIR = path.resolve(__dirname, '../models');
 const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
-const DEFAULT_RESULTS_FILE = path.resolve(__dirname, '../generated/retrieval-evaluation.json');
+
+/** The default report path of a hints version: generated/retrieval-evaluation-hints-v<N>.json. */
+export function defaultResultsPath(hintsVersion) {
+  return path.resolve(__dirname, `../generated/retrieval-evaluation-hints-v${normalizeHintsVersion(hintsVersion)}.json`);
+}
 
 function average(values) {
   if (!values || values.length === 0) {
@@ -100,15 +119,18 @@ export function evaluateRetrieval(schema, testCases, { hintsVersion = undefined 
   return { summary, cases, behaviorCases };
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+/** Runs the evaluation for `argv` and `env`, writes the report and returns it. */
+export async function main(argv = process.argv.slice(2), { env = process.env, output = console } = {}) {
+  // Read once: the same version runs retrieval, is recorded and names the file.
+  const hintsVersion = resolveHintsVersion(env);
+  const schemaScope = resolveSchemaScopeConfig(env);
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const datasetPath = getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set');
   const datasetName = getOptionValue(argv, '--dataset') || (datasetPath ? null : DEFAULT_DATASET_NAME);
   const datasetsDir = path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR);
   const caseId = getOptionValue(argv, '--case-id');
   const tag = getOptionValue(argv, '--tag');
-  const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || DEFAULT_RESULTS_FILE);
+  const resultsPath = path.resolve(getOptionValue(argv, '--results-file') || defaultResultsPath(hintsVersion));
 
   const schema = await loadNarrowSchema({
     modelsDir: MODELS_DIR,
@@ -122,10 +144,12 @@ async function main() {
     caseId,
     tag,
   });
-  const { summary, cases, behaviorCases } = evaluateRetrieval(schema, datasetInfo.cases, { hintsVersion: resolveHintsVersion() });
+  const { summary, cases, behaviorCases } = evaluateRetrieval(schema, datasetInfo.cases, { hintsVersion });
 
   const report = {
     generated_at: new Date().toISOString(),
+    hints_version: hintsVersion,
+    product: describeProductConfig(schema, schemaScope, hintsVersion),
     schema_table_count: schema.tables.length,
     dataset: {
       name: datasetInfo.datasetName,
@@ -141,13 +165,15 @@ async function main() {
 
   await writeJsonFile(resultsPath, report);
 
-  console.log(`Retrieval evaluation written to ${resultsPath}`);
-  console.log(`Dataset: ${datasetInfo.datasetName}`);
-  console.log(`Cases: ${summary.case_count}${behaviorCases.length ? ` (${behaviorCases.length} abstain/clarify case(s) not scored: no gold tables; listed under behavior_cases)` : ''}`);
-  console.log(`Base full recall: ${summary.base_full_recall_count}/${summary.case_count}`);
-  console.log(`Expanded full recall: ${summary.expanded_full_recall_count}/${summary.case_count}`);
-  console.log(`Average expanded table count: ${summary.average_expanded_table_count.toFixed(2)}`);
-  console.log(`Average extra expanded tables: ${summary.average_expanded_extra_tables.toFixed(2)}`);
+  output.log(`Retrieval evaluation written to ${resultsPath}`);
+  output.log(`Dataset: ${datasetInfo.datasetName}`);
+  output.log(`Hints version: ${describeHintsVersion(hintsVersion)}`);
+  output.log(`Cases: ${summary.case_count}${behaviorCases.length ? ` (${behaviorCases.length} abstain/clarify case(s) not scored: no gold tables; listed under behavior_cases)` : ''}`);
+  output.log(`Base full recall: ${summary.base_full_recall_count}/${summary.case_count}`);
+  output.log(`Expanded full recall: ${summary.expanded_full_recall_count}/${summary.case_count}`);
+  output.log(`Average expanded table count: ${summary.average_expanded_table_count.toFixed(2)}`);
+  output.log(`Average extra expanded tables: ${summary.average_expanded_extra_tables.toFixed(2)}`);
+  return { resultsPath, report };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {

@@ -1667,6 +1667,13 @@ npm run build-eval-dataset -- --check             # the templated files are up t
 npm run evaluate-retrieval -- --dataset edge-cases-public
 ```
 
+`evaluate-retrieval` writes `generated/retrieval-evaluation-hints-v<N>.json`
+for the hints version it ran (so a `HINTS_VERSION=1` run and a default run
+never overwrite each other; `--results-file <path>` writes elsewhere) and
+records that version (`hints_version`) and the evaluation reports' product
+configuration block (`product`: schema scope and hints version; the schema
+scope does not change what retrieval returns).
+
 The controls come from `datasets/controls` or `--controls-dir <dir>`. A
 missing directory, one without any `*.json` controls file, JSON that is not
 controls, or controls that apply to none of the cases being verified stop the

@@ -262,7 +262,7 @@ Inspect retrieval without making an LLM call:
 
 ```bash
 npm run debug-retrieval -- "Show sparkling water product sales by branch month-wise"
-npm run evaluate-retrieval -- --dataset paraphrase-public
+npm run evaluate-retrieval -- --dataset paraphrase-public   # writes generated/retrieval-evaluation-hints-v<N>.json
 ```
 
 Inspect product master-data resolution against the configured database:
