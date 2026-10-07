@@ -119,6 +119,10 @@ No LLM calls:
 Output:
   --reveal-holdout            list holdout cases one by one in report.md and the console (by default
                               holdout results are shown in aggregate only: accuracy by split)
+  --holdout-summary           add one line for the comparison's paired holdout cases in aggregate
+                              (their number, improvements, regressions, exact McNemar p, accuracy
+                              change with its CI; no ids): only to conclude a pre-registered
+                              experiment, never while designing a change
   --output-dir <dir>          default generated/runs
   --results-file <path>       report.json path (report.md is written next to it)
   --trace-file <path>  --trace-dir <dir>  --trace (JSONL trace on stdout)
@@ -184,6 +188,7 @@ const BOOLEAN_FLAGS = new Set([
   '--offline',
   '--use-home-env',
   '--reveal-holdout',
+  '--holdout-summary',
 ]);
 
 function editDistance(left, right) {
@@ -369,6 +374,7 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     traceFile: getOptionValue(argv, '--trace-file') ? path.resolve(getOptionValue(argv, '--trace-file')) : null,
     traceToStdout: hasOptionFlag(argv, '--trace'),
     revealHoldout: hasOptionFlag(argv, '--reveal-holdout'),
+    holdoutSummary: hasOptionFlag(argv, '--holdout-summary'),
     failOnAnyFailure: benchmark,
     argv: [...argv],
   };
@@ -863,12 +869,18 @@ export function verificationRefusal(verification) {
   return `Verification failed (${parts.join('; ')}); no LLM call was made. Fix the dataset, controls or fixtures, or pass --skip-verify to run anyway.`;
 }
 
-async function writeReport(report, { reportPath, cli, revealHoldout = false }) {
+/**
+ * Writes report.json and report.md and prints the console headline. What they
+ * show of the holdout follows --reveal-holdout (revealHoldout) and
+ * --holdout-summary (holdoutSummary: one aggregate line for the comparison's
+ * paired holdout cases).
+ */
+export async function writeReport(report, { reportPath, cli, revealHoldout = false, holdoutSummary = false }) {
   const markdownPath = markdownPathFor(reportPath);
   await writeJsonFile(reportPath, report);
-  await fs.writeFile(markdownPath, renderReportMarkdown(report, { revealHoldout }), 'utf8');
+  await fs.writeFile(markdownPath, renderReportMarkdown(report, { revealHoldout, holdoutSummary }), 'utf8');
   cli.log('');
-  cli.log(renderHeadline(report, { revealHoldout }));
+  cli.log(renderHeadline(report, { revealHoldout, holdoutSummary }));
   cli.log('');
   cli.log(`Report: ${markdownPath}`);
   cli.log(`JSON:   ${reportPath}`);
@@ -1177,7 +1189,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
       comparison: comparison ? { verdict: comparison.verdict, mcnemar: comparison.mcnemar, delta: comparison.accuracy.delta } : null,
       reportPath,
     });
-    await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout });
+    await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout, holdoutSummary: options.holdoutSummary });
     const exit = stop.interruptedBy
       ? { code: 130, reasons: [`interrupted by ${stop.interruptedBy}; ${run.stopped ? 'the report is partial' : 'the run had finished, the report is complete'}`] }
       : computeExitCode(report, options);
@@ -1372,7 +1384,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
     },
     traceFile: null,
   });
-  await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout });
+  await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout, holdoutSummary: options.holdoutSummary });
   return finish(computeExitCode(report, options), options, cli);
 }
 

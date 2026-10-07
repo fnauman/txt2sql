@@ -25,7 +25,10 @@
 // comparison with a baseline, attribution, cost) covers the dev cases, so
 // error analysis and experiment design look at dev failures only and no
 // figure says more about holdout outcomes than the split accuracy
-// (src/eval/report-markdown.js). report.json keeps every case (rescore,
+// (src/eval/report-markdown.js). `--holdout-summary`, to conclude a
+// pre-registered experiment, adds one aggregate line for a comparison's
+// paired holdout cases (counts, McNemar p, accuracy change with its CI; no
+// ids). report.json keeps every case (rescore,
 // compare and the gate need them), and trace.jsonl (stdout with --trace) logs
 // every case's events; reading either is revealing the holdout.
 

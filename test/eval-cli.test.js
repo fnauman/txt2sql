@@ -60,6 +60,24 @@ test('flags parse lists and numbers; the benchmark profile keeps the old behavio
   assert.match(USAGE, /--reveal-holdout {12}list holdout cases one by one/);
 });
 
+test('--holdout-summary is an opt-in boolean output flag, documented in --help, that leaves the exit code alone', () => {
+  assert.equal(parseEvalArgs([], { env: {} }).holdoutSummary, false);
+  const options = parseEvalArgs(['--holdout-summary'], { env: {} });
+  assert.deepEqual([options.holdoutSummary, options.revealHoldout], [true, false]);
+  assert.deepEqual(
+    [parseEvalArgs(['--holdout-summary', '--reveal-holdout'], { env: {} })].map((parsed) => [parsed.holdoutSummary, parsed.revealHoldout]),
+    [[true, true]]
+  );
+  assert.throws(() => parseEvalArgs(['--holdout-summary=yes'], { env: {} }), (error) => error instanceof HarnessError && /takes no value/.test(error.message));
+  assert.throws(() => parseEvalArgs(['--holdout-sumary'], { env: {} }), /Did you mean --holdout-summary\?/);
+  assert.match(USAGE, /\n {2}--holdout-summary {11}add one line for the comparison's paired holdout cases in aggregate\n/);
+  assert.match(USAGE, /only to conclude a pre-registered\n {30}experiment, never while designing a change\n/);
+  // The gate's reason withholds the holdout's counts as before.
+  const withHoldout = { verdict: 'worse', mcnemar: { regressions: 6, improvements: 0, p: 0.03125 }, holdoutCases: ['h1'], pairedCases: [{ id: 'h1' }] };
+  const report = { attribution: { repetitions: { byOutcome: { pass: 3 } } }, stats: { strictAccuracy: { value: 0.75 }, repeat: 1 }, comparison: withHoldout, results: [] };
+  assert.deepEqual(computeExitCode(report, { ...options, gate: true }), computeExitCode(report, { gate: true }));
+});
+
 test('bad usage is a harness error (exit 2)', () => {
   for (const argv of [
     ['--repeat', '0'],

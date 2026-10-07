@@ -13,7 +13,9 @@ import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, summarizeAccuracy, summarizeBreakd
 // set, report.md and the console show holdout results in aggregate only (the
 // split breakdown): no per-case holdout rows, and every other figure,
 // the comparison's included, covers the dev cases. report.json keeps
-// everything.
+// everything. `holdoutSummary` (--holdout-summary, to conclude a
+// pre-registered experiment) adds one line: the comparison's paired holdout
+// cases in aggregate (holdoutPairSummary), nothing per case.
 
 // The ids report.md and the console must not list: the holdout cases of the
 // report and of its comparison (empty when they are revealed).
@@ -45,16 +47,58 @@ function displayedComparison(comparison, { revealHoldout = false } = {}) {
   }
   const visible = (entries) => (entries || []).filter((entry) => !hidden.has(typeof entry === 'string' ? entry : entry.id));
   const pairs = visible(comparison.pairedCases);
-  const ci = comparison.accuracy?.deltaCi95 || {};
   return {
     ...comparison,
-    ...summarizePairs(pairs, { alpha: comparison.alpha ?? 0.05, resamples: ci.resamples ?? BOOTSTRAP_RESAMPLES, seed: ci.seed ?? BOOTSTRAP_SEED }),
+    ...summarizePairs(pairs, comparisonStatsOptions(comparison)),
     pairedCases: pairs,
     excluded: { goldChanged: visible(comparison.excluded?.goldChanged), notCounted: visible(comparison.excluded?.notCounted) },
     newCases: visible(comparison.newCases),
     removedCases: visible(comparison.removedCases),
     hiddenCases: hidden.size,
   };
+}
+
+// The settings a comparison's figures were computed with (its alpha, and the
+// resamples and seed of its accuracy-change interval), so figures recomputed
+// over a subset of its pairs are drawn the same way.
+function comparisonStatsOptions(comparison) {
+  const ci = comparison.accuracy?.deltaCi95 || {};
+  return { alpha: comparison.alpha ?? 0.05, resamples: ci.resamples ?? BOOTSTRAP_RESAMPLES, seed: ci.seed ?? BOOTSTRAP_SEED };
+}
+
+// A canonical order of paired outcomes (pass rates, then majority verdicts).
+const outcomeKey = (side) => [side.passRate ?? -1, side.majorityPass ? 1 : 0];
+function byPairedOutcome(left, right) {
+  const a = [...outcomeKey(left.baseline), ...outcomeKey(left.candidate)];
+  const b = [...outcomeKey(right.baseline), ...outcomeKey(right.candidate)];
+  const index = a.findIndex((value, position) => value !== b[position]);
+  return index === -1 ? 0 : a[index] - b[index];
+}
+
+/**
+ * --holdout-summary: the paired holdout cases of a recorded comparison in
+ * aggregate (the comparison's holdout cases that are paired, which the dev
+ * figures leave out): summarizePairs over them, with the comparison's alpha
+ * and bootstrap settings, so the counts, accuracies, accuracy change and
+ * McNemar p are those of the holdout subset of the full comparison that
+ * --reveal-holdout lists. Null without a comparison, without its pairs (a
+ * comparison recorded before they were stored) or without a paired holdout
+ * case. Each pair keeps only its outcome (pass rates, majority verdicts: no
+ * id, question or outcome name), in a canonical order of outcomes instead of
+ * by id: the bootstrap draws cases by position, so in id order its interval
+ * would move with WHICH holdout cases flipped; in this order every figure
+ * depends only on the paired outcomes, and two runs whose holdout pairs
+ * differ only in which cases they are print the same line.
+ */
+export function holdoutPairSummary(comparison) {
+  const holdout = new Set(comparison?.holdoutCases || []);
+  const pairs = Array.isArray(comparison?.pairedCases) ? comparison.pairedCases.filter((entry) => holdout.has(entry.id)) : [];
+  if (pairs.length === 0) {
+    return null;
+  }
+  const outcome = (side) => ({ passRate: side.passRate, majorityPass: side.majorityPass });
+  const canonical = pairs.map((entry) => ({ baseline: outcome(entry.baseline), candidate: outcome(entry.candidate) })).sort(byPairedOutcome);
+  return summarizePairs(canonical, comparisonStatsOptions(comparison));
 }
 
 // The holdout note of a displayed comparison, or null when nothing is hidden.
@@ -369,6 +413,22 @@ export function comparisonLine(comparison) {
   );
 }
 
+/**
+ * The --holdout-summary line (holdoutPairSummary): the number of paired
+ * holdout cases, their improvements and regressions, the exact McNemar p
+ * with the verdict's usual wording, and strict accuracy on those cases,
+ * baseline → candidate, with the change and its paired bootstrap 95% CI.
+ * Nothing else about the holdout.
+ */
+function holdoutSummaryText(summary) {
+  return (
+    `${summary.paired} paired holdout case(s); ${summary.mcnemar.improvements} improvement(s), ${summary.mcnemar.regressions} regression(s); ` +
+    `exact McNemar p = ${summary.mcnemar.p.toFixed(3)} → ${VERDICT_TEXT[summary.verdict] || summary.verdict}; ` +
+    `strict accuracy ${formatPercent(summary.accuracy.baseline)} → ${formatPercent(summary.accuracy.candidate)}, ` +
+    `Δ ${formatPoints(summary.accuracy.delta)} (95% CI ${formatSignedInterval(summary.accuracy.deltaCi95)})`
+  );
+}
+
 // The 2x2 table, also for comparisons recorded before it was stored.
 function contingencyOf(comparison) {
   if (comparison.contingency) {
@@ -391,10 +451,13 @@ function flipList(entries) {
 /**
  * The comparison as a few plain-text lines for the console: the paired 2x2
  * table of majority verdicts, the accuracy change, the exact McNemar p and
- * the flipped cases by id (over the paired dev cases, unless revealHoldout).
+ * the flipped cases by id (over the paired dev cases, unless revealHoldout);
+ * with holdoutSummary, one more line for the paired holdout cases in
+ * aggregate (holdoutPairSummary), when there is one.
  */
-export function renderComparisonConsole(recorded, { revealHoldout = false } = {}) {
+export function renderComparisonConsole(recorded, { revealHoldout = false, holdoutSummary = false } = {}) {
   const comparison = displayedComparison(recorded, { revealHoldout });
+  const holdout = holdoutSummary ? holdoutPairSummary(recorded) : null;
   const dev = comparison.hiddenCases > 0;
   const contingency = contingencyOf(comparison);
   const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
@@ -413,6 +476,9 @@ export function renderComparisonConsole(recorded, { revealHoldout = false } = {}
     `  regressions: ${flipList(comparison.flips.regressions)}`,
     `  improvements: ${flipList(comparison.flips.improvements)}`,
   ];
+  if (holdout) {
+    lines.push(`  holdout in aggregate (--holdout-summary): ${holdoutSummaryText(holdout)}`);
+  }
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
   }
@@ -743,8 +809,9 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
 }
 
 // The comparison section of a displayed comparison (displayedComparison:
-// the paired dev cases while the holdout is hidden).
-function comparisonSection(comparison) {
+// the paired dev cases while the holdout is hidden), with the
+// --holdout-summary line when `holdoutSummary` (holdoutPairSummary) is given.
+function comparisonSection(comparison, holdoutSummary = null) {
   const dev = comparison.hiddenCases > 0 ? 'dev ' : '';
   const lines = ['## Comparison with the baseline', ''];
   const note = hiddenComparisonNote(comparison);
@@ -785,6 +852,10 @@ function comparisonSection(comparison) {
   );
   lines.push('');
   lines.push(comparisonLine(comparison));
+  if (holdoutSummary) {
+    lines.push('');
+    lines.push(`Holdout in aggregate (\`--holdout-summary\`): ${holdoutSummaryText(holdoutSummary)}.`);
+  }
   for (const [title, entries] of [
     ['Regressions (baseline majority pass → candidate fail)', comparison.flips.regressions],
     ['Improvements (baseline fail → candidate majority pass)', comparison.flips.improvements],
@@ -954,19 +1025,23 @@ function legacySection(report, shown = displayedSummaries(report)) {
 
 /**
  * Renders report.json as Markdown. Holdout results are shown in aggregate
- * only unless `revealHoldout` (see the holdout display policy above).
+ * only unless `revealHoldout` (see the holdout display policy above);
+ * `holdoutSummary` adds one line for the comparison's paired holdout cases in
+ * aggregate (holdoutPairSummary) to the comparison section, when there is
+ * one, with or without revealHoldout.
  */
-export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
+export function renderReportMarkdown(report, { revealHoldout = false, holdoutSummary = false } = {}) {
   const hidden = hiddenIds(report, { revealHoldout });
   const shown = displayedSummaries(report, hidden);
   const comparison = report.comparison ? displayedComparison(report.comparison, { revealHoldout }) : null;
+  const holdout = holdoutSummary && report.comparison ? holdoutPairSummary(report.comparison) : null;
   const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${report.model}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
   const sections = [
     title,
     headline(report, hidden, shown, comparison),
     attributionSection(report, shown),
     confusionSection(report, shown),
-    comparison ? comparisonSection(comparison) : '',
+    comparison ? comparisonSection(comparison, holdout) : '',
     behaviorSection(report, hidden, shown),
     casesSection(report, hidden),
     breakdownSection(report, hidden),
@@ -981,9 +1056,10 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
 /**
  * Short console headline (a few lines). Unless `revealHoldout`, the holdout
  * is its accuracy by split, as in report.md: every other figure, the
- * comparison's included, covers the dev cases.
+ * comparison's included, covers the dev cases; `holdoutSummary` adds the
+ * paired holdout cases in aggregate to the comparison, as in report.md.
  */
-export function renderHeadline(report, { revealHoldout = false } = {}) {
+export function renderHeadline(report, { revealHoldout = false, holdoutSummary = false } = {}) {
   const stats = report.stats;
   // As in report.md: with holdout cases hidden, attribution and behaviour
   // cover the listed (dev) cases, so nothing hidden can be subtracted out.
@@ -1030,7 +1106,7 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
     );
   }
   if (report.comparison) {
-    lines.push(renderComparisonConsole(report.comparison, { revealHoldout }));
+    lines.push(renderComparisonConsole(report.comparison, { revealHoldout, holdoutSummary }));
   }
   return lines.join('\n');
 }

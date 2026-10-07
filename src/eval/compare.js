@@ -109,7 +109,8 @@ function describeReport(report, label) {
  * the exact McNemar test, the accuracy change with its paired bootstrap CI
  * and the verdict. compareReports uses it over every paired case; report.md
  * and the console recompute it over the dev cases while the holdout is
- * hidden.
+ * hidden, and with --holdout-summary over the paired holdout cases
+ * (holdoutPairSummary in report-markdown.js).
  */
 export function summarizePairs(pairs, { alpha = 0.05, resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
   const paired = pairs || [];
