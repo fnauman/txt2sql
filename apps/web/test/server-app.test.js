@@ -720,6 +720,13 @@ test('infra failures never show raw driver messages (DB host:port) to callers th
     assert.equal(json.status, 503);
     assert.doesNotMatch(json.text, /10\.9\.8\.7|3306/);
   });
+  // A missing key names both variables that can supply it.
+  const noKey = createRuntimeFactory({ fail: () => true });
+  await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0' }), runtimeFactory: noKey.factory }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.status, 503);
+    assert.equal(json.json.error.message, 'OPENAI_API_KEY (or OPENROUTER_API_KEY with an openrouter.ai OPENAI_BASE_URL) is not configured on the server.');
+  });
 
   // Token holders and loopback/debug setups keep the actionable raw message.
   await withApp({ config: testConfig({ WEB_ALLOW_DEBUG: '0', WEB_API_TOKEN: TOKEN }), runtimeFactory: factory, runQuestion }, async (app) => {

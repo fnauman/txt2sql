@@ -327,7 +327,7 @@ function streamResultFrames(res, payload, includeDebug, cacheHit) {
 // was presented): say WHAT is wrong (by code) without the host:port, paths or
 // driver detail that raw messages carry. The raw message goes to the server log.
 const ANONYMOUS_INFRA_MESSAGES = {
-  OPENAI_NOT_CONFIGURED: 'OPENAI_API_KEY is not configured on the server.',
+  OPENAI_NOT_CONFIGURED: 'OPENAI_API_KEY (or OPENROUTER_API_KEY with an openrouter.ai OPENAI_BASE_URL) is not configured on the server.',
   DB_NOT_CONFIGURED: 'The database settings are incomplete on the server.',
   DB_SCHEMA_MISSING: 'The database is missing the expected demo tables.',
   ER_ACCESS_DENIED_ERROR: 'The database rejected the configured credentials.',
