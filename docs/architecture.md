@@ -88,6 +88,19 @@ the failure mode — when a business term is missing, the fix is a **visible,
 testable edit** in `metadata/semantic-layer.json` plus a retrieval test, not an
 opaque vector nudge. Embedding or hybrid retrieval is not implemented.
 
+### Why the prompt's knowledge layer is versioned
+
+Everything the prompt tells the model beyond the schema (business rules, the
+temporal resolver, the semantic layer, retrieval's tokens, the metric
+guardrail's arbitration) is one versioned layer, `HINTS_VERSION`
+(`src/hints-version.js`, default 2). A change to it can then be A/B'd as one
+variable against the committed baseline, with `HINTS_VERSION=1` reproducing
+the baseline's prompts byte for byte. Version 2's semantic-layer changes live
+in an overlay (`metadata/semantic-layer.hints-v2.json`, entries replacing the
+same-named entries of `metadata/semantic-layer.json`), so the base file stays
+the version-1 layer. The error analysis behind version 2, and its offline
+measurements, are in `docs/experiments/02-hints-v2.md`.
+
 Retrieval narrows rather than minimizes: "How many active customers do we
 have?" still retrieves 5 of the 13 tables. In the retrieved scope the point is
 that the prompt does not grow with the whole schema.

@@ -1,6 +1,7 @@
 // report.md: the human-readable view of report.json, readable in a terminal
 // and rendered on GitHub (plain Markdown tables, no HTML).
 
+import { describeHintsVersion, sameHintsVersion } from '../hints-version.js';
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
 import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
@@ -308,6 +309,9 @@ export function renderComparisonConsole(comparison, { revealHoldout = false } = 
   ];
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
+  }
+  if (!sameHintsVersion(comparison.baseline?.hintsVersion, comparison.candidate?.hintsVersion)) {
+    lines.push(`  hints version: ${describeHintsVersion(comparison.baseline?.hintsVersion)} → ${describeHintsVersion(comparison.candidate?.hintsVersion)}`);
   }
   const notes = [
     excluded.goldChanged.length ? `${excluded.goldChanged.length} gold changed` : null,
@@ -644,6 +648,7 @@ function comparisonSection(comparison, { revealHoldout = false } = {}) {
         ['Git', `${short(base.gitSha, 10)}${base.gitDirty ? ' (dirty)' : ''}`, `${short(cand.gitSha, 10)}${cand.gitDirty ? ' (dirty)' : ''}`],
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
         ['Schema scope', schemaScopeText(base.schemaScope), schemaScopeText(cand.schemaScope)],
+        ['Hints version', describeHintsVersion(base.hintsVersion), describeHintsVersion(cand.hintsVersion)],
         ['Strict accuracy (paired cases)', formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
         ['Majority passes (paired cases)', `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
       ]
@@ -800,7 +805,11 @@ function provenanceSection(report) {
     ['Git', provenance.git?.sha ? `${provenance.git.sha.slice(0, 12)}${provenance.git.dirty ? ' (dirty working tree)' : ''}` : 'n/a'],
     ['Prompt version', short(provenance.promptVersion)],
     ['Schema scope', schemaScopeText(provenance.product?.schemaScope)],
-    ['Semantic layer version', short(provenance.semanticLayerVersion)],
+    ['Hints version', describeHintsVersion(provenance.product?.hintsVersion)],
+    [
+      'Semantic layer version',
+      `${short(provenance.semanticLayerVersion)}${provenance.semanticLayerOverlay ? ` (with overlay ${provenance.semanticLayerOverlay.path} ${short(provenance.semanticLayerOverlay.sha256)})` : ''}`,
+    ],
     ['Schema version', short(provenance.schemaVersion)],
     ['Fixtures', (provenance.fixtures || []).map((fixture) => `${fixture.name} ${short(fixture.contentHash)}`).join(', ') || 'n/a'],
     ['Datasets', (provenance.datasets || []).map((dataset) => `${dataset.name} ${short(dataset.sha256)}`).join(', ') || 'n/a'],
@@ -818,6 +827,12 @@ function provenanceSection(report) {
     rows.push(['Rescored from', `${report.rescoredFrom.path} (sha256 ${short(report.rescoredFrom.sha256)}, git ${short(report.rescoredFrom.gitSha, 10)})`]);
     if ('schemaScope' in report.rescoredFrom && !sameSchemaScope(report.rescoredFrom.schemaScope, provenance.product?.schemaScope)) {
       rows.push(['Recorded schema scope', `${schemaScopeText(report.rescoredFrom.schemaScope)} (recorded SQL re-judged with today's scope)`]);
+    }
+    if ('hintsVersion' in report.rescoredFrom && !sameHintsVersion(report.rescoredFrom.hintsVersion, provenance.product?.hintsVersion)) {
+      rows.push([
+        'Recorded hints version',
+        `${describeHintsVersion(report.rescoredFrom.hintsVersion)} (recorded SQL re-judged with today's semantic plan; the prompts are not regenerated)`,
+      ]);
     }
   }
   return ['## Provenance', '', table(['', ''], rows)].join('\n');

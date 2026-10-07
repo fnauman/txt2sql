@@ -9,6 +9,7 @@ is the protocol on top of it.
 | # | Experiment | Variable | Status |
 |---|---|---|---|
 | 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | complete — adopted |
+| 02 | [Hints v2](02-hints-v2.md) | `HINTS_VERSION` (1 → 2: de-poisoned rules, temporal resolution, semantic layer) | complete — adopted |
 
 ## How an experiment is run
 

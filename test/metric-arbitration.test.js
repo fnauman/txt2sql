@@ -231,8 +231,16 @@ test('advisory metrics are data-driven through advisory_synonyms', () => {
 
 test('advisory metrics stay prompt hints and say they are weak matches', () => {
   const question = 'Which sparkling water products did we sell in March 2026?';
-  const prompt = buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question) });
-  assert.match(prompt.user, /Metric "quantity_sold" matched sell \(weak match: use this measure only if the question asks for it/);
+  const v1 = buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question, { hintsVersion: 1 }) });
+  assert.match(v1.user, /Metric "quantity_sold" matched sell \(weak match: use this measure only if the question asks for it/);
+  // Hints version 2 says which kind of weak match it is.
+  const v2 = buildOptimizedPrompt(schema, question, { semanticPlan: buildSemanticPlan(question) });
+  assert.match(v2.user, /Metric "quantity_sold" matched sell \(weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows\)/);
+  const countQuestion = 'How many debit postings were there in March 2026?';
+  assert.match(
+    buildOptimizedPrompt(schema, countQuestion).user,
+    /Metric "debit_amount" matched debit, debits \(weak match: the question counts or lists rows; use this measure only if it also asks for this amount\)/
+  );
 });
 
 test('an advisory metric mismatch is a guardrail warning, not a rejection', () => {

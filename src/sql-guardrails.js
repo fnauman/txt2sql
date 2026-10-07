@@ -1118,6 +1118,481 @@ function columnMentioned(sqlText, qualifiedColumn) {
   return new RegExp(`\\b${lowerColumn}\\b`).test(sqlText) || sqlText.includes(lowerQualified);
 }
 
+// Wrappers an operand of a column difference may have: a NULL default
+// (COALESCE(col, 0)) or a cast to a non-integer number type, which keep the
+// value; and a SUM, which distributes over the difference, or a ROUND to n
+// places, which both sides must share. (TRUNCATE never reaches this check:
+// the safety layer rejects the word.)
+const DIFFERENCE_NULL_DEFAULT_FUNCTIONS = new Set(['COALESCE', 'IFNULL', 'NVL']);
+const DIFFERENCE_AGGREGATE_FUNCTIONS = new Set(['SUM']);
+const DIFFERENCE_ROUNDING_FUNCTIONS = new Set(['ROUND']);
+const DIFFERENCE_CAST_FUNCTIONS = new Set(['CAST', 'CONVERT']);
+const DIFFERENCE_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED', 'DOUBLE', 'FLOAT', 'REAL']);
+// Operators binding tighter than binary minus: next to an operand they take
+// it away from the difference ("a - b * 2", "2 * a - b").
+const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
+const DIFFERENCE_TIGHTER_KEYWORDS = new Set(['DIV', 'MOD']);
+
+function matchingParens(tokens) {
+  const closeOf = new Map();
+  const openOf = new Map();
+  const stack = [];
+  tokens.forEach((token, index) => {
+    if (isPunctToken(token, '(')) {
+      stack.push(index);
+    } else if (isPunctToken(token, ')') && stack.length > 0) {
+      const open = stack.pop();
+      closeOf.set(open, index);
+      openOf.set(index, open);
+    }
+  });
+  return { closeOf, openOf };
+}
+
+function isPlainIdentifierToken(token) {
+  if (token?.type === 'quoted_identifier') {
+    return true;
+  }
+  return token?.type === 'word' && !SQL_KEYWORDS.has(token.upper) && !KNOWN_SQL_FUNCTIONS.has(token.upper) && !OPERATOR_WORDS.has(token.upper);
+}
+
+// The top-level comma-separated ranges [start, end] of tokens[start..end].
+function splitTopLevelArguments(tokens, start, end, parens) {
+  const ranges = [];
+  let from = start;
+  for (let index = start; index <= end; index += 1) {
+    if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+      index = parens.closeOf.get(index);
+    } else if (isPunctToken(tokens[index], ',')) {
+      ranges.push([from, index - 1]);
+      from = index + 1;
+    }
+  }
+  ranges.push([from, end]);
+  return ranges;
+}
+
+// Whether tokens[start..end] is an integer literal, optionally signed.
+function isIntegerLiteral(tokens, start, end) {
+  const valueStart = isOperatorToken(tokens[start], '-', '+') ? start + 1 : start;
+  return valueStart === end && tokens[end]?.type === 'number' && /^\d+$/.test(tokens[end].value);
+}
+
+// Whether tokens[start..end] names a non-integer number type ("DECIMAL",
+// "DECIMAL(12,2)", "DOUBLE").
+function isValueKeepingCastType(tokens, start, end, parens) {
+  const typeName = tokens[start];
+  if (typeName?.type !== 'word' || !DIFFERENCE_CAST_TYPES.has(typeName.upper)) {
+    return false;
+  }
+  return start === end || (isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end);
+}
+
+/**
+ * The column tokens[start..end] reads as a whole, or null: a column reference
+ * (`col`, `t.col`, `db.t.col`, quoted or not), in grouping parentheses, in a
+ * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast to a non-integer number
+ * type (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
+ * Returns { column (lower-case name), wrappers (the SUM and ROUND wrappers,
+ * outermost first, e.g. ['ROUND(2)', 'SUM']) }.
+ */
+function columnOperandOf(tokens, start, end, parens) {
+  if (start > end || start < 0) {
+    return null;
+  }
+  if (isPunctToken(tokens[end], ')') && parens.openOf.get(end) !== undefined) {
+    const open = parens.openOf.get(end);
+    if (open === start) {
+      return columnOperandOf(tokens, start + 1, end - 1, parens);
+    }
+    if (open !== start + 1 || tokens[start]?.type !== 'word') {
+      return null;
+    }
+    const functionName = tokens[start].upper;
+    const args = splitTopLevelArguments(tokens, open + 1, end - 1, parens);
+    if (DIFFERENCE_AGGREGATE_FUNCTIONS.has(functionName)) {
+      const inner = args.length === 1 ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+      return inner ? { ...inner, wrappers: [functionName, ...inner.wrappers] } : null;
+    }
+    if (DIFFERENCE_ROUNDING_FUNCTIONS.has(functionName)) {
+      const places = args.length === 2 && isIntegerLiteral(tokens, args[1][0], args[1][1]) ? Number(tokens[args[1][1]].value) * (isOperatorToken(tokens[args[1][0]], '-') ? -1 : 1) : null;
+      if (places === null && args.length !== 1) {
+        return null;
+      }
+      const inner = columnOperandOf(tokens, args[0][0], args[0][1], parens);
+      return inner ? { ...inner, wrappers: [`${functionName}(${places ?? 0})`, ...inner.wrappers] } : null;
+    }
+    if (DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
+      if (functionName === 'CONVERT') {
+        return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+      }
+      if (args.length !== 1) {
+        return null;
+      }
+      // CAST(<operand> AS <type>): the last top-level AS splits them.
+      let asIndex = -1;
+      for (let index = args[0][0]; index <= args[0][1]; index += 1) {
+        if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+          index = parens.closeOf.get(index);
+        } else if (isKeywordToken(tokens[index], 'AS')) {
+          asIndex = index;
+        }
+      }
+      return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? columnOperandOf(tokens, args[0][0], asIndex - 1, parens) : null;
+    }
+    if (DIFFERENCE_NULL_DEFAULT_FUNCTIONS.has(functionName)) {
+      const defaultsAreNumbers = args.slice(1).every(([from, to]) => {
+        const valueStart = isOperatorToken(tokens[from], '-', '+') ? from + 1 : from;
+        return valueStart === to && tokens[to]?.type === 'number';
+      });
+      return args.length >= 2 && defaultsAreNumbers ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
+    }
+    return null;
+  }
+  // A column reference: identifier ('.' identifier){0,2}.
+  const parts = [];
+  for (let index = start; index <= end; index += 1) {
+    const expectIdentifier = (index - start) % 2 === 0;
+    if (expectIdentifier ? !isPlainIdentifierToken(tokens[index]) : !isPunctToken(tokens[index], '.')) {
+      return null;
+    }
+    if (expectIdentifier) {
+      parts.push(identifierTokenName(tokens[index]));
+    }
+  }
+  if ((end - start) % 2 !== 0 || parts.length === 0 || parts.length > 3) {
+    return null;
+  }
+  return { column: String(parts[parts.length - 1]).toLowerCase(), wrappers: [] };
+}
+
+// The start index of the operand that ends at tokens[end]: a parenthesized
+// group with its function name, or a dotted column reference.
+function operandStartBefore(tokens, end, parens) {
+  if (isPunctToken(tokens[end], ')')) {
+    const open = parens.openOf.get(end);
+    if (open === undefined) {
+      return -1;
+    }
+    // A word before the group is its function name ("SUM(", "ABS("), unless
+    // it is a keyword that only precedes a grouped expression ("SELECT (").
+    const before = tokens[open - 1];
+    const isGroupingKeyword = before?.type === 'word' && SQL_KEYWORDS.has(before.upper) && !KNOWN_SQL_FUNCTIONS.has(before.upper);
+    return before?.type === 'word' && !isGroupingKeyword ? open - 1 : open;
+  }
+  let start = end;
+  while (isPunctToken(tokens[start - 1], '.') && tokens[start - 2] && (tokens[start - 2].type === 'word' || tokens[start - 2].type === 'quoted_identifier')) {
+    start -= 2;
+  }
+  return start;
+}
+
+// The end index of the operand that starts at tokens[start].
+function operandEndAfter(tokens, start, parens) {
+  if (isPunctToken(tokens[start], '(')) {
+    return parens.closeOf.get(start) ?? -1;
+  }
+  if (tokens[start]?.type === 'word' && isPunctToken(tokens[start + 1], '(')) {
+    return parens.closeOf.get(start + 1) ?? -1;
+  }
+  let end = start;
+  while (isPunctToken(tokens[end + 1], '.') && tokens[end + 2] && (tokens[end + 2].type === 'word' || tokens[end + 2].type === 'quoted_identifier')) {
+    end += 2;
+  }
+  return end;
+}
+
+function bindsTighterThanMinus(token) {
+  return (token?.type === 'operator' && DIFFERENCE_TIGHTER_OPERATORS.has(token.value)) || (token?.type === 'word' && DIFFERENCE_TIGHTER_KEYWORDS.has(token.upper));
+}
+
+// A minus before the minuend subtracts it too ("x - a - b" is x - (a + b);
+// "-a - b" negates it).
+function negatesMinuend(token) {
+  return token?.type === 'operator' && token.value === '-';
+}
+
+// Comparison and logical operators and keywords: a difference that is an
+// operand of one is a condition ("NetPayableAmount - PaidAmount > 0"), not a
+// computed value.
+const PREDICATE_OPERATORS = new Set(['=', '<', '>', '<=', '>=', '<>', '!=', '<=>', '!', '&&', '||']);
+const PREDICATE_KEYWORDS = new Set(['AND', 'OR', 'XOR', 'NOT', 'IS', 'IN', 'BETWEEN', 'LIKE', 'RLIKE', 'REGEXP', 'SOUNDS', 'EXISTS']);
+// Clauses (read backwards from an expression) whose expressions filter, join,
+// group or order rows, or select a CASE branch.
+const CONDITION_CLAUSE_KEYWORDS = new Set(['WHERE', 'HAVING', 'ON', 'USING', 'WHEN', 'BY', 'LIMIT', 'OFFSET', 'CASE']);
+// Keywords that end an expression when read forwards.
+const EXPRESSION_BOUNDARY_KEYWORDS = new Set([
+  'AS', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'WHEN', 'THEN', 'ELSE', 'END', 'UNION', 'INTERSECT',
+  'EXCEPT', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'CROSS', 'STRAIGHT_JOIN', 'NATURAL', 'ON', 'USING', 'OVER', 'WINDOW', 'ASC', 'DESC', 'INTO', 'FOR', 'LOCK',
+]);
+
+const CASE_KEYWORD = new Set(['CASE']);
+const END_KEYWORD = new Set(['END']);
+
+function isBareKeyword(token, words) {
+  return token?.type === 'word' && !token.afterDot && words.has(token.upper);
+}
+
+// Whether tokens[index] names a function called with the '(' after it
+// ("SUM(", "IF(", a user function), not a keyword before a group ("IN (",
+// "EXISTS (", "FROM (", "AS (", "AND (").
+function isFunctionCallName(tokens, index) {
+  const token = tokens[index];
+  if (token?.type !== 'word' || token.afterDot || !isPunctToken(tokens[index + 1], '(')) {
+    return false;
+  }
+  const word = token.upper;
+  return (
+    (KNOWN_SQL_FUNCTIONS.has(word) || !SQL_KEYWORDS.has(word)) &&
+    !PREDICATE_KEYWORDS.has(word) &&
+    !CONDITION_CLAUSE_KEYWORDS.has(word) &&
+    !OPERATOR_WORDS.has(word)
+  );
+}
+
+// The CASE that the END/THEN/ELSE at tokens[index] belongs to (same
+// parenthesis level), or -1.
+function matchingCaseBefore(tokens, index, parens) {
+  let depth = 0;
+  for (let at = index - 1; at >= 0; at -= 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, ')')) {
+      const open = parens.openOf.get(at);
+      if (open === undefined) {
+        return -1;
+      }
+      at = open;
+    } else if (isPunctToken(token, '(')) {
+      return -1;
+    } else if (isBareKeyword(token, END_KEYWORD)) {
+      depth += 1;
+    } else if (isBareKeyword(token, CASE_KEYWORD)) {
+      if (depth === 0) {
+        return at;
+      }
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+// The END closing the CASE expression that tokens[index] (a CASE, THEN or
+// ELSE) is part of (same parenthesis level), or -1.
+function matchingEndAfter(tokens, index, parens) {
+  let depth = 0;
+  for (let at = index + 1; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(')) {
+      const close = parens.closeOf.get(at);
+      if (close === undefined) {
+        return -1;
+      }
+      at = close;
+    } else if (isPunctToken(token, ')')) {
+      return -1;
+    } else if (isBareKeyword(token, CASE_KEYWORD)) {
+      depth += 1;
+    } else if (isBareKeyword(token, END_KEYWORD)) {
+      if (depth === 0) {
+        return at;
+      }
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+// Whether the expression ending at tokens[end] continues into a comparison or
+// logical operator before its boundary (a comma, a closing parenthesis or a
+// clause keyword).
+function continuesIntoPredicate(tokens, end, parens) {
+  for (let at = end + 1; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(')) {
+      const close = parens.closeOf.get(at);
+      if (close === undefined) {
+        return false;
+      }
+      at = close;
+      continue;
+    }
+    if (isPunctToken(token, ')') || isPunctToken(token, ',') || isPunctToken(token, ';')) {
+      return false;
+    }
+    if (token.type === 'operator' && PREDICATE_OPERATORS.has(token.value)) {
+      return true;
+    }
+    if (token.type !== 'word' || token.afterDot || isFunctionCallName(tokens, at)) {
+      continue;
+    }
+    if (token.upper === 'CASE') {
+      const caseEnd = matchingEndAfter(tokens, at, parens);
+      if (caseEnd < 0) {
+        return false;
+      }
+      at = caseEnd;
+    } else if (PREDICATE_KEYWORDS.has(token.upper)) {
+      return true;
+    } else if (EXPRESSION_BOUNDARY_KEYWORDS.has(token.upper)) {
+      return false;
+    }
+  }
+  return false;
+}
+
+// The unmatched '(' enclosing tokens[index], or -1 at the top level.
+function enclosingOpenParen(tokens, index, parens) {
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (isPunctToken(tokens[at], ')')) {
+      const open = parens.openOf.get(at);
+      if (open === undefined) {
+        return -1;
+      }
+      at = open;
+    } else if (isPunctToken(tokens[at], '(')) {
+      return at;
+    }
+  }
+  return -1;
+}
+
+// The operand a parenthesized group at tokens[open] forms: with its function
+// name when a function word precedes it.
+function groupOperandStart(tokens, open) {
+  return isFunctionCallName(tokens, open - 1) ? open - 1 : open;
+}
+
+/**
+ * Whether the expression tokens[start..end] is a computed value: it reaches a
+ * SELECT list (of the query, a derived table, a CTE or a scalar subquery
+ * there) through function arguments, arithmetic and CASE results, without
+ * being an operand of a comparison or logical operator or sitting in a WHERE,
+ * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as
+ * "AND NetPayableAmount - PaidAmount > 0" computes no value.
+ */
+function expressionIsComputedValue(tokens, start, end, parens) {
+  for (let guard = 0; guard <= tokens.length; guard += 1) {
+    if (continuesIntoPredicate(tokens, end, parens)) {
+      return false;
+    }
+    let sameExpression = true;
+    let next = null;
+    for (let at = start - 1; at >= 0 && !next; at -= 1) {
+      const token = tokens[at];
+      if (isPunctToken(token, ')')) {
+        const open = parens.openOf.get(at);
+        if (open === undefined) {
+          return false;
+        }
+        at = open;
+      } else if (isPunctToken(token, '(')) {
+        const close = parens.closeOf.get(at);
+        if (close === undefined) {
+          return false;
+        }
+        next = [groupOperandStart(tokens, at), close];
+      } else if (isPunctToken(token, ',')) {
+        sameExpression = false;
+      } else if (isPunctToken(token, ';')) {
+        return false;
+      } else if (token.type === 'operator' && PREDICATE_OPERATORS.has(token.value)) {
+        if (sameExpression) {
+          return false;
+        }
+      } else if (token.type === 'word' && !token.afterDot && !isFunctionCallName(tokens, at)) {
+        const word = token.upper;
+        if (word === 'END') {
+          at = matchingCaseBefore(tokens, at, parens);
+          if (at < 0) {
+            return false;
+          }
+        } else if (word === 'THEN' || word === 'ELSE') {
+          const caseStart = matchingCaseBefore(tokens, at, parens);
+          const caseEnd = matchingEndAfter(tokens, at, parens);
+          if (caseStart < 0 || caseEnd < 0) {
+            return false;
+          }
+          next = [caseStart, caseEnd];
+        } else if (word === 'SELECT') {
+          // A select-list item: of the whole query, or of a subquery whose
+          // own place decides.
+          const open = enclosingOpenParen(tokens, at, parens);
+          if (open < 0) {
+            return true;
+          }
+          const close = parens.closeOf.get(open);
+          if (close === undefined) {
+            return false;
+          }
+          next = [groupOperandStart(tokens, open), close];
+        } else if (word === 'FROM' || word === 'JOIN' || word === 'AS') {
+          // A derived table ("FROM (SELECT ...)") or a CTE body ("AS (...)").
+          return true;
+        } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
+          return false;
+        } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {
+          return false;
+        }
+      }
+    }
+    if (!next) {
+      return false;
+    }
+    [start, end] = next;
+  }
+  return false;
+}
+
+/**
+ * Whether the SQL computes `minuend - subtrahend` (qualified column names,
+ * matched by column name like columnMentioned): a binary minus whose left
+ * operand is exactly the minuend column and whose right operand is exactly
+ * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
+ * defaults, non-integer casts, SUM and ROUND(x, n) (both sides
+ * summed and rounded alike), and neither operand bound to a
+ * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
+ * difference must be a computed value (expressionIsComputedValue): in a
+ * SELECT list, a derived table's included, not in a filter, join, grouping,
+ * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count). A
+ * difference of aliases of the two columns ("np - pa") does not count.
+ */
+function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
+  const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();
+  const wantLeft = columnName(minuend);
+  const wantRight = columnName(subtrahend);
+  if (!wantLeft || !wantRight) {
+    return false;
+  }
+
+  for (let index = 1; index < tokens.length - 1; index += 1) {
+    if (!isOperatorToken(tokens[index], '-')) {
+      continue;
+    }
+    const leftEnd = index - 1;
+    const leftStart = operandStartBefore(tokens, leftEnd, parens);
+    const rightStart = index + 1;
+    const rightEnd = operandEndAfter(tokens, rightStart, parens);
+    if (leftStart < 0 || rightEnd < 0) {
+      continue;
+    }
+    const left = columnOperandOf(tokens, leftStart, leftEnd, parens);
+    const right = columnOperandOf(tokens, rightStart, rightEnd, parens);
+    if (
+      left?.column === wantLeft &&
+      right?.column === wantRight &&
+      left.wrappers.join(' ') === right.wrappers.join(' ') &&
+      !bindsTighterThanMinus(tokens[leftStart - 1]) &&
+      !negatesMinuend(tokens[leftStart - 1]) &&
+      !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
+      !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER') &&
+      expressionIsComputedValue(tokens, leftStart, rightEnd, parens)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function metricEnforcement(metric) {
   // Plans built before metric arbitration existed (or by hand in tests) carry no
   // enforcement flag; they keep the original, enforced behavior.
@@ -1142,6 +1617,7 @@ function validateMetricGuardrails(sql, promptContext = {}) {
   const metrics = promptContext.semanticPlan?.metrics || [];
   const hasLineMetric = metrics.some((metric) => metric.name === 'line_net_sales');
   const sqlText = normalizeSqlForColumnSearch(sql);
+  let sqlTokens = null;
   const checkedMetrics = [];
   const warnings = [];
 
@@ -1157,13 +1633,25 @@ function validateMetricGuardrails(sql, promptContext = {}) {
     if (preferredColumns.length === 0) {
       continue;
     }
+    // A difference [minuend, subtrahend] the SQL computes also satisfies the
+    // metric ("NetPayableAmount - PaidAmount" is the open balance). Both
+    // columns merely appearing does not: "SUM(NetPayableAmount)" next to a
+    // PaidAmount filter, or "NetPayableAmount + PaidAmount", is not that
+    // difference.
+    const alternativeDifferences = Array.isArray(metric.alternativeDifferences)
+      ? metric.alternativeDifferences.filter((pair) => Array.isArray(pair) && pair.length === 2)
+      : [];
 
     checkedMetrics.push({
       name: metric.name,
       preferredColumns,
       enforcement: metricEnforcement(metric),
       enforcementReason: metric.enforcementReason || null,
-      satisfied: preferredColumns.some((column) => columnMentioned(sqlText, column)),
+      satisfied:
+        preferredColumns.some((column) => columnMentioned(sqlText, column)) ||
+        (alternativeDifferences.length > 0 &&
+          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference((sqlTokens ??= significantTokensOf(sql)), minuend, subtrahend))),
+      ...(alternativeDifferences.length > 0 ? { alternativeDifferences } : {}),
     });
   }
 
@@ -1171,7 +1659,9 @@ function validateMetricGuardrails(sql, promptContext = {}) {
   if (metric) {
     throw guardrailError(
       'METRIC_COLUMN',
-      `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}).`,
+      `SQL does not use a preferred column for semantic metric "${metric.name}" (${metric.preferredColumns.join(', ')}${
+        metric.alternativeDifferences ? metric.alternativeDifferences.map(([minuend, subtrahend]) => `; or ${minuend} - ${subtrahend}`).join('') : ''
+      }).`,
       { metric: metric.name, preferredColumns: metric.preferredColumns }
     );
   }

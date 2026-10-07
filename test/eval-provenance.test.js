@@ -5,13 +5,14 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { BUSINESS_RULES, DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
+import { BUSINESS_RULES, BUSINESS_RULES_V2, DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import {
   collectProvenance,
   computePromptVersion,
   describeLlmEndpoint,
   repoRelative,
   resolveGitState,
+  SEMANTIC_LAYER_OVERLAY_PATH,
   SEMANTIC_LAYER_PATH,
   stableStringify,
   traceMetadataFromProvenance,
@@ -30,7 +31,15 @@ test('promptVersion hashes the real system prompt, business rules, few-shots and
   assert.equal(computePromptVersion(schema), version, 'stable across calls');
   // Built from the product's builder: passing the same parts explicitly gives the same hash.
   const system = buildOptimizedPrompt(schema, 'anything at all').system;
-  assert.equal(computePromptVersion(schema, { systemPrompt: system, businessRules: BUSINESS_RULES, fewShotExamples: FEW_SHOT_EXAMPLES }), version);
+  assert.equal(computePromptVersion(schema, { systemPrompt: system, businessRules: BUSINESS_RULES_V2, fewShotExamples: FEW_SHOT_EXAMPLES }), version);
+  // The hints version decides the system prompt and the business rules.
+  const v1System = buildOptimizedPrompt(schema, 'anything at all', { hintsVersion: 1 }).system;
+  assert.equal(
+    computePromptVersion(schema, { hintsVersion: 1 }),
+    computePromptVersion(schema, { systemPrompt: v1System, businessRules: BUSINESS_RULES, fewShotExamples: FEW_SHOT_EXAMPLES })
+  );
+  assert.notEqual(computePromptVersion(schema, { hintsVersion: 1 }), version);
+  assert.equal(computePromptVersion(schema, { hintsVersion: 2 }), version, 'version 2 is the default');
   // Any one input changing changes the version.
   assert.notEqual(computePromptVersion(schema, { fewShotExamples: FEW_SHOT_EXAMPLES.slice(1) }), version);
   assert.notEqual(computePromptVersion(schema, { businessRules: [...BUSINESS_RULES, 'New rule.'] }), version);
@@ -79,7 +88,15 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     runner: { repeat: 3, concurrency: 4 },
     gitState: { sha: 'f00', dirty: true, changedFiles: 1 },
   });
-  assert.equal(provenance.semanticLayerVersion, sha256(await fs.readFile(SEMANTIC_LAYER_PATH)));
+  // Hints version 2 (the default) reads the base layer and its overlay.
+  const baseHash = sha256(await fs.readFile(SEMANTIC_LAYER_PATH));
+  const overlayHash = sha256(await fs.readFile(SEMANTIC_LAYER_OVERLAY_PATH));
+  assert.deepEqual(provenance.semanticLayerOverlay, { path: 'metadata/semantic-layer.hints-v2.json', sha256: overlayHash });
+  assert.equal(provenance.semanticLayerVersion, sha256(stableStringify({ base: baseHash, overlay: overlayHash })));
+  // Version 1 keeps the plain file hash of the reports before HINTS_VERSION.
+  const v1 = await collectProvenance({ schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {}, hintsVersion: 1 });
+  assert.equal(v1.semanticLayerVersion, baseHash);
+  assert.equal(v1.semanticLayerOverlay, null);
   assert.deepEqual(provenance.datasets, [{ name: 'core-public', path: 'datasets/core-public.json', sha256: sha256(await fs.readFile(datasetPath)) }]);
   assert.deepEqual(provenance.controls, [{ path: 'datasets/controls/core-public.json', sha256: sha256(await fs.readFile(controlsPath)) }]);
   assert.equal(provenance.schemaPath, 'generated/schema.json');
@@ -101,6 +118,7 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     schemaScopeEffective: 'full',
     schemaFullEstimatedTokens: provenance.product.schemaScope.fullSchemaEstimatedTokens,
     schemaWidenOnDemand: true,
+    hintsVersion: 2,
   });
 });
 
@@ -108,6 +126,11 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
 // retrieved scope without widen-on-demand), recorded by the first committed
 // baseline (eval: commit the gpt-4o-mini baseline, 1aa30a3).
 const PRE_SCOPE_PROMPT_VERSION = '0c314451d4b7a5f347f574d4cebc60e20b0f92a592a71b1dd6d4ca35fcb1f10f';
+
+// Prompt version of the full-scope, hints-version-1 prompt: the version-1
+// baseline on the 404-case suite (eval: re-make the gpt-4o-mini baseline on
+// the audited 404-case suite).
+const FULL_SCOPE_V1_PROMPT_VERSION = 'b264e57d8e15f50c44f0d6da0cd67983d49767197dbfbe5f6509142c3fee6f39';
 
 test('provenance records the product configuration (schema scope) and the prompt version it implies', async () => {
   const base = { schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} };
@@ -123,20 +146,32 @@ test('provenance records the product configuration (schema scope) and the prompt
   assert.ok(byDefault.product.schemaScope.fullSchemaEstimatedTokens > 1000);
   assert.equal(byDefault.promptVersion, computePromptVersion(schema, { schemaScope: 'full' }));
 
-  const retrieved = await collectProvenance({ ...base, schemaScope: { schemaScope: 'retrieved', widenOnDemand: false } });
+  assert.equal(byDefault.product.hintsVersion, 2);
+  assert.equal(byDefault.promptVersion, computePromptVersion(schema, { schemaScope: 'full', hintsVersion: 2 }));
+
+  const retrieved = await collectProvenance({ ...base, schemaScope: { schemaScope: 'retrieved', widenOnDemand: false }, hintsVersion: 1 });
   assert.equal(retrieved.product.schemaScope.effective, 'retrieved');
   assert.equal(retrieved.product.schemaScope.widenOnDemand, false);
-  // The retrieved scope's prompt is the pre-scope prompt, byte for byte: the
-  // prompt version of the first committed baseline (before SCHEMA_SCOPE).
-  // The full scope's system prompt differs.
+  assert.equal(retrieved.product.hintsVersion, 1);
+  // The retrieved scope's version-1 prompt is the pre-scope prompt, byte for
+  // byte: the prompt version of the first committed baseline (before
+  // SCHEMA_SCOPE). The full scope's system prompt differs.
   assert.equal(retrieved.promptVersion, PRE_SCOPE_PROMPT_VERSION);
   assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
-  // The committed baseline was produced with the default configuration.
+  // Hints version 1 with the full scope is byte for byte the prompt of the
+  // version-1 baseline on the 404-case suite (before HINTS_VERSION existed).
+  const fullV1 = await collectProvenance({ ...base, hintsVersion: 1 });
+  assert.equal(fullV1.promptVersion, FULL_SCOPE_V1_PROMPT_VERSION);
+  // The committed baseline was produced with the defaults: full scope and
+  // hints version 2 (the Experiment 2 live run).
   const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
   assert.equal(baseline.provenance.promptVersion, byDefault.promptVersion);
   assert.equal(baseline.provenance.product.schemaScope.requested, 'auto');
   assert.equal(baseline.provenance.product.schemaScope.effective, 'full');
+  assert.equal(baseline.provenance.product.hintsVersion, 2);
   assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
+  assert.equal(traceMetadataFromProvenance(retrieved).hintsVersion, 1);
+  assert.equal(traceMetadataFromProvenance(baseline.provenance).hintsVersion, 2);
 });
 
 test('trace metadata keeps one type per key: the run-level scope never collides with the prompt events\' schemaScope object', async () => {

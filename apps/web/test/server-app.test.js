@@ -238,6 +238,27 @@ test('the schema scope from the web config reaches the question runner (never pr
   assert.deepEqual({ ...calls[0].schemaScope }, { schemaScope: 'retrieved', fullSchemaMaxTokens: 8000, widenOnDemand: false });
 });
 
+test('the hints version from the web config reaches the question runner (never process.env)', async () => {
+  const { factory } = createRuntimeFactory();
+  const { runQuestion, calls } = recordingRunner();
+  const saved = process.env.HINTS_VERSION;
+  process.env.HINTS_VERSION = '2';
+  try {
+    await withApp({ config: testConfig({ HINTS_VERSION: '1' }), runtimeFactory: factory, runQuestion }, async (app) => {
+      const response = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+      assert.equal(response.status, 200);
+    });
+  } finally {
+    if (saved === undefined) {
+      delete process.env.HINTS_VERSION;
+    } else {
+      process.env.HINTS_VERSION = saved;
+    }
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].hintsVersion, 1);
+});
+
 test('responses carry the allow-list and retrieval\'s ranking separately (JSON and the SSE sql frame)', async () => {
   const { factory } = createRuntimeFactory();
   const all = ['Customer', 'Product', 'SalesDocument'];

@@ -180,6 +180,7 @@ Common variables:
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
 - `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved` on its own reproduces the product loop of the previous (retrieved-scope) baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baseline ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
+- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions of the committed baseline byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -429,37 +430,35 @@ contains:
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
-whole 404-case suite, 3 repetitions, full-schema prompting via the default
-`SCHEMA_SCOPE=auto`, measured on 2026-10-06):
+whole 404-case suite, 3 repetitions, full-schema prompting and hints v2 — the
+defaults `SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-06):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, 205 intents) | **62.2%** (95% CI 57.5%–66.8%) |
-| By split | dev **74.7%** (245 cases) · fresh holdout **41.3%** (147 cases) |
-| Failures by cause (repetitions, dev cases) | model 186 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
-| Guardrails over every dev attempt | precision 100%, recall 25.7%, false-rejection rate 0% |
+| Strict accuracy (392 answer cases, 205 intents) | **73.6%** (95% CI 69.2%–77.9%) |
+| By split | dev **88.3%** (245 cases) · fresh holdout **49.2%** (147 cases) |
+| Failures by cause (repetitions, dev cases) | model 86 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
+| Guardrails over every dev attempt | precision 100%, recall 30.4%, false-rejection rate 0% |
 | Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
-| Cost and latency | $0.54 for the whole run · dev cases: $0.00062 per correct answer, p50 2.5 s, p95 5.3 s, 91.0% of prompt tokens cached |
+| Cost and latency | $0.63 for the whole run · dev cases: $0.00060 per correct answer, p50 2.4 s, p95 4.4 s, 83.5% of prompt tokens cached |
 
-The fresh holdout is 77 new intents written blind (no model answers to them
-were seen while writing) and audited by two independent annotators before
-this run; reports show it in aggregate only. The 33-point gap between dev and
-holdout is the honest measure of how the product copes with new kinds of
-questions: the holdout leans on analytical shapes the dev set barely covers
-(shares and ratios, overdue and ageing balances, running totals,
-month-over-month change, weekday and value-band breakdowns) and on unfamiliar
-wording, so dev accuracy overstates what a new user's questions would get.
-With perfect SQL the suite's ceiling is 98.7% (5 cases are known validator
-rejections: the validator rejects their correct answers); every dev failure
-of this baseline is a model error, including the flagged dev case's, which
-did not end in the flagged rejection. (The failure causes, guardrail,
+How it got here, each step a paired experiment against the previous baseline:
+[Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting:
+68.8% → 72.8% on the earlier 255-case suite) and
+[Experiment 2](docs/experiments/02-hints-v2.md) (hints v2 — unambiguous
+business rules, safer date handling, a cleaned semantic layer: 62.2% → 73.6%
+on the 404-case suite, McNemar p < 0.001, and on the blind holdout alone
+41.3% → 49.2%, p = 0.035). The fresh holdout is 77 new intents written blind
+and audited by two independent annotators; reports show it in aggregate only.
+The dev number is in-sample (experiments are designed from dev failures); the
+holdout number is the honest estimate for new kinds of questions — shares and
+ratios, overdue and ageing balances, running totals, period-over-period
+change — and it is where the remaining work is. With perfect SQL the suite's
+ceiling is 99.0% (4 holdout cases are known validator rejections); every dev
+failure of this baseline is a model error. (The failure causes, guardrail,
 behaviour and per-question cost figures are what `npm run eval -- --offline`
-prints by default: it recomputes the attribution and covers the dev cases,
-the holdout only as its split accuracy. The attribution recorded inside
-`eval/baselines/gpt-4o-mini.json` predates the fix that limits the system
-bucket to the flagged rejection.) On the earlier 255-case suite,
-[Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting) moved strict accuracy from 68.8% to 72.8%. These are measurements
-of the product, not targets.
+prints by default: they cover the dev cases, the holdout only as its split
+accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
@@ -470,7 +469,7 @@ provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
 `--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole 404-case suite costs
-about 18 cents on gpt-4o-mini (the committed baseline: $0.54 for 3 repetitions). The dataset composition, the generator, how to add a
+about 21 cents on gpt-4o-mini (the committed baseline: $0.63 for 3 repetitions). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 

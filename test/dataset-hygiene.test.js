@@ -21,8 +21,13 @@ import {
   CONTROLS_PATH as HOLDOUT_CONTROLS_PATH,
   DATASET_NAME as HOLDOUT_DATASET,
   DATASET_PATH as HOLDOUT_DATASET_PATH,
+  FROZEN_HINTS_V2_VOCABULARY,
   HOLDOUT_INTENTS,
   holdoutCaseIdFor,
+  semanticLayerPhrases,
+  semanticLayerPhrasesIn,
+  vocabularyLayers,
+  vocabularyPhrases,
 } from '../scripts/build-holdout-dataset.mjs';
 import { CASE_SPLITS, isDatasetFileName, normalizeBenchmarkCase, topLevelLimitRowCount } from '../src/benchmark.js';
 import { DEFAULT_INCLUDED_TABLES, FEW_SHOT_EXAMPLES } from '../src/constants.js';
@@ -419,6 +424,11 @@ test('controls: every templated intent and every hard case with controls resolve
 test('known validator rejections are real and current; every other new gold and positive control passes the validator', async () => {
   const schema = filterSchema(await compileSchemaFromModelsDir(path.join(REPO_ROOT, 'models')), DEFAULT_INCLUDED_TABLES);
   const validate = createValidatorProbe({ schema });
+  // Every flag was measured with hints version 1's prompts (the A/B control
+  // arm). The dev flag (METRIC_COLUMN) is a gap of version 1 that version 2
+  // (the default) closes; the fresh holdout's flags are only checked to be
+  // real under version 1 and consistent under version 2.
+  const validateV1 = validate.forHintsVersion(1);
   const index = await loadControlsIndex();
   const flaggedBy = {};
   for (const name of ['templated-public', 'hard-cases-public', FRESH_HOLDOUT]) {
@@ -429,8 +439,20 @@ test('known validator rejections are real and current; every other new gold and 
       const known = testCase.known_validator_rejection;
       if (known) {
         flaggedBy[name] += 1;
-        assert.ok(rejections.some((rejection) => rejection?.code === known), `${testCase.id} is flagged ${known} but every gold variant passes`);
-        assert.ok(rejections.every((rejection) => !rejection || rejection.code === known), `${testCase.id}: ${rejections.map((rejection) => rejection?.code).join(', ')}`);
+        const v1Rejections = await Promise.all(variants.map((sql) => validateV1(testCase.question, sql)));
+        assert.ok(v1Rejections.some((rejection) => rejection?.code === known), `${testCase.id} is flagged ${known} but every gold variant passes under hints version 1`);
+        assert.ok(v1Rejections.every((rejection) => !rejection || rejection.code === known), `${testCase.id}: ${v1Rejections.map((rejection) => rejection?.code).join(', ')}`);
+        if (name === FRESH_HOLDOUT) {
+          // Under version 2 a holdout flag is either still current or closed
+          // and kept by version 1 (a verify-dataset note); which one is not
+          // pinned: nothing is tuned on the holdout.
+          assert.ok(
+            rejections.every((rejection) => !rejection || rejection.code === known),
+            `${testCase.id} under hints version 2: ${rejections.map((rejection) => rejection?.code).join(', ')}`
+          );
+        } else {
+          rejections.forEach((rejection, position) => assert.equal(rejection, null, `${name}/${testCase.id} variant ${position} under hints version 2: ${rejection?.code} ${rejection?.message}`));
+        }
       } else {
         rejections.forEach((rejection, position) => assert.equal(rejection, null, `${name}/${testCase.id} variant ${position}: ${rejection?.code} ${rejection?.message}`));
       }
@@ -487,6 +509,77 @@ test('fresh holdout: the builder rejects semantic-layer wording and the enforced
     } finally {
       HOLDOUT_INTENTS.splice(index, 1, original);
     }
+  }
+});
+
+test('fresh holdout: the wording rule covers the hints-v2 overlay vocabulary too (both HINTS_VERSION arms); the frozen exceptions are pinned', () => {
+  const overlay = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'metadata/semantic-layer.hints-v2.json'), 'utf8'));
+  const layers = vocabularyLayers(layer, overlay);
+  assert.equal(layers.length, 2);
+  const v1Phrases = semanticLayerPhrases(layer);
+  const v2Phrases = semanticLayerPhrases(layers[1]);
+  for (const phrase of ['average order value', 'order value', 'open amount', 'open balance', 'unpaid balance']) {
+    assert.ok(v2Phrases.includes(phrase), phrase);
+    assert.ok(!v1Phrases.includes(phrase), phrase);
+  }
+  // Version 1's vocabulary is checked too ("stopped selling" left the overlay, not the base layer).
+  assert.ok(v1Phrases.includes('stopped selling'));
+  assert.ok(!v2Phrases.includes('stopped selling'));
+
+  // The committed holdout: no version 1 vocabulary, and version 2's only in
+  // the frozen cases FROZEN_HINTS_V2_VOCABULARY lists, exactly.
+  const committed = JSON.parse(fs.readFileSync(HOLDOUT_DATASET_PATH, 'utf8'));
+  assert.deepEqual(buildHoldoutDataset({ previousCases: committed, layers }).problems, []);
+  const v2Only = v2Phrases.filter((phrase) => !v1Phrases.includes(phrase));
+  const found = Object.fromEntries(
+    freshCases.map((testCase) => [testCase.id, semanticLayerPhrasesIn(testCase.question, v2Only)]).filter(([, phrases]) => phrases.length > 0)
+  );
+  assert.deepEqual(found, { ...FROZEN_HINTS_V2_VOCABULARY });
+  // Without the exceptions those cases are refused; an exception that no
+  // longer matches is refused too.
+  const strict = buildHoldoutDataset({ previousCases: committed, layers, frozenExceptions: {} }).problems;
+  assert.equal(strict.length, Object.keys(FROZEN_HINTS_V2_VOCABULARY).length, strict.join('\n'));
+  assert.ok(strict.every((problem) => /hints-v2 vocabulary/.test(problem)));
+  const extra = buildHoldoutDataset({ previousCases: committed, layers, frozenExceptions: { ...FROZEN_HINTS_V2_VOCABULARY, ho2_missing_000000: ['open balance'] } }).problems;
+  assert.deepEqual(extra, ['ho2_missing_000000: listed in FROZEN_HINTS_V2_VOCABULARY but not a case: update FROZEN_HINTS_V2_VOCABULARY']);
+
+  // An overlay entry's name matches like a synonym, so the overlay's names
+  // are vocabulary too (npm run build-holdout-dataset checks vocabularyPhrases).
+  // Review finding: the first overlay named the open-balance metric
+  // outstanding_balance, which matched "outstanding balance", and a
+  // synonyms-only check missed it.
+  const phrases = vocabularyPhrases(layer, overlay);
+  for (const name of ['average order value', 'open balance']) {
+    assert.ok(phrases.includes(name), name);
+  }
+  assert.deepEqual(buildHoldoutDataset({ previousCases: committed, layers, phrases }).problems, []);
+  const renamed = { ...overlay, metrics: overlay.metrics.map((metric) => (metric.name === 'open_balance' ? { ...metric, name: 'outstanding_balance' } : metric)) };
+  assert.ok(vocabularyPhrases(layer, renamed).includes('outstanding balance'));
+  assert.ok(!semanticLayerPhrases(vocabularyLayers(layer, renamed)[1]).includes('outstanding balance'));
+  // The base layer's names are left out (the holdout was frozen against its
+  // synonyms only).
+  assert.ok(!phrases.includes('store location'));
+  assert.ok(semanticLayerPhrases(layer, { includeNames: true }).includes('store location'));
+
+  // A new holdout phrasing with version 2's vocabulary is refused under both
+  // arms' layers (and passes version 1's alone); one with an overlay entry's
+  // name only with the names checked.
+  const index = HOLDOUT_INTENTS.findIndex((intent) => intent.answer !== false);
+  const original = HOLDOUT_INTENTS[index];
+  const tamper = (question) => HOLDOUT_INTENTS.splice(index, 1, { ...original, phrasings: [...original.phrasings.slice(0, 1), question] });
+  const problemsOf = (options) => buildHoldoutDataset(options).problems.filter((problem) => problem.includes(original.intentId));
+  try {
+    tamper('What was the average order value per store?');
+    assert.deepEqual(problemsOf({ layer }), []);
+    const problems = problemsOf({ layers });
+    assert.ok(problems.some((problem) => /hints-v2 vocabulary: average order value/.test(problem)), problems.join('\n'));
+    tamper('Outstanding balance by customer at the end of March 2026.');
+    const renamedLayers = vocabularyLayers(layer, renamed);
+    assert.deepEqual(problemsOf({ layers: renamedLayers }), []);
+    const named = problemsOf({ layers: renamedLayers, phrases: vocabularyPhrases(layer, renamed) });
+    assert.ok(named.some((problem) => /hints-v2 vocabulary: outstanding balance/.test(problem)), named.join('\n'));
+  } finally {
+    HOLDOUT_INTENTS.splice(index, 1, original);
   }
 });
 

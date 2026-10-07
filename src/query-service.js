@@ -17,6 +17,7 @@ import {
   tablesToWidenFor,
   validateReadOnlySql,
 } from './pipeline.js';
+import { normalizeHintsVersion, resolveHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
@@ -298,13 +299,15 @@ export async function loadOptimizedQueryRuntime({
   connectionLimit = undefined,
   clientOptions = {},
   schemaScope = undefined,
+  hintsVersion = undefined,
 } = {}) {
   const model = process.env.MODEL_NAME || 'gpt-4o-mini';
   const effectiveConnectionLimit = connectionLimit ?? resolveDbConnectionLimit();
-  // SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS / SCHEMA_WIDEN_ON_DEMAND unless the
-  // caller (the web server's config) passes its own; a bad value fails here,
-  // before anything is opened.
+  // SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS / SCHEMA_WIDEN_ON_DEMAND and
+  // HINTS_VERSION unless the caller (the web server's config) passes its own;
+  // a bad value fails here, before anything is opened.
   const schemaScopeConfig = schemaScope === undefined ? resolveSchemaScopeConfig() : normalizeSchemaScopeConfig(schemaScope);
+  const resolvedHintsVersion = hintsVersion === undefined ? resolveHintsVersion() : normalizeHintsVersion(hintsVersion);
 
   // The OpenAI client is cheap and fails fast on missing/invalid settings, so it
   // is created first: a misconfigured server never compiles the schema or opens
@@ -332,6 +335,7 @@ export async function loadOptimizedQueryRuntime({
     schemaPath,
     tableCount: schema.tables.length,
     schemaScope: effectiveSchemaScope,
+    hintsVersion: resolvedHintsVersion,
   });
 
   const connectionTimer = createTimer();
@@ -353,6 +357,8 @@ export async function loadOptimizedQueryRuntime({
     // schema (requested / effective scope, full-schema token estimate).
     schemaScope: schemaScopeConfig,
     effectiveSchemaScope,
+    // The hints version to pass to runOptimizedQuestion (src/hints-version.js).
+    hintsVersion: resolvedHintsVersion,
     close() {
       closePromise ||= connection.end();
       return closePromise;
@@ -398,6 +404,7 @@ export async function runOptimizedQuestion({
   statementTimeoutMs = null,
   signal = null,
   schemaScope = undefined,
+  hintsVersion = undefined,
 } = {}) {
   const normalizedQuestion = String(question || '').trim();
   if (!normalizedQuestion) {
@@ -420,6 +427,8 @@ export async function runOptimizedQuestion({
   assertNonNegativeInteger('maxRetries', effectiveMaxRetries);
   // Like maxRetries: the caller's setting, else SCHEMA_SCOPE & co. from the env.
   const schemaScopeConfig = schemaScope === undefined ? resolveSchemaScopeConfig() : normalizeSchemaScopeConfig(schemaScope);
+  // Likewise HINTS_VERSION (src/hints-version.js).
+  const resolvedHintsVersion = hintsVersion === undefined ? resolveHintsVersion() : normalizeHintsVersion(hintsVersion);
   if (rowLimit != null) {
     assertNonNegativeInteger('rowLimit', rowLimit);
   }
@@ -447,7 +456,7 @@ export async function runOptimizedQuestion({
     });
   }
 
-  const semanticPlan = buildSemanticPlan(normalizedQuestion);
+  const semanticPlan = buildSemanticPlan(normalizedQuestion, { hintsVersion: resolvedHintsVersion });
   const masterDataTimer = createTimer();
   let masterDataCandidates = [];
 
@@ -502,7 +511,13 @@ export async function runOptimizedQuestion({
 
   const promptTimer = createTimer();
   const buildPrompt = (extraTables = []) =>
-    buildOptimizedPrompt(schema, normalizedQuestion, { masterDataCandidates, semanticPlan, schemaScope: schemaScopeConfig, extraTables });
+    buildOptimizedPrompt(schema, normalizedQuestion, {
+      masterDataCandidates,
+      semanticPlan,
+      schemaScope: schemaScopeConfig,
+      extraTables,
+      hintsVersion: resolvedHintsVersion,
+    });
   let prompt = buildPrompt();
   await trace.emit('prompt.built', {
     ...questionContext,

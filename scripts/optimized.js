@@ -14,6 +14,7 @@ import {
   resolveEffectiveSchemaScope,
   resolveStatementTimeoutMs,
 } from '../src/pipeline.js';
+import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
@@ -27,7 +28,8 @@ const USAGE = `Usage: npm run optimized -- [question] [--refresh-schema] [--trac
 ${ENV_USAGE}
 Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).
 Schema scope: SCHEMA_SCOPE=auto|full|retrieved (default auto), SCHEMA_FULL_MAX_TOKENS (default 8000),
-SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).`;
+SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).
+Hints version: HINTS_VERSION=1|2 (default 2; 1 is the prompt before hints v2).`;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -41,6 +43,7 @@ async function main() {
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const maxRetries = resolveMaxRetries();
   const schemaScope = resolveSchemaScopeConfig();
+  const hintsVersion = resolveHintsVersion();
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const traceOptions = resolveTraceOptions(argv);
   const trace = await createTraceLogger({
@@ -72,6 +75,7 @@ async function main() {
     statementTimeoutMs,
     maxRetries,
     schemaScope,
+    hintsVersion,
   });
 
   let schema;
@@ -139,6 +143,7 @@ async function main() {
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);
   cli.log(`Schema scope: ${describeSchemaScope(effectiveSchemaScope)}`);
+  cli.log(`Hints version: ${describeHintsVersion(hintsVersion)}`);
 
   let failureCount = 0;
   const runUsages = [];
@@ -157,6 +162,7 @@ async function main() {
         maxRetries,
         statementTimeoutMs,
         schemaScope,
+        hintsVersion,
       });
 
       if (result.llmUsage) {

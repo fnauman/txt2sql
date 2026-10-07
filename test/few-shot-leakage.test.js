@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { isDatasetFileName } from '../src/benchmark.js';
-import { FEW_SHOT_EXAMPLES } from '../src/constants.js';
+import { BUSINESS_RULES, BUSINESS_RULES_V2, FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import { validateReadOnlySql } from '../src/pipeline.js';
 import { tokenizeSql } from '../src/sql-tokenizer.js';
 
@@ -105,4 +105,96 @@ test('every few-shot example is valid read-only SQL over the tables it lists', (
     const validated = validateReadOnlySql(example.sql, example.tables);
     assert.deepEqual([...validated.tablesUsed].sort(), [...example.tables].sort(), example.question);
   }
+});
+
+// Hints version 2 adds prompt text of its own: rewritten and added business
+// rules and the semantic-layer overlay's notes. Review found two rule
+// examples that quoted dev questions ("the single biggest document", "from
+// highest to lowest") and the account code of a motivating failing case
+// ("such as 1100"). Prompt text written from failures must state general
+// guidance, never a dataset's wording or literals.
+const V2_PROMPT_TEXTS = (() => {
+  const overlay = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'metadata/semantic-layer.hints-v2.json'), 'utf8'));
+  return [
+    ...BUSINESS_RULES_V2.filter((rule) => !BUSINESS_RULES.includes(rule)).map((text) => ({ label: 'business rule', text })),
+    ...[...(overlay.entities || []), ...(overlay.metrics || [])].flatMap((entry) =>
+      (entry.notes || []).map((text) => ({ label: `overlay ${entry.name} note`, text }))
+    ),
+  ];
+})();
+const NGRAM = 4;
+
+function wordNgrams(text, size = NGRAM) {
+  const words = normalizeQuestion(text).split(' ').filter(Boolean);
+  const grams = new Set();
+  for (let index = 0; index + size <= words.length; index += 1) {
+    grams.add(words.slice(index, index + size).join(' '));
+  }
+  return grams;
+}
+
+// String literals of the gold SQL and 3+ digit numbers of the questions:
+// codes, names and amounts a prompt must not hand the model. Dates and
+// format strings ('%Y-%m') are not dataset values.
+function datasetLiterals() {
+  const literals = new Set();
+  for (const { sql } of GOLD_SQL) {
+    for (const match of sql.matchAll(/'((?:[^']|'')*)'/g)) {
+      const value = match[1].replace(/%/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (value.length >= 3 && !/^\d{4}-\d{2}(-\d{2})?$/.test(value) && /[a-z0-9]{2}/.test(value.replace(/\b[a-z]\b/gi, ''))) {
+        literals.add(value);
+      }
+    }
+  }
+  for (const testCase of CASES) {
+    for (const match of String(testCase.question || '').matchAll(/\b\d{3,}\b/g)) {
+      if (!/^(19|20)\d{2}$/.test(match[0])) {
+        literals.add(match[0]);
+      }
+    }
+  }
+  return [...literals];
+}
+
+// The one overlap with the fresh holdout (datasets/holdout-public.json),
+// pinned exactly: the units rule's "lines without a product, such as delivery
+// fees" was written from dev failures, independently of the holdout (authored
+// blind on another branch at the same time), and both are frozen, so neither
+// was tuned on the other. For the HINTS_VERSION=2 arm that holdout case shares the wording
+// with the prompt (docs/experiments/02-hints-v2.md). Any other overlap fails.
+const KNOWN_HOLDOUT_OVERLAPS = {
+  'holdout-public.json/ho2_fee_lines_q1_2026_7c63a9': ['product such as delivery', 'such as delivery fees'],
+};
+
+test('hints v2 rules and overlay notes share no 4-word phrase with a dataset question', () => {
+  assert.ok(V2_PROMPT_TEXTS.length >= 10);
+  const questionGrams = CASES.map((testCase) => ({ label: `${testCase.dataset}/${testCase.id}`, grams: wordNgrams(testCase.question) }));
+  const holdoutOverlaps = {};
+  for (const { label, text } of V2_PROMPT_TEXTS) {
+    const grams = wordNgrams(text);
+    for (const question of questionGrams) {
+      const shared = [...question.grams].filter((gram) => grams.has(gram));
+      if (shared.length > 0 && KNOWN_HOLDOUT_OVERLAPS[question.label]) {
+        holdoutOverlaps[question.label] = [...new Set([...(holdoutOverlaps[question.label] || []), ...shared])].sort();
+        continue;
+      }
+      assert.deepEqual(shared, [], `${label} shares "${shared.join('", "')}" with ${question.label}: ${text}`);
+    }
+  }
+  assert.deepEqual(holdoutOverlaps, KNOWN_HOLDOUT_OVERLAPS, 'the known holdout overlaps changed: review KNOWN_HOLDOUT_OVERLAPS');
+  // The measure catches the wording that used to be there.
+  const old = wordNgrams('"Rank", "order", "sort" or "from highest to lowest" with no number returns every row');
+  assert.ok(questionGrams.some((question) => [...question.grams].some((gram) => old.has(gram))));
+});
+
+test('hints v2 rules and overlay notes add no dataset literal the version-1 prompt did not have', () => {
+  const v1Text = ` ${normalizeQuestion([...BUSINESS_RULES, ...FEW_SHOT_EXAMPLES.flatMap((example) => [example.question, example.sql])].join(' '))} `;
+  const literals = datasetLiterals().filter((literal) => !v1Text.includes(` ${normalizeQuestion(literal)} `));
+  assert.ok(literals.includes('1100'), 'account codes from the questions are dataset literals');
+  for (const { label, text } of V2_PROMPT_TEXTS) {
+    const words = ` ${normalizeQuestion(text)} `;
+    const found = literals.filter((literal) => normalizeQuestion(literal) && words.includes(` ${normalizeQuestion(literal)} `));
+    assert.deepEqual(found, [], `${label} contains dataset literal(s) ${found.join(', ')}: ${text}`);
+  }
+  assert.ok(` ${normalizeQuestion('filter an account number (such as 1100) on LedgerAccount.AccountCode')} `.includes(' 1100 '));
 });

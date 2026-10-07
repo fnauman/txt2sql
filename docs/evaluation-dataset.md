@@ -136,7 +136,14 @@ other words).
   dev questions say "net sales" or "net revenue". Single-word entity synonyms
   (customer, store, product, units, documents) and the advisory words
   ("sales", "sold") still match the layer: they are the only names of those
-  things.
+  things. The rule covers both `HINTS_VERSION` arms: the multi-word phrases
+  the hints-v2 overlay (`metadata/semantic-layer.hints-v2.json`) adds are
+  refused too. The fresh holdout was authored against the base layer and
+  frozen before the overlay's vocabulary was checked against it: five of its
+  questions contain overlay phrases ("open balance" in four, "unpaid balance"
+  in one). They stay as frozen and are pinned, exactly, in
+  `FROZEN_HINTS_V2_VOCABULARY` (any other match fails the build); for the
+  version-2 arm those five cases do not measure unseen vocabulary.
 
 **The holdout freeze.** `datasets/holdout-manifest.json` (not a dataset:
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
@@ -563,17 +570,29 @@ changes.
 ## Known validator rejections
 
 `known_validator_rejection: '<code>'` marks a case whose correct answers the
-production validator rejects today, in the default product configuration, a
-product gap the suite measures instead of hiding. Five cases are flagged:
-one dev case, `METRIC_COLUMN` (`tpl_revenue_credits_monthly_q1_2026_e1b20a`:
-the account name "Sales Revenue" trips the net-sales metric guardrail on a
-ledger question), and four holdout cases, counted here and not named (the
-holdout is looked at in aggregate only).
+production validator rejects today, in the default product configuration or
+in another supported arm of an A/B switch, a product gap the suite measures
+instead of hiding. Five cases are flagged: one dev case, `METRIC_COLUMN`
+(`tpl_revenue_credits_monthly_q1_2026_e1b20a`: the account name "Sales
+Revenue" trips the net-sales metric guardrail on a ledger question), and four
+holdout cases, counted here and not named (the holdout is looked at in
+aggregate only). Every flag was measured with hints version 1's prompts.
+Hints version 2 (`HINTS_VERSION`, the default) closes the dev case's gap; the
+flag stays because version 1, the A/B control arm, still has it
+([docs/experiments/02-hints-v2.md](experiments/02-hints-v2.md)). A holdout
+flag version 2 closes stays for the same reason (the frozen holdout is not
+edited); which holdout flags version 2 closes is not listed here.
 
 - verify-dataset reports a rejection of the gold, an alternative or a positive
   control with that code as a note, and fails when the validator accepts every
-  gold variant (the flag is stale and must go); `test/gold-sql-validator.test.js`
-  and `test/dataset-hygiene.test.js` check the same offline. The in-process
+  gold variant under every supported hints version (the flag is stale and must
+  go). When only the configured version accepts it and another supported one
+  still rejects with that code, that is a note naming the version that keeps
+  the flag, so both arms of the `HINTS_VERSION` A/B verify;
+  `test/gold-sql-validator.test.js` and `test/dataset-hygiene.test.js` check
+  the same offline (every flag under version 1; under version 2 the dev
+  flag's closure, and for a holdout flag only that version 2 rejects its gold
+  variants with the flag's code or not at all). The in-process
   verification of `npm run eval` only warns about a stale flag (in the console
   and report.md's Verification section), so a product change that closes the
   gap can be measured, live or with `--offline --gate`, before the dataset is
@@ -1306,12 +1325,16 @@ rule).
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).
 - **Provenance**: git sha (and whether the tree was dirty), prompt and
-  semantic-layer versions, the schema scope (requested and effective, the
-  full-schema token estimate, widen-on-demand), schema, fixture, dataset and
-  controls hashes, model, the LLM endpoint host (never keys), Node and every
-  runner flag. The comparison table shows both reports' schema scopes (a report
-  from before the setting reads "not recorded (before SCHEMA_SCOPE: retrieved,
-  no widening)"), and so does the console when they differ.
+  semantic-layer versions (under hints version 2 the semantic-layer version
+  hashes `metadata/semantic-layer.json` and its overlay
+  `metadata/semantic-layer.hints-v2.json` together, and the overlay is named),
+  the schema scope (requested and effective, the full-schema token estimate,
+  widen-on-demand), the hints version (`product.hintsVersion`), schema,
+  fixture, dataset and controls hashes, model, the LLM endpoint host (never
+  keys), Node and every runner flag. The comparison table shows both reports'
+  schema scopes and hints versions (a report from before a setting reads "not
+  recorded (before SCHEMA_SCOPE: retrieved, no widening)" or "not recorded
+  (before HINTS_VERSION: 1)"), and so does the console when they differ.
 
 ### Statistics
 
@@ -1362,6 +1385,14 @@ as the product loop would have widened it. The console and report.md say when
 the recording ran another scope or another widen-on-demand setting.
 `SCHEMA_SCOPE=retrieved` (widen-on-demand is off by default for an explicit
 retrieved scope) re-judges a pre-scope report exactly as it ran.
+
+The hints version is today's too (`HINTS_VERSION`): the replayed SQL is
+validated against today's semantic plan (metric enforcement, join hints), so
+a guardrail change of hints version 2 shows, while its prompt changes cannot
+(the recorded SQL was generated from the recorded prompts). The console and
+report.md say when the recording ran another hints version;
+`HINTS_VERSION=1` re-judges a report from before the setting exactly as it
+ran.
 
 `--offline` runs the preflight, fixtures and verification, then rescores
 `eval/baselines/<model>.json` when it exists, or says there is none and exits 0
@@ -1448,69 +1479,62 @@ purpose.
 
 `eval/baselines/gpt-4o-mini.json`, written by
 `npm run eval -- --repeat 3 --budget-usd 1.5 --write-baseline` on 2026-10-06
-at commit `e42828b`: gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset
-(`auto` → `full`), prompt version `b264e57d8e15`, fixtures seed
-`094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
+(the [Experiment 2](experiments/02-hints-v2.md) live run, at commit
+`4ff6ecb`): gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset (`auto` →
+`full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
+seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.10 MB. It includes every
-measurement-hygiene change: the [scoring relaxations](#scoring-relaxations),
-the [gold conventions](#gold-conventions), known validator rejections, the
-retired (now dev) holdout and the audited fresh holdout. The attribution,
-guardrail, behaviour, per-question cost and latency rows below are what the
-offline rescore (`npm run eval -- --offline`, which recomputes the
-attribution) prints by default: they cover the dev cases, and the holdout is
-read only as its accuracy by split (see the
+255, fresh holdout 149), compact file 2.07 MB. The attribution, guardrail,
+behaviour, per-question cost and latency rows below are what the offline
+rescore (`npm run eval -- --offline`) prints by default: they cover the dev
+cases, and the holdout is read only as its accuracy by split (see the
 [holdout policy](#splits-and-the-holdout-policy); `--reveal-holdout` prints
-every case). The attribution recorded inside the committed file predates the
-fix that books only the flagged rejection of a flagged case as a system
-error, so it still books every failure of a flagged case as one; strict
-accuracy and the splits are the same either way.
+every case).
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases / 205 intents) | 62.2% (95% CI 57.5%–66.8%, case bootstrap) |
-| Majority-pass cases | 244/392 (Wilson 95% 57.4%–66.9%) |
-| Intent-clustered accuracy | 60.6% (95% CI 54.7%–66.3%) |
-| By split | dev 74.7% (245 cases) · fresh holdout 41.3% (147 cases) |
-| Attribution, dev cases (repetitions) | pass 549 · model 186 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion, dev cases (786 attempts) | 61 wrong SQL caught, 0 correct SQL rejected, 176 wrong SQL accepted; precision 100%, recall 25.7% |
+| Strict accuracy (392 answer cases / 205 intents) | 73.6% (95% CI 69.2%–77.9%, case bootstrap) |
+| Majority-pass cases | 288/392 (Wilson 95% 68.9%–77.6%) |
+| Intent-clustered accuracy | 73.3% (95% CI 67.8%–78.5%) |
+| By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
+| Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
-| Cost | $0.5406 for the whole run (the budget row) · dev cases: $0.00044 per question · $0.00062 per correct answer · 91.0% of prompt tokens cached |
-| Latency, dev cases | p50 2.49 s · p95 5.32 s (product loop) · retry rate 6.7% |
+| Cost | $0.6347 for the whole run (the budget row) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
+| Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
 
 How to read it:
 
-- **Dev vs holdout.** The dev split (245 answer cases) is everything that was
-  inspected or tuned on, including the retired holdout; the fresh holdout
-  (147 answer cases) is new intents that were written blind and audited by
-  two independent annotators. The 33-point gap is the clearest measurement in
-  this repository: the holdout leans on analytical shapes the dev set barely
-  covers (shares and ratios, overdue and ageing balances, running totals,
-  month-over-month change, weekday and value-band breakdowns) and on
-  unfamiliar wording, so dev accuracy overstates what new questions get. Per
-  the [holdout policy](#splits-and-the-holdout-policy), only dev failures are
+- **Dev vs holdout.** Dev (245 answer cases) is everything that was inspected
+  or tuned on; the fresh holdout (147 answer cases) is new intents written
+  blind and audited by two independent annotators. Experiment 2 was designed
+  from dev failures, so its dev gain (74.7% → 88.3%) is in-sample; its holdout
+  gain (41.3% → 49.2%, 17 improvements vs 6 regressions, exact McNemar
+  p = 0.035) is the out-of-sample evidence. The remaining 39-point gap is the
+  clearest measurement in this repository: the holdout leans on analytical
+  shapes the dev set barely covers (shares and ratios, overdue and ageing
+  balances, running totals, month-over-month change, weekday and value-band
+  breakdowns) and on unfamiliar wording. Per the
+  [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
 - **Gold audit effect.** A run on the same code before the audit scored the
   holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
   readings, 2 rewordings, 1 wrong gold). The rest of the difference is
   run-to-run variation between two live runs.
 - **System failures.** None among the dev cases (the holdout's failure
-  causes are not shown). The 5 cases flagged `known_validator_rejection`
-  (1 dev, 4 holdout) cap strict accuracy at 98.7% with perfect SQL; the dev
-  one's failed repetitions did not end in the flagged rejection (its retries
-  were rejected for `FAN_OUT`), so they are model errors like every other
-  dev failure (dev case majority: model 61, system 0).
-- **Dev stability.** Paired with the previous (255-case) baseline on the 202
-  dev cases whose scoring did not change: 75.6% → 75.3%, 3 flips each way,
-  exact McNemar p = 1.0.
-- **Guardrails** (dev cases) never reject correct SQL but catch about a
-  quarter of wrong SQL (61 of 237 attempts); most wrong answers are
+  causes are not shown). Under hints v2 the dev flagged case (`e1b20a`) is no
+  longer rejected; the 4 holdout cases flagged `known_validator_rejection`
+  (`METRIC_COLUMN`) cap strict accuracy at 99.0% with perfect SQL.
+- **Guardrails** (dev cases) never reject correct SQL but catch under a
+  third of wrong SQL (34 of 112 attempts); most wrong answers are
   semantically wrong SQL that is still valid.
+- **Reproduction.** `npm run eval -- --offline --gate` rescores this file's
+  recorded SQL with today's code and reproduces it exactly (0 flips).
 
 Earlier baselines: the retrieved-scope baseline (prompt version
-`0c314451d4b7`) scored 68.8% on the 255-case suite with 92 system failures,
-all retrieval misses; the full-schema baseline of
-[Experiment 1](experiments/01-schema-scope.md) scored 72.8% on that suite.
+`0c314451d4b7`, 68.8% on the 255-case suite), the full-schema baseline of
+[Experiment 1](experiments/01-schema-scope.md) (72.8% on that suite), and the
+version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
 
 ### CI
 
@@ -1529,10 +1553,10 @@ all retrieval misses; the full-schema baseline of
 
 ### Cost
 
-LLM cost is small: the committed gpt-4o-mini baseline cost $0.00045 per
+LLM cost is small: the committed gpt-4o-mini baseline cost $0.00052 per
 question (one case repetition, up to two LLM calls), so one repetition of the
-whole 404-case suite is about 18 cents and `--repeat 3` about 54 cents
-(measured: $0.5406), inside the default 1 USD budget. `--budget-usd` caps it.
+whole 404-case suite is about 21 cents and `--repeat 3` about 63 cents
+(measured: $0.6347), inside the default 1 USD budget. `--budget-usd` caps it.
 Rescoring and `--offline` cost nothing.
 
 ## Known limits

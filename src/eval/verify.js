@@ -33,7 +33,10 @@
 // the flag is stale, which is a problem for verify-dataset (so it is removed)
 // and only a warning for the in-process verification of `npm run eval`
 // (`staleKnownRejection: 'warning'`), so a product change that closes the gap
-// can still be measured before the dataset is updated.
+// can still be measured before the dataset is updated. A flag the configured
+// hints version no longer needs but another supported one (HINTS_VERSION, an
+// A/B switch) still does is not stale: the dataset must stay valid for both
+// arms, so it is a note naming the version that keeps it.
 // Abstain / clarify cases (expected_behavior) have no gold and no controls:
 // nothing is executed for them.
 
@@ -46,6 +49,7 @@ import {
   runSignalChecks,
 } from '../benchmark.js';
 import { resolveMasterDataCandidates } from '../master-data-resolver.js';
+import { HINTS_VERSIONS, normalizeHintsVersion } from '../hints-version.js';
 import { buildOptimizedPrompt, buildSemanticPlan, resolveEffectiveSchemaScope, validateReadOnlySql, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { resolveCaseControls } from './controls.js';
@@ -69,9 +73,11 @@ import { caseDefinitionFingerprint } from './suite.js';
  * widen-on-demand gives a retry). `validate.schemaScope` is the scope in
  * effect for `schema`.
  *
- * `schemaScope` is a scope name or config (src/schema-scope.js); omitted, the
- * product defaults (auto). Entry points pass resolveSchemaScopeConfig(env), so
- * verification validates exactly what the product would.
+ * `schemaScope` is a scope name or config (src/schema-scope.js) and
+ * `hintsVersion` a hints version (src/hints-version.js); omitted, the product
+ * defaults (auto, 2). Entry points pass resolveSchemaScopeConfig(env) and
+ * resolveHintsVersion(env), so verification validates exactly what the
+ * product would. `validate.hintsVersion` is the version in effect.
  *
  * Master-data lookup failures are handled like the product loop handles them:
  * an infrastructure failure (the database went away) is thrown, not hidden
@@ -80,16 +86,17 @@ import { caseDefinitionFingerprint } from './suite.js';
  * statement timeout) degrade to no candidates. The lookup runs under
  * `statementTimeoutMs` like the product's.
  */
-export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null, schemaScope = undefined }) {
+export function createValidatorProbe({ schema, connection = null, statementTimeoutMs = null, schemaScope = undefined, hintsVersion = undefined }) {
   const prompts = new Map();
   const effectiveScope = resolveEffectiveSchemaScope(schema, schemaScope);
+  const version = normalizeHintsVersion(hintsVersion);
   const inScopeTables = new Set(schema.tables.map((table) => table.tableName));
   const promptFor = async (question, { extraTables = [] } = {}) => {
     const extra = [...new Set(extraTables)].sort();
     const key = `${question}\u0000${extra.join(',')}`;
     if (!prompts.has(key)) {
       const pending = (async () => {
-        const semanticPlan = buildSemanticPlan(question);
+        const semanticPlan = buildSemanticPlan(question, { hintsVersion: version });
         let masterDataCandidates = [];
         if (extra.length > 0) {
           // A widened prompt reuses the question's own master-data lookup.
@@ -104,7 +111,7 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
             masterDataCandidates = [];
           }
         }
-        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan, schemaScope, extraTables: extra });
+        const prompt = buildOptimizedPrompt(schema, question, { masterDataCandidates, semanticPlan, schemaScope, extraTables: extra, hintsVersion: version });
         return {
           context: prompt.context,
           allowedTables: prompt.tables.map((table) => table.tableName),
@@ -145,6 +152,16 @@ export function createValidatorProbe({ schema, connection = null, statementTimeo
   };
   validate.promptFor = promptFor;
   validate.schemaScope = effectiveScope;
+  validate.hintsVersion = version;
+  // The same probe (schema, connection, scope) under another hints version.
+  const siblings = new Map([[version, validate]]);
+  validate.forHintsVersion = (otherVersion) => {
+    const other = normalizeHintsVersion(otherVersion);
+    if (!siblings.has(other)) {
+      siblings.set(other, createValidatorProbe({ schema, connection, statementTimeoutMs, schemaScope, hintsVersion: other }));
+    }
+    return siblings.get(other);
+  };
   return validate;
 }
 
@@ -202,6 +219,26 @@ function checkComparisonColumns(testCase, rows, label, fixture) {
     }
   }
   return problems;
+}
+
+// The other supported hints versions under which the validator still rejects
+// a gold variant of `testCase` with `code` (a probe without forHintsVersion,
+// e.g. a test double, has none).
+async function hintsVersionsKeepingRejection(testCase, variants, validate, code) {
+  if (typeof validate.forHintsVersion !== 'function') {
+    return [];
+  }
+  const kept = [];
+  for (const version of HINTS_VERSIONS.filter((candidate) => candidate !== validate.hintsVersion)) {
+    const other = validate.forHintsVersion(version);
+    for (const variant of variants) {
+      if ((await other(testCase.question, variant.sql))?.code === code) {
+        kept.push(version);
+        break;
+      }
+    }
+  }
+  return kept;
 }
 
 /**
@@ -286,8 +323,16 @@ export async function verifyCase(testCase, {
     }
   }
   if (validate && knownRejection && knownRejectionsSeen === 0 && scopeMasked === 0 && !goldFailed) {
-    const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
-    (staleKnownRejection === 'warning' ? warnings : problems).push(message);
+    const keptBy = await hintsVersionsKeepingRejection(testCase, variants, validate, knownRejection);
+    if (keptBy.length > 0) {
+      notes.push(
+        `known_validator_rejection ${knownRejection}: the validator accepts the gold under hints version ${validate.hintsVersion}, ` +
+          `but still rejects it under HINTS_VERSION=${keptBy.join(', ')}, which keeps the flag`
+      );
+    } else {
+      const message = `known_validator_rejection is ${knownRejection}, but the production validator accepts the gold now: remove the flag`;
+      (staleKnownRejection === 'warning' ? warnings : problems).push(message);
+    }
   }
 
   let controls = null;

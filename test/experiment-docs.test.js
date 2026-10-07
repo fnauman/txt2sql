@@ -71,7 +71,9 @@ test('experiment status: the index and each write-up agree, and a write-up with 
     const status = /^\*\*Status:\*\* ([^\n]+)/m.exec(doc);
     assert.ok(status, `${file} states its status`);
     assert.ok(status[1].startsWith(indexStatus.trim()), `experiment ${number}: index "${indexStatus.trim()}" vs write-up "${status[1]}"`);
-    if (/^## Decision$/m.test(doc)) {
+    // Every write-up has a Decision section (the protocol's sections); it
+    // holds a decision unless it still says the decision is pending.
+    if (/^## Decision$/m.test(doc) && !/^\W*pending\b/i.test(section(doc, '## Decision').trim())) {
       assert.doesNotMatch(indexStatus, /pending/, `experiment ${number} has a decision`);
       assert.doesNotMatch(status[1], /pending/, `experiment ${number} has a decision`);
     }

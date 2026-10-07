@@ -4,7 +4,7 @@ import OpenAI, { APIUserAbortError } from 'openai';
 import mysql from 'mysql2/promise';
 
 import {
-  BUSINESS_RULES,
+  businessRulesFor,
   DEFAULT_INCLUDED_TABLES,
   FEW_SHOT_EXAMPLES,
   NO_SQL_COMMENTS_RULE,
@@ -12,8 +12,9 @@ import {
 } from './constants.js';
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
+import { normalizeHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig } from './schema-scope.js';
-import { loadSemanticLayerSync } from './semantic-layer.js';
+import { loadSemanticLayerForHintsVersion } from './semantic-layer.js';
 import { SqlValidationError, validateSqlGuardrails } from './sql-guardrails.js';
 import {
   SqlTokenizeError,
@@ -24,14 +25,31 @@ import {
 } from './sql-tokenizer.js';
 import { uniqueStrings } from './utils.js';
 
-function splitWords(value) {
+function splitWordText(value) {
   return String(value || '')
     .replace(/\b([A-Z]{2,})s\b/g, (match) => match.toLowerCase())
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .toLowerCase()
+    .toLowerCase();
+}
+
+function splitWords(value) {
+  return splitWordText(value)
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+}
+
+// The words of splitWords, each with the text between it and the previous
+// word ("," or " (" ...), which splitWords drops.
+function splitWordsWithSeparators(value) {
+  const text = splitWordText(value);
+  const words = [];
+  let previousEnd = 0;
+  for (const match of text.matchAll(/[a-z0-9]+/g)) {
+    words.push({ word: match[0], separatorBefore: text.slice(previousEnd, match.index) });
+    previousEnd = match.index + match[0].length;
+  }
+  return words;
 }
 
 const STOPWORDS = new Set([
@@ -91,6 +109,37 @@ const STOPWORDS = new Set([
   'of',
   'with',
   'without',
+]);
+
+// Hints version 2: words retrieval ignores. Each one matched a column name or
+// comment only by accident and pointed the relevance hint (and the retrieved
+// scope's column order) at the wrong column: "included" and "distinct" at
+// NetPayableAmount ("Net payable amount; included as an intentionally
+// distinct metric", tpl_total_net_sales_feb15_mar15_2026_40ae9d), "total" at
+// BillTotalAmount and line TotalAmount (edge_public_002), "units" at
+// SalePrice ("Unit sale price"), "recorded" at AccountingPosting.PostingDate,
+// "used", "column" and "row" at the decoy DocumentTypeClass and posting
+// comments, "as" at several comments. The semantic plan does not read these
+// tokens: "units" still matches quantity_sold.
+const RETRIEVAL_STOPWORDS_V2 = new Set([
+  'as',
+  'include',
+  'included',
+  'including',
+  'inclusive',
+  'distinct',
+  'total',
+  'totals',
+  'unit',
+  'units',
+  'record',
+  'records',
+  'recorded',
+  'used',
+  'column',
+  'columns',
+  'row',
+  'rows',
 ]);
 
 function singularTokenVariant(token) {
@@ -243,7 +292,102 @@ function buildMonthRange(year, month) {
   };
 }
 
-export function extractTemporalReferences(question) {
+// Hints version 2: a "<Month> <Year>" match that is only part of a date
+// phrase the resolver does not understand is dropped instead of being
+// resolved to the whole month; the model reads such a phrase itself
+// (business rule 4). A match is dropped when, around it, there is
+// - a day of the month ("between 1 and 10 March 2026", "Today is 15 February
+//   2026");
+// - a part of the month or a period ending in it: a time unit "of" it ("the
+//   first week of", "the last 10 days of", "the second half of", "the end
+//   of"), a mid- / early- / late- prefix, or "ending", "ended", "to",
+//   "through", "until", "up to" before it ("the quarter ending March 2026",
+//   "the three months to March 2026");
+// - an anchor: "as of", "since", "before", "after", "from ... until today";
+// - a range or a list sharing a year, at either end ("January to March
+//   2026", "from March 2026 to the end of May 2026", "between November 2025
+//   and February 2026", "January and February 2026", "January, February,
+//   and March 2026");
+// - a to-date or open-ended tail ("to date", "year to date", "YTD", "so
+//   far", "onwards", "and later").
+// A month with its own year next to another one ("March 2025 and March 2026")
+// and a ranking size before it ("top 10 March 2026 customers") still resolve.
+const MONTH_ALTERNATION = [...MONTH_TOKEN_TO_INFO.keys()].sort((left, right) => right.length - left.length).join('|');
+const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till|up to|up until)';
+// A list separator, with the optional serial (Oxford) comma before a
+// conjunction: "January, February, and March 2026".
+const LIST_CONNECTOR = '(?:,?\\s*(?:and|or|&)|,)';
+const DAY_OF_MONTH = '\\d{1,2}(?:st|nd|rd|th)?';
+// "the end of", "the start of": a point inside the month, not all of it.
+const MONTH_POINT = '(?:(?:the\\s+)?(?:very\\s+)?(?:end|start|beginning|middle|close|half|first half|second half)\\s+of\\s+)';
+// Not "month": "the month of March 2026" is the whole month.
+const TIME_UNIT = '(?:days?|weeks?|weekends?|fortnights?|halves|half|quarters?|periods?|parts?|portions?|rest|remainder|end|start|beginning|middle|close)';
+const PARTIAL_BEFORE_PATTERNS = [
+  // A day of the month right before: "15 February 2026", "1 and 10 March 2026".
+  new RegExp(`\\b${DAY_OF_MONTH}\\s+(?:of\\s+)?$`, 'i'),
+  // The end of a month range: "January to March 2026", "November 2025 through February 2026".
+  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s*${RANGE_CONNECTOR}\\s*${MONTH_POINT}?$`, 'i'),
+  // A month without its own year shares this one: "January and February 2026".
+  new RegExp(`\\b(?:${MONTH_ALTERNATION})\\.?\\s*${LIST_CONNECTOR}\\s*$`, 'i'),
+  // The end of "between <month> [year] and [the end of] <month> <year>".
+  new RegExp(`\\bbetween\\s+(?:the\\s+)?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION})\\.?(?:\\s*,?\\s*\\d{2,4})?\\s+and\\s+${MONTH_POINT}?$`, 'i'),
+  // An anchor or the end of a period, not a window: "as of", "since",
+  // "the quarter ending", "up to".
+  /\b(?:as of|as at|today is|since|before|after|until|till|up to|up until|prior to|through|thru|ending|ended|ending in|ended in|ending on|end of|start of|beginning of)\s+(?:the\s+)?$/i,
+  // A period ending in the month: "the three months to March 2026", "the
+  // 12 weeks to the end of March 2026". A bare "to" ("compare February 2026
+  // to March 2026") is not dropped.
+  new RegExp(`\\b(?:days|weeks|months|quarters|years|period|week|month|quarter|year)\\s+(?:to|into)\\s+${MONTH_POINT}?$`, 'i'),
+  // A part of the month: "the first week of", "the last 10 days of",
+  // "the second half of", "the weeks of".
+  new RegExp(`\\b${TIME_UNIT}\\s+of\\s+(?:the\\s+)?$`, 'i'),
+  // "mid-March 2026", "early March 2026", "late March 2026", "end-March".
+  /\b(?:mid|middle|early|late|end)\s*-?\s*$/i,
+];
+const PARTIAL_AFTER_PATTERNS = [
+  // The start of a range: "November 2025 through February 2026", "1 March
+  // 2026 to 10 March 2026", "March 2026 to the end of May 2026", "March 2026
+  // until today".
+  new RegExp(
+    `^\\s*,?\\s*${RANGE_CONNECTOR}\\s*(?:the\\s+)?${MONTH_POINT}?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION}|today|now|date|present|yesterday)\\b`,
+    'i'
+  ),
+  // To-date and open-ended phrases: "March 2026 to date", "March 2026 YTD",
+  // "March 2026 year to date", "March 2026 onwards".
+  /^\s*,?\s*(?:to date|to-date|so far|onwards?|and later|or later|and earlier|or earlier|and after|and before|ytd|mtd|year to date|year-to-date|month to date|month-to-date)\b/i,
+];
+// "top 10 March 2026 customers": the number is a ranking size, not a day.
+const RANKING_SIZE_BEFORE_PATTERN = /\b(?:top|bottom|first|last|best|worst)\s+\d{1,2}\s+$/i;
+const BETWEEN_START_PATTERN = new RegExp(
+  `^\\s*and\\s+(?:the\\s+)?${MONTH_POINT}?(?:${DAY_OF_MONTH}\\s+(?:of\\s+)?)?(?:${MONTH_ALTERNATION}|today|now)\\b`,
+  'i'
+);
+
+function isPartialMonthReference(text, startIndex, matchedText) {
+  const before = text.slice(0, startIndex);
+  const after = text.slice(startIndex + matchedText.length);
+  const [dayBefore, ...otherBefore] = PARTIAL_BEFORE_PATTERNS;
+  if (dayBefore.test(before) && !RANKING_SIZE_BEFORE_PATTERN.test(before)) {
+    return true;
+  }
+  if (otherBefore.some((pattern) => pattern.test(before))) {
+    return true;
+  }
+  if (PARTIAL_AFTER_PATTERNS.some((pattern) => pattern.test(after))) {
+    return true;
+  }
+  // The start of "between <month> <year> and <month> <year>".
+  return /\bbetween\s+(?:the\s+)?$/i.test(before) && BETWEEN_START_PATTERN.test(after);
+}
+
+/**
+ * Whole-month references ("March 2026", "Feb, 26") in `question`, each with
+ * its half-open range. `hintsVersion` 2 (the default) drops a match that is
+ * only part of a longer date phrase (see isPartialMonthReference); version 1
+ * resolves every match.
+ */
+export function extractTemporalReferences(question, { hintsVersion = undefined } = {}) {
+  const version = normalizeHintsVersion(hintsVersion);
   const temporalReferences = [];
   const text = String(question || '');
 
@@ -254,6 +398,9 @@ export function extractTemporalReferences(question) {
     const year = normalizeYearToken(String(match[3] || ''), separator);
 
     if (!monthInfo || !year) {
+      continue;
+    }
+    if (version !== 1 && isPartialMonthReference(text, match.index ?? 0, match[0])) {
       continue;
     }
 
@@ -287,15 +434,23 @@ function normalizeQuestionTemporalText(question, temporalReferences) {
   return normalized;
 }
 
-export function buildQuestionContext(question) {
+/**
+ * The question as retrieval and the semantic plan read it: the original and
+ * the temporally normalized text, its lexical tokens and the resolved
+ * temporal references. `hintsVersion` (src/hints-version.js; default 2)
+ * selects how dates are resolved and which tokens retrieval ignores.
+ */
+export function buildQuestionContext(question, { hintsVersion = undefined } = {}) {
+  const version = normalizeHintsVersion(hintsVersion);
   const originalQuestion = String(question || '');
-  const temporalReferences = extractTemporalReferences(originalQuestion);
+  const temporalReferences = extractTemporalReferences(originalQuestion, { hintsVersion: version });
   const normalizedQuestion = normalizeQuestionTemporalText(originalQuestion, temporalReferences);
 
+  const tokens = normalizeTokens(normalizedQuestion);
   return {
     originalQuestion,
     normalizedQuestion,
-    questionTokens: normalizeTokens(normalizedQuestion),
+    questionTokens: version === 1 ? tokens : tokens.filter((token) => !RETRIEVAL_STOPWORDS_V2.has(token)),
     temporalReferences,
   };
 }
@@ -305,11 +460,12 @@ function normalizedPhrase(value) {
 }
 
 function buildQuestionWordIndex(questionContext) {
-  return splitWords(questionContext.normalizedQuestion).map((word) => ({
+  return splitWordsWithSeparators(questionContext.normalizedQuestion).map(({ word, separatorBefore }) => ({
     word,
     singular: singularTokenVariant(word),
     variants: tokenVariants(word),
     isStopword: STOPWORDS.has(word),
+    separatorBefore,
   }));
 }
 
@@ -437,6 +593,126 @@ export function detectCountOrExistenceIntent(question) {
   return COUNT_OR_EXISTENCE_INTENT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+// Words that join two separately requested measures, or are themselves a
+// measure: between a metric phrase and another amount they mean that amount is
+// asked for alongside the metric ("revenue and gross amount", "average order
+// value versus the bill total"), not that it modifies it.
+const SEPARATE_MEASURE_WORDS = new Set([
+  'and',
+  'or',
+  'nor',
+  'plus',
+  'versus',
+  'vs',
+  'against',
+  'compared',
+  'than',
+  'alongside',
+  'besides',
+  'also',
+  'both',
+  'either',
+  'amount',
+  'amounts',
+  'total',
+  'totals',
+  'value',
+  'values',
+  'sum',
+  'sums',
+  'figure',
+  'figures',
+  'number',
+  'count',
+]);
+// Words that may stand between a metric phrase and an amount word after it
+// without making that amount a separate measure: "revenue on a gross basis",
+// "revenue in gross terms", "revenue measured gross".
+// Words that may follow an appositive amount (", gross,") when it modifies
+// the metric before it: a period, grouping or filter phrase.
+const APPOSITIVE_FOLLOWING_WORDS = new Set(['in', 'for', 'during', 'over', 'across', 'from', 'since', 'between', 'by', 'per', 'at', 'on', 'of', 'this', 'last', 'each', 'until', 'through', 'to']);
+const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the', 'is', 'are', 'was', 'were', 'measured', 'reported', 'stated', 'calculated', 'counted', 'taken', 'expressed', 'shown']);
+
+/**
+ * Whether one of `otherSpans` (an `advisory_when_mentioned` amount) modifies
+ * one of `metricSpans` (the metric's matched phrases), as word spans of
+ * `questionWords`:
+ * - right before it, at most two plain words apart, with no comma or
+ *   measure/conjunction word between: "gross revenue", "gross monthly
+ *   revenue", "tax inclusive revenue";
+ * - right after it, at most three glue words apart, when it is a tax phrase
+ *   ("revenue including tax", "average order value, tax included": a tax
+ *   phrase qualifies an amount and never names one), in parentheses
+ *   ("revenue (gross)"), as one word set off by commas or ending the clause
+ *   ("revenue, gross, in March"), or with no comma between and no measure
+ *   word after it ("revenue on a gross basis").
+ * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
+ * and the bill total") is a separate measure.
+ */
+function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
+  const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
+  const between = (start, end) => questionWords.slice(start, end).map((questionWord) => questionWord.word);
+  const separatorsBetween = (start, end) => {
+    let text = '';
+    for (let index = start; index <= end; index += 1) {
+      text += separatorAt(index);
+    }
+    return text;
+  };
+
+  return otherSpans.some((other) => {
+    const otherWords = between(other.start, other.end);
+    const isTaxPhrase = otherWords.includes('tax');
+    return metricSpans.some((metric) => {
+      if (other.end <= metric.start) {
+        const gap = between(other.end, metric.start);
+        return (
+          gap.length <= 2 &&
+          gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word)) &&
+          !/[,;:]/.test(separatorsBetween(other.end, metric.start))
+        );
+      }
+      if (metric.end <= other.start) {
+        const gap = between(metric.end, other.start);
+        if (gap.length > 3 || !gap.every((word) => POSTPOSITIVE_GLUE_WORDS.has(word))) {
+          return false;
+        }
+        if (isTaxPhrase) {
+          return true;
+        }
+        const separators = separatorsBetween(metric.end, other.start);
+        if (separators.includes('(')) {
+          return true;
+        }
+        const nextWord = questionWords[other.end]?.word;
+        // An appositive single word, set off by commas and followed by a
+        // period or grouping phrase, or ending the sentence: "average order
+        // value, gross, in March", "revenue, gross?" (but not a list:
+        // "revenue, gross, and units", "revenue, gross, discount").
+        if (gap.length === 0 && other.end - other.start === 1 && separators.includes(',')) {
+          const after = separatorAt(other.end);
+          return !nextWord || /[.?!:]/.test(after) || (/[,)]/.test(after) && APPOSITIVE_FOLLOWING_WORDS.has(nextWord));
+        }
+        return !/[,;:]/.test(separators) && !(nextWord && SEPARATE_MEASURE_WORDS.has(nextWord));
+      }
+      return false;
+    });
+  });
+}
+
+// Whether every explicit metric phrase in the question is modified by one of
+// `otherSpans`. A span inside a longer explicit span ("revenue" inside "total
+// revenue") is part of that phrase, so only the longest spans are read.
+function everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) {
+  const phrases = explicitSpans.filter(
+    (span) =>
+      !explicitSpans.some(
+        (other) => other !== span && other.start <= span.start && span.end <= other.end && other.end - other.start > span.end - span.start
+      )
+  );
+  return phrases.length > 0 && phrases.every((phrase) => otherAmountModifiesMetric(otherSpans, [phrase], questionWords));
+}
+
 /**
  * Decide whether a matched metric is ENFORCED by the SQL guardrail or only
  * ADVISORY (kept as a prompt hint; a mismatch becomes a trace warning). Both
@@ -450,7 +726,7 @@ export function detectCountOrExistenceIntent(question) {
  * Every other synonym is an explicit metric phrase ("net sales", "revenue",
  * "units sold") and enforces in every kind of question.
  */
-function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
+function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, questionWords = null) {
   const advisory = new Set(uniqueStrings(entry.advisory_synonyms).map(normalizedPhrase));
   const countAdvisory = new Set(uniqueStrings(entry.count_advisory_synonyms).map(normalizedPhrase));
   const advisoryMatches = matchedSynonyms.filter((synonym) => advisory.has(normalizedPhrase(synonym)));
@@ -458,6 +734,25 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent) {
 
   if (explicitMatches.length === 0) {
     return { enforcement: 'advisory', enforcementReason: 'generic_terms_only', explicitMatches, advisoryMatches };
+  }
+  // `advisory_when_mentioned` (hints-v2 overlay): the question names another
+  // amount for this metric ("gross revenue", "average order value including
+  // tax"), so the metric's column is not what it measures. Only wording that
+  // modifies the metric phrase counts (otherAmountModifiesMetric); another
+  // measure asked for alongside it ("revenue and gross amount") leaves the
+  // metric enforced. Only the explicit phrases count, and every one of them
+  // must be modified: a modified generic word ("revenue and gross sales") or
+  // a second, modified mention ("revenue and gross revenue") leaves an
+  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales")
+  // still enforces.
+  const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
+  if (
+    otherAmounts.length > 0 &&
+    questionWords &&
+    everyExplicitSpanModified(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(explicitMatches, questionWords), questionWords) &&
+    !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
+  ) {
+    return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }
   if (countIntent && explicitMatches.every((synonym) => countAdvisory.has(normalizedPhrase(synonym)))) {
     return { enforcement: 'advisory', enforcementReason: 'count_or_existence_intent', explicitMatches, advisoryMatches };
@@ -477,6 +772,11 @@ function summarizeSemanticEntry(entry, matchedSynonyms) {
     displayColumns: entry.display_columns || [],
     preferredColumns: entry.preferred_columns || [],
     preferredExpression: entry.preferred_expression || null,
+    // Hints-v2 overlay only (absent from every version-1 plan): column
+    // differences [minuend, subtrahend] that, computed by the SQL, satisfy the
+    // metric guardrail as well ("NetPayableAmount - PaidAmount" for the open
+    // balance).
+    ...(entry.alternative_differences ? { alternativeDifferences: entry.alternative_differences } : {}),
     defaultFilters: entry.default_filters || [],
     notes: entry.notes || [],
     score: semanticMatchScore(matchedSynonyms),
@@ -567,6 +867,55 @@ function addDerivedMetrics(metrics, semanticLayer) {
   return derivedMetrics;
 }
 
+// Hints version 2: an account named after its code, "account 4000 (Sales
+// Revenue)" or 'account 4000 "Sales Revenue"', is one ledger-account
+// reference. Its span consumes the metric words inside the name, exactly as
+// the "sales revenue account" synonym does for "the Sales Revenue ledger
+// account", so "revenue" there is not the net_sales metric
+// (tpl_revenue_credits_monthly_q1_2026_e1b20a, flagged known_validator_rejection:
+// METRIC_COLUMN under version 1). Sales words anywhere else in the question
+// ("net sales and total credits") still match and enforce.
+const ACCOUNT_CODE_NAME_PATTERN =
+  /\b(?:ledger\s+|gl\s+)?accounts?\s+(?:(?:code|number|no\.?|#)\s*)?\d[\d.-]*\s*(?:\([^()]*\)|"[^"]*"|\u201c[^\u201d]*\u201d)/gi;
+
+function findAccountReferenceSpans(normalizedQuestion) {
+  const text = String(normalizedQuestion || '');
+  const spans = [];
+  for (const match of text.matchAll(ACCOUNT_CODE_NAME_PATTERN)) {
+    const start = splitWords(text.slice(0, match.index ?? 0)).length;
+    const end = start + splitWords(match[0]).length;
+    spans.push({ synonym: match[0], start, end });
+  }
+  return spans;
+}
+
+/**
+ * Hints version 2: an entity whose every matched word lies inside the span of
+ * a matched metric measured at that entity's grain names the metric's grain,
+ * not something to list ("sales" in "What were sales in March 2026?" is
+ * net_sales over sales documents; "order" in "average order value"). Such an
+ * entity keeps its tables and default filters but loses its display columns,
+ * which invited one row per document (hard_ambiguous_sales_mar_2026,
+ * tpl_outstanding_balance_mar_2026_c15bb6). A metric phrase that names
+ * another entity ("biggest buyers": net sales per customer) keeps that
+ * entity's display columns.
+ */
+function withoutGrainDisplayColumns(entities, matches, activeSpans) {
+  const grainOf = new Map(matches.filter((match) => match.kind === 'metric').map((match) => [match.key, match.entry.grain || null]));
+  const metricSpans = activeSpans.filter((span) => span.kind === 'metric');
+  const entityKeyOf = new Map(matches.filter((match) => match.kind === 'entity').map((match) => [match.entry.name, match.key]));
+  return entities.map((entity) => {
+    const spans = activeSpans.filter((span) => span.key === entityKeyOf.get(entity.name));
+    const consumedBy = (span) =>
+      metricSpans.find((metric) => grainOf.get(metric.key) === entity.name && metric.start <= span.start && span.end <= metric.end);
+    const consumers = spans.map(consumedBy);
+    if (entity.displayColumns.length === 0 || spans.length === 0 || consumers.some((consumer) => !consumer)) {
+      return entity;
+    }
+    return { ...entity, displayColumns: [], displayColumnsSuppressedBy: uniqueStrings(consumers.map((consumer) => consumer.entryName)) };
+  });
+}
+
 function findSemanticJoinHints(joinPaths, requiredTables) {
   const required = new Set(requiredTables);
 
@@ -593,7 +942,7 @@ function findMatchedClarificationRules(clarificationRules, questionContext) {
     .filter((rule) => rule.matchedTriggers.length > 0);
 }
 
-function matchSemanticLayer(semanticLayer, questionContext) {
+function matchSemanticLayer(semanticLayer, questionContext, { hintsVersion = 1 } = {}) {
   const questionWords = buildQuestionWordIndex(questionContext);
   const sources = [
     ...(semanticLayer.entities || []).map((entry) => ({ kind: 'entity', entry, matchEntry: entry })),
@@ -617,6 +966,14 @@ function matchSemanticLayer(semanticLayer, questionContext) {
       entryName: source.entry.name,
     }))
   );
+  const ledgerAccount = sources.find((source) => source.kind === 'entity' && source.entry.name === 'ledger_account');
+  if (hintsVersion !== 1 && ledgerAccount) {
+    // Only the span takes part in arbitration; the entity is matched by its
+    // own "account" synonym, which lies inside it.
+    for (const span of findAccountReferenceSpans(questionContext.normalizedQuestion)) {
+      candidates.push({ ...span, key: ledgerAccount.key, kind: 'entity', entryName: 'ledger_account' });
+    }
+  }
   const { active, suppressed } = arbitrateSemanticSpans(candidates);
 
   const matches = sources
@@ -628,6 +985,7 @@ function matchSemanticLayer(semanticLayer, questionContext) {
 
   return {
     matches,
+    activeSpans: active,
     suppressedMatches: suppressed.map((span) => ({
       kind: span.kind,
       name: span.entryName,
@@ -638,18 +996,32 @@ function matchSemanticLayer(semanticLayer, questionContext) {
   };
 }
 
-export function buildSemanticPlan(question, { questionContext = null, semanticLayer = loadSemanticLayerSync() } = {}) {
-  const context = questionContext || buildQuestionContext(question);
+/**
+ * The semantic plan of `question`: matched entities, metrics (with their
+ * guardrail enforcement), filter hints, join hints and clarification rules.
+ * `hintsVersion` (src/hints-version.js; default 2) selects the semantic layer
+ * (version 2 applies metadata/semantic-layer.hints-v2.json) and the v2
+ * arbitration; a version-2 plan says so in `hintsVersion`, a version-1 plan
+ * is exactly the plan every run had before HINTS_VERSION existed.
+ */
+export function buildSemanticPlan(question, { questionContext = null, semanticLayer = undefined, hintsVersion = undefined } = {}) {
+  const version = normalizeHintsVersion(hintsVersion);
+  const layer = semanticLayer ?? loadSemanticLayerForHintsVersion(version);
+  const context = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const countIntent = detectCountOrExistenceIntent(context.normalizedQuestion);
-  const { matches, suppressedMatches } = matchSemanticLayer(semanticLayer, context);
-  const entities = matches
+  const questionWords = buildQuestionWordIndex(context);
+  const { matches, activeSpans, suppressedMatches } = matchSemanticLayer(layer, context, { hintsVersion: version });
+  let entities = matches
     .filter((match) => match.kind === 'entity')
     .map((match) => summarizeSemanticEntry(match.entry, match.matchedSynonyms));
+  if (version !== 1) {
+    entities = withoutGrainDisplayColumns(entities, matches, activeSpans);
+  }
   let metrics = matches
     .filter((match) => match.kind === 'metric')
     .map((match) => ({
       ...summarizeSemanticEntry(match.entry, match.matchedSynonyms),
-      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent),
+      ...classifyMetricEnforcement(match.entry, match.matchedSynonyms, countIntent, questionWords),
     }));
   const filterHints = matches
     .filter((match) => match.kind === 'filter')
@@ -660,7 +1032,7 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
     entities.some((entry) => PRODUCT_CONTEXT_ENTITY_NAMES.has(entry.name)) ||
     filterHints.some((entry) => PRODUCT_CONTEXT_FILTER_TABLES.has(entry.targetTable));
   if (hasProductContext) {
-    metrics = addDerivedMetrics(metrics, semanticLayer);
+    metrics = addDerivedMetrics(metrics, layer);
   }
 
   const requiredTables = uniqueStrings([
@@ -675,21 +1047,27 @@ export function buildSemanticPlan(question, { questionContext = null, semanticLa
   ]);
   const defaultFilters = uniqueStrings([
     ...entities.flatMap((entry) => entry.defaultFilters),
+    // Version 2: a metric's own default filters (units count product lines
+    // only, canceled documents excluded) apply even when no entity matched.
+    ...(version === 1 ? [] : metrics.flatMap((entry) => entry.defaultFilters)),
   ]);
 
-  return {
-    version: semanticLayer.version ?? null,
+  const plan = {
+    version: layer.version ?? null,
     entities,
     metrics,
     filterHints,
     requiredTables,
     preferredColumns,
     defaultFilters,
-    clarificationRules: findMatchedClarificationRules(semanticLayer.clarification_rules || [], context),
-    joinHints: findSemanticJoinHints(semanticLayer.join_paths || [], requiredTables),
+    clarificationRules: findMatchedClarificationRules(layer.clarification_rules || [], context),
+    joinHints: findSemanticJoinHints(layer.join_paths || [], requiredTables),
     countIntent,
     suppressedMatches,
   };
+  // Only a version-2 plan is marked: a version-1 plan stays byte for byte the
+  // plan of the runs before HINTS_VERSION existed (absent = 1).
+  return version === 1 ? plan : { ...plan, hintsVersion: version };
 }
 
 function buildSemanticTableBoosts(semanticPlan) {
@@ -759,18 +1137,29 @@ function scoreColumn(column, questionTokens) {
   return score;
 }
 
-function buildTableIndex(table) {
+// Hints version 2: "account" is not a Customer alias (in this schema it names
+// a ledger account; tpl_account_net_movement_feb_2026_c1256b read "each
+// account" as each customer), matching the overlay's customer entity.
+const TABLE_ALIAS_REMOVALS_V2 = { Customer: new Set(['account', 'accounts']) };
+
+function tableAliases(tableName, hintsVersion) {
+  const aliases = TABLE_ALIASES[tableName] || [];
+  const removed = hintsVersion === 1 ? null : TABLE_ALIAS_REMOVALS_V2[tableName];
+  return removed ? aliases.filter((alias) => !removed.has(alias)) : aliases;
+}
+
+function buildTableIndex(table, hintsVersion = 1) {
   return {
     nameTokens: normalizeTokens(table.name),
     descriptionTokens: normalizeTokens(table.description || ''),
-    aliasTokens: normalizeTokens((TABLE_ALIASES[table.name] || []).join(' ')),
+    aliasTokens: normalizeTokens(tableAliases(table.name, hintsVersion).join(' ')),
     columnNameTokens: normalizeTokens(table.columns.map((column) => column.name).join(' ')),
     columnCommentTokens: normalizeTokens(table.columns.map((column) => column.comment || '').join(' ')),
   };
 }
 
-export function scoreTableDetailed(table, questionTokens) {
-  const index = buildTableIndex(table);
+export function scoreTableDetailed(table, questionTokens, { hintsVersion = undefined } = {}) {
+  const index = buildTableIndex(table, normalizeHintsVersion(hintsVersion));
   let score = 0;
   const matches = [];
 
@@ -815,8 +1204,8 @@ export function scoreTableDetailed(table, questionTokens) {
   };
 }
 
-function scoreTable(table, questionTokens) {
-  return scoreTableDetailed(table, questionTokens).score;
+function scoreTable(table, questionTokens, hintsVersion) {
+  return scoreTableDetailed(table, questionTokens, { hintsVersion }).score;
 }
 
 function getImportantColumns(table, questionTokens, limit = 24) {
@@ -1069,15 +1458,16 @@ function expandTablesForJoinPaths(tables, selectedNames, maxJoinPathHops = 3) {
 export function retrieveRelevantTables(
   schema,
   question,
-  { maxTables = 4, maxJoinPathHops = 3, questionContext = null, semanticPlan = null } = {}
+  { maxTables = 4, maxJoinPathHops = 3, questionContext = null, semanticPlan = null, hintsVersion = undefined } = {}
 ) {
-  const resolvedQuestionContext = questionContext || buildQuestionContext(question);
+  const version = normalizeHintsVersion(hintsVersion);
+  const resolvedQuestionContext = questionContext || buildQuestionContext(question, { hintsVersion: version });
   const { questionTokens } = resolvedQuestionContext;
-  const resolvedSemanticPlan = semanticPlan || buildSemanticPlan(question, { questionContext: resolvedQuestionContext });
+  const resolvedSemanticPlan = semanticPlan || buildSemanticPlan(question, { questionContext: resolvedQuestionContext, hintsVersion: version });
   const semanticBoosts = buildSemanticTableBoosts(resolvedSemanticPlan);
   const scored = schema.tables
     .map((table) => {
-      const lexicalScore = scoreTable(table, questionTokens);
+      const lexicalScore = scoreTable(table, questionTokens, version);
       const semanticBoost = semanticBoosts.get(table.tableName) || semanticBoosts.get(table.name) || { score: 0, matches: [] };
 
       return {
@@ -1163,8 +1553,10 @@ function scoreExample(example, questionTokens) {
   };
 }
 
+// Few-shot selection reads the version-1 tokens in every hints version: the
+// example pool and how it is picked are held fixed across the A/B.
 export function retrieveRelevantExamples(question, { maxExamples = 2, minScore = 1 } = {}) {
-  const questionTokens = buildQuestionContext(question).questionTokens;
+  const questionTokens = buildQuestionContext(question, { hintsVersion: 1 }).questionTokens;
 
   return FEW_SHOT_EXAMPLES.map((example) => {
     const scored = scoreExample(example, questionTokens);
@@ -1206,7 +1598,23 @@ function formatTemporalReferences(temporalReferences) {
     .join('\n');
 }
 
-function formatSemanticHints(semanticPlan) {
+// Version 1 said "counts and lists do not need it" for every advisory match,
+// also for "How many units did we sell" (a SUM of quantity). Version 2 says
+// which kind of weak match it is.
+function advisoryMetricNote(metric, hintsVersion) {
+  if (hintsVersion === 1) {
+    return ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)';
+  }
+  if (metric.enforcementReason === 'count_or_existence_intent') {
+    return ' (weak match: the question counts or lists rows; use this measure only if it also asks for this amount)';
+  }
+  if (metric.enforcementReason === 'other_amount_named') {
+    return ' (weak match: the question names another amount, such as gross, tax included or a named total; use the amount it names)';
+  }
+  return ' (weak match on generic wording: use this measure when the question asks for an amount or a quantity, not when it only counts or lists rows)';
+}
+
+function formatSemanticHints(semanticPlan, { hintsVersion = 1 } = {}) {
   if (
     !semanticPlan ||
     ((semanticPlan.entities || []).length === 0 &&
@@ -1232,14 +1640,17 @@ function formatSemanticHints(semanticPlan) {
     // An advisory metric matched only generic wording ("sales", "sold") or a
     // count/existence question, so say so instead of steering a COUNT query
     // toward an amount column.
-    const advisoryNote =
-      metric.enforcement === 'advisory'
-        ? ' (weak match: use this measure only if the question asks for it; counts and lists do not need it)'
-        : '';
+    const advisoryNote = metric.enforcement === 'advisory' ? advisoryMetricNote(metric, hintsVersion) : '';
+    // Version 2 also states the metric's default filters and notes (the
+    // conventions behind the gold: product lines only for units, canceled
+    // documents excluded, which amount column a money word means).
+    const defaults =
+      hintsVersion !== 1 && (metric.defaultFilters || []).length > 0 ? `; apply default filters ${metric.defaultFilters.join(' AND ')}` : '';
+    const notes = hintsVersion !== 1 && (metric.notes || []).length > 0 ? ` ${metric.notes.join(' ')}` : '';
     lines.push(
       `- Metric "${metric.name}" matched ${metric.matchedSynonyms.join(', ')}${advisoryNote}; prefer ${metric.preferredExpression || 'the most direct matching expression'}${
         metric.preferredTables.length > 0 ? ` using tables ${metric.preferredTables.join(', ')}` : ''
-      }.`
+      }${defaults}.${notes}`
     );
   }
 
@@ -1305,8 +1716,10 @@ function estimatePromptTokens(text) {
   return length === 0 ? 0 : Math.ceil(length / 4);
 }
 
+// The basic prompt has no semantic hints and does not follow HINTS_VERSION:
+// its temporal resolution and tokens are version 1's.
 export function buildBasicPrompt(schema, question) {
-  const questionContext = buildQuestionContext(question);
+  const questionContext = buildQuestionContext(question, { hintsVersion: 1 });
   const context = buildPromptContext(schema.tables, questionContext.questionTokens);
 
   return {
@@ -1345,8 +1758,8 @@ const SCHEMA_PREFIX_NOTES = {
   full: 'In-scope schema context comes first: it lists every in-scope table and is the same for every question.',
 };
 
-function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved' } = {}) {
-  const rules = BUSINESS_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n');
+function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved', hintsVersion = 1 } = {}) {
+  const rules = businessRulesFor(hintsVersion).map((rule, index) => `${index + 1}. ${rule}`).join('\n');
 
   return `You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.
 
@@ -1384,7 +1797,7 @@ In-scope schema:
 ${context.tableBlocks}`;
 }
 
-function buildOptimizedQuestionContext({ question, retrieval, rankedContext, masterDataCandidates, examples }) {
+function buildOptimizedQuestionContext({ question, retrieval, rankedContext, masterDataCandidates, examples, hintsVersion }) {
   return `Question-specific context:
 
 Question:
@@ -1394,7 +1807,7 @@ Resolved temporal references:
 ${formatTemporalReferences(retrieval.temporalReferences)}
 
 Semantic retrieval hints:
-${formatSemanticHints(retrieval.semanticPlan)}
+${formatSemanticHints(retrieval.semanticPlan, { hintsVersion })}
 
 Resolved master-data candidates:
 ${formatMasterDataCandidates(masterDataCandidates)}
@@ -1410,7 +1823,7 @@ ${examples}`;
 // the question part carries retrieval's output as a one-line hint instead of
 // re-printing the retrieved tables (the 'Question-ranked schema details' block
 // of the retrieved scope, about a quarter of that prompt; audit D8).
-function buildFullScopeQuestionContext({ question, retrieval, relevanceHint, masterDataCandidates, examples }) {
+function buildFullScopeQuestionContext({ question, retrieval, relevanceHint, masterDataCandidates, examples, hintsVersion }) {
   return `Question-specific context:
 
 Question:
@@ -1420,7 +1833,7 @@ Resolved temporal references:
 ${formatTemporalReferences(retrieval.temporalReferences)}
 
 Semantic retrieval hints:
-${formatSemanticHints(retrieval.semanticPlan)}
+${formatSemanticHints(retrieval.semanticPlan, { hintsVersion })}
 
 Resolved master-data candidates:
 ${formatMasterDataCandidates(masterDataCandidates)}
@@ -1712,6 +2125,23 @@ export function tablesToWidenFor(rejection, sql, { schema, allowedTables = [] })
 }
 
 /**
+ * The hints version a prompt is built with: the explicit option, else the
+ * version the semantic plan was built with (a version-2 plan is marked; an
+ * unmarked plan is a version-1 plan or a hand-built one), else the default.
+ * A version-2 plan in a version-1 prompt is a caller bug and throws.
+ */
+function resolvePromptHintsVersion(hintsVersion, semanticPlan) {
+  if (hintsVersion === undefined || hintsVersion === null) {
+    return normalizeHintsVersion(semanticPlan ? semanticPlan.hintsVersion ?? 1 : undefined);
+  }
+  const version = normalizeHintsVersion(hintsVersion);
+  if (semanticPlan?.hintsVersion !== undefined && semanticPlan.hintsVersion !== version) {
+    throw new Error(`The semantic plan was built with hints version ${semanticPlan.hintsVersion}, the prompt asks for ${version}.`);
+  }
+  return version;
+}
+
+/**
  * The optimized prompt for `question`. Options:
  * - masterDataCandidates, semanticPlan: question context resolved upstream;
  * - schemaScope: a scope name or config (src/schema-scope.js; default auto).
@@ -1719,14 +2149,23 @@ export function tablesToWidenFor(rejection, sql, { schema, allowedTables = [] })
  *   all; 'retrieved' shows and allows the retrieved tables (the prompt every
  *   question had before schema scopes existed, byte for byte);
  * - extraTables: retrieved scope only, in-scope tables to add (widen-on-demand
- *   after a TABLE_SCOPE rejection; see tablesToWidenFor).
- * `tables` is the allow-list; `context.schemaScope` says which scope applied.
+ *   after a TABLE_SCOPE rejection; see tablesToWidenFor);
+ * - hintsVersion: 1 or 2 (src/hints-version.js; default: the plan's, else 2).
+ *   Version 1 is the prompt every question had before HINTS_VERSION existed,
+ *   byte for byte.
+ * `tables` is the allow-list; `context.schemaScope` says which scope applied
+ * and `context.hintsVersion` which hints version.
  */
-export function buildOptimizedPrompt(schema, question, { masterDataCandidates = [], semanticPlan = null, schemaScope = undefined, extraTables = [] } = {}) {
+export function buildOptimizedPrompt(
+  schema,
+  question,
+  { masterDataCandidates = [], semanticPlan = null, schemaScope = undefined, extraTables = [], hintsVersion = undefined } = {}
+) {
   const scope = resolveEffectiveSchemaScope(schema, schemaScope);
-  const retrieval = retrieveRelevantTables(schema, question, { semanticPlan });
+  const version = resolvePromptHintsVersion(hintsVersion, semanticPlan);
+  const retrieval = retrieveRelevantTables(schema, question, { semanticPlan, hintsVersion: version });
   if (scope.effective === 'full') {
-    return buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates });
+    return buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates, hintsVersion: version });
   }
   const widened = extraTables.length > 0 ? widenRetrievedTables(schema, retrieval.tables, extraTables) : null;
   const promptTables = widened ? widened.tables : retrieval.tables;
@@ -1737,7 +2176,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
     minScore: 1,
   });
   const examples = formatExamples(relevantExamples);
-  const system = buildOptimizedSystemPrompt();
+  const system = buildOptimizedSystemPrompt({ hintsVersion: version });
   const schemaContext = buildOptimizedSchemaContext(stableContext);
   const questionContext = buildOptimizedQuestionContext({
     question,
@@ -1745,6 +2184,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
     rankedContext: context,
     masterDataCandidates,
     examples,
+    hintsVersion: version,
   });
   const promptCache = summarizePromptCacheLayout({
     system,
@@ -1775,6 +2215,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
         widenedTables: widened ? widened.addedTableNames : [],
         widenConnectorTables: widened ? widened.connectorTableNames : [],
       },
+      hintsVersion: version,
       examples: summarizeExamples(relevantExamples),
     },
   };
@@ -1792,18 +2233,19 @@ function summarizeExamples(examples) {
 // Full scope: every in-scope table in one stable schema block (the cacheable
 // prefix, identical for every question), retrieval as a one-line hint, and
 // every in-scope table allowed.
-function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates }) {
+function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates, hintsVersion }) {
   const { schemaContext } = fullSchemaStableContext(schema);
   const context = buildPromptContext(schema.tables, retrieval.questionTokens);
   const relevanceHint = buildRelevanceHint(schema, retrieval);
   const relevantExamples = retrieveRelevantExamples(question, { maxExamples: 2, minScore: 1 });
-  const system = buildOptimizedSystemPrompt({ effectiveScope: 'full' });
+  const system = buildOptimizedSystemPrompt({ effectiveScope: 'full', hintsVersion });
   const questionContext = buildFullScopeQuestionContext({
     question,
     retrieval,
     relevanceHint: relevanceHint.text,
     masterDataCandidates,
     examples: formatExamples(relevantExamples),
+    hintsVersion,
   });
   const promptCache = summarizePromptCacheLayout({ system, schemaContext, questionContext, effectiveScope: 'full' });
 
@@ -1827,6 +2269,7 @@ function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCa
       masterDataCandidates,
       promptCache,
       schemaScope: { ...scope, widenedTables: [], widenConnectorTables: [] },
+      hintsVersion,
       examples: summarizeExamples(relevantExamples),
     },
   };

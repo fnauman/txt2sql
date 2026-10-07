@@ -1,0 +1,2037 @@
+{
+  "note": "Optimized prompts and semantic plans built at dff0eb0 (exp/schema-scope, before HINTS_VERSION existed). HINTS_VERSION=1 must reproduce them byte for byte in both schema scopes.",
+  "gitSha": "dff0eb0",
+  "full": {
+    "system": "You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.\n\nWrite one read-only SQL query using only the provided schema context.\nUse only in-scope foreign keys and in-scope tables.\nIMPORTANT: Use only exact table and column names that appear in the schema context below. Detailed column entries are a ranked subset; you may use another column only when its exact name appears in an \"Other available columns\" list. Do NOT invent or infer names that are not shown.\n\nThe user message is arranged for prompt caching:\n1. In-scope schema context comes first: it lists every in-scope table and is the same for every question.\n2. Question-specific context comes after the schema context.\n3. The final answer must still answer only the user's current question.\n\nBusiness rules:\n1. Write MariaDB 10.6 compatible SQL only.\n2. Do not write SQL comments (--, #, /* */) anywhere in the query: SQL that contains a comment is rejected.\n3. Use only the tables and foreign keys provided in the prompt context. Ignore all missing or implied relationships.\n4. If the prompt resolves temporal references, use those exact normalized interpretations and do not reinterpret ambiguous dates or years.\n5. For month or date filters, prefer half-open ranges like date_col >= start_date AND date_col < end_exclusive instead of MONTH() or YEAR() wrappers.\n6. For sales date questions, prefer SalesDocument.DocumentDate unless the user explicitly asks for posting date or due date.\n7. Use SalesDocument.PostingDate or AccountingPosting.PostingDate for posted-date questions and SalesDocument.DueDate for aging or due-date questions.\n8. Unless the user explicitly asks for canceled documents, exclude them with IFNULL(SalesDocument.IsCanceled, 0) = 0 when querying SalesDocument.\n9. For outstanding or unpaid sales document amounts, use SalesDocument.BalanceAmount. For paid amounts, use SalesDocument.PaidAmount.\n10. For document-level totals, prefer the explicitly named header amounts such as SalesDocument.NetAmount, SalesDocument.NetPayableAmount, SalesDocument.BillTotalAmount, or SalesDocument.SubtotalAmount based on the wording of the question.\n11. If the user names a document type or document class, join DocumentType and filter by DocumentType.DocumentTypeName instead of guessing numeric type IDs.\n12. For product-level analysis, prefer SalesDocumentLine.Quantity, SalesDocumentLine.SalePrice, SalesDocumentLine.TotalAmount, and SalesDocumentLine.NetAmount.\n13. For accounting questions, use AccountingPosting with LedgerAccount and aggregate DebitAmount/CreditAmount columns instead of sales document header totals.\n14. For user-provided entity names (customer, store location, campaign, product category, brand, product), prefer LIKE with surrounding wildcards on canonical name columns instead of exact equality, unless the user explicitly asks for an exact match.\n15. For named customer or store-location filters, include Customer.CustomerName and StoreLocation.LocationName as candidate text filters when those tables are in scope.\n16. For campaign-filtered product sales, join SalesDocumentLine to Product and Product to Campaign, then filter Campaign.CampaignName with LIKE. Do not require an external campaign ID variable when Campaign is in scope.\n17. For product categories, prefer ProductCategory joined through Product.ProductCategoryId instead of stale SalesDocumentLine.CategoryNameSnapshot values when ProductCategory is in scope.\n18. For brand analysis, prefer Brand joined through Product.BrandId or ProductBrand instead of stale SalesDocumentLine.BrandNameSnapshot values when Brand is in scope.\n19. If the business meaning is ambiguous, choose the most directly named column and state that assumption in the JSON response.\n20. Unless requested otherwise, project only the most specific display name columns for entities: select only CustomerName for customer, only ProductName for product, only LocationName for store location, and only DocumentTypeName for document type. Do not project ID or code columns unless explicitly requested or needed for query logic.\n21. Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested.\n22. For currency/amount metrics (net sales, debit, credit), round the aggregated sum to 2 decimal places using ROUND(..., 2). Alias the aggregated sum of net sales/revenue as total_net_amount, debit as total_debit, and credit as total_credit.\n23. For quantity metrics (qty sold, moved), round the aggregated sum to 3 decimal places using ROUND(..., 3). Alias the aggregated sum of quantity as total_qty.\n24. For counts, alias sales document/document counts as document_count, and product/SKU counts as product_count.\n25. For \"not in\" or \"did not sell in\" temporal comparison questions (anti-joins), write the query using a LEFT JOIN ... WHERE ... IS NULL or NOT EXISTS pattern. Avoid restricting the main WHERE clause to the first period if you also filter the second period there, as that removes the comparison data before the anti-join or HAVING clause can process it.\n26. For \"top\", \"biggest\", or \"most\" ranking queries, always apply a LIMIT 10 unless a different limit is explicitly specified.\n27. When sorting ranking queries, sort rounded aggregate outputs by the underlying unrounded aggregate expression first, then use a secondary deterministic sort key (e.g., entity name/code like CustomerName, ProductName, AccountCode) in ASC order to handle equal values cleanly.\n\nReturn ONLY a JSON object with this shape:\n{\n  \"sql\": \"SELECT ...\",\n  \"explanation\": \"short explanation\",\n  \"tables_used\": [\"TableA\", \"TableB\"],\n  \"assumptions\": [\"any explicit assumption\"]\n}",
+    "systemSha256": "bbd4954c36c7d72659162870de0a854e8806950707cd5f34deab59ec09f12704",
+    "schemaContextSha256": "17ed75827c5816a1d74b22533886ea1b7442eb2f8b9438c86723b9e2440bfbcf"
+  },
+  "retrieved": {
+    "systemSha256": "9803ed4285a6ec18c451dc7464f707395f077876960d47ff3827691dc6760579"
+  },
+  "prompts": [
+    {
+      "question": "Show the top customers by total net sales amount in March 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "customer",
+            "matchedSynonyms": [
+              "customer",
+              "customers"
+            ],
+            "preferredTables": [
+              "Customer"
+            ],
+            "displayColumns": [
+              "Customer.CustomerName",
+              "Customer.CustomerCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          },
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "net_sales",
+            "matchedSynonyms": [
+              "net_sales",
+              "net sales",
+              "sales",
+              "sale"
+            ],
+            "preferredTables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocument.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocument.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+            ],
+            "score": 9,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "explicitMatches": [
+              "net_sales",
+              "net sales"
+            ],
+            "advisoryMatches": [
+              "sales",
+              "sale"
+            ]
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "Customer",
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "Customer.CustomerName",
+          "Customer.CustomerCode",
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate",
+          "SalesDocument.NetAmount"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "document_to_customer",
+            "tables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "joinSql": "SalesDocument.CustomerId = Customer.CustomerId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nShow the top customers by total net sales amount in March 2026.\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"customer\" matched customer, customers; prefer tables Customer and display columns Customer.CustomerName, Customer.CustomerCode.\n- Entity \"sales_document\" matched sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Metric \"net_sales\" matched net_sales, net sales, sales, sale; prefer COALESCE(SalesDocument.NetAmount, 0) using tables SalesDocument, Customer.\n- Semantic join \"document_to_customer\": SalesDocument.CustomerId = Customer.CustomerId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument (NetAmount, NetPayableAmount, BillTotalAmount, CustomerId); Customer; SalesDocumentLine (TotalAmount, NetAmount); CustomerProductPrice (SalePrice); join path via Product\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "8c61b76c1dde0328821882297187b1a4b6f12e517f0f0c07cec165b2f65a49a1",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "fb9789b5c735c872adbf65658e151781864c3f90130fe07912c1c8a71428e239",
+        "allowedTables": [
+          "Customer",
+          "CustomerProductPrice",
+          "Product",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "How many products were sold in February 2026 but not in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "product",
+            "matchedSynonyms": [
+              "product",
+              "products"
+            ],
+            "preferredTables": [
+              "Product"
+            ],
+            "displayColumns": [
+              "Product.ProductName",
+              "Product.ProductCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "quantity_sold",
+            "matchedSynonyms": [
+              "sold"
+            ],
+            "preferredTables": [
+              "SalesDocumentLine",
+              "Product",
+              "SalesDocument"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocumentLine.Quantity"
+            ],
+            "preferredExpression": "COALESCE(SalesDocumentLine.Quantity, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "Use SalesDocumentLine for product-level quantity analysis."
+            ],
+            "score": 1,
+            "enforcement": "advisory",
+            "enforcementReason": "generic_terms_only",
+            "explicitMatches": [],
+            "advisoryMatches": [
+              "sold"
+            ]
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "Product",
+          "SalesDocumentLine",
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "Product.ProductName",
+          "Product.ProductCode",
+          "SalesDocumentLine.Quantity"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "document_line_to_product",
+            "tables": [
+              "SalesDocumentLine",
+              "Product"
+            ],
+            "joinSql": "SalesDocumentLine.ProductId = Product.ProductId"
+          },
+          {
+            "name": "document_line_to_document",
+            "tables": [
+              "SalesDocumentLine",
+              "SalesDocument"
+            ],
+            "joinSql": "SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": true,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow many products were sold in February 2026 but not in March 2026?\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"product\" matched product, products; prefer tables Product and display columns Product.ProductName, Product.ProductCode.\n- Metric \"quantity_sold\" matched sold (weak match: use this measure only if the question asks for it; counts and lists do not need it); prefer COALESCE(SalesDocumentLine.Quantity, 0) using tables SalesDocumentLine, Product, SalesDocument.\n- Semantic join \"document_line_to_product\": SalesDocumentLine.ProductId = Product.ProductId.\n- Semantic join \"document_line_to_document\": SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: Product; SalesDocumentLine (ProductId, ProductNameSnapshot, Quantity); SalesDocument; ProductBrand; join path via Campaign\n\nFew-shot examples:\nExample 1:\nQ: Which products have never been sold?\nTables: Product, SalesDocumentLine, SalesDocument\nSQL:\nSELECT p.ProductName\nFROM Product p\nWHERE NOT EXISTS (\n  SELECT 1\n  FROM SalesDocumentLine l\n  JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\n  WHERE l.ProductId = p.ProductId\n    AND IFNULL(d.IsCanceled, 0) = 0\n)\nORDER BY p.ProductName ASC\n\nExample 2:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "2b2165b422c1b3c11ac7cf4d81933f83554ea4b698e93a66b5c8cc3154fe2fe6",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "f5c09416b9104dc6d91461ab3f13d0fc64d1e5df5301ddff23ac59d60be65082",
+        "allowedTables": [
+          "Campaign",
+          "Product",
+          "ProductBrand",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "How many SKUs sold in February 2026 but stopped selling in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "product",
+            "matchedSynonyms": [
+              "sku",
+              "skus"
+            ],
+            "preferredTables": [
+              "Product"
+            ],
+            "displayColumns": [
+              "Product.ProductName",
+              "Product.ProductCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "quantity_sold",
+            "matchedSynonyms": [
+              "sold",
+              "sell",
+              "stopped selling"
+            ],
+            "preferredTables": [
+              "SalesDocumentLine",
+              "Product",
+              "SalesDocument"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocumentLine.Quantity"
+            ],
+            "preferredExpression": "COALESCE(SalesDocumentLine.Quantity, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "Use SalesDocumentLine for product-level quantity analysis."
+            ],
+            "score": 4,
+            "enforcement": "advisory",
+            "enforcementReason": "generic_terms_only",
+            "explicitMatches": [],
+            "advisoryMatches": [
+              "sold",
+              "sell",
+              "stopped selling"
+            ]
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "Product",
+          "SalesDocumentLine",
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "Product.ProductName",
+          "Product.ProductCode",
+          "SalesDocumentLine.Quantity"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "document_line_to_product",
+            "tables": [
+              "SalesDocumentLine",
+              "Product"
+            ],
+            "joinSql": "SalesDocumentLine.ProductId = Product.ProductId"
+          },
+          {
+            "name": "document_line_to_document",
+            "tables": [
+              "SalesDocumentLine",
+              "SalesDocument"
+            ],
+            "joinSql": "SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": true,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow many SKUs sold in February 2026 but stopped selling in March 2026?\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"product\" matched sku, skus; prefer tables Product and display columns Product.ProductName, Product.ProductCode.\n- Metric \"quantity_sold\" matched sold, sell, stopped selling (weak match: use this measure only if the question asks for it; counts and lists do not need it); prefer COALESCE(SalesDocumentLine.Quantity, 0) using tables SalesDocumentLine, Product, SalesDocument.\n- Semantic join \"document_line_to_product\": SalesDocumentLine.ProductId = Product.ProductId.\n- Semantic join \"document_line_to_document\": SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: Product (ProductCode); SalesDocumentLine (ProductId, Quantity); SalesDocument; join path via Campaign\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Which products have never been sold?\nTables: Product, SalesDocumentLine, SalesDocument\nSQL:\nSELECT p.ProductName\nFROM Product p\nWHERE NOT EXISTS (\n  SELECT 1\n  FROM SalesDocumentLine l\n  JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId\n  WHERE l.ProductId = p.ProductId\n    AND IFNULL(d.IsCanceled, 0) = 0\n)\nORDER BY p.ProductName ASC",
+        "userSha256": "4fb755f88f30901f329d47b6f46ac0509b48623c8ebded2c0951d0e279b231f9",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "1630f9f5ce18a00aef0e0afed289eb5959bd24d41aa55949cc923dad5fad8f0f",
+        "allowedTables": [
+          "Campaign",
+          "Product",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "Show the top ledger accounts by debit amount in March 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "ledger_account",
+            "matchedSynonyms": [
+              "ledger_account",
+              "account",
+              "accounts",
+              "ledger",
+              "ledger account",
+              "ledger accounts"
+            ],
+            "preferredTables": [
+              "LedgerAccount"
+            ],
+            "displayColumns": [
+              "LedgerAccount.AccountCode",
+              "LedgerAccount.AccountName"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 11
+          }
+        ],
+        "metrics": [
+          {
+            "name": "debit_amount",
+            "matchedSynonyms": [
+              "debit_amount",
+              "debit",
+              "debits",
+              "debit amount"
+            ],
+            "preferredTables": [
+              "AccountingPosting",
+              "LedgerAccount",
+              "SalesDocument"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "AccountingPosting.DebitAmount"
+            ],
+            "preferredExpression": "COALESCE(AccountingPosting.DebitAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "Use accounting postings with LedgerAccount for ledger debit analysis."
+            ],
+            "score": 7,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "explicitMatches": [
+              "debit_amount",
+              "debit",
+              "debits",
+              "debit amount"
+            ],
+            "advisoryMatches": []
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "LedgerAccount",
+          "AccountingPosting",
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "LedgerAccount.AccountCode",
+          "LedgerAccount.AccountName",
+          "AccountingPosting.DebitAmount"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "posting_to_account",
+            "tables": [
+              "AccountingPosting",
+              "LedgerAccount"
+            ],
+            "joinSql": "AccountingPosting.LedgerAccountId = LedgerAccount.LedgerAccountId"
+          },
+          {
+            "name": "posting_to_document",
+            "tables": [
+              "AccountingPosting",
+              "SalesDocument"
+            ],
+            "joinSql": "AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": [
+          {
+            "kind": "entity",
+            "name": "customer",
+            "synonym": "account",
+            "suppressedBy": "ledger_account",
+            "suppressedBySynonym": "ledger_account"
+          },
+          {
+            "kind": "entity",
+            "name": "customer",
+            "synonym": "accounts",
+            "suppressedBy": "ledger_account",
+            "suppressedBySynonym": "ledger_account"
+          }
+        ]
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nShow the top ledger accounts by debit amount in March 2026.\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"ledger_account\" matched ledger_account, account, accounts, ledger, ledger account, ledger accounts; prefer tables LedgerAccount and display columns LedgerAccount.AccountCode, LedgerAccount.AccountName.\n- Metric \"debit_amount\" matched debit_amount, debit, debits, debit amount; prefer COALESCE(AccountingPosting.DebitAmount, 0) using tables AccountingPosting, LedgerAccount, SalesDocument.\n- Semantic join \"posting_to_account\": AccountingPosting.LedgerAccountId = LedgerAccount.LedgerAccountId.\n- Semantic join \"posting_to_document\": AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: LedgerAccount; AccountingPosting (LedgerAccountId, DebitAmount, CreditAmount); SalesDocument (GrossAmount, NetAmount, NetPayableAmount, PaidAmount); Customer\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "3cf65e98378a9a9dc0fe2694780559c6904ae68b4e04feb336639c89f1303308",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "2143744645285d050b69b8e34892fc3a1e78404bd8aec0d90680cb285d77c61a",
+        "allowedTables": [
+          "AccountingPosting",
+          "Customer",
+          "LedgerAccount",
+          "SalesDocument"
+        ]
+      }
+    },
+    {
+      "question": "How many sales documents were posted in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sales_document",
+              "document",
+              "documents",
+              "sales document",
+              "sales documents",
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 16
+          },
+          {
+            "name": "accounting_posting",
+            "matchedSynonyms": [
+              "posting",
+              "postings"
+            ],
+            "preferredTables": [
+              "AccountingPosting"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument",
+          "AccountingPosting"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "posting_to_document",
+            "tables": [
+              "AccountingPosting",
+              "SalesDocument"
+            ],
+            "joinSql": "AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": true,
+        "suppressedMatches": [
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sales",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          },
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sale",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          }
+        ]
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow many sales documents were posted in March 2026?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched sales_document, document, documents, sales document, sales documents, sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Entity \"accounting_posting\" matched posting, postings; prefer tables AccountingPosting.\n- Semantic join \"posting_to_document\": AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; SalesDocumentLine; AccountingPosting (SalesDocumentId, LedgerAccountId); DocumentType (DocumentTypeName)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "c25563ebce9dbbe4a07e645efb7b2379d3626a8f18fc9c7fd8a7b2e44d76b6c7",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "66826131940ea1e330dedc391b38eb2683901b44c582b136f4a5dc2ac7ea9c7e",
+        "allowedTables": [
+          "AccountingPosting",
+          "DocumentType",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "Which outlet had the highest turnover in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [],
+        "preferredColumns": [],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nWhich outlet had the highest turnover in March 2026?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- No semantic hints matched this question.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- No table matched the wording of this question; choose tables from the schema above.\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "79554b4dc006ae8b3e43b48c1ced37125113946a9a34c64d9378de52413e2079",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "2f27c68d234385559c9fac86b184a3318de0f32f8ec2d07c52cfe2a9ee3879e6",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "Product",
+          "SalesDocument"
+        ]
+      }
+    },
+    {
+      "question": "Show turnover by department for February 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "product_category",
+            "matchedSynonyms": [
+              "department",
+              "departments"
+            ],
+            "preferredTables": [
+              "ProductCategory"
+            ],
+            "displayColumns": [
+              "ProductCategory.CategoryName",
+              "ProductCategory.CategoryCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "ProductCategory"
+        ],
+        "preferredColumns": [
+          "ProductCategory.CategoryName",
+          "ProductCategory.CategoryCode"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nShow turnover by department for February 2026.\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n\nSemantic retrieval hints:\n- Entity \"product_category\" matched department, departments; prefer tables ProductCategory and display columns ProductCategory.CategoryName, ProductCategory.CategoryCode.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: ProductCategory\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "94b17657342ee14da72427e5b61b9e0baa32ac45f0049cb0b1c78dddc440e558",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "a5b9758137012576dc481c0fd1029bf7d005e8afd46c28dcd8ddea64d5f8850f",
+        "allowedTables": [
+          "ProductCategory"
+        ]
+      }
+    },
+    {
+      "question": "How much did Lakeside Wholesale spend with us in Q1 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [],
+        "preferredColumns": [],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow much did Lakeside Wholesale spend with us in Q1 2026?\n\nResolved temporal references:\n- No explicit temporal references were resolved.\n\nSemantic retrieval hints:\n- No semantic hints matched this question.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: Customer (CustomerSegment)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "01e1750723028e5354f86f9c6da0d6c58d40b179fc09469b106ccf2963c3a3a8",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "b3028a71ffa8bded77d870a6071fcf19e5ee3d8309e3d8b755925caf202336f1",
+        "allowedTables": [
+          "Customer"
+        ]
+      }
+    },
+    {
+      "question": "Today is 15 February 2026. How many sales documents have we recorded this month so far?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sales_document",
+              "document",
+              "documents",
+              "sales document",
+              "sales documents",
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 16
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": true,
+        "suppressedMatches": [
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sales",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          },
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sale",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          }
+        ]
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nToday is 15 February 2026. How many sales documents have we recorded this month so far?\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched sales_document, document, documents, sales document, sales documents, sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; SalesDocumentLine; DocumentType (DocumentTypeName); AccountingPosting (SalesDocumentId, PostingDate)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "1e340714b8d775589214a7e758667d1aecbbd6fc9a177e95f70480a1514b2bc0",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "966e6451e2d5f38b27351c8c37f64c08340fe4ed47ae1d8fd7f4478de50a171e",
+        "allowedTables": [
+          "AccountingPosting",
+          "DocumentType",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "What were sales in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "net_sales",
+            "matchedSynonyms": [
+              "sales",
+              "sale"
+            ],
+            "preferredTables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocument.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocument.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+            ],
+            "score": 3,
+            "enforcement": "advisory",
+            "enforcementReason": "generic_terms_only",
+            "explicitMatches": [],
+            "advisoryMatches": [
+              "sales",
+              "sale"
+            ]
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument",
+          "Customer"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate",
+          "SalesDocument.NetAmount"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "document_to_customer",
+            "tables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "joinSql": "SalesDocument.CustomerId = Customer.CustomerId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nWhat were sales in March 2026?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Metric \"net_sales\" matched sales, sale (weak match: use this measure only if the question asks for it; counts and lists do not need it); prefer COALESCE(SalesDocument.NetAmount, 0) using tables SalesDocument, Customer.\n- Semantic join \"document_to_customer\": SalesDocument.CustomerId = Customer.CustomerId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; SalesDocumentLine; Customer; AccountingPosting (SalesDocumentId)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "d196ebf37c65db97622db383ebd7863e4ed7547bdb9d2a318cf2ae3d9cdbd225",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "5c64c7aafb9b85dd0b6575830b138450f52c217ef852cdb3f516c2752b983feb",
+        "allowedTables": [
+          "AccountingPosting",
+          "Customer",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "How many sales documents were dated between 1 and 10 March 2026, inclusive?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sales_document",
+              "document",
+              "documents",
+              "sales document",
+              "sales documents",
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 16
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": true,
+        "suppressedMatches": [
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sales",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          },
+          {
+            "kind": "metric",
+            "name": "net_sales",
+            "synonym": "sale",
+            "suppressedBy": "sales_document",
+            "suppressedBySynonym": "sales_document"
+          }
+        ]
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow many sales documents were dated between 1 and 10 March 2026, inclusive?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched sales_document, document, documents, sales document, sales documents, sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; SalesDocumentLine; DocumentType (DocumentTypeName); AccountingPosting (SalesDocumentId)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "03d2667429497ee9e622f94bf41e518327e3e3f0adfffb1cbb4e79e96cfefcfe",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "34106a1563a57b20e8c96dffbae17903e0b0326c5d22b0cc191154ffa9c8eb13",
+        "allowedTables": [
+          "AccountingPosting",
+          "DocumentType",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "What was our turnover from 15 February 2026 through 15 March 2026, both days included?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [],
+        "preferredColumns": [],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nWhat was our turnover from 15 February 2026 through 15 March 2026, both days included?\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- No semantic hints matched this question.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument (NetPayableAmount)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "732d41252c4491cec16c78855f659042dfa0b44c56c3272268c340e375913b71",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "763bf9fa7a8839192caa2c238362b833bcaab99924d53176f743c7515ef48de8",
+        "allowedTables": [
+          "SalesDocument"
+        ]
+      }
+    },
+    {
+      "question": "How much revenue did each brand bring in during February 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "brand",
+            "matchedSynonyms": [
+              "brand",
+              "brands"
+            ],
+            "preferredTables": [
+              "Brand",
+              "ProductBrand"
+            ],
+            "displayColumns": [
+              "Brand.BrandName"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "net_sales",
+            "matchedSynonyms": [
+              "revenue"
+            ],
+            "preferredTables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocument.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocument.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+            ],
+            "score": 1,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "explicitMatches": [
+              "revenue"
+            ],
+            "advisoryMatches": []
+          },
+          {
+            "name": "line_net_sales",
+            "matchedSynonyms": [
+              "sales with product filter context"
+            ],
+            "preferredTables": [
+              "SalesDocumentLine",
+              "Product",
+              "SalesDocument"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocumentLine.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocumentLine.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "Use sales document lines when sales/revenue is filtered or grouped by brand, product category, campaign, product, or SKU."
+            ],
+            "score": 5,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "derivedFrom": "net_sales"
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "Brand",
+          "ProductBrand",
+          "SalesDocument",
+          "Customer",
+          "SalesDocumentLine",
+          "Product"
+        ],
+        "preferredColumns": [
+          "Brand.BrandName",
+          "SalesDocument.NetAmount",
+          "SalesDocumentLine.NetAmount"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [
+          {
+            "trigger": "revenue",
+            "questions": [
+              "Do you want document-level net sales, line-level net sales, bill total, or subtotal?"
+            ],
+            "matchedTriggers": [
+              "revenue"
+            ]
+          }
+        ],
+        "joinHints": [
+          {
+            "name": "document_to_customer",
+            "tables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "joinSql": "SalesDocument.CustomerId = Customer.CustomerId"
+          },
+          {
+            "name": "document_line_to_product",
+            "tables": [
+              "SalesDocumentLine",
+              "Product"
+            ],
+            "joinSql": "SalesDocumentLine.ProductId = Product.ProductId"
+          },
+          {
+            "name": "document_line_to_document",
+            "tables": [
+              "SalesDocumentLine",
+              "SalesDocument"
+            ],
+            "joinSql": "SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId"
+          },
+          {
+            "name": "product_to_brand",
+            "tables": [
+              "Product",
+              "Brand"
+            ],
+            "joinSql": "Product.BrandId = Brand.BrandId"
+          },
+          {
+            "name": "product_brand_to_product",
+            "tables": [
+              "ProductBrand",
+              "Product"
+            ],
+            "joinSql": "ProductBrand.ProductId = Product.ProductId"
+          },
+          {
+            "name": "product_brand_to_brand",
+            "tables": [
+              "ProductBrand",
+              "Brand"
+            ],
+            "joinSql": "ProductBrand.BrandId = Brand.BrandId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow much revenue did each brand bring in during February 2026?\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n\nSemantic retrieval hints:\n- Entity \"brand\" matched brand, brands; prefer tables Brand, ProductBrand and display columns Brand.BrandName.\n- Metric \"net_sales\" matched revenue; prefer COALESCE(SalesDocument.NetAmount, 0) using tables SalesDocument, Customer.\n- Metric \"line_net_sales\" matched sales with product filter context; prefer COALESCE(SalesDocumentLine.NetAmount, 0) using tables SalesDocumentLine, Product, SalesDocument.\n- Semantic join \"document_to_customer\": SalesDocument.CustomerId = Customer.CustomerId.\n- Semantic join \"document_line_to_product\": SalesDocumentLine.ProductId = Product.ProductId.\n- Semantic join \"document_line_to_document\": SalesDocumentLine.SalesDocumentId = SalesDocument.SalesDocumentId.\n- Semantic join \"product_to_brand\": Product.BrandId = Brand.BrandId.\n- Semantic join \"product_brand_to_product\": ProductBrand.ProductId = Product.ProductId.\n- Semantic join \"product_brand_to_brand\": ProductBrand.BrandId = Brand.BrandId.\n- Clarification rule \"revenue\" matched revenue; if the request remains ambiguous, ask: Do you want document-level net sales, line-level net sales, bill total, or subtotal?\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; Brand; ProductBrand; Product (BrandId); SalesDocumentLine (BrandNameSnapshot); Customer; join path via Campaign, CustomerProductPrice\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "f6b008143ffd9e8ab25a71fd4df6446fe1cf4c5041fc735751ba2b7f46756b4a",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "10d0a75da62c7f1004a3c3bdf1742abdda9e6e0680c6d28309ffa17e5fe99daa",
+        "allowedTables": [
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "Product",
+          "ProductBrand",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "Monthly gross amount in 2025.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [],
+        "preferredColumns": [],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nMonthly gross amount in 2025.\n\nResolved temporal references:\n- No explicit temporal references were resolved.\n\nSemantic retrieval hints:\n- No semantic hints matched this question.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument (GrossAmount, NetAmount, NetPayableAmount, PaidAmount); AccountingPosting (DebitAmount, CreditAmount); SalesDocumentLine (TotalAmount, NetAmount)\n\nFew-shot examples:\nNo closely matched examples were selected for this question.",
+        "userSha256": "abcb4f33c445e26d6671989448cec5249792c5278f014e50379d4c2cbcd1528c",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "de4182b70970510a0887203a98009003397eaaa38dc2735ef94313e4219b8e5d",
+        "allowedTables": [
+          "AccountingPosting",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "What was the average order value in March 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "order",
+              "orders"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nWhat was the average order value in March 2026?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched order, orders; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "59e6e3c72e8b01c54f6d3ecdc31bebfa097a645e19ce56206f9fa8dd39079a13",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "cc324a6844fed09121341005c96e5bab783ab2af1719127416648d85ec083784",
+        "allowedTables": [
+          "SalesDocument"
+        ]
+      }
+    },
+    {
+      "question": "Total open amount on documents with a due date in April 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "document",
+              "documents"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nTotal open amount on documents with a due date in April 2026.\n\nResolved temporal references:\n- \"April 2026\" => April 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-04-01' AND date_col < '2026-05-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched document, documents; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument (DueDate, BillTotalAmount, DocumentDate, PostingDate); DocumentType; SalesDocumentLine (TotalAmount, NetAmount); AccountingPosting (SalesDocumentId, PostingDate, DebitAmount, CreditAmount)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "36cc9487c6c839c6df274fefa421a238448571dae622089b78378c05336a067c",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "76b0ac75a6ba6aaaf0bd056333aa851c3172e676c167e7834e2d2b34b8227a06",
+        "allowedTables": [
+          "AccountingPosting",
+          "DocumentType",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "How much is still unpaid on March 2026 sales?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "net_sales",
+            "matchedSynonyms": [
+              "sales",
+              "sale"
+            ],
+            "preferredTables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocument.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocument.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+            ],
+            "score": 3,
+            "enforcement": "advisory",
+            "enforcementReason": "generic_terms_only",
+            "explicitMatches": [],
+            "advisoryMatches": [
+              "sales",
+              "sale"
+            ]
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument",
+          "Customer"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate",
+          "SalesDocument.NetAmount"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "document_to_customer",
+            "tables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "joinSql": "SalesDocument.CustomerId = Customer.CustomerId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nHow much is still unpaid on March 2026 sales?\n\nResolved temporal references:\n- \"March 2026\" => March 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-03-01' AND date_col < '2026-04-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Metric \"net_sales\" matched sales, sale (weak match: use this measure only if the question asks for it; counts and lists do not need it); prefer COALESCE(SalesDocument.NetAmount, 0) using tables SalesDocument, Customer.\n- Semantic join \"document_to_customer\": SalesDocument.CustomerId = Customer.CustomerId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; SalesDocumentLine; Customer; AccountingPosting (SalesDocumentId)\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "a9e427a8645e39519bf3da8ed0937e838f8ce71b32875411402315a68f76eafa",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "c367d82b64784c3a43be56be998c7f6448c3dded92bcba4cf63a7a2a7caf2408",
+        "allowedTables": [
+          "AccountingPosting",
+          "Customer",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "Monthly credits posted to account 4000 (Sales Revenue) in Q1 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "customer",
+            "matchedSynonyms": [
+              "account",
+              "accounts"
+            ],
+            "preferredTables": [
+              "Customer"
+            ],
+            "displayColumns": [
+              "Customer.CustomerName",
+              "Customer.CustomerCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          },
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "sale",
+              "sales"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          },
+          {
+            "name": "ledger_account",
+            "matchedSynonyms": [
+              "account",
+              "accounts"
+            ],
+            "preferredTables": [
+              "LedgerAccount"
+            ],
+            "displayColumns": [
+              "LedgerAccount.AccountCode",
+              "LedgerAccount.AccountName"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          },
+          {
+            "name": "accounting_posting",
+            "matchedSynonyms": [
+              "posting",
+              "postings"
+            ],
+            "preferredTables": [
+              "AccountingPosting"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [
+          {
+            "name": "net_sales",
+            "matchedSynonyms": [
+              "sales",
+              "sale",
+              "revenue"
+            ],
+            "preferredTables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "SalesDocument.NetAmount"
+            ],
+            "preferredExpression": "COALESCE(SalesDocument.NetAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "For document-level sales/revenue rankings, prefer SalesDocument.NetAmount over payable, bill total, subtotal, or gross columns."
+            ],
+            "score": 4,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "explicitMatches": [
+              "revenue"
+            ],
+            "advisoryMatches": [
+              "sales",
+              "sale"
+            ]
+          },
+          {
+            "name": "credit_amount",
+            "matchedSynonyms": [
+              "credit",
+              "credits"
+            ],
+            "preferredTables": [
+              "AccountingPosting",
+              "LedgerAccount",
+              "SalesDocument"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [
+              "AccountingPosting.CreditAmount"
+            ],
+            "preferredExpression": "COALESCE(AccountingPosting.CreditAmount, 0)",
+            "defaultFilters": [],
+            "notes": [
+              "Use accounting postings with LedgerAccount for ledger credit analysis."
+            ],
+            "score": 3,
+            "enforcement": "enforced",
+            "enforcementReason": "explicit_metric_phrase",
+            "explicitMatches": [
+              "credit",
+              "credits"
+            ],
+            "advisoryMatches": []
+          }
+        ],
+        "filterHints": [],
+        "requiredTables": [
+          "Customer",
+          "SalesDocument",
+          "LedgerAccount",
+          "AccountingPosting"
+        ],
+        "preferredColumns": [
+          "Customer.CustomerName",
+          "Customer.CustomerCode",
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate",
+          "LedgerAccount.AccountCode",
+          "LedgerAccount.AccountName",
+          "SalesDocument.NetAmount",
+          "AccountingPosting.CreditAmount"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [
+          {
+            "trigger": "revenue",
+            "questions": [
+              "Do you want document-level net sales, line-level net sales, bill total, or subtotal?"
+            ],
+            "matchedTriggers": [
+              "revenue"
+            ]
+          }
+        ],
+        "joinHints": [
+          {
+            "name": "document_to_customer",
+            "tables": [
+              "SalesDocument",
+              "Customer"
+            ],
+            "joinSql": "SalesDocument.CustomerId = Customer.CustomerId"
+          },
+          {
+            "name": "posting_to_account",
+            "tables": [
+              "AccountingPosting",
+              "LedgerAccount"
+            ],
+            "joinSql": "AccountingPosting.LedgerAccountId = LedgerAccount.LedgerAccountId"
+          },
+          {
+            "name": "posting_to_document",
+            "tables": [
+              "AccountingPosting",
+              "SalesDocument"
+            ],
+            "joinSql": "AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nMonthly credits posted to account 4000 (Sales Revenue) in Q1 2026.\n\nResolved temporal references:\n- No explicit temporal references were resolved.\n\nSemantic retrieval hints:\n- Entity \"customer\" matched account, accounts; prefer tables Customer and display columns Customer.CustomerName, Customer.CustomerCode.\n- Entity \"sales_document\" matched sale, sales; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Entity \"ledger_account\" matched account, accounts; prefer tables LedgerAccount and display columns LedgerAccount.AccountCode, LedgerAccount.AccountName.\n- Entity \"accounting_posting\" matched posting, postings; prefer tables AccountingPosting.\n- Metric \"net_sales\" matched sales, sale, revenue; prefer COALESCE(SalesDocument.NetAmount, 0) using tables SalesDocument, Customer.\n- Metric \"credit_amount\" matched credit, credits; prefer COALESCE(AccountingPosting.CreditAmount, 0) using tables AccountingPosting, LedgerAccount, SalesDocument.\n- Semantic join \"document_to_customer\": SalesDocument.CustomerId = Customer.CustomerId.\n- Semantic join \"posting_to_account\": AccountingPosting.LedgerAccountId = LedgerAccount.LedgerAccountId.\n- Semantic join \"posting_to_document\": AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId.\n- Clarification rule \"revenue\" matched revenue; if the request remains ambiguous, ask: Do you want document-level net sales, line-level net sales, bill total, or subtotal?\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument; AccountingPosting (SalesDocumentId, LedgerAccountId, CreditAmount); LedgerAccount; Customer\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show net sales by store location\nTables: SalesDocument, StoreLocation\nSQL:\nSELECT s.LocationName, ROUND(SUM(COALESCE(d.NetAmount, 0)), 2) AS total_net_amount\nFROM SalesDocument d\nJOIN StoreLocation s ON d.StoreLocationId = s.StoreLocationId\nWHERE IFNULL(d.IsCanceled, 0) = 0\nGROUP BY s.StoreLocationId, s.LocationName\nORDER BY SUM(COALESCE(d.NetAmount, 0)) DESC, s.LocationName ASC",
+        "userSha256": "be6ca3e554f9f75398d031d0aaab9627df7fe431ee0e9e1bb78d5dea19f5808d",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "c62611d65e39f89f014c8b90e17a6023a0aa4f87125785b960e0862121c796e9",
+        "allowedTables": [
+          "AccountingPosting",
+          "Customer",
+          "LedgerAccount",
+          "SalesDocument"
+        ]
+      }
+    },
+    {
+      "question": "Which three customers bought the most units in Q1 2026?",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "customer",
+            "matchedSynonyms": [
+              "customer",
+              "customers"
+            ],
+            "preferredTables": [
+              "Customer"
+            ],
+            "displayColumns": [
+              "Customer.CustomerName",
+              "Customer.CustomerCode"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "Customer"
+        ],
+        "preferredColumns": [
+          "Customer.CustomerName",
+          "Customer.CustomerCode"
+        ],
+        "defaultFilters": [],
+        "clarificationRules": [],
+        "joinHints": [],
+        "countIntent": false,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nWhich three customers bought the most units in Q1 2026?\n\nResolved temporal references:\n- No explicit temporal references were resolved.\n\nSemantic retrieval hints:\n- Entity \"customer\" matched customer, customers; prefer tables Customer and display columns Customer.CustomerName, Customer.CustomerCode.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: Customer; CustomerProductPrice; SalesDocument (CustomerId); SalesDocumentLine (SalePrice); join path via Product\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC\n\nExample 2:\nQ: Show outstanding balance by customer\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, ROUND(SUM(COALESCE(d.BalanceAmount, 0)), 2) AS outstanding_balance\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND COALESCE(d.BalanceAmount, 0) > 0\nGROUP BY c.CustomerId, c.CustomerName\nORDER BY SUM(COALESCE(d.BalanceAmount, 0)) DESC, c.CustomerName ASC",
+        "userSha256": "f5a2a38507020316e8cc34179c7559ea1d846157083b8b321ff84e121e4ea36e",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "94817e1fb816eb020700ddedc77a6028aba59a7bd3b2a2bf86be0330a4746250",
+        "allowedTables": [
+          "Customer",
+          "CustomerProductPrice",
+          "Product",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    },
+    {
+      "question": "Count the documents whose posting date falls in February 2026.",
+      "semanticPlan": {
+        "version": 1,
+        "entities": [
+          {
+            "name": "sales_document",
+            "matchedSynonyms": [
+              "document",
+              "documents"
+            ],
+            "preferredTables": [
+              "SalesDocument"
+            ],
+            "displayColumns": [
+              "SalesDocument.DocumentNo",
+              "SalesDocument.DocumentDate"
+            ],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [
+              "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+            ],
+            "notes": [],
+            "score": 3
+          },
+          {
+            "name": "accounting_posting",
+            "matchedSynonyms": [
+              "posting",
+              "postings"
+            ],
+            "preferredTables": [
+              "AccountingPosting"
+            ],
+            "displayColumns": [],
+            "preferredColumns": [],
+            "preferredExpression": null,
+            "defaultFilters": [],
+            "notes": [],
+            "score": 3
+          }
+        ],
+        "metrics": [],
+        "filterHints": [],
+        "requiredTables": [
+          "SalesDocument",
+          "AccountingPosting"
+        ],
+        "preferredColumns": [
+          "SalesDocument.DocumentNo",
+          "SalesDocument.DocumentDate"
+        ],
+        "defaultFilters": [
+          "IFNULL(SalesDocument.IsCanceled, 0) = 0"
+        ],
+        "clarificationRules": [],
+        "joinHints": [
+          {
+            "name": "posting_to_document",
+            "tables": [
+              "AccountingPosting",
+              "SalesDocument"
+            ],
+            "joinSql": "AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId"
+          }
+        ],
+        "countIntent": true,
+        "suppressedMatches": []
+      },
+      "full": {
+        "questionContext": "Question-specific context:\n\nQuestion:\nCount the documents whose posting date falls in February 2026.\n\nResolved temporal references:\n- \"February 2026\" => February 2026; if the query needs a date filter, use the appropriate in-scope date column with a half-open range like date_col >= '2026-02-01' AND date_col < '2026-03-01'\n\nSemantic retrieval hints:\n- Entity \"sales_document\" matched document, documents; prefer tables SalesDocument and display columns SalesDocument.DocumentNo, SalesDocument.DocumentDate; apply default filters IFNULL(SalesDocument.IsCanceled, 0) = 0.\n- Entity \"accounting_posting\" matched posting, postings; prefer tables AccountingPosting.\n- Semantic join \"posting_to_document\": AccountingPosting.SalesDocumentId = SalesDocument.SalesDocumentId.\n\nResolved master-data candidates:\n- No master-data candidates were resolved for this question.\n\nRetrieval relevance hint (a ranking only; every allowed table may be used):\n- Most relevant tables/columns for this question: SalesDocument (PostingDate, DocumentDate, DueDate); AccountingPosting (SalesDocumentId, PostingDate); DocumentType; SalesDocumentLine\n\nFew-shot examples:\nExample 1:\nQ: Which customers had more than 2 sales documents in 2026?\nTables: SalesDocument, Customer\nSQL:\nSELECT c.CustomerName, COUNT(*) AS document_count\nFROM SalesDocument d\nJOIN Customer c ON d.CustomerId = c.CustomerId\nWHERE IFNULL(d.IsCanceled, 0) = 0\n  AND d.DocumentDate >= '2026-01-01'\n  AND d.DocumentDate < '2027-01-01'\nGROUP BY c.CustomerId, c.CustomerName\nHAVING COUNT(*) > 2\nORDER BY COUNT(*) DESC, c.CustomerName ASC",
+        "userSha256": "e9b073f47c29a4a9d181652349c06557e3762d14806cbff764a6bf52b300ed17",
+        "allowedTables": [
+          "AccountingPosting",
+          "Brand",
+          "Campaign",
+          "Customer",
+          "CustomerProductPrice",
+          "DocumentType",
+          "LedgerAccount",
+          "Product",
+          "ProductBrand",
+          "ProductCategory",
+          "SalesDocument",
+          "SalesDocumentLine",
+          "StoreLocation"
+        ]
+      },
+      "retrieved": {
+        "userSha256": "b98caa01aca613a045387f05e4e563b8bae7f2f1887c57111df01bb65f6817e9",
+        "allowedTables": [
+          "AccountingPosting",
+          "DocumentType",
+          "SalesDocument",
+          "SalesDocumentLine"
+        ]
+      }
+    }
+  ]
+}
