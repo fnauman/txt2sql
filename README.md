@@ -540,6 +540,15 @@ capability map is keyed by the model id without a vendor prefix, so
 | `gpt-5*-pro` (e.g. `gpt-5.4-pro`), o-series `-pro` (`o1-pro`, `o3-pro`) | not supported | none (the model is refused) | every entry point stops before anything starts: these models are served only by the Responses API (OpenAI lists Chat Completions as not supported), while every request here is a Chat Completions request with a strict `json_schema` response format |
 | anything else (also the `gpt-5*-chat` models) | unknown | `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | the `gpt-4o*` request |
 
+Known unsupported but not refused up front: OpenAI also serves the `-codex`
+models (`gpt-5-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`,
+`gpt-5.1-codex-mini`, `gpt-5.2-codex`, `gpt-5.3-codex`, `codex-mini-latest`)
+and the deep-research models (`o3-deep-research`, `o4-mini-deep-research`) in
+the Responses API only (their model pages list Chat Completions as not
+supported, checked on 2026-10-07). The map files them under the `gpt-5*` and
+o-series rows (`codex-mini-latest` under "anything else"), so a run with one
+starts and its first request fails on api.openai.com: do not use them here.
+
 With reasoning on (any effort but `none`, set or the family's default) the
 request drops `temperature` / `top_p`, sends `reasoning_effort` and raises
 `max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
