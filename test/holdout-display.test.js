@@ -504,3 +504,96 @@ test('with the holdout hidden and only holdout cases paired, the verdict does no
   const unpaired = await suiteReport(HOLDOUT_VARIANTS.spread, { baseline: { ...baseline, results: [] } });
   assert.match(renderHeadline(unpaired, { revealHoldout: true }), /→ no case could be paired with the baseline/);
 });
+
+test('with the holdout hidden, the headline counts the dev answer cases left out of accuracy, never the holdout ones', async () => {
+  // Fifth review: the "N of M answer case(s) had no counted repetition" line
+  // counted every case while the holdout was hidden, so a holdout answer case
+  // with no counted repetition changed it although the holdout's accuracy by
+  // split stayed 50.0%. dev_b1 has no counted repetition in every run. (The
+  // line counts dev cases so it agrees with the dev figures beside it; the
+  // holdout split row's case count still gives the holdout's number away.)
+  const dev = { ...DEV_REPETITIONS, dev_b1: [skipped, skipped, skipped] };
+  const variants = {
+    counted: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+    excluded: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [skipped, infraFailure, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+  };
+  const reports = {};
+  for (const [name, holdout] of Object.entries(variants)) {
+    reports[name] = await suiteReport(holdout, { dev });
+  }
+  assert.deepEqual(
+    Object.values(reports).map((report) => [report.stats.cases.excluded, report.stats.bySplit.find((entry) => entry.key === 'holdout').accuracy]),
+    [[1, 0.5], [2, 0.5]]
+  );
+  const line =
+    '\n1 of 3 dev answer case(s) had no counted repetition and are left out of accuracy (see Attribution; holdout cases are not counted here); ' +
+    'the 1 dev abstain/clarify case(s) are scored apart.\n';
+  for (const [name, report] of Object.entries(reports)) {
+    const markdown = renderReportMarkdown(report);
+    assert.ok(markdown.includes(line), name);
+    assert.doesNotMatch(markdown, /of 6 answer case|the 2 abstain/, name);
+  }
+  // --reveal-holdout counts every case, as before.
+  assert.match(
+    renderReportMarkdown(reports.excluded, { revealHoldout: true }),
+    /\n2 of 6 answer case\(s\) had no counted repetition and are left out of accuracy \(see Attribution\); the 2 abstain\/clarify case\(s\) are scored apart\.\n/
+  );
+  // No dev case left out: no line while the holdout is hidden, whatever the
+  // holdout's cases did.
+  const devCounted = await suiteReport(variants.excluded);
+  assert.doesNotMatch(renderReportMarkdown(devCounted), /had no counted repetition/);
+  assert.match(renderReportMarkdown(devCounted, { revealHoldout: true }), /\n1 of 6 answer case\(s\) had no counted repetition/);
+  // Without a dev behaviour case the line counts the selected dev cases.
+  const { dev_abstain: _devAbstain, ...devAnswers } = dev;
+  const answersOnly = await suiteReport(variants.excluded, { dev: devAnswers });
+  assert.match(
+    renderReportMarkdown(answersOnly),
+    /\n1 of 3 selected dev case\(s\) had no counted repetition and are left out of accuracy \(see Attribution; holdout cases are not counted here\)\.\n/
+  );
+});
+
+test('a recorded comparison without its paired cases shows its own figures only when no holdout case is paired, else says the dev comparison cannot be reconstructed', async () => {
+  // Fifth review: without pairedCases (an older shape), with holdout cases in
+  // the comparison, report.md and the console replaced the recorded figures
+  // with a summary of no pair and claimed that no dev case was paired.
+  const withoutPairs = (report) => {
+    const comparison = { ...report.comparison };
+    delete comparison.pairedCases;
+    return { ...report, comparison };
+  };
+  // Every holdout case of the comparison is listed as unpaired (new to the
+  // baseline, or not counted in one report): the recorded figures are the
+  // dev comparison's own, shown as if the pairs were there.
+  for (const baselineOutcomes of [
+    { dev_pass: ['pass'], dev_flip: ['pass'] },
+    { dev_pass: ['pass'], dev_flip: ['pass'], secret_holdout_case: ['infra_error'] },
+  ]) {
+    const baseline = await reportWith(baselineOutcomes);
+    const report = await reportWith(CANDIDATE_OUTCOMES, { comparisonWith: baseline });
+    assert.deepEqual(report.comparison.holdoutCases, ['secret_holdout_case']);
+    assert.ok(!report.comparison.pairedCases.some((entry) => entry.id === 'secret_holdout_case'));
+    const legacy = withoutPairs(report);
+    assert.equal(renderReportMarkdown(legacy), renderReportMarkdown(report));
+    assert.equal(renderHeadline(legacy), renderHeadline(report));
+    assert.match(renderHeadline(legacy), /\nPaired comparison with baseline\.json: 2 paired dev case\(s\) /);
+    assert.match(renderReportMarkdown(legacy), /\nvs baseline \(dev cases\): Δ −50\.0 pts \(95% CI [^)]+\) on 2 paired dev case\(s\); 1 regression\(s\), 0 improvement\(s\);/);
+    assert.doesNotMatch(`${renderReportMarkdown(legacy)}\n${renderHeadline(legacy)}`, /secret_holdout|no dev case is paired|0 paired/);
+  }
+  // A holdout case is (or may be) paired: no figure is shown, none invented.
+  const baseline = await reportWith(BASELINE_OUTCOMES);
+  const legacy = withoutPairs(await reportWith(CANDIDATE_OUTCOMES, { comparisonWith: baseline }));
+  const markdown = renderReportMarkdown(legacy);
+  const consoleText = renderHeadline(legacy);
+  const unavailable =
+    'the dev-only comparison cannot be reconstructed from this recording: it does not store its paired cases, and its 1 holdout case(s) ' +
+    'may be among them; `--reveal-holdout` shows its figures over every paired case, holdout included; --gate tests every paired case';
+  assert.ok(markdown.includes(`\nvs baseline (dev cases): ${unavailable}\n`), markdown);
+  assert.ok(consoleText.includes(`\nPaired comparison with baseline.json: ${unavailable}`), consoleText);
+  for (const text of [markdown, consoleText]) {
+    assert.doesNotMatch(text, /secret_holdout|no dev case is paired|paired dev case|regression\(s\)|improvement\(s\)|McNemar|Δ|candidate pass|Majority passes \(paired/);
+  }
+  assert.doesNotMatch(markdown, /### Regressions|### Improvements|Pass-rate changes/);
+  assert.match(markdown, /## Comparison with the baseline\n\nDev cases only: the comparison's 1 holdout case\(s\) are left out of these figures and lists/);
+  // --reveal-holdout shows the recorded comparison over every paired case.
+  assert.match(renderHeadline(legacy, { revealHoldout: true }), /: 3 paired case\(s\)[\s\S]*exact McNemar p = 0\.500 \(2 regression\(s\), 0 improvement\(s\)\)/);
+});

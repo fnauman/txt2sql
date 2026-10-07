@@ -792,11 +792,19 @@ const SUM_NOUNS = new Set([...AMOUNT_OF_NOUNS, 'sum', 'sums']);
  * - followed by a boundary, a joining or period word, an amount noun, the
  *   metric or another amount, not by another noun ("gross revenue and net
  *   margin", "at Net Mart"; "terms" and "basis" only after another amount:
- *   "in gross and net terms").
+ *   "in gross and net terms"). Amounts coordinated after it without a comma
+ *   ("net and gross", "net/gross") modify the noun after the last of them,
+ *   so that noun decides instead: "net and gross revenue" asks for the net
+ *   amount, "net and gross margin category" does not. The metric there may
+ *   be one of its generic words the question used (`genericSpans`: "gross
+ *   revenue and net and gross sales", "gross revenue and net turnover"), and
+ *   it may stand a word or two after the amount, as for an amount modifying
+ *   it (otherAmountModifiesMetric): "net and gross monthly revenue", "net vs
+ *   gross store revenue" ask for the net amount like "net and gross revenue".
  * "net of ..." other than tax ("gross revenue net of returns") qualifies an
  * amount, and "net (amount) payable" names another one; neither counts.
  */
-function asksForNetMeasure(otherSpans, metricSpans, questionWords) {
+function asksForNetMeasure(otherSpans, metricSpans, questionWords, genericSpans = []) {
   const words = questionWords.map((questionWord) => questionWord.word);
   const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
   const covered = (span, spans) => spans.some((other) => other !== span && other.start <= span.start && span.end <= other.end);
@@ -811,17 +819,21 @@ function asksForNetMeasure(otherSpans, metricSpans, questionWords) {
     }
     return false;
   };
+  // The separators before words start..end.
+  const separatorsBetween = (start, end) => {
+    let separators = '';
+    for (let index = start; index <= end; index += 1) {
+      separators += separatorAt(index);
+    }
+    return separators;
+  };
   // Whether `first` and `second` (first before second) are joined.
   const joined = (first, second) => {
     if (first.end > second.start || second.start - first.end > 4 || boundaryBetween(first.end, second.start)) {
       return false;
     }
     const gap = words.slice(first.end, second.start);
-    let separators = '';
-    for (let index = first.end; index <= second.start; index += 1) {
-      separators += separatorAt(index);
-    }
-    return gap.every((word) => NET_LINK_WORDS.has(word)) && (gap.some((word) => NET_JOINING_WORDS.has(word)) || /[&+/,]/.test(separators));
+    return gap.every((word) => NET_LINK_WORDS.has(word)) && (gap.some((word) => NET_JOINING_WORDS.has(word)) || /[&+/,]/.test(separatorsBetween(first.end, second.start)));
   };
 
   const netSpans = findSynonymSpans(NET_AMOUNT_PHRASES, questionWords).filter(
@@ -839,6 +851,14 @@ function asksForNetMeasure(otherSpans, metricSpans, questionWords) {
     }
   }
 
+  // The amount (another amount or a net wording) coordinated right after
+  // `span` with no comma or parenthesis between ("net and gross", "net /
+  // gross", "net or pre-tax"), or null: the two modify the same noun.
+  const coordinatedAmountAfter = (span) =>
+    [...otherSpans, ...netSpans.filter((other) => !covered(other, netSpans))]
+      .filter((other) => other.start >= span.end && joined(span, other) && !/[,()]/.test(separatorsBetween(span.end, other.start)))
+      .sort((left, right) => left.start - right.start)[0] || null;
+
   return netSpans.some((net) => {
     if (covered(net, netSpans)) {
       return false;
@@ -854,15 +874,28 @@ function asksForNetMeasure(otherSpans, metricSpans, questionWords) {
     if (!otherPartner && !metricPartner) {
       return false;
     }
-    const next = words[net.end];
+    let last = net;
+    for (let following = coordinatedAmountAfter(last); following; following = coordinatedAmountAfter(last)) {
+      last = following;
+    }
+    // The metric's own words: its explicit phrases and the generic words the
+    // question used for it.
+    const metricWordSpans = [...metricSpans, ...genericSpans];
+    // The last of them modifies the metric ("net and gross monthly revenue":
+    // "gross monthly revenue"), so the net wording coordinated with it
+    // modifies the same metric and asks for its net amount.
+    if (otherAmountModifiesMetric([last], metricWordSpans, questionWords)) {
+      return true;
+    }
+    const next = words[last.end];
     return (
       next === undefined ||
-      /[,.;:!?()&+/]/.test(separatorAt(net.end)) ||
+      /[,.;:!?()&+/]/.test(separatorAt(last.end)) ||
       NET_LINK_WORDS.has(next) ||
       APPOSITIVE_FOLLOWING_WORDS.has(next) ||
       SUM_NOUNS.has(next) ||
-      startsSpan(net.end, [...otherSpans, ...metricSpans, ...netSpans]) ||
-      (otherPartner && (next === 'terms' || next === 'basis'))
+      startsSpan(last.end, [...otherSpans, ...metricWordSpans, ...netSpans]) ||
+      ((otherPartner || last !== net) && (next === 'terms' || next === 'basis'))
     );
   });
 }
@@ -910,7 +943,7 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
     questionWords &&
     everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) &&
     !explicitMatches.some((synonym) => splitWords(synonym).includes('net')) &&
-    !asksForNetMeasure(otherSpans, explicitSpans, questionWords)
+    !asksForNetMeasure(otherSpans, explicitSpans, questionWords, findSynonymSpans(advisoryMatches, questionWords))
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }

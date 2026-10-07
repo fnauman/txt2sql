@@ -41,22 +41,65 @@ function comparisonHiddenIds(comparison, { revealHoldout = false } = {}) {
 // sets, not of an outcome) is all that is said about them. --gate still tests
 // every paired case; its verdict is the exit code. `hiddenCases` is that
 // number (0 when nothing is hidden).
+//
+// A recorded comparison without its pairs (`pairedCases`, an older shape)
+// cannot be recomputed. Its own figures are the dev comparison's when no
+// holdout case is paired (pairsNoHoldoutCase), and are shown as they are;
+// otherwise no figure is shown (`devFiguresUnavailable`, with no flip or
+// pass-rate change listed): every case's figures would include the holdout
+// pairs, and a summary of no pair would claim that no dev case was paired.
 function displayedComparison(comparison, { revealHoldout = false } = {}) {
   const hidden = comparisonHiddenIds(comparison, { revealHoldout });
   if (hidden.size === 0) {
     return { ...comparison, hiddenCases: 0 };
   }
   const visible = (entries) => (entries || []).filter((entry) => !hidden.has(typeof entry === 'string' ? entry : entry.id));
-  const pairs = visible(comparison.pairedCases);
-  return {
-    ...comparison,
-    ...summarizePairs(pairs, comparisonStatsOptions(comparison)),
-    pairedCases: pairs,
+  const lists = {
     excluded: { goldChanged: visible(comparison.excluded?.goldChanged), notCounted: visible(comparison.excluded?.notCounted) },
     newCases: visible(comparison.newCases),
     removedCases: visible(comparison.removedCases),
     hiddenCases: hidden.size,
   };
+  if (!Array.isArray(comparison.pairedCases)) {
+    return pairsNoHoldoutCase(comparison)
+      ? { ...comparison, ...lists }
+      : { ...comparison, ...lists, flips: { regressions: [], improvements: [] }, rateChanges: [], devFiguresUnavailable: true };
+  }
+  const pairs = visible(comparison.pairedCases);
+  return {
+    ...comparison,
+    ...summarizePairs(pairs, comparisonStatsOptions(comparison)),
+    pairedCases: pairs,
+    ...lists,
+  };
+}
+
+// Whether a comparison recorded without its pairs provably paired no holdout
+// case: it paired nothing, or each of its holdout cases is listed as not
+// paired (gold changed, not counted in one report, new to the baseline, or
+// not in this run). compareReports pairs every other case that both reports
+// have, so a holdout case listed nowhere may be paired.
+function pairsNoHoldoutCase(comparison) {
+  if (comparison.paired === 0) {
+    return true;
+  }
+  const ids = (entries) => (entries || []).map((entry) => (typeof entry === 'string' ? entry : entry.id));
+  const unpaired = new Set([
+    ...ids(comparison.excluded?.goldChanged),
+    ...ids(comparison.excluded?.notCounted),
+    ...ids(comparison.newCases),
+    ...ids(comparison.removedCases),
+  ]);
+  return (comparison.holdoutCases || []).every((id) => unpaired.has(id));
+}
+
+// What report.md and the console say instead of the figures of a comparison
+// whose dev figures cannot be shown (displayedComparison).
+function devFiguresUnavailableText(comparison) {
+  return (
+    `the dev-only comparison cannot be reconstructed from this recording: it does not store its paired cases, and its ${comparison.hiddenCases} ` +
+    'holdout case(s) may be among them; `--reveal-holdout` shows its figures over every paired case, holdout included; --gate tests every paired case'
+  );
 }
 
 // The settings a comparison's figures were computed with (its alpha, and the
@@ -156,21 +199,30 @@ function displayedSummaries(report, hidden = new Set()) {
       hidden: false,
       hiddenAnswerCases: 0,
       hiddenBehaviorCases: 0,
+      cases: report.stats?.cases,
     };
   }
   const hiddenRecords = results.filter((record) => hidden.has(record.id));
   const listedAnswers = listed.filter((record) => !isBehaviorRecord(record));
+  const accuracy = summarizeAccuracy(listedAnswers, statsOptionsOf(report));
   return {
     attribution: summarizeAttribution(listedAnswers),
     behavior: summarizeBehavior(listed),
     usage: summarizeRunUsage(listed),
-    accuracy: summarizeAccuracy(listedAnswers, statsOptionsOf(report)),
+    accuracy,
     // A report without the legacy block (a compact baseline) shows none.
     reliability: report.reliability ? legacySummary(listedAnswers.filter((record) => Array.isArray(record.repetitions))).reliability : null,
     records: listed,
     hidden: true,
     hiddenAnswerCases: hiddenRecords.filter((record) => !isBehaviorRecord(record)).length,
     hiddenBehaviorCases: hiddenRecords.filter(isBehaviorRecord).length,
+    // The listed cases as report.stats.cases counts every case (selected,
+    // excluded: answer cases with no counted repetition, behaviour cases).
+    cases: {
+      selected: listed.length,
+      excluded: listedAnswers.length - accuracy.cases.counted,
+      behavior: listed.length - listedAnswers.length,
+    },
   };
 }
 
@@ -337,6 +389,29 @@ function devAccuracyText(accuracy) {
   );
 }
 
+// "N of M answer case(s) had no counted repetition" (null when none had).
+// While the holdout is hidden it counts the listed (dev) cases, so it agrees
+// with the dev figures beside it (the attribution, the intervals). It hides
+// no holdout count: the holdout split row counts the holdout cases with a
+// counted repetition, so the holdout's case count, less its abstain/clarify
+// cases and that row's count, is its number left out.
+function excludedCasesText(shown) {
+  const { selected, excluded } = shown.cases || {};
+  const behavior = shown.cases?.behavior || 0;
+  if (!(excluded > 0)) {
+    return null;
+  }
+  const dev = shown.hidden ? 'dev ' : '';
+  const scope = shown.hidden ? '(see Attribution; holdout cases are not counted here)' : '(see Attribution)';
+  // The denominator is the answer cases: abstain/clarify cases never have a
+  // counted repetition and are reported on their own, so counting them here
+  // would make "excluded of selected" disagree with the accuracy's n.
+  return behavior > 0
+    ? `${excluded} of ${selected - behavior} ${dev}answer case(s) had no counted repetition and are left out of accuracy ${scope}; ` +
+        `the ${behavior} ${dev}abstain/clarify case(s) are scored apart.`
+    : `${excluded} of ${selected} selected ${dev}case(s) had no counted repetition and are left out of accuracy ${scope}.`;
+}
+
 // "N case(s) did not finish" of a stopped run. While the holdout is hidden it
 // counts the listed (dev) cases: which holdout repetitions a stop cut off is
 // a holdout outcome the split accuracy does not show (a case cut off after
@@ -396,19 +471,10 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
     lines.push('');
     lines.push(`${behaviorText} Not in strict accuracy (see Behaviour cases).`);
   }
-  if (stats.cases.excluded > 0) {
+  const excludedText = excludedCasesText(shown);
+  if (excludedText) {
     lines.push('');
-    // The denominator is the answer cases: abstain/clarify cases never have a
-    // counted repetition and are reported on their own, so counting them here
-    // would make "excluded of selected" disagree with the accuracy's n.
-    const behaviorCases = stats.cases.behavior || 0;
-    const answerCases = stats.cases.selected - behaviorCases;
-    lines.push(
-      behaviorCases > 0
-        ? `${stats.cases.excluded} of ${answerCases} answer case(s) had no counted repetition and are left out of accuracy (see Attribution); ` +
-            `the ${behaviorCases} abstain/clarify case(s) are scored apart.`
-        : `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
-    );
+    lines.push(excludedText);
   }
   if (report.stopped) {
     lines.push('');
@@ -451,6 +517,9 @@ function verdictText(comparison) {
 /** The comparison's one-line summary (of a displayed comparison: dev cases only while the holdout is hidden). */
 export function comparisonLine(comparison) {
   const dev = comparison.hiddenCases > 0;
+  if (comparison.devFiguresUnavailable) {
+    return `vs baseline (dev cases): ${devFiguresUnavailableText(comparison)}`;
+  }
   return (
     `vs baseline${dev ? ' (dev cases)' : ''}: Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)}) on ` +
     `${comparison.paired} paired ${dev ? 'dev ' : ''}case(s); ${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s); ` +
@@ -499,29 +568,16 @@ function flipList(entries) {
  * table of majority verdicts, the accuracy change, the exact McNemar p and
  * the flipped cases by id (over the paired dev cases, unless revealHoldout);
  * with holdoutSummary, one more line for the paired holdout cases in
- * aggregate (holdoutPairSummary), when there is one.
+ * aggregate (holdoutPairSummary), when there is one. A recording whose dev
+ * figures cannot be shown (displayedComparison) gets one line saying so
+ * instead of the figures.
  */
 export function renderComparisonConsole(recorded, { revealHoldout = false, holdoutSummary = false } = {}) {
   const comparison = displayedComparison(recorded, { revealHoldout });
   const holdout = holdoutSummary ? holdoutPairSummary(recorded) : null;
-  const dev = comparison.hiddenCases > 0;
-  const contingency = contingencyOf(comparison);
-  const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
-  const row = (label, left, right) => `  ${label.padEnd(15)}${String(left).padStart(14 + width - 4)}${String(right).padStart(16 + width - 4)}`;
-  const excluded = comparison.excluded || { goldChanged: [], notCounted: [] };
-  const lines = [
-    `Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${comparison.paired} paired ${dev ? 'dev ' : ''}case(s)` +
-      (dev ? ` (the comparison's ${comparison.hiddenCases} holdout case(s) are not shown; --gate tests every paired case, its verdict is the exit code)` : ''),
-    `  ${''.padEnd(15)}${'candidate pass'.padStart(14 + width - 4)}${'candidate fail'.padStart(16 + width - 4)}`,
-    row('baseline pass', contingency.bothPass, contingency.regressions),
-    row('baseline fail', contingency.improvements, contingency.bothFail),
-    `  strict accuracy (paired ${dev ? 'dev ' : ''}cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
-      `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
-    `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
-      `${verdictText(comparison)}`,
-    `  regressions: ${flipList(comparison.flips.regressions)}`,
-    `  improvements: ${flipList(comparison.flips.improvements)}`,
-  ];
+  const lines = comparison.devFiguresUnavailable
+    ? [`Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${devFiguresUnavailableText(comparison)}`]
+    : comparisonConsoleFigures(comparison);
   if (holdout) {
     lines.push(`  holdout in aggregate (--holdout-summary): ${holdoutSummaryText(holdout)}`);
   }
@@ -540,6 +596,7 @@ export function renderComparisonConsole(recorded, { revealHoldout = false, holdo
   if (!sameHintsVersion(comparison.baseline?.hintsVersion, comparison.candidate?.hintsVersion)) {
     lines.push(`  hints version: ${describeHintsVersion(comparison.baseline?.hintsVersion)} → ${describeHintsVersion(comparison.candidate?.hintsVersion)}`);
   }
+  const excluded = comparison.excluded || { goldChanged: [], notCounted: [] };
   const notes = [
     excluded.goldChanged.length ? `${excluded.goldChanged.length} gold changed` : null,
     excluded.notCounted.length ? `${excluded.notCounted.length} not counted or timed out in one report` : null,
@@ -550,6 +607,28 @@ export function renderComparisonConsole(recorded, { revealHoldout = false, holdo
     lines.push(`  not paired: ${notes.join(', ')} (listed in report.md)`);
   }
   return lines.join('\n');
+}
+
+// The console's figures of a displayed comparison: the paired case count,
+// the 2x2 table, the accuracy change, the McNemar line and the flips.
+function comparisonConsoleFigures(comparison) {
+  const dev = comparison.hiddenCases > 0;
+  const contingency = contingencyOf(comparison);
+  const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
+  const row = (label, left, right) => `  ${label.padEnd(15)}${String(left).padStart(14 + width - 4)}${String(right).padStart(16 + width - 4)}`;
+  return [
+    `Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${comparison.paired} paired ${dev ? 'dev ' : ''}case(s)` +
+      (dev ? ` (the comparison's ${comparison.hiddenCases} holdout case(s) are not shown; --gate tests every paired case, its verdict is the exit code)` : ''),
+    `  ${''.padEnd(15)}${'candidate pass'.padStart(14 + width - 4)}${'candidate fail'.padStart(16 + width - 4)}`,
+    row('baseline pass', contingency.bothPass, contingency.regressions),
+    row('baseline fail', contingency.improvements, contingency.bothFail),
+    `  strict accuracy (paired ${dev ? 'dev ' : ''}cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
+      `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
+    `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
+      `${verdictText(comparison)}`,
+    `  regressions: ${flipList(comparison.flips.regressions)}`,
+    `  improvements: ${flipList(comparison.flips.improvements)}`,
+  ];
 }
 
 function formatSignedInterval(interval) {
@@ -895,8 +974,12 @@ function comparisonSection(comparison, holdoutSummary = null) {
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
         ['Schema scope', schemaScopeText(base.schemaScope), schemaScopeText(cand.schemaScope)],
         ['Hints version', describeHintsVersion(base.hintsVersion), describeHintsVersion(cand.hintsVersion)],
-        [`Strict accuracy (paired ${dev}cases)`, formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
-        [`Majority passes (paired ${dev}cases)`, `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
+        ...(comparison.devFiguresUnavailable
+          ? []
+          : [
+              [`Strict accuracy (paired ${dev}cases)`, formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
+              [`Majority passes (paired ${dev}cases)`, `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
+            ]),
       ]
     )
   );
@@ -913,19 +996,21 @@ function comparisonSection(comparison, holdoutSummary = null) {
         `${requestOptionsText(cand.requestOptions)}), so the paired comparison measures that change too.`
     );
   }
-  const contingency = contingencyOf(comparison);
-  lines.push('');
-  lines.push('Paired majority verdicts (the exact McNemar test uses the off-diagonal cells):');
-  lines.push('');
-  lines.push(
-    table(
-      ['', 'Candidate pass', 'Candidate fail'],
-      [
-        ['Baseline pass', contingency.bothPass, `${contingency.regressions} (regressions)`],
-        ['Baseline fail', `${contingency.improvements} (improvements)`, contingency.bothFail],
-      ]
-    )
-  );
+  if (!comparison.devFiguresUnavailable) {
+    const contingency = contingencyOf(comparison);
+    lines.push('');
+    lines.push('Paired majority verdicts (the exact McNemar test uses the off-diagonal cells):');
+    lines.push('');
+    lines.push(
+      table(
+        ['', 'Candidate pass', 'Candidate fail'],
+        [
+          ['Baseline pass', contingency.bothPass, `${contingency.regressions} (regressions)`],
+          ['Baseline fail', `${contingency.improvements} (improvements)`, contingency.bothFail],
+        ]
+      )
+    );
+  }
   lines.push('');
   lines.push(comparisonLine(comparison));
   if (holdoutSummary) {

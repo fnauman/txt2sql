@@ -741,7 +741,49 @@ test('v2 METRIC_COLUMN: a qualified derived-table or CTE column counts only thro
   }
 });
 
-test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like, or with its decimals dropped, computes no balance', () => {
+test('v2 METRIC_COLUMN: a derived-table or CTE column counts only where its own query block reads it, in nested scopes and under shadowed names', () => {
+  // Fifth review: an unqualified reference counted wherever the CTE or derived
+  // table was visible, and a qualifier counted wherever it was spelled, so a
+  // same-named column of another source (another derived table, a nested
+  // query's own source, another UNION branch, an alias reused in a separate
+  // query) let a difference used only as a filter count. Each of these sums
+  // NetPayableAmount, or nothing, over the open documents.
+  const april = aprilDueDocuments;
+  const diff = 'd.NetPayableAmount - d.PaidAmount';
+  for (const sql of [
+    // The review's examples.
+    'WITH t AS (SELECT NetPayableAmount - PaidAmount AS bal FROM SalesDocument) SELECT SUM(d.NetPayableAmount) FROM SalesDocument d WHERE EXISTS (SELECT SUM(bal) FROM (SELECT NetPayableAmount AS bal FROM SalesDocument) x)',
+    `WITH t AS (SELECT NetPayableAmount - PaidAmount AS bal FROM SalesDocument) SELECT SUM(bal) AS open_amount FROM (SELECT d.NetPayableAmount AS bal ${april}) x WHERE EXISTS (SELECT 1 FROM t WHERE t.bal > 0)`,
+    `WITH docs AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT SUM(bal) AS open_amount FROM (SELECT d.NetPayableAmount AS bal ${april} AND EXISTS (SELECT 1 FROM docs WHERE docs.bal > 0 AND docs.SalesDocumentId = d.SalesDocumentId)) z`,
+    `WITH docs AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT SUM(x.bal) AS open_amount FROM (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) x WHERE EXISTS (SELECT 1 FROM docs x WHERE x.bal > 0)`,
+    // A nested query's own source shadows the outer derived table.
+    `SELECT (SELECT SUM(t.bal) FROM (SELECT d.NetPayableAmount AS bal ${april}) t) AS open_amount FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal FROM SalesDocument x) t WHERE t.bal > 0`,
+    `SELECT (SELECT SUM(bal) FROM (SELECT d.NetPayableAmount AS bal ${april}) z) AS open_amount FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal FROM SalesDocument x) t WHERE t.bal > 0`,
+    `WITH t AS (SELECT ${diff} AS bal ${april}) SELECT (WITH t AS (SELECT d.NetPayableAmount AS bal ${april}) SELECT SUM(bal) FROM t) AS open_amount FROM t LIMIT 1`,
+    // Another UNION branch, or another CTE that the outer query reads.
+    `SELECT SUM(t.np) AS open_amount FROM (SELECT d.NetPayableAmount AS np, ${diff} AS bal ${april}) t WHERE t.bal > 0 UNION ALL SELECT SUM(bal) FROM (SELECT 0 AS bal) y`,
+    `WITH t AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}), o AS (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) SELECT SUM(bal) AS open_amount FROM o WHERE EXISTS (SELECT 1 FROM t WHERE t.bal > 0 AND t.SalesDocumentId = o.SalesDocumentId)`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
+  }
+  // Read from its own block, or from a nested query whose own FROM has no
+  // such column (a correlated reference), the column still counts.
+  for (const sql of [
+    `WITH t AS (SELECT ${diff} AS bal ${april}) SELECT ROUND(SUM(bal), 2) AS open_amount FROM t`,
+    `SELECT t.SalesDocumentId, (SELECT t.bal) AS open_amount FROM (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) t`,
+    `SELECT t.SalesDocumentId, (SELECT bal) AS open_amount FROM (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) t`,
+    `SELECT (SELECT SUM(bal) FROM (SELECT ${diff} AS bal ${april}) t) AS open_amount FROM (SELECT 0 AS bal) z`,
+    `SELECT 0 AS open_amount UNION ALL SELECT SUM(bal) FROM (SELECT ${diff} AS bal ${april}) t`,
+    `WITH t AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT o.SalesDocumentId, (SELECT SUM(bal) FROM t WHERE t.SalesDocumentId = o.SalesDocumentId) AS open_amount FROM SalesDocument o`,
+    `WITH t AS (SELECT d.CustomerId, ${diff} AS bal ${april}) SELECT x.CustomerId, SUM(x.bal) AS open_amount FROM t x GROUP BY x.CustomerId`,
+    `WITH a AS (SELECT ${diff} AS bal ${april}), b AS (SELECT * FROM a) SELECT SUM(bal) AS open_amount FROM b`,
+    `SELECT SUM(u.bal) AS open_amount FROM (SELECT t.* FROM (SELECT ${diff} AS bal ${april}) t) u`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), null, sql);
+  }
+});
+
+test('v2 METRIC_COLUMN: a difference read as a condition by SIGN(), COUNT() and the like, or with its decimals dropped, computes no balance', () => {
   // Fourth review: SUM(SIGN(a - b) * a) sums NetPayableAmount over the open
   // documents like the IF() condition does, and FLOOR(), DIV or FORMAT(x, 0)
   // drop the decimals like an integer cast does; all of them passed.
@@ -758,12 +800,23 @@ test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like,
     `SELECT SUM(d.NetPayableAmount - d.PaidAmount) % 100 AS open_amount ${april}`,
     `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 0) AS open_amount ${april}`,
     `SELECT SUM(FLOOR(t.bal)) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    // Sixth review: COUNT() reads only whether the difference is NULL; it
+    // counts rows, not an amount.
+    `SELECT COUNT(d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `SELECT COUNT(DISTINCT d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `SELECT COUNT(t.bal) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    `WITH t AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT SUM(d.NetPayableAmount) AS open_amount, (SELECT COUNT(bal) FROM t) AS n ${april}`,
   ]) {
     assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
   }
   // The value itself, or another column's sign, still counts.
   for (const sql of [
     `SELECT SUM(ABS(d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT MAX(d.NetPayableAmount - d.PaidAmount) AS largest_open_amount ${april}`,
+    `SELECT MIN(d.NetPayableAmount - d.PaidAmount) AS smallest_open_amount ${april}`,
+    `SELECT AVG(d.NetPayableAmount - d.PaidAmount) AS average_open_amount ${april}`,
+    `SELECT COUNT(*) AS documents, SUM(d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `WITH t AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT COUNT(bal) AS documents, SUM(bal) AS open_amount FROM t`,
     `SELECT SUM(SIGN(d.NetPayableAmount) * (d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
     `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,
     `SELECT ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,
@@ -1064,6 +1117,97 @@ test('v2 layer: a negated or unrelated "net" leaves a modified metric a hint', (
     'Show gross vs. net revenue for March 2026.',
   ]) {
     assert.equal(metricOf(v2Plan(question), 'net_sales').enforcement, 'enforced', question);
+  }
+});
+
+test('v2 layer: "net" coordinated with another amount before a noun that is no measure leaves a modified metric a hint', () => {
+  // Fifth review: in "gross revenue by net and gross margin category" the
+  // "and" after "net" made it a measure joined to the later "gross", although
+  // "net and gross" modify "margin category"; the metric stayed enforced and
+  // the SUM(GrossAmount) the question asks for was rejected. The coordinated
+  // amounts now count as a net measure only when what follows the last of
+  // them is the metric, an amount noun or a boundary, as for "net" alone.
+  for (const question of [
+    'Show gross revenue by net and gross margin category for March 2026.',
+    'Show gross revenue by net/gross margin category for March 2026.',
+    'Show gross revenue by net & gross margin band for March 2026.',
+    'Show gross revenue split by net and gross margin tier in March 2026.',
+    'Show gross revenue by net or gross margin bucket for March 2026.',
+    'Show gross revenue and net and gross margin by category for March 2026.',
+  ]) {
+    const metric = metricOf(v2Plan(question), 'net_sales');
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`), null, question);
+    // Version 1 enforces "revenue", as before.
+    assert.equal(metricOf(v1Plan(question), 'net_sales').enforcement, 'enforced', question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`, 1), 'METRIC_COLUMN', question);
+  }
+  // The coordinated amounts before the metric, an amount noun, a boundary or
+  // "terms", or "net" set off as a list item, still ask for the net amount.
+  for (const question of [
+    'Show net and gross revenue for March 2026.',
+    'Show net vs gross revenue for March 2026.',
+    'Show both net and gross revenue by store for March 2026.',
+    'Revenue (gross and net) by store for March 2026.',
+    'Show net of tax and gross revenue for March 2026.',
+    'Show net and gross revenue by margin category for March 2026.',
+    'Show net/gross revenue by margin category for March 2026.',
+    'Show net and gross amounts of revenue for March 2026.',
+    'Show revenue in net and gross terms for March 2026.',
+    'Show revenue by net and gross for each store in March 2026.',
+    'Show gross revenue, net, and gross margin by category for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, `SELECT SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`), 'METRIC_COLUMN', question);
+  }
+});
+
+test('v2 layer: "net" coordinated with an amount that modifies the metric a word away, or a generic metric word, asks for the net amount', () => {
+  // Sixth review: judging only the word right after the coordinated amounts
+  // made "net and gross monthly revenue" a hint, although "gross monthly
+  // revenue" is the metric with another amount and "net" modifies the same
+  // revenue; SUM(GrossAmount) as the net measure then passed. Likewise "net
+  // and gross sales" next to "gross revenue", where "sales" is the metric's
+  // generic word. Both enforce again, as in version 1; a noun that is no
+  // measure ("margin category") still leaves the metric a hint.
+  const grossForNet = `SELECT SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`;
+  const bothAmounts = `SELECT SUM(d.NetAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`;
+  for (const question of [
+    'Show net and gross monthly revenue for March 2026.',
+    'Show net and gross store revenue for March 2026.',
+    'Show net and gross daily revenue by store for March 2026.',
+    'Show net vs gross store revenue for March 2026.',
+    'Show both net and gross store revenue for March 2026.',
+    'Show net/gross monthly revenue for March 2026.',
+    'Compare net and gross weekly revenue for March 2026.',
+    'Show gross revenue and net and gross sales by store for March 2026.',
+    'Show gross revenue, net and gross sales by store for March 2026.',
+    'Show gross revenue and net turnover by store for March 2026.',
+    'Show gross revenue and net monthly turnover by store for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, grossForNet), 'METRIC_COLUMN', question);
+    assert.equal(metricVerdict(question, bothAmounts), null, question);
+    // Version 1 enforces "revenue", as before.
+    assert.equal(metricOf(v1Plan(question), 'net_sales').enforcement, 'enforced', question);
+    assert.equal(metricVerdict(question, grossForNet, 1), 'METRIC_COLUMN', question);
+  }
+  for (const question of ['Show net and gross monthly average order value for March 2026.', 'Show net and gross store average order value for March 2026.']) {
+    assert.deepEqual([metricOf(v2Plan(question), 'average_order_value').enforcement, metricOf(v2Plan(question), 'average_order_value').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, `SELECT AVG(d.GrossAmount) AS net_aov, AVG(d.GrossAmount) AS gross_aov ${marchDocuments}`), 'METRIC_COLUMN', question);
+    assert.equal(metricVerdict(question, `SELECT AVG(d.NetAmount) AS net_aov, AVG(d.GrossAmount) AS gross_aov ${marchDocuments}`), null, question);
+  }
+  // The coordinated amounts before a noun that is no measure, even with the
+  // metric's word later in the question, leave the gross metric a hint.
+  for (const question of [
+    'Show gross revenue by net and gross margin category for March 2026.',
+    'Show gross revenue by net and gross monthly margin for March 2026.',
+    'Show gross store revenue and the net and gross margin category for March 2026.',
+    'Show gross revenue and net margin by sales channel for March 2026.',
+    'Show gross revenue instead of net turnover for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['advisory', 'other_amount_named'], question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`), null, question);
   }
 });
 
