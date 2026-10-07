@@ -783,7 +783,7 @@ test('v2 METRIC_COLUMN: a derived-table or CTE column counts only where its own 
   }
 });
 
-test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like, or with its decimals dropped, computes no balance', () => {
+test('v2 METRIC_COLUMN: a difference read as a condition by SIGN(), COUNT() and the like, or with its decimals dropped, computes no balance', () => {
   // Fourth review: SUM(SIGN(a - b) * a) sums NetPayableAmount over the open
   // documents like the IF() condition does, and FLOOR(), DIV or FORMAT(x, 0)
   // drop the decimals like an integer cast does; all of them passed.
@@ -800,12 +800,23 @@ test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like,
     `SELECT SUM(d.NetPayableAmount - d.PaidAmount) % 100 AS open_amount ${april}`,
     `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 0) AS open_amount ${april}`,
     `SELECT SUM(FLOOR(t.bal)) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    // Sixth review: COUNT() reads only whether the difference is NULL; it
+    // counts rows, not an amount.
+    `SELECT COUNT(d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `SELECT COUNT(DISTINCT d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `SELECT COUNT(t.bal) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    `WITH t AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT SUM(d.NetPayableAmount) AS open_amount, (SELECT COUNT(bal) FROM t) AS n ${april}`,
   ]) {
     assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
   }
   // The value itself, or another column's sign, still counts.
   for (const sql of [
     `SELECT SUM(ABS(d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT MAX(d.NetPayableAmount - d.PaidAmount) AS largest_open_amount ${april}`,
+    `SELECT MIN(d.NetPayableAmount - d.PaidAmount) AS smallest_open_amount ${april}`,
+    `SELECT AVG(d.NetPayableAmount - d.PaidAmount) AS average_open_amount ${april}`,
+    `SELECT COUNT(*) AS documents, SUM(d.NetPayableAmount - d.PaidAmount) AS open_amount ${april}`,
+    `WITH t AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT COUNT(bal) AS documents, SUM(bal) AS open_amount FROM t`,
     `SELECT SUM(SIGN(d.NetPayableAmount) * (d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
     `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,
     `SELECT ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,

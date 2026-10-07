@@ -1139,9 +1139,10 @@ const DIFFERENCE_DECIMAL_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIX
 const DIFFERENCE_FLOAT_CAST_TYPES = new Set(['DOUBLE', 'FLOAT', 'REAL']);
 // Functions that read the difference only as a condition (SIGN keeps its
 // sign, FIELD and INTERVAL compare every argument, ELT reads its first as an
-// index), and functions or operators that drop its decimals (FLOOR, CEIL, a
-// remainder, an integer division; FORMAT(x, 0) too).
-const DIFFERENCE_CONDITION_FUNCTIONS = new Set(['SIGN', 'FIELD', 'INTERVAL']);
+// index, COUNT only whether it is NULL), and functions or operators that drop
+// its decimals (FLOOR, CEIL, a remainder, an integer division; FORMAT(x, 0)
+// too).
+const DIFFERENCE_CONDITION_FUNCTIONS = new Set(['SIGN', 'FIELD', 'INTERVAL', 'COUNT']);
 const DIFFERENCE_DECIMAL_DROPPING_FUNCTIONS = new Set(['FLOOR', 'CEIL', 'CEILING', 'MOD']);
 // Operators binding tighter than binary minus: next to an operand they take
 // it away from the difference ("a - b * 2", "2 * a - b").
@@ -1686,7 +1687,7 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, wal
  * query reading them uses as values (derivedColumnReachesValue), without
  * being an operand of a comparison or logical operator, the condition of an
  * IF(), an argument NULLIF() compares, read as a condition by SIGN(),
- * FIELD(), INTERVAL() or ELT(), inside a cast or a function or operator that
+ * FIELD(), INTERVAL(), COUNT() or ELT(), inside a cast or a function or operator that
  * drops the decimals (CAST(... AS SIGNED), FLOOR(), DIV), or in a WHERE,
  * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
  * 0" computes no value. `passedName` is the column name a `*` select item
@@ -1735,8 +1736,8 @@ function expressionIsComputedValue(tokens, start, end, parens, depth, passedName
         if (DIFFERENCE_CAST_FUNCTIONS.has(functionName) && !valueKeepingCastOperand(tokens, at, parens)) {
           return false;
         }
-        // SIGN(), FIELD(), INTERVAL() and ELT(<index>, ...) read it as a
-        // condition; FLOOR(), CEIL(), MOD() and FORMAT(x, 0) drop the
+        // SIGN(), FIELD(), INTERVAL(), COUNT() and ELT(<index>, ...) read it
+        // as a condition; FLOOR(), CEIL(), MOD() and FORMAT(x, 0) drop the
         // decimals. (MOD and INTERVAL are keywords too, so the word before
         // the parenthesis is read as written.)
         const callee = tokens[at - 1]?.type === 'word' && !tokens[at - 1].afterDot ? tokens[at - 1].upper : null;
