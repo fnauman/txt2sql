@@ -10,7 +10,10 @@ import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 // show holdout results in aggregate only (accuracy by split) unless
 // --reveal-holdout: no per-case holdout rows, no holdout flip lists, no
 // holdout ids in the comparison's lists, and the finer breakdowns cover dev
-// cases only. report.json keeps everything.
+// cases only. report.json keeps everything. The headline's intervals,
+// majority-pass cases, intent-clustered accuracy and the pooled rate cover
+// dev cases too: runs that differ only in holdout outcomes, with the same
+// holdout accuracy, render byte for byte the same.
 
 const attempt = { attempt: 1, retry: false, generatedSql: 'SELECT 1', llm: { ok: true, durationMs: 1000 }, validation: { ok: true, durationMs: 1 }, execution: { ok: true, durationMs: 1, rowCount: 1 } };
 // A repetition that made one priced LLM call (as a live run records it).
@@ -77,7 +80,13 @@ test('report.md shows the holdout in aggregate only by default, and every case w
   assert.doesNotMatch(markdown, /holdout_only_(tag|class)/, 'the finer breakdowns cover dev cases only');
   // Aggregates stay: the split line and rows, the headline note.
   assert.match(markdown, /By split: dev 50\.0% \(2 cases\) · holdout 0\.0% \(1 case\)\./);
-  assert.match(markdown, /\| split \| holdout \| 1 \| 0\.0% \| 0\/1 \|/);
+  // The holdout's split row is its accuracy and case count; the headline's
+  // intervals, majority passes and intent-clustered accuracy cover dev cases.
+  assert.match(markdown, /\| split \| holdout \| 1 \| 0\.0% \| not shown \|/);
+  assert.match(markdown, /\| split \| dev \| 2 \| 50\.0% \| 1\/2 \|/);
+  assert.match(markdown, /\*\*Strict accuracy 33\.3%\*\* \(every split; no interval while the holdout is hidden\) · 3 cases · 1 repetition · /);
+  assert.match(markdown, /\nDev cases: strict accuracy 50\.0% \(95% CI [^)]+, case bootstrap\) over 2 cases · majority-pass cases 1\/2 \(Wilson 95% [^)]+\) · intent-clustered accuracy 50\.0% \(95% CI [^)]+, 2 intents\)\n/);
+  assert.doesNotMatch(markdown, /Majority-pass cases [0-9]+\/3|3 intents/);
   assert.match(markdown, /Holdout: 2 case\(s\), shown in aggregate only \(accuracy by split\)/);
   assert.match(markdown, /Failure class, difficulty and tag rows cover the dev cases only/);
   assert.match(markdown, /\| tag \| shared \| 2 \| 50\.0% \| 1\/2 \|/);
@@ -89,6 +98,9 @@ test('report.md shows the holdout in aggregate only by default, and every case w
   assert.match(markdown, /### Regressions \(baseline majority pass → candidate fail\)\n\n\| Case \| Question \| Baseline \| Candidate \|\n\| --- \| --- \| --- \| --- \|\n\| dev_flip \|[^\n]*\n\n/);
 
   const revealed = renderReportMarkdown(report, { revealHoldout: true });
+  assert.match(revealed, /\*\*Strict accuracy 33\.3%\*\* \(95% CI [^)]+, case bootstrap\) · 3 cases · 3 intents · /);
+  assert.match(revealed, /\nMajority-pass cases 1\/3 \(Wilson 95% /);
+  assert.match(revealed, /\| split \| holdout \| 1 \| 0\.0% \| 0\/1 \|/);
   assert.match(revealed, /\| secret_holdout_case \| Question secret_holdout_case\? \|/);
   assert.match(revealed, /\| secret_holdout_abstain \| Weather\? \|/);
   assert.match(revealed, /\| tag \| holdout_only_tag \| 1 \|/);
@@ -226,7 +238,12 @@ test('a run of holdout cases only prints no empty attribution, guardrail or cost
   assert.match(markdown, /## Guardrail confusion matrix\n\nNo dev answer case in this run \(the holdout is shown in aggregate, by split\)\.\n/);
   assert.match(markdown, /## Cost, latency, retries, tokens\n\nNo dev case in this run: cost, latency, retries and tokens cover the dev cases only/);
   assert.doesNotMatch(markdown, /\| Bucket \||attempts 0|\| Total LLM cost \|/);
+  // The headline's dev line and the pooled rate have no dev case to cover.
+  assert.match(markdown, /\nDev cases: no counted dev answer case in this run \(the holdout is shown in aggregate, by split\)\.\n/);
+  assert.match(markdown, /## Legacy pooled reliability\n\nNo dev answer case in this run \(the holdout is shown in aggregate, by split\)\.\n$/);
+  assert.doesNotMatch(markdown, /Pooled pass rate|Majority-pass cases/);
   const console = renderHeadline(report);
+  assert.match(console, /\nDev cases: no counted dev answer case in this run \(the holdout is shown in aggregate, by split\)\n/);
   assert.match(console, /\nAttribution: no dev answer case in this run \(the holdout is shown in aggregate, by split\)\n/);
   assert.match(console, /\nCost: no dev case in this run \(cost, latency and retries cover dev cases only while the holdout is hidden\)/);
   assert.doesNotMatch(console, /pass 0 · model 0|\$0\.0000/);
@@ -237,4 +254,129 @@ test('a run of holdout cases only prints no empty attribution, guardrail or cost
   const revealed = renderReportMarkdown(report, { revealHoldout: true });
   assert.match(revealed, /\| Bucket \| Repetitions \| Cases \(majority\) \|/);
   assert.match(revealed, /\| Total LLM cost \| \$0\.0002 \|/);
+});
+
+// A three-repetition run of three dev cases over two intents, a dev abstain
+// case, three holdout cases over two intents and a holdout abstain case;
+// `holdout` gives the holdout cases' repetitions.
+const DEV_REPETITIONS = {
+  dev_a1: ['pass', 'pass', 'result_mismatch'],
+  dev_a2: ['result_mismatch', 'result_mismatch', 'result_mismatch'],
+  dev_b1: ['pass', 'pass', 'pass'],
+  dev_abstain: ['answered', 'answered', 'answered'],
+};
+const skipped = () => ({ status: 'skipped_budget', warnings: [], attempts: [], attempt_count: 0 });
+const outage = () => ({ ...providerRefusal(), error_code: 'HTTP_503' });
+const harnessFailure = () => ({ status: 'evaluation_error', warnings: [], attempts: [], attempt_count: 0, timings: { totalMs: 5 } });
+const infraFailure = () => ({ ...rep('infra_error'), error_code: 'ECONNRESET' });
+
+async function suiteReport(holdout, { baseline = null } = {}) {
+  const definitions = {
+    dev_a1: testCase('dev_a1', { intentId: 'dev_a' }),
+    dev_a2: testCase('dev_a2', { intentId: 'dev_a' }),
+    dev_b1: testCase('dev_b1', { intentId: 'dev_b' }),
+    dev_abstain: normalizeBenchmarkCase({ id: 'dev_abstain', question: 'Mood?', expected_behavior: 'abstain' }),
+    ho_x1: testCase('ho_x1', { intentId: 'ho_x', split: 'holdout' }),
+    ho_x2: testCase('ho_x2', { intentId: 'ho_x', split: 'holdout' }),
+    ho_y1: testCase('ho_y1', { intentId: 'ho_y', split: 'holdout' }),
+    ho_abstain: normalizeBenchmarkCase({ id: 'ho_abstain', question: 'Weather?', split: 'holdout', expected_behavior: 'abstain' }),
+  };
+  const caseRecords = await attributeCaseRuns(
+    Object.entries({ ...DEV_REPETITIONS, ...holdout }).map(([id, statuses]) => ({
+      entry: { testCase: definitions[id], datasets: ['d'] },
+      repetitions: statuses.map((status) => (typeof status === 'string' ? rep(status) : status())),
+    })),
+    { checkGuardrails: false }
+  );
+  const generatedAt = '2026-10-07T00:00:00.000Z';
+  return buildReport({
+    mode: 'run',
+    generatedAt,
+    runTimestamp: 't',
+    model: 'm',
+    schemaPath: 'generated/schema.json',
+    suite: { name: 'all', datasets: [], filters: { split: 'all', caseIds: [], tags: [], intents: [] } },
+    oracle: { fixtures: [], maxRetries: 1 },
+    runner: { repeat: 3 },
+    provenance: {},
+    verification: null,
+    budget: null,
+    caseRecords,
+    comparison: baseline ? compareReports(baseline, { results: caseRecords, model: 'm', generatedAt, mode: 'run' }, { baselineLabel: 'baseline.json', resamples: 200 }) : null,
+    traceFile: null,
+    statsOptions: { resamples: 200 },
+  });
+}
+
+const P = 'pass';
+const F = 'result_mismatch';
+// Runs that differ only in the holdout cases' outcomes, with the holdout's
+// accuracy by split held at 50.0% over 3 cases (pass rates summing to 1.5; a
+// half needs one repetition left out of the count): how those pass rates
+// spread over cases and intents, how many cases pass by majority, and
+// excluded or skipped repetitions all change.
+const HOLDOUT_VARIANTS = {
+  spread: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+  // The same pass rates permuted across the intents.
+  permuted: { ho_x1: [F, F, F], ho_x2: [P, F, skipped], ho_y1: [P, P, P], ho_abstain: [declined, declined, declined] },
+  // No majority pass instead of one.
+  majority: { ho_x1: [P, F, skipped], ho_x2: [F, P, infraFailure], ho_y1: [P, outage, F], ho_abstain: ['answered', declined, 'answered'] },
+  // Other excluded (infrastructure, outage, harness) and skipped repetitions.
+  excluded: { ho_x1: [P, infraFailure, P], ho_x2: [F, harnessFailure, outage], ho_y1: [infraFailure, P, F], ho_abstain: [skipped, 'answered', 'answered'] },
+  // A timeout majority (counted as a failure; never paired in a comparison).
+  timeouts: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [deadline, P, skipped], ho_abstain: [deadline, 'answered', 'answered'] },
+};
+
+test('with the holdout hidden, report.md and the console are byte-identical for runs that differ only in holdout outcomes', async () => {
+  const reports = {};
+  for (const [name, holdout] of Object.entries(HOLDOUT_VARIANTS)) {
+    reports[name] = await suiteReport(holdout);
+  }
+  const all = Object.values(reports);
+  // The holdout's aggregate is the same in every run...
+  for (const report of all) {
+    assert.deepEqual(
+      report.stats.bySplit.map((entry) => [entry.key, entry.cases, entry.accuracy]),
+      [['dev', 3, 0.5556], ['holdout', 3, 0.5]]
+    );
+    assert.equal(report.stats.strictAccuracy.value, 0.5278);
+  }
+  // ...and what report.json says about every case is not.
+  assert.notEqual(reports.spread.stats.intentClustered.value, reports.permuted.stats.intentClustered.value);
+  assert.notDeepEqual(reports.spread.stats.intentClustered.ci95, reports.permuted.stats.intentClustered.ci95);
+  assert.notDeepEqual(reports.spread.stats.strictAccuracy.ci95, reports.permuted.stats.strictAccuracy.ci95);
+  assert.deepEqual(all.map((report) => report.stats.majority.passes), [3, 3, 2, 3, 3]);
+  assert.deepEqual(
+    [reports.spread, reports.majority, reports.excluded].map((report) => [report.reliability.passRate, report.reliability.totalAttempts]),
+    [[0.5294, 17], [0.4706, 17], [0.4444, 18]]
+  );
+  assert.deepEqual(Object.keys(reports.excluded.stats.repetitions.excludedByOutcome).sort(), ['harness_error', 'infra_error', 'llm_outage']);
+  const distinct = (values) => new Set(values).size;
+  assert.equal(distinct(all.map((report) => renderReportMarkdown(report, { revealHoldout: true }))), all.length);
+  assert.equal(distinct(all.map((report) => renderHeadline(report, { revealHoldout: true }))), all.length);
+
+  const markdown = renderReportMarkdown(reports.spread);
+  const consoleText = renderHeadline(reports.spread);
+  for (const [name, report] of Object.entries(reports)) {
+    assert.equal(renderReportMarkdown(report), markdown, name);
+    assert.equal(renderHeadline(report), consoleText, name);
+  }
+
+  // What is shown: every case's strict accuracy as a point estimate, the
+  // dev cases' statistics, the holdout's accuracy by split.
+  assert.match(markdown, /\*\*Strict accuracy 52\.8%\*\* \(every split; no interval while the holdout is hidden\) · 6 cases · 3 repetitions · /);
+  assert.match(markdown, /\nDev cases: strict accuracy 55\.6% \(95% CI [^)]+, case bootstrap\) over 3 cases · majority-pass cases 2\/3 \(Wilson 95% [^)]+\) · intent-clustered accuracy 66\.7% \(95% CI [^)]+, 2 intents\)\n/);
+  assert.match(markdown, /By split: dev 55\.6% \(3 cases\) · holdout 50\.0% \(3 cases\)\./);
+  assert.match(markdown, /\| split \| holdout \| 3 \| 50\.0% \| not shown \|/);
+  assert.match(markdown, /## Legacy pooled reliability\n\nDev cases only \(the holdout is shown in aggregate, by split\): pooled pass rate 55\.6% over 9 repetition\(s\)/);
+  assert.match(consoleText, /^Strict accuracy 52\.8% over 6 cases \(every split; no interval while the holdout is hidden\), 3 repetition\(s\), m\n/);
+  assert.match(consoleText, /\nDev cases: strict accuracy 55\.6% \(95% CI [^)]+\) over 3 cases \/ 2 intents; majority-pass 2\/3 \(Wilson 95% [^)]+\); intent-clustered 66\.7%\n/);
+  assert.doesNotMatch(`${markdown}\n${consoleText}`, /ho_|Weather\?|4 intents|\/6\b|over 1[78] repetition/);
+
+  // --reveal-holdout keeps every case's figures.
+  const revealed = renderReportMarkdown(reports.spread, { revealHoldout: true });
+  assert.match(revealed, /\*\*Strict accuracy 52\.8%\*\* \(95% CI 24\.9%–83\.3%, case bootstrap\) · 6 cases · 4 intents · 3 repetitions · /);
+  assert.match(revealed, /\nMajority-pass cases 3\/6 \(Wilson 95% [^)]+\) · intent-clustered accuracy 58\.3% /);
+  assert.match(revealed, /\| split \| holdout \| 3 \| 50\.0% \| 1\/3 \|/);
+  assert.match(revealed, /\nPooled pass rate 52\.9% over 17 repetition\(s\)/);
 });

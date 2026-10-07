@@ -5,7 +5,8 @@ import { describeHintsVersion, sameHintsVersion } from '../hints-version.js';
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
 import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
-import { summarizeBreakdowns, summarizeRunUsage } from './stats.js';
+import { legacySummary } from './runner.js';
+import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, summarizeAccuracy, summarizeBreakdowns, summarizeRunUsage } from './stats.js';
 
 // Holdout display policy (src/eval/holdout.js): unless `revealHoldout` is
 // set, report.md and the console show holdout results in aggregate only (the
@@ -27,6 +28,13 @@ function comparisonHiddenIds(comparison, { revealHoldout = false } = {}) {
 
 const isBehaviorRecord = (record) => Boolean(record.expected_behavior && record.expected_behavior !== 'answer');
 
+// The bootstrap settings the report's own intervals used (a test run may use
+// fewer resamples), so recomputed intervals are drawn the same way.
+function statsOptionsOf(report) {
+  const ci = report.stats?.strictAccuracy?.ci95 || {};
+  return { resamples: ci.resamples ?? BOOTSTRAP_RESAMPLES, seed: ci.seed ?? BOOTSTRAP_SEED };
+}
+
 // The summaries report.md and the console show. A summary over every case
 // next to the listed dev rows gives the hidden holdout outcomes away by
 // subtraction (combined behaviour or attribution counts minus the dev rows),
@@ -34,10 +42,16 @@ const isBehaviorRecord = (record) => Boolean(record.expected_behavior && record.
 // guardrail confusion matrix and the cost, latency, retry and token figures
 // are recomputed from the listed records (a holdout case that completed no
 // LLM call, or made a retry, would otherwise show up in those counts; a live
-// run's console also prints each dev repetition's cost). Hidden holdout
+// run's console also prints each dev repetition's cost). So are the
+// headline's intervals, majority-pass cases and intent-clustered accuracy
+// (`accuracy`) and the legacy pooled rate (`reliability`): two runs with the
+// same holdout accuracy can differ in how its pass rates spread over cases
+// and intents, and in excluded or skipped holdout repetitions. Hidden holdout
 // behaviour cases are only counted (the dataset says how many there are),
 // never with their outcomes. The holdout's one shown aggregate is its
-// accuracy by split. Without hidden cases these are the report's own.
+// accuracy by split (with its case count), and the headline's strict
+// accuracy over every case, which the split rows give anyway. Without hidden
+// cases these are the report's own.
 function displayedSummaries(report, hidden = new Set()) {
   const results = report.results || [];
   const listed = results.filter((record) => !hidden.has(record.id));
@@ -47,6 +61,8 @@ function displayedSummaries(report, hidden = new Set()) {
       attribution: report.attribution,
       behavior: report.behavior,
       usage: { cost, latency, retries, tokens },
+      accuracy: null,
+      reliability: report.reliability || null,
       records: results,
       hidden: false,
       hiddenAnswerCases: 0,
@@ -54,10 +70,14 @@ function displayedSummaries(report, hidden = new Set()) {
     };
   }
   const hiddenRecords = results.filter((record) => hidden.has(record.id));
+  const listedAnswers = listed.filter((record) => !isBehaviorRecord(record));
   return {
-    attribution: summarizeAttribution(listed.filter((record) => !isBehaviorRecord(record))),
+    attribution: summarizeAttribution(listedAnswers),
     behavior: summarizeBehavior(listed),
     usage: summarizeRunUsage(listed),
+    accuracy: summarizeAccuracy(listedAnswers, statsOptionsOf(report)),
+    // A report without the legacy block (a compact baseline) shows none.
+    reliability: report.reliability ? legacySummary(listedAnswers.filter((record) => Array.isArray(record.repetitions))).reliability : null,
     records: listed,
     hidden: true,
     hiddenAnswerCases: hiddenRecords.filter((record) => !isBehaviorRecord(record)).length,
@@ -172,21 +192,48 @@ function passRateText(summary) {
   return `${summary.passes}/${summary.counted}`;
 }
 
+// The headline's dev-case line while the holdout is hidden: strict accuracy
+// with its interval, majority-pass cases and intent-clustered accuracy over
+// the listed dev answer cases.
+function devAccuracyText(accuracy) {
+  if (!accuracy || accuracy.cases.counted === 0) {
+    return 'Dev cases: no counted dev answer case in this run (the holdout is shown in aggregate, by split).';
+  }
+  const { strictAccuracy: strict, majority, intentClustered } = accuracy;
+  return (
+    `Dev cases: strict accuracy ${formatPercent(strict.value)} (95% CI ${formatInterval(strict.ci95)}, case bootstrap) over ` +
+    `${accuracy.cases.counted} cases · majority-pass cases ${majority.passes}/${majority.n} (Wilson 95% ${formatInterval(majority.wilson95)}) · ` +
+    `intent-clustered accuracy ${formatPercent(intentClustered.value)} (95% CI ${formatInterval(intentClustered.ci95)}, ${intentClustered.intents} intents)`
+  );
+}
+
 function headline(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
   const stats = report.stats;
   const strict = stats.strictAccuracy;
   const date = report.generatedAt ? report.generatedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'n/a';
+  const repetitions = `${stats.repeat} repetition${stats.repeat === 1 ? '' : 's'}`;
   const lines = [];
-  lines.push(
-    `**Strict accuracy ${formatPercent(strict.value)}** (95% CI ${formatInterval(strict.ci95)}, case bootstrap) · ` +
-      `${stats.cases.counted} cases · ${stats.cases.intents} intents · ${stats.repeat} repetition${stats.repeat === 1 ? '' : 's'} · ` +
-      `${report.model} · ${date}`
-  );
-  lines.push('');
-  lines.push(
-    `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}) · ` +
-      `intent-clustered accuracy ${formatPercent(stats.intentClustered.value)} (95% CI ${formatInterval(stats.intentClustered.ci95)}, ${stats.intentClustered.intents} intents)`
-  );
+  if (shown.hidden) {
+    // Every case: a point estimate only (the split accuracies weighted by
+    // their case counts); the intervals and the finer statistics are the dev
+    // cases' (displayedSummaries).
+    lines.push(
+      `**Strict accuracy ${formatPercent(strict.value)}** (every split; no interval while the holdout is hidden) · ` +
+        `${stats.cases.counted} cases · ${repetitions} · ${report.model} · ${date}`
+    );
+    lines.push('');
+    lines.push(devAccuracyText(shown.accuracy));
+  } else {
+    lines.push(
+      `**Strict accuracy ${formatPercent(strict.value)}** (95% CI ${formatInterval(strict.ci95)}, case bootstrap) · ` +
+        `${stats.cases.counted} cases · ${stats.cases.intents} intents · ${repetitions} · ${report.model} · ${date}`
+    );
+    lines.push('');
+    lines.push(
+      `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}) · ` +
+        `intent-clustered accuracy ${formatPercent(stats.intentClustered.value)} (95% CI ${formatInterval(stats.intentClustered.ci95)}, ${stats.intentClustered.intents} intents)`
+    );
+  }
   const splits = stats.bySplit || [];
   if (splits.length > 1) {
     lines.push('');
@@ -201,7 +248,8 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
     lines.push('');
     lines.push(
       `Holdout: ${hiddenHoldout} case(s), shown in aggregate only (accuracy by split); error analysis and experiment design use dev ` +
-        'failures only (attribution, the guardrail matrix, behaviour cases, cost, latency and the finer breakdowns cover dev cases). `--reveal-holdout` lists them.'
+        'failures only (the intervals, majority-pass cases, intent-clustered accuracy, attribution, the guardrail matrix, behaviour cases, ' +
+        'cost, latency, the finer breakdowns and the pooled rate cover dev cases). `--reveal-holdout` lists them.'
     );
   }
   const behaviorText = behaviorSummaryText(shown);
@@ -491,13 +539,18 @@ function breakdownSection(report, hidden = new Set()) {
     ['tag', finer.byTag || []],
   ]) {
     for (const entry of entries) {
-      rows.push([label, entry.key, entry.cases, formatPercent(entry.accuracy), `${entry.majorityPasses}/${entry.cases}`]);
+      // The hidden holdout's row is its accuracy (and case count) only: its
+      // majority passes would say how its pass rates spread over cases.
+      const majority = holdoutHidden && label === 'split' && entry.key === 'holdout' ? 'not shown' : `${entry.majorityPasses}/${entry.cases}`;
+      rows.push([label, entry.key, entry.cases, formatPercent(entry.accuracy), majority]);
     }
   }
   return [
     '## By split, failure class, difficulty and tag',
     '',
-    ...(holdoutHidden ? ['Failure class, difficulty and tag rows cover the dev cases only (the holdout is shown in aggregate, by split).', ''] : []),
+    ...(holdoutHidden
+      ? ['Failure class, difficulty and tag rows cover the dev cases only, and the holdout row shows its accuracy only (the holdout is shown in aggregate, by split).', '']
+      : []),
     table(['Group', 'Value', 'Cases', 'Accuracy', 'Majority passes'], rows) || 'No counted cases.',
   ].join('\n');
 }
@@ -838,15 +891,19 @@ function provenanceSection(report) {
   return ['## Provenance', '', table(['', ''], rows)].join('\n');
 }
 
-function legacySection(report) {
-  const reliability = report.reliability;
+function legacySection(report, shown = displayedSummaries(report)) {
+  const reliability = shown.reliability;
   if (!reliability) {
     return '';
+  }
+  if (noListedAnswerCase(shown)) {
+    return ['## Legacy pooled reliability', '', `${NO_DEV_ANSWER_CASE} (the holdout is shown in aggregate, by split).`].join('\n');
   }
   return [
     '## Legacy pooled reliability',
     '',
-    `Pooled pass rate ${formatPercent(reliability.passRate)} over ${reliability.totalAttempts} repetition(s), pooled Wilson 95% lower bound ${formatPercent(reliability.wilsonLower95)}. ` +
+    `${shown.hidden ? 'Dev cases only (the holdout is shown in aggregate, by split): p' : 'P'}ooled pass rate ${formatPercent(reliability.passRate)} over ` +
+      `${reliability.totalAttempts} repetition(s), pooled Wilson 95% lower bound ${formatPercent(reliability.wilsonLower95)}. ` +
       'Kept for older consumers only: repetitions of one case are correlated, so the pooled bound overstates confidence. Use the case-level numbers above.',
   ].join('\n');
 }
@@ -871,7 +928,7 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
     costSection(report, hidden, shown),
     verificationSection(report),
     provenanceSection(report),
-    legacySection(report),
+    legacySection(report, shown),
   ].filter(Boolean);
   return `${sections.join('\n\n')}\n`;
 }
@@ -885,10 +942,22 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
   const attribution = shown.attribution;
   const usage = shown.usage;
   const buckets = attribution.repetitions.byBucket;
+  const run = `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`;
+  const dev = shown.accuracy;
   const lines = [
-    `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} (95% CI ${formatInterval(stats.strictAccuracy.ci95)}) over ${stats.cases.counted} cases / ${stats.cases.intents} intents, ` +
-      `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`,
-    `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}); intent-clustered ${formatPercent(stats.intentClustered.value)}`,
+    ...(shown.hidden
+      ? [
+          `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} over ${stats.cases.counted} cases (every split; no interval while the holdout is hidden), ${run}`,
+          dev.cases.counted === 0
+            ? 'Dev cases: no counted dev answer case in this run (the holdout is shown in aggregate, by split)'
+            : `Dev cases: strict accuracy ${formatPercent(dev.strictAccuracy.value)} (95% CI ${formatInterval(dev.strictAccuracy.ci95)}) over ${dev.cases.counted} cases / ` +
+              `${dev.cases.intents} intents; majority-pass ${dev.majority.passes}/${dev.majority.n} (Wilson 95% ${formatInterval(dev.majority.wilson95)}); ` +
+              `intent-clustered ${formatPercent(dev.intentClustered.value)}`,
+        ]
+      : [
+          `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} (95% CI ${formatInterval(stats.strictAccuracy.ci95)}) over ${stats.cases.counted} cases / ${stats.cases.intents} intents, ${run}`,
+          `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}); intent-clustered ${formatPercent(stats.intentClustered.value)}`,
+        ]),
     noListedAnswerCase(shown)
       ? `Attribution: ${NO_DEV_ANSWER_CASE.toLowerCase()} (the holdout is shown in aggregate, by split)`
       : `Attribution (repetitions${shown.hiddenAnswerCases > 0 ? ', dev cases' : ''}): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +

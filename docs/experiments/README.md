@@ -64,10 +64,13 @@ For each arm (baseline and candidate):
 - provenance: git sha, prompt version, the product setting as report.md's
   Provenance shows it (for the schema scope: requested and effective scope,
   the full-schema token estimate), model and endpoint, repetitions;
-- strict accuracy with its interval, majority-pass cases, intent-clustered
-  accuracy, accuracy by split (dev / holdout; the holdout in aggregate only:
-  design the experiment from dev failures, never from holdout cases, see
-  [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy));
+- strict accuracy, accuracy by split (dev / holdout; the holdout in
+  aggregate only: design the experiment from dev failures, never from
+  holdout cases, see
+  [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy)),
+  and the dev cases' interval, majority-pass cases and intent-clustered
+  accuracy (report.md gives these for dev cases only while the holdout is
+  hidden);
 - attribution: pass / model / system / infra buckets, guardrail false
   rejections, retrieval misses, known validator rejections, the guardrail
   confusion matrix;

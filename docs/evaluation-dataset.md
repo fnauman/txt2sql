@@ -177,9 +177,14 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   every case for the rescore, the comparison and the gate; opening it is
   revealing the holdout.
 - While the holdout is hidden, these still cover every case, holdout
-  included: the headline accuracy and its intervals (their holdout share is
-  the split aggregate), the budget row's spend, and **the exit code with its
-  reasons**. The exit code can give a hidden holdout outcome away in edge
+  included: the headline strict accuracy (a point estimate without an
+  interval: the split accuracies weighted by their case counts), the budget
+  row's spend, and **the exit code with its reasons**. The headline's
+  intervals, the majority-pass cases, the intent-clustered accuracy, the
+  holdout split row's majority passes and the legacy pooled rate are dev
+  figures: two runs with the same holdout accuracy can differ in how its
+  pass rates spread over cases and intents, or in excluded and skipped
+  holdout repetitions, and those figures would show it. The exit code can give a hidden holdout outcome away in edge
   cases: in the benchmark profile a run whose dev cases all pass exits 1
   when a holdout case failed, a holdout abstain / clarify case included
   (whose outcome report.md does not show; the reason does not itemize
@@ -1251,7 +1256,11 @@ rule).
   accuracy, when a run has both, with what the holdout rule enforces: no
   multi-word semantic-layer phrase and not "revenue"); the **behaviour line** ("Behaviour cases:
   abstain/clarify — N cases, M handled correctly"); the comparison line when
-  there is a baseline.
+  there is a baseline. While the holdout is hidden, the first line gives
+  every case's strict accuracy without an interval ("every split; no
+  interval while the holdout is hidden") and the second line is the dev
+  cases': their strict accuracy with its CI, majority-pass cases and
+  intent-clustered accuracy (the console prints the same two lines).
 - **Attribution** (answer cases only): who caused each outcome, per repetition
   and per case (majority outcome):
 
@@ -1297,7 +1306,10 @@ rule).
   attribution tables, the guardrail confusion matrix, the behaviour summary
   and the cost, latency, retry and token figures (report.md and the console)
   cover dev cases, so that subtracting
-  the listed dev rows from a total cannot give a holdout outcome away;
+  the listed dev rows from a total cannot give a holdout outcome away; so do
+  the headline's intervals, majority-pass cases and intent-clustered
+  accuracy and the legacy pooled rate, and the holdout's split row shows no
+  majority passes ("not shown");
   holdout behaviour cases are counted, without their outcomes (they are not
   in the split accuracy). `--reveal-holdout` lists them. See
   [Splits and the holdout policy](#splits-and-the-holdout-policy).
@@ -1315,7 +1327,7 @@ rule).
   A behaviour case's outcome agrees with its majority the same way:
   `declined` only when more than half of its scored repetitions declined.
 - **By split, failure class, difficulty and tag**: cases, accuracy, majority
-  passes.
+  passes (for a hidden holdout's split row, "not shown").
 - **Cost, latency, retries, tokens** (every case, behaviour cases included;
   dev cases only while the holdout is hidden): total cost, cost per question
   and per correct answer, p50/p95 product-loop and LLM-call latency, retry
@@ -1352,7 +1364,8 @@ repeats), so pooling them as independent trials overstates confidence.
   with a cluster bootstrap over intents.
 - **By split** and the other breakdowns use the same per-case pass rates.
 - The old pooled `reliability` block is still in `report.json`, labelled as
-  pooled and correlated.
+  pooled and correlated; report.md's "Legacy pooled reliability" line shows
+  it (over the dev cases while the holdout is hidden).
 
 ### Rescore (no LLM calls)
 
@@ -1484,19 +1497,19 @@ purpose.
 `full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
 seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.07 MB. The attribution, guardrail,
-behaviour, per-question cost and latency rows below are what the offline
-rescore (`npm run eval -- --offline`) prints by default: they cover the dev
-cases, and the holdout is read only as its accuracy by split (see the
-[holdout policy](#splits-and-the-holdout-policy); `--reveal-holdout` prints
-every case).
+255, fresh holdout 149), compact file 2.07 MB. The rows below are what the
+offline rescore (`npm run eval -- --offline`) prints by default: every row
+after the first two covers the dev cases, and the holdout is read only as
+its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
+`--reveal-holdout` prints every case).
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases / 205 intents) | 73.6% (95% CI 69.2%–77.9%, case bootstrap) |
-| Majority-pass cases | 288/392 (Wilson 95% 68.9%–77.6%) |
-| Intent-clustered accuracy | 73.3% (95% CI 67.8%–78.5%) |
+| Strict accuracy (392 answer cases, every split) | 73.6% (a point estimate: no interval while the holdout is hidden) |
 | By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
+| Strict accuracy, dev cases (245 answer cases) | 88.3% (95% CI 84.4%–92.0%, case bootstrap) |
+| Majority-pass cases, dev | 217/245 (Wilson 95% 84.0%–92.0%) |
+| Intent-clustered accuracy, dev (130 intents) | 86.5% (95% CI 81.0%–91.4%) |
 | Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
 | Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |

@@ -394,11 +394,11 @@ oracle and retry budget. Run cost: $0.63.
 | | Baseline (v1) | Candidate (v2) |
 |---|---|---|
 | Git / prompt version | `e42828b` / `b264e57d8e15` | `4ff6ecb` / `4358263bcf82` |
-| Strict accuracy (95% CI) | 62.2% (57.5%–66.8%) | **73.6%** (69.2%–77.9%) |
-| dev (245 answer cases) | 74.7% | 88.3% |
+| Strict accuracy, every split | 62.2% | **73.6%** |
+| dev (245 answer cases; 95% CI) | 74.7% (69.3%–79.9%) | 88.3% (84.4%–92.0%) |
 | fresh holdout (147 answer cases) | 41.3% | **49.2%** |
-| Majority-pass cases | 244/392 | 288/392 |
-| Intent-clustered accuracy | 60.6% | 73.3% |
+| Majority-pass cases, dev | 184/245 | 217/245 |
+| Intent-clustered accuracy, dev (130 intents) | 72.2% | 86.5% |
 | Paired: improvements / regressions, exact McNemar p | | 57 / 13, p < 0.001 |
 | Δ strict accuracy (paired bootstrap 95% CI) | | +11.5 pts (+7.6 to +15.3) |
 | Attribution, dev cases (repetitions) | pass 549 · model 186 · system 0 | pass 649 · model 86 · system 0 |
@@ -426,9 +426,10 @@ balance"); they are pinned in the holdout builder and counted, not excluded —
 the words are ordinary business vocabulary, not tuned to the holdout. Cost per
 correct answer is flat (dev cases): the prompt is about 19% longer and its
 cached share falls from 91.0% to 83.5%, but fewer retries and more correct
-answers offset it, and p95 latency drops by almost a second. Attribution,
-guardrail, behaviour, cost and latency rows cover dev cases, as the reports
-print them by default; the holdout is read only as its accuracy by split.
+answers offset it, and p95 latency drops by almost a second. The interval,
+majority-pass, intent-clustered, attribution, guardrail, behaviour, cost and
+latency rows cover dev cases, as the reports print them by default; the
+holdout is read only as its accuracy by split.
 
 ## Decision
 

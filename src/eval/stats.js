@@ -273,20 +273,18 @@ export function summarizeRunUsage(caseRecords) {
 }
 
 /**
- * Headline statistics over case records ({ id, intentId, tags, difficulty,
- * failure_class, repetitions[], summary }) as built by the runner
- * (summary from summarizeCaseRepetitions in attribution.js).
+ * The case-level accuracy statistics over case records: the counted cases
+ * and their intents, strict accuracy with its case-bootstrap CI, majority-pass
+ * cases with a Wilson interval and the intent-clustered accuracy with its
+ * cluster-bootstrap CI ({ cases: { counted, intents }, strictAccuracy,
+ * majority, intentClustered }). summarizeRunStatistics uses it over every
+ * case; report.md and the console recompute it over the dev cases while the
+ * holdout is hidden.
  */
-export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
-  const records = caseRecords || [];
-  // Abstain / clarify cases never count in accuracy (their repetitions are
-  // never `counted`); cost, latency, retries and tokens (summarizeRunUsage)
-  // cover them too.
-  const behaviorRecords = new Set(records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer'));
-  const counted = records.filter((record) => record.summary?.counted > 0);
+export function summarizeAccuracy(caseRecords, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
+  const counted = (caseRecords || []).filter((record) => record.summary?.counted > 0);
   const passRates = counted.map((record) => record.summary.passRate);
   const majorityPasses = counted.filter((record) => record.summary.majorityPass).length;
-  const repeat = records.reduce((max, record) => Math.max(max, record.repetitions?.length || 0), 0);
 
   const intents = groupBy(counted, (record) => [record.intentId || record.id]);
   const perIntent = [...intents.entries()]
@@ -297,27 +295,8 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
     }))
     .sort((left, right) => left.intentId.localeCompare(right.intentId));
 
-  const repetitions = records.flatMap((record) => record.repetitions || []);
-  const excluded = {};
-  for (const repetition of records.filter((record) => !behaviorRecords.has(record)).flatMap((record) => record.repetitions || []).filter((entry) => !entry.counted)) {
-    excluded[repetition.outcome] = (excluded[repetition.outcome] || 0) + 1;
-  }
-
   return {
-    unit: 'case',
-    repeat,
-    cases: {
-      selected: records.length,
-      counted: counted.length,
-      excluded: records.length - behaviorRecords.size - counted.length,
-      behavior: behaviorRecords.size,
-      intents: intents.size,
-    },
-    repetitions: {
-      total: repetitions.length,
-      counted: repetitions.filter((repetition) => repetition.counted).length,
-      excludedByOutcome: excluded,
-    },
+    cases: { counted: counted.length, intents: intents.size },
     strictAccuracy: {
       value: round(mean(passRates)),
       n: counted.length,
@@ -343,6 +322,48 @@ export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESA
       },
       perIntent,
     },
+  };
+}
+
+/**
+ * Headline statistics over case records ({ id, intentId, tags, difficulty,
+ * failure_class, repetitions[], summary }) as built by the runner
+ * (summary from summarizeCaseRepetitions in attribution.js).
+ */
+export function summarizeRunStatistics(caseRecords, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
+  const records = caseRecords || [];
+  // Abstain / clarify cases never count in accuracy (their repetitions are
+  // never `counted`); cost, latency, retries and tokens (summarizeRunUsage)
+  // cover them too.
+  const behaviorRecords = new Set(records.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer'));
+  const counted = records.filter((record) => record.summary?.counted > 0);
+  const repeat = records.reduce((max, record) => Math.max(max, record.repetitions?.length || 0), 0);
+  const accuracy = summarizeAccuracy(counted, { resamples, seed });
+
+  const repetitions = records.flatMap((record) => record.repetitions || []);
+  const excluded = {};
+  for (const repetition of records.filter((record) => !behaviorRecords.has(record)).flatMap((record) => record.repetitions || []).filter((entry) => !entry.counted)) {
+    excluded[repetition.outcome] = (excluded[repetition.outcome] || 0) + 1;
+  }
+
+  return {
+    unit: 'case',
+    repeat,
+    cases: {
+      selected: records.length,
+      counted: counted.length,
+      excluded: records.length - behaviorRecords.size - counted.length,
+      behavior: behaviorRecords.size,
+      intents: accuracy.cases.intents,
+    },
+    repetitions: {
+      total: repetitions.length,
+      counted: repetitions.filter((repetition) => repetition.counted).length,
+      excludedByOutcome: excluded,
+    },
+    strictAccuracy: accuracy.strictAccuracy,
+    majority: accuracy.majority,
+    intentClustered: accuracy.intentClustered,
     ...summarizeBreakdowns(counted),
     ...summarizeRunUsage(records),
   };

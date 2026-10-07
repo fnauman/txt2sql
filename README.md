@@ -420,13 +420,14 @@ flagged code is a system error (any other failure of it, such as a wrong
 result or a rejection for another reason, is judged as usual). The report
 contains:
 
-- `report.md`: strict accuracy with a 95% confidence interval, accuracy by
-  split, who caused each failure (model, guardrail false rejection, retrieval
-  miss, known validator rejection, infrastructure), the guardrail confusion
-  matrix, the abstain / clarify cases handled, a per-case table, cost /
-  latency / retries / tokens (all of these cover the dev cases; holdout
-  cases only with `--reveal-holdout`), and the provenance (git sha, prompt,
-  semantic-layer, fixture and dataset hashes);
+- `report.md`: strict accuracy and accuracy by split; then, over the dev
+  cases (holdout cases only with `--reveal-holdout`), the 95% confidence
+  interval, majority-pass cases, the intent-clustered accuracy, who caused
+  each failure (model, guardrail false rejection, retrieval miss, known
+  validator rejection, infrastructure), the guardrail confusion matrix, the
+  abstain / clarify cases handled, a per-case table and cost / latency /
+  retries / tokens; and the provenance (git sha, prompt, semantic-layer,
+  fixture and dataset hashes);
 - `report.json` (everything, every repetition) and `trace.jsonl`.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
@@ -435,8 +436,8 @@ defaults `SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-06):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, 205 intents) | **73.6%** (95% CI 69.2%–77.9%) |
-| By split | dev **88.3%** (245 cases) · fresh holdout **49.2%** (147 cases) |
+| Strict accuracy (392 answer cases, every split) | **73.6%** |
+| By split | dev **88.3%** (245 cases, 95% CI 84.4%–92.0%) · fresh holdout **49.2%** (147 cases) |
 | Failures by cause (repetitions, dev cases) | model 86 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
 | Guardrails over every dev attempt | precision 100%, recall 30.4%, false-rejection rate 0% |
 | Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
@@ -455,10 +456,10 @@ holdout number is the honest estimate for new kinds of questions — shares and
 ratios, overdue and ageing balances, running totals, period-over-period
 change — and it is where the remaining work is. With perfect SQL the suite's
 ceiling is 99.0% (4 holdout cases are known validator rejections); every dev
-failure of this baseline is a model error. (The failure causes, guardrail,
-behaviour and per-question cost figures are what `npm run eval -- --offline`
-prints by default: they cover the dev cases, the holdout only as its split
-accuracy.) These are measurements of the product, not targets.
+failure of this baseline is a model error. (The interval, failure causes,
+guardrail, behaviour and per-question cost figures are what `npm run eval --
+--offline` prints by default: they cover the dev cases, the holdout only as
+its split accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
 when committed) it adds a paired comparison with an exact McNemar test;
