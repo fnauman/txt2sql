@@ -10,6 +10,7 @@ import {
   NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
+import { buildCompletionOptions } from './model-config.js';
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { normalizeHintsVersion } from './hints-version.js';
@@ -2493,6 +2494,11 @@ function extractMessageText(content) {
   return '';
 }
 
+// The base request options of each pipeline. Every call goes through
+// buildCompletionOptions (src/model-config.js), which returns them unchanged
+// for gpt-4o-mini and the other non-reasoning models and adapts them for a
+// reasoning model (no temperature, reasoning_effort, a higher
+// max_completion_tokens) or OpenRouter (provider.require_parameters).
 export const BASIC_MODEL_REQUEST_OPTIONS = {
   temperature: 0,
   max_completion_tokens: 1200,
@@ -2540,10 +2546,14 @@ function assertCompleteChoice(choice, details) {
   }
 }
 
-export async function generateBasicSql({ client, model, prompt }) {
+// `modelConfig` (optional): the reasoning effort and the endpoint settings
+// for buildCompletionOptions ({ reasoningEffort, isOpenRouter,
+// requireParameters, maxCompletionTokens }; a resolved model config fits).
+// Without it the request follows the model's capabilities alone.
+export async function generateBasicSql({ client, model, prompt, modelConfig = null }) {
   const request = {
     model,
-    ...BASIC_MODEL_REQUEST_OPTIONS,
+    ...buildCompletionOptions(BASIC_MODEL_REQUEST_OPTIONS, { ...modelConfig, model }),
     messages: [
       { role: 'system', content: prompt.system },
       { role: 'user', content: prompt.user },
@@ -2608,7 +2618,7 @@ export const OPTIMIZED_MODEL_REQUEST_OPTIONS = {
   },
 };
 
-export async function generateOptimizedResponse({ client, model, prompt, retryContext = null, signal = null }) {
+export async function generateOptimizedResponse({ client, model, prompt, retryContext = null, signal = null, modelConfig = null }) {
   const messages = [{ role: 'system', content: prompt.system }];
 
   if (!retryContext) {
@@ -2645,7 +2655,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
 
   const request = {
     model,
-    ...OPTIMIZED_MODEL_REQUEST_OPTIONS,
+    ...buildCompletionOptions(OPTIMIZED_MODEL_REQUEST_OPTIONS, { ...modelConfig, model }),
     messages,
   };
   const tracedRequest = {
@@ -3480,7 +3490,9 @@ export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env =
   return { timeoutMs: resolvedTimeoutMs, maxRetries: resolvedMaxRetries };
 }
 
-export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } = {}) {
+// `fetch` (optional) replaces the SDK's fetch: tests route an
+// https://openrouter.ai base URL to a local stand-in with it.
+export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env, fetch = undefined } = {}) {
   if (!env.OPENAI_API_KEY) {
     const error = new Error('OPENAI_API_KEY is required.');
     error.code = 'OPENAI_NOT_CONFIGURED';
@@ -3493,6 +3505,7 @@ export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env } 
     ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),
     timeout: options.timeoutMs,
     maxRetries: options.maxRetries,
+    ...(fetch && { fetch }),
   });
 }
 
