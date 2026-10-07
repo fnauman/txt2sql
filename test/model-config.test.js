@@ -37,26 +37,33 @@ function listSourceFiles(dir) {
   return files;
 }
 
-// Where the default model's id may appear outside a comment: the one
-// definition, and its price row (a price, not a default).
-const ALLOWED_DEFAULT_LITERALS = {
-  'src/model-config.js': /^export const DEFAULT_MODEL = 'gpt-4o-mini';$/,
-  'src/pricing.js': /^ {2}'gpt-4o-mini': Object\.freeze\(\{$/,
+// A quoted model id (optionally vendor-prefixed): 'gpt-4o-mini',
+// "openai/gpt-6-luna", `o3-mini`. Independent of DEFAULT_MODEL's value, so a
+// leftover default of the old model is still caught after the default changes.
+const MODEL_ID_LITERAL = /['"`](?:[a-z0-9-]+\/)?(?:gpt-\d[\w.-]*|o\d[\w.-]*|chatgpt-[\w.-]+)['"`]/;
+// The same id unquoted, as a shell default would spell it (${MODEL_NAME:-...}).
+const MODEL_ID_WORD = /(?:^|[^\w.])(?:[a-z0-9-]+\/)?(?:gpt-\d[\w.-]*|o\d-[\w.-]+|chatgpt-[\w.-]+)/;
+
+// Where a model id may appear outside a comment: the one default, the
+// capability map's family ids, and the price rows (prices, not defaults).
+const ALLOWED_MODEL_LITERALS = {
+  'src/model-config.js': [/^export const DEFAULT_MODEL = '[^']+';$/, /^\s*(?:Object\.freeze\(\{ )?family: '[^']+',/],
+  'src/pricing.js': [/^ {2}'[^']+': Object\.freeze\(\{$/],
 };
 
-test('DEFAULT_MODEL is the one default model: no other gpt-4o-mini literal in src/, scripts/, the web server or CI', () => {
+test('DEFAULT_MODEL is the one default model: no other model id literal in src/, scripts/, the web server or CI', () => {
   const offenders = [];
   const files = [...listSourceFiles('src'), ...listSourceFiles('scripts'), ...listSourceFiles('apps/web/src/server')];
   for (const file of files) {
     for (const [index, line] of fs.readFileSync(path.join(REPO_ROOT, file), 'utf8').split('\n').entries()) {
-      if (!line.includes(DEFAULT_MODEL)) {
+      if (!MODEL_ID_LITERAL.test(line)) {
         continue;
       }
       const trimmed = line.trim();
       if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
         continue;
       }
-      if (ALLOWED_DEFAULT_LITERALS[file]?.test(line)) {
+      if ((ALLOWED_MODEL_LITERALS[file] || []).some((pattern) => pattern.test(line))) {
         continue;
       }
       offenders.push(`${file}:${index + 1}: ${trimmed}`);
@@ -65,15 +72,24 @@ test('DEFAULT_MODEL is the one default model: no other gpt-4o-mini literal in sr
   // The CI workflow asks the runner for the default baseline instead of
   // repeating the default in shell (${MODEL_NAME:-...}).
   for (const [index, line] of fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8').split('\n').entries()) {
-    if (line.includes(DEFAULT_MODEL) && !line.trim().startsWith('#')) {
+    if (MODEL_ID_WORD.test(line) && !line.trim().startsWith('#')) {
       offenders.push(`.github/workflows/ci.yml:${index + 1}: ${line.trim()}`);
     }
   }
-  assert.deepEqual(offenders, [], 'use DEFAULT_MODEL (src/model-config.js) instead of repeating the default model');
-  // The allow-list entries still exist (a stale entry would hide nothing).
-  for (const [file, pattern] of Object.entries(ALLOWED_DEFAULT_LITERALS)) {
-    assert.ok(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8').split('\n').some((line) => pattern.test(line)), `${file} still has its allowed line`);
+  assert.deepEqual(offenders, [], 'use DEFAULT_MODEL (src/model-config.js) instead of repeating a model id');
+  // The allow-list entries still match a line (a stale entry would hide nothing).
+  for (const [file, patterns] of Object.entries(ALLOWED_MODEL_LITERALS)) {
+    const lines = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8').split('\n');
+    for (const pattern of patterns) {
+      assert.ok(lines.some((line) => pattern.test(line)), `${file} still has a line matching ${pattern}`);
+    }
   }
+  // The guard sees what it must: a default spelled out in code, or in shell.
+  for (const line of ["  const model = process.env.MODEL_NAME || 'gpt-4o-mini';", '  model: "openai/gpt-6-luna",', "const fallback = `o3-mini`;"]) {
+    assert.ok(MODEL_ID_LITERAL.test(line), line);
+  }
+  assert.ok(MODEL_ID_WORD.test('if [ -f "eval/baselines/${MODEL_NAME:-gpt-4o-mini}.json" ]; then'));
+  assert.ok(!MODEL_ID_WORD.test('        run: npm run eval -- --offline --gate'));
 });
 
 test('resolveModelName: --model, then MODEL_NAME, then DEFAULT_MODEL, each with its source', () => {
@@ -85,6 +101,10 @@ test('resolveModelName: --model, then MODEL_NAME, then DEFAULT_MODEL, each with 
 });
 
 test('every entry point falls back to the same DEFAULT_MODEL', () => {
+  // Pinned on purpose: the committed baseline (eval/baselines/gpt-4o-mini.json)
+  // is the default model's, and the CI db job gates against the default
+  // model's baseline only when it exists, so a changed default would silently
+  // turn the offline gate off until a baseline of the new default is committed.
   assert.equal(DEFAULT_MODEL, 'gpt-4o-mini');
   assert.equal(parseEvalArgs([], { env: {} }).model, DEFAULT_MODEL);
   assert.equal(DEFAULT_WEB_CONFIG.model, DEFAULT_MODEL);

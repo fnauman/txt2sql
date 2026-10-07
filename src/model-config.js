@@ -4,9 +4,11 @@
 // - DEFAULT_MODEL is the one default model of the repository: the web server,
 //   the basic and optimized CLIs, the query service and npm run eval all fall
 //   back to it when neither --model (eval only) nor MODEL_NAME is set. A test
-//   (test/model-config.test.js) fails on any other default model literal in
-//   src/, scripts/, apps/web/src/server/ or the CI workflow, so changing the
-//   default is a one-line change here.
+//   (test/model-config.test.js) fails on any other model id literal in src/,
+//   scripts/, apps/web/src/server/ or the CI workflow (the capability map's
+//   family ids and the price rows aside), so changing the default is a
+//   one-line change here, plus a baseline of the new default for the CI gate
+//   (the test pins the value until then).
 // - The capability map (MODEL_FAMILIES) is keyed by the model id with any
 //   vendor prefix stripped (openai/gpt-6-luna is gpt-6-luna, as OpenRouter
 //   names it): gpt-4o* and gpt-4.1* take temperature 0 and no reasoning
