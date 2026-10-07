@@ -540,7 +540,14 @@ effort `none` the request keeps `temperature: 0` and the 1200 / 3200 limits,
 plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
 does not list, stops every entry point before anything starts, with the
 allowed values in the message. (An effort set in an env file can be cleared
-for one run with an empty `REASONING_EFFORT=` in the shell.)
+for one run with an empty `REASONING_EFFORT=` in the shell.) Without
+`temperature: 0` a reasoning model's repetitions vary more than gpt-4o-mini's,
+so measure it with `--repeat 3`; a completion cut off at the token limit is an
+`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if the pilot
+shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`;
+to pair a new model with the committed gpt-4o-mini baseline, pass
+`--compare eval/baselines/gpt-4o-mini.json` (the comparison then states the
+model change).
 
 ### OpenRouter
 
