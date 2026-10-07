@@ -1515,9 +1515,11 @@ a recording of another model or effort, and `runner.flags` records them as
 `--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
 when present, with the effort when one is set or the model family has a
 reasoning default (`medium` for `gpt-6*`), and a `/` in the model id
-written `__`; an id with other characters than lower-case letters, digits,
-`.`, `-` and `/` also gets `_` and a short hash of the id, so two ids never
-share a file; `--no-baseline` turns that off) aligns cases by id. When the two
+written `__`; an id that is not plain (plain: lower-case letters and digits
+with single `.` or `-` between them, in `/`-separated parts, not ending in
+`.<effort>`) is written sanitized plus `_` and the first 8 hex digits of its
+SHA-256, so ids that sanitize alike still get their own file; `--no-baseline`
+turns that off) aligns cases by id. When the two
 reports ran another model or reasoning effort the comparison says so
 (`modelChange`; a "Model change" line in report.md, a `model:` line on the
 console, and a note when the baseline is loaded): the paired test then

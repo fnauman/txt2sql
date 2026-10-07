@@ -467,10 +467,13 @@ guardrail, behaviour and per-question cost figures are what `npm run eval --
 its split accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
-when committed, `/` in a model id written `__`, and an id with any character
-other than lower-case letters, digits, `.`, `-` and `/` (`openai/gpt-6-luna:free`)
-written sanitized plus `_` and a short hash of the id, so two ids never share a
-file) it adds a paired comparison with an exact McNemar test
+when committed, `/` in a model id written `__`; that is the whole rule for a
+plain id, lower-case letters and digits with single `.` or `-` between them, in
+`/`-separated parts, not ending in `.<effort>`; any other id, such as
+`openai/gpt-6-luna:free`, `a--b` or `gpt-6-luna.low`, is written sanitized
+(characters outside letters, digits, `.` and `-` as `-`) plus `_` and the first
+8 hex digits of the id's SHA-256, so ids that sanitize alike still get their
+own file) it adds a paired comparison with an exact McNemar test
 (shown over the paired dev cases while the holdout is hidden; the gate tests every
 paired case; and it says so when the two sides ran another model or reasoning effort);
 `--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,

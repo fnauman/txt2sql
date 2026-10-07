@@ -15,7 +15,8 @@
 //     re-judge a recorded report with zero LLM calls.
 //  5. Attribute every failure, compute case-level statistics, compare with
 //     the baseline (--compare, default eval/baselines/<model>[.<effort>].json,
-//     `/` in the model id as `__`) and write
+//     `/` in the model id as `__`, a hash added for an id that is not plain:
+//     modelFileLabel) and write
 //     generated/runs/<timestamp>/<suite>/<model>[.<effort>]/{report.json,report.md,trace.jsonl}.
 //
 // Exit codes: 0 success; 2 harness/dataset/infrastructure failure (database,
@@ -119,7 +120,9 @@ Setup:
   --refresh-schema            recompile generated/schema.json from models/
 Compare and gate:
   --compare <report.json>     baseline to compare with (default eval/baselines/<model>[.<effort>].json
-                              when present; a "/" in the model id is written "__")
+                              when present; a "/" in the model id is written "__"; an id that is not
+                              plain (lower-case letters and digits, single "." or "-" between them, no
+                              trailing .<effort>) is sanitized and gets "_" plus a hash of the id)
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X (exit 2 when
