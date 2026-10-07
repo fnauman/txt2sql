@@ -1558,11 +1558,12 @@ const MAX_DERIVED_COLUMN_REFERENCES = 256;
  * value in the query that reads it (tokens[scope[0]..scope[1]], the body
  * left out): a reference to the column, bare or qualified, that is a
  * computed value (expressionIsComputedValue), or a `*` / `q.*` select item
- * that passes it on and is one. A column only used to filter, join, group or
- * order rows computes nothing ("WHERE t.bal > 0" next to SUM(t.other)).
+ * that passes it on and is one (the only way to read an unnamed column,
+ * `name` null). A column only used to filter, join, group or order rows
+ * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)).
  */
 function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, budget) {
-  const wanted = String(name).toLowerCase();
+  const wanted = name === null ? null : String(name).toLowerCase();
   for (let at = scope[0]; at <= scope[1]; at += 1) {
     if (at === body[0]) {
       at = body[1];
@@ -1581,7 +1582,7 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
       continue;
     }
     const tokenName = token?.type === 'word' || token?.type === 'quoted_identifier' ? identifierTokenName(token) : null;
-    if (!tokenName || String(tokenName).toLowerCase() !== wanted || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
+    if (!tokenName || wanted === null || String(tokenName).toLowerCase() !== wanted || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
       continue;
     }
     const qualified = isPunctToken(tokens[at - 1], '.');
@@ -1687,7 +1688,7 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
         } else if (word === 'FROM' || word === 'JOIN') {
           // A derived table ("FROM (SELECT ...) t"): its column must be a
           // value in the query around it.
-          if (!selectItem?.name || !isPunctToken(tokens[start], '(')) {
+          if (!selectItem || !isPunctToken(tokens[start], '(')) {
             return false;
           }
           const open = enclosingOpenParen(tokens, at, parens);
@@ -1704,12 +1705,13 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
           }
           let columnName = selectItem.name;
           if (isPunctToken(tokens[at - 1], ')') && parens.openOf.get(at - 1) !== undefined) {
+            // A column list names the CTE's columns by position.
             const columns = splitTopLevelArguments(tokens, parens.openOf.get(at - 1) + 1, at - 2, parens);
             const column = selectItem.star ? null : columns[selectItem.position];
             columnName = column && column[0] === column[1] ? identifierTokenName(tokens[column[0]]) : null;
-          }
-          if (!columnName) {
-            return false;
+            if (!columnName) {
+              return false;
+            }
           }
           const open = enclosingOpenParen(tokens, start, parens);
           const scopeEnd = open < 0 ? tokens.length - 1 : (parens.closeOf.get(open) ?? tokens.length) - 1;

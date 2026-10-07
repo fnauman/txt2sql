@@ -643,6 +643,7 @@ test('v2 METRIC_COLUMN: an open-balance difference used as an IF() condition, or
     `WITH t (np, bal) AS (SELECT d.NetPayableAmount, d.NetPayableAmount - d.PaidAmount ${april}) SELECT SUM(bal) AS open_amount FROM t WHERE bal > 0`,
     `SELECT d.CustomerId, SUM(t.bal) AS open_amount FROM SalesDocument d JOIN (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t ON t.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled,0)=0 GROUP BY d.CustomerId`,
     `SELECT * FROM (SELECT d.SalesDocumentId, d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+    `SELECT * FROM (SELECT ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) ${april}) t`,
     `SELECT SUM(u.bal) AS open_amount FROM (SELECT t.* FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t) u`,
     `WITH a AS (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}), b AS (SELECT * FROM a) SELECT SUM(bal) AS open_amount FROM b`,
   ]) {
