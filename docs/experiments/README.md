@@ -38,7 +38,7 @@ is the protocol on top of it.
    hypothesis, the arms and the decision rule (what the paired holdout test
    of step 4 must show for the setting to be kept). Then
    `npm run eval -- --repeat 3` with the new setting. A live run compares
-   itself with `eval/baselines/<model>.json` automatically (`--compare
+   itself with `eval/baselines/<model>[.<effort>].json` automatically (`--compare
    <report.json>` for another baseline): cases are paired by id (a case whose
    gold or scoring changed is excluded and listed). Add `--budget-usd` as a
    cap.

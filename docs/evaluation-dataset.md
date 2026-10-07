@@ -1283,7 +1283,7 @@ npm run eval -- --help                              # every flag
 5. **Attribution, statistics, comparison, report.** Guardrail rejections are
    re-run on the fixtures, every repetition gets an outcome, and
    `report.json`, `report.md` and `trace.jsonl` are written to
-   `generated/runs/<timestamp>/<suite>/<model>/`.
+   `generated/runs/<timestamp>/<suite>/<model>[.<effort>]/`.
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
@@ -1499,13 +1499,18 @@ report.md say when the recording ran another hints version;
 ran.
 
 `--offline` runs the preflight, fixtures and verification, then rescores
-`eval/baselines/<model>.json` when it exists, or says there is none and exits 0
+`eval/baselines/<model>[.<effort>].json` when it exists, or says there is none and exits 0
 (exit 2 with `--gate`).
 
 ### Compare and gate
 
-`--compare <report.json>` (default: `eval/baselines/<model>.json` when present;
-`--no-baseline` turns that off) aligns cases by id. A case whose gold or
+`--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
+when present, the effort only when one is set and a `/` in the model id
+written `__`; `--no-baseline` turns that off) aligns cases by id. When the two
+reports ran another model or reasoning effort the comparison says so
+(`modelChange`; a "Model change" line in report.md, a `model:` line on the
+console, and a note when the baseline is loaded): the paired test then
+measures the model change. A case whose gold or
 scoring fingerprint changed is excluded and listed, as are cases one report
 did not count or whose majority outcome is a timeout; behaviour cases are not
 compared; new and removed cases are listed. Per paired case the verdict is the
@@ -1553,7 +1558,7 @@ Exit 2 wins over 1.
 
 ### Baselines
 
-The committed baseline for a model lives at `eval/baselines/<model>.json`: a
+The committed baseline for a model lives at `eval/baselines/<model>[.<effort>].json`: a
 **compact** report of the whole default suite (see `eval/baselines/README.md`).
 `npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree,
 only when the run exits 0 with no case skipped by the budget; the run's own

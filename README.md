@@ -466,10 +466,10 @@ guardrail, behaviour and per-question cost figures are what `npm run eval --
 --offline` prints by default: they cover the dev cases, the holdout only as
 its split accuracy.) These are measurements of the product, not targets.
 
-With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
-when committed) it adds a paired comparison with an exact McNemar test (shown
-over the paired dev cases while the holdout is hidden; the gate tests every
-paired case);
+With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
+when committed, `/` in a model id written `__`) it adds a paired comparison with an exact McNemar test
+(shown over the paired dev cases while the holdout is hidden; the gate tests every
+paired case; and it says so when the two sides ran another model or reasoning effort);
 `--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,
 a run below X; with only abstain / clarify cases selected there is no accuracy,
 so `--min-accuracy` is refused with exit 2). Harness, database and

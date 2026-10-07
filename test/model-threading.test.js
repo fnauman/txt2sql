@@ -1,13 +1,25 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 
-import { completionSettingsOf, describeModelConfig, resolveCompletionSettings, resolveModelConfig } from '../src/model-config.js';
+import { completionSettingsOf, describeModelConfig, modelFileLabel, resolveCompletionSettings, resolveModelConfig } from '../src/model-config.js';
+import { compareReports } from '../src/eval/compare.js';
 import { collectProvenance, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
-import { renderReportMarkdown } from '../src/eval/report-markdown.js';
+import { renderComparisonConsole, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 import { createBufferedTraceLogger, loadOptimizedQueryRuntime, resolveRunModelSettings, runOptimizedQuestion } from '../src/query-service.js';
-import { budgetPricingRefusal, describeRunnerFlags, parseEvalArgs, runEval, USAGE, validateEvalArgv } from '../scripts/eval.js';
+import {
+  baselineModelNote,
+  baselineTarget,
+  budgetPricingRefusal,
+  defaultBaselineForEnv,
+  defaultBaselinePath,
+  describeRunnerFlags,
+  parseEvalArgs,
+  runEval,
+  USAGE,
+  validateEvalArgv,
+} from '../scripts/eval.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
 
 // The model, its source and the reasoning effort travel from the settings
@@ -331,4 +343,95 @@ test('a paid eval with --budget-usd refuses to start for a model without a price
     budgetPricingRefusal(parseEvalArgs(['--model', 'anthropic/claude-sonnet-4.5', '--budget-usd', '1'], { env: {} })),
     /^--budget-usd needs a price for model "anthropic\/claude-sonnet-4\.5" \(src\/pricing\.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion\); without it the budget cannot be enforced, so the run does not start\.$/
   );
+});
+
+test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in the model id as __', async () => {
+  assert.equal(modelFileLabel('gpt-4o-mini'), 'gpt-4o-mini');
+  assert.equal(modelFileLabel('gpt-6-luna', 'low'), 'gpt-6-luna.low');
+  assert.equal(modelFileLabel('openai/gpt-6-luna', 'medium'), 'openai__gpt-6-luna.medium');
+  assert.equal(modelFileLabel('openai/gpt-6-luna:free'), 'openai__gpt-6-luna-free');
+  assert.match(defaultBaselinePath('gpt-4o-mini'), /eval\/baselines\/gpt-4o-mini\.json$/);
+  assert.match(defaultBaselinePath('gpt-4o-mini', null), /eval\/baselines\/gpt-4o-mini\.json$/);
+  assert.match(defaultBaselinePath('gpt-6-luna', 'low'), /eval\/baselines\/gpt-6-luna\.low\.json$/);
+  assert.match(defaultBaselinePath('openai/gpt-6-luna', 'medium'), /eval\/baselines\/openai__gpt-6-luna\.medium\.json$/);
+  assert.match(defaultBaselineForEnv({}), /eval\/baselines\/gpt-4o-mini\.json$/);
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'openai/gpt-6-luna', REASONING_EFFORT: 'low' }), /eval\/baselines\/openai__gpt-6-luna\.low\.json$/);
+
+  // --write-baseline writes the model's and effort's own file, and refuses another model's.
+  const write = parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--write-baseline'], { env: {} });
+  assert.match(baselineTarget(write), /eval\/baselines\/gpt-6-luna\.low\.json$/);
+  assert.throws(
+    () => parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--write-baseline', '--baseline-file', 'eval/baselines/gpt-6-luna.json'], { env: {} }),
+    /this run's model gpt-6-luna \(reasoning effort low\) writes eval\/baselines\/gpt-6-luna\.low\.json/
+  );
+
+  // --gate looks for the effort's baseline.
+  const lines = [];
+  const cli = { log: (line) => lines.push(line), error: (line) => lines.push(line) };
+  await assert.rejects(
+    runEval(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--gate'], { env: {} }), { cli, env: {} }),
+    (error) => error.code === 'NO_BASELINE' && /there is none at eval\/baselines\/gpt-6-luna\.low\.json/.test(error.message)
+  );
+});
+
+test('comparisons flag a model or reasoning-effort change (comparison, report.md, console, baseline note)', () => {
+  const record = (id, pass) => ({ id, question: id, gold_fingerprint: 'g', summary: { counted: 1, passes: pass ? 1 : 0, passRate: pass ? 1 : 0, majorityPass: pass, outcome: pass ? 'pass' : 'wrong_result' } });
+  const results = [record('a', true), record('b', false)];
+  const report = (model, reasoningEffort, extra = {}) => ({
+    model,
+    results,
+    provenance: { product: reasoningEffort === undefined ? {} : { reasoningEffort } },
+    ...extra,
+  });
+
+  const same = compareReports(report('gpt-4o-mini', undefined), report('gpt-4o-mini', null), { resamples: 20 });
+  assert.equal(same.modelChange, null, 'a report from before REASONING_EFFORT sent none');
+  const model = compareReports(report('gpt-4o-mini', undefined), report('gpt-6-luna', 'low'), { resamples: 20 });
+  assert.deepEqual(model.modelChange, { model: true, reasoningEffort: true });
+  assert.equal(model.candidate.reasoningEffort, 'low');
+  const effort = compareReports(report('gpt-6-luna', 'low'), report('gpt-6-luna', 'medium'), { resamples: 20 });
+  assert.deepEqual(effort.modelChange, { model: false, reasoningEffort: true });
+
+  const printed = renderComparisonConsole(model);
+  assert.match(printed, /\n {2}model: gpt-4o-mini → gpt-6-luna \(reasoning effort low\) \(the comparison measures the model change\)/);
+  assert.doesNotMatch(renderComparisonConsole(same), /model:/);
+
+  assert.equal(baselineModelNote(report('gpt-4o-mini', undefined), 'gpt-4o-mini', null), null);
+  assert.equal(
+    baselineModelNote(report('gpt-4o-mini', undefined), 'gpt-6-luna', 'low'),
+    '  note: the baseline was run with gpt-4o-mini, this run uses gpt-6-luna (reasoning effort low): the comparison measures the model change too.'
+  );
+  assert.match(baselineModelNote(report('gpt-6-luna', 'low'), 'gpt-6-luna', 'medium'), /run with gpt-6-luna \(reasoning effort low\), this run uses gpt-6-luna \(reasoning effort medium\)/);
+});
+
+test('report.md\'s comparison table shows both efforts and states a model change', async () => {
+  const caseRecords = await attributeCaseRuns(
+    [
+      {
+        entry: { testCase: normalizeBenchmarkCase({ id: 'case_1', question: 'How many customers?', expected_sql: 'SELECT 1', expected_tables: ['Customer'] }), datasets: ['core'] },
+        repetitions: [{ status: 'pass', warnings: [], attempts: [], attempt_count: 1, llm_usage: null, llm_cost: null, timings: { totalMs: 10 } }],
+      },
+    ],
+    { checkGuardrails: false }
+  );
+  const provenance = { product: { reasoningEffort: 'low', modelSource: '--model', model: 'gpt-6-luna' }, model: 'gpt-6-luna' };
+  const baselineReport = { model: 'gpt-4o-mini', results: caseRecords, provenance: { product: {} } };
+  const comparison = compareReports(baselineReport, { model: 'gpt-6-luna', results: caseRecords, provenance }, { resamples: 20, baselineLabel: 'eval/baselines/gpt-4o-mini.json' });
+  const markdown = renderReportMarkdown(
+    buildReport({
+      mode: 'run',
+      generatedAt: '2026-10-07T10:00:00.000Z',
+      model: 'gpt-6-luna',
+      suite: { name: 'all', datasets: [], selectedCaseCount: 1, totalCaseCount: 1, filters: { split: 'all', caseIds: [], tags: [], intents: [] } },
+      oracle: { fixtures: [] },
+      runner: { repeat: 1 },
+      provenance,
+      verification: { skipped: true },
+      caseRecords,
+      comparison,
+      statsOptions: { resamples: 20 },
+    })
+  );
+  assert.match(markdown, /\| Reasoning effort \| unset \| low \|/);
+  assert.match(markdown, /\*\*Model change:\*\* the baseline ran gpt-4o-mini and the candidate gpt-6-luna \(reasoning effort low\)/);
 });

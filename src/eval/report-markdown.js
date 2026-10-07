@@ -245,6 +245,11 @@ function schemaScopeText(scope) {
   return scope ? describeSchemaScope(scope) : 'not recorded (before SCHEMA_SCOPE: retrieved, no widening)';
 }
 
+// A comparison side's effort (a report from before REASONING_EFFORT sent none).
+function comparisonEffortText(side) {
+  return side.model ? describeReasoningEffort(side.model, side.reasoningEffort ?? null) : side.reasoningEffort || 'n/a';
+}
+
 // The report's model with its reasoning effort when one was set
 // (provenance.product.reasoningEffort; reports from before it sent none).
 function reportModelLabel(report) {
@@ -511,6 +516,12 @@ export function renderComparisonConsole(recorded, { revealHoldout = false, holdo
   ];
   if (holdout) {
     lines.push(`  holdout in aggregate (--holdout-summary): ${holdoutSummaryText(holdout)}`);
+  }
+  if (comparison.modelChange) {
+    lines.push(
+      `  model: ${modelLabel(comparison.baseline?.model || 'n/a', comparison.baseline?.reasoningEffort ?? null)} → ` +
+        `${modelLabel(comparison.candidate?.model || 'n/a', comparison.candidate?.reasoningEffort ?? null)} (the comparison measures the model change)`
+    );
   }
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
@@ -864,6 +875,7 @@ function comparisonSection(comparison, holdoutSummary = null) {
       [
         ['Report', base.label || 'n/a', cand.label || 'this run'],
         ['Model', base.model || 'n/a', cand.model || 'n/a'],
+        ['Reasoning effort', comparisonEffortText(base), comparisonEffortText(cand)],
         ['Generated', base.generatedAt || 'n/a', cand.generatedAt || 'n/a'],
         ['Git', `${short(base.gitSha, 10)}${base.gitDirty ? ' (dirty)' : ''}`, `${short(cand.gitSha, 10)}${cand.gitDirty ? ' (dirty)' : ''}`],
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
@@ -874,6 +886,13 @@ function comparisonSection(comparison, holdoutSummary = null) {
       ]
     )
   );
+  if (comparison.modelChange) {
+    lines.push('');
+    lines.push(
+      `**Model change:** the baseline ran ${modelLabel(base.model || 'n/a', base.reasoningEffort ?? null)} and the candidate ` +
+        `${modelLabel(cand.model || 'n/a', cand.reasoningEffort ?? null)}, so the paired comparison measures the model change, not only a product change.`
+    );
+  }
   const contingency = contingencyOf(comparison);
   lines.push('');
   lines.push('Paired majority verdicts (the exact McNemar test uses the off-diagonal cells):');

@@ -15,6 +15,10 @@
 // Abstain / clarify (behavior) cases are skipped: they never count in strict
 // accuracy.
 //
+// A different model or reasoning effort on the two sides is flagged
+// (`modelChange`): the paired test then measures the model change, not (only)
+// a product change.
+//
 // Reports from before the runner rewrite (no results[i].summary) are read too:
 // their per-case pass rate comes from reliability.perCase when present, else
 // from the single recorded status.
@@ -97,6 +101,8 @@ function describeReport(report, label) {
     schemaScope: report?.provenance?.product?.schemaScope || null,
     // null for a report from before HINTS_VERSION (hints version 1).
     hintsVersion: report?.provenance?.product?.hintsVersion ?? null,
+    // null when none was set, also for a report from before REASONING_EFFORT.
+    reasoningEffort: report?.provenance?.product?.reasoningEffort ?? null,
     mode: report?.mode || 'run',
   };
 }
@@ -163,8 +169,19 @@ export function summarizePairs(pairs, { alpha = 0.05, resamples = BOOTSTRAP_RESA
 }
 
 /**
+ * { model, reasoningEffort } (each a boolean: changed) when the two described
+ * reports ran another model or effort; null when both match. A report that
+ * does not record its model is not a change.
+ */
+export function describeModelChange(baseline, candidate) {
+  const model = Boolean(baseline?.model && candidate?.model && baseline.model !== candidate.model);
+  const reasoningEffort = (baseline?.reasoningEffort ?? null) !== (candidate?.reasoningEffort ?? null);
+  return model || reasoningEffort ? { model, reasoningEffort } : null;
+}
+
+/**
  * Compares a candidate report with a baseline report. Returns
- * { baseline, candidate, baselineCases, candidateCases, paired,
+ * { baseline, candidate, modelChange, baselineCases, candidateCases, paired,
  *   excluded: { goldChanged, notCounted },
  *   newCases, removedCases, holdoutCases, flips: { regressions, improvements },
  *   rateChanges, accuracy: { baseline, candidate, delta, deltaCi95 },
@@ -217,9 +234,12 @@ export function compareReports(baselineReport, candidateReport, {
   paired.sort((left, right) => left.id.localeCompare(right.id));
   const summary = summarizePairs(paired, { alpha, resamples, seed });
 
+  const baselineDescription = describeReport(baselineReport, baselineLabel);
+  const candidateDescription = describeReport(candidateReport, candidateLabel);
   return {
-    baseline: describeReport(baselineReport, baselineLabel),
-    candidate: describeReport(candidateReport, candidateLabel),
+    baseline: baselineDescription,
+    candidate: candidateDescription,
+    modelChange: describeModelChange(baselineDescription, candidateDescription),
     alpha,
     // Case counts of both reports: the gate needs to know how much of the
     // run the pairing covers.

@@ -358,3 +358,16 @@ export function describeModelConfig(config) {
 export function modelLabel(model, reasoningEffort = null) {
   return reasoningEffort ? `${model} (reasoning effort ${reasoningEffort})` : String(model);
 }
+
+/**
+ * A file or directory name for a model and effort: the model id with `/`
+ * mapped to `__` (openai/gpt-6-luna -> openai__gpt-6-luna), then `.<effort>`
+ * when an effort is set; other characters outside [A-Za-z0-9._-] become `-`.
+ * gpt-4o-mini with no effort stays gpt-4o-mini, so its committed baseline
+ * keeps its name.
+ */
+export function modelFileLabel(model, reasoningEffort = null) {
+  const id = String(model || '').trim().replace(/\//g, '__');
+  const label = reasoningEffort ? `${id}.${reasoningEffort}` : id;
+  return label.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}

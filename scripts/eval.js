@@ -14,8 +14,9 @@
 //     --repeat and an optional --budget-usd; or, with --rescore / --offline,
 //     re-judge a recorded report with zero LLM calls.
 //  5. Attribute every failure, compute case-level statistics, compare with
-//     the baseline (--compare, default eval/baselines/<model>.json) and write
-//     generated/runs/<timestamp>/<suite>/<model>/{report.json,report.md,trace.jsonl}.
+//     the baseline (--compare, default eval/baselines/<model>[.<effort>].json,
+//     `/` in the model id as `__`) and write
+//     generated/runs/<timestamp>/<suite>/<model>[.<effort>]/{report.json,report.md,trace.jsonl}.
 //
 // Exit codes: 0 success; 2 harness/dataset/infrastructure failure (database,
 // fixtures, verification gates, gold errors, infra errors, provider outages or
@@ -59,7 +60,16 @@ import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, reso
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
 import { hasModelPrice } from '../src/pricing.js';
-import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, describeReasoningEffort, modelLabel, REASONING_EFFORTS, resolveModelConfig, resolveModelName } from '../src/model-config.js';
+import {
+  completionSettingsOf,
+  DEFAULT_MODEL,
+  describeModelConfig,
+  describeReasoningEffort,
+  modelFileLabel,
+  modelLabel,
+  REASONING_EFFORTS,
+  resolveModelConfig,
+} from '../src/model-config.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
 import { evaluateQuestion } from './evaluate.js';
@@ -78,7 +88,7 @@ export const USAGE = `Usage: npm run eval -- [options]
 One command: database preflight (starts the docker-compose MariaDB if needed),
 fixture seeding, gold + controls verification, the evaluation run, attribution,
 statistics, baseline comparison, and report.json + report.md + trace.jsonl under
-generated/runs/<timestamp>/<suite>/<model>/.
+generated/runs/<timestamp>/<suite>/<model>[.<effort>]/.
 
 Suite (default: every dataset in datasets/, de-duplicated by case id and by
 identical question + gold):
@@ -106,13 +116,14 @@ Setup:
   --min-heldout-kill-rate 0   held-out kill-rate floor per dataset
   --refresh-schema            recompile generated/schema.json from models/
 Compare and gate:
-  --compare <report.json>     baseline to compare with (default eval/baselines/<model>.json when present)
+  --compare <report.json>     baseline to compare with (default eval/baselines/<model>[.<effort>].json
+                              when present; a "/" in the model id is written "__")
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X (exit 2 when
                               only abstain / clarify cases are selected: no accuracy)
   --write-baseline            also save a compact copy of report.json (what rescore, compare and gate
-                              read) as eval/baselines/<model>.json (only from a clean run of the
+                              read) as eval/baselines/<model>[.<effort>].json (only from a clean run of the
                               whole default suite on every fixture)
   --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset;
                               never inside eval/baselines/, which holds only full default baselines)
@@ -308,12 +319,14 @@ function parseNumber(argv, name, fallback, { min = 0, max = Number.POSITIVE_INFI
   return value;
 }
 
-function sanitizeSegment(value) {
-  return String(value || 'unknown').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
-}
-
-export function defaultBaselinePath(model, baselinesDir = DEFAULT_BASELINES_DIR) {
-  return path.resolve(baselinesDir, `${sanitizeSegment(model)}.json`);
+/**
+ * The default baseline of a model at a reasoning effort:
+ * eval/baselines/<model>[.<effort>].json, with `/` in the model id mapped to
+ * `__` (modelFileLabel): eval/baselines/gpt-4o-mini.json,
+ * eval/baselines/gpt-6-luna.low.json, eval/baselines/openai__gpt-6-luna.low.json.
+ */
+export function defaultBaselinePath(model, reasoningEffort = null, baselinesDir = DEFAULT_BASELINES_DIR) {
+  return path.resolve(baselinesDir, `${modelFileLabel(model, reasoningEffort)}.json`);
 }
 
 /**
@@ -321,7 +334,8 @@ export function defaultBaselinePath(model, baselinesDir = DEFAULT_BASELINES_DIR)
  * CI db job checks for it before an offline --gate.
  */
 export function defaultBaselineForEnv(env = process.env) {
-  return defaultBaselinePath(resolveModelName(env).model);
+  const config = resolveModelConfig({ env });
+  return defaultBaselinePath(config.model, config.reasoningEffort);
 }
 
 /**
@@ -419,12 +433,14 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   if (options.baselineFile && !options.writeBaseline) {
     throw usageError('--baseline-file only applies with --write-baseline.');
   }
-  if (writesDefaultBaseline(options) && path.resolve(baselineTarget(options)) !== defaultBaselinePath(options.model)) {
-    // eval/baselines/<model>.json is what runs of <model> pair with: another
-    // name there would replace another model's baseline (or invent one).
+  if (writesDefaultBaseline(options) && path.resolve(baselineTarget(options)) !== defaultBaselinePath(options.model, options.reasoningEffort)) {
+    // eval/baselines/<model>[.<effort>].json is what runs of <model> at that
+    // effort pair with: another name there would replace another model's
+    // baseline (or invent one).
     throw usageError(
       `--baseline-file ${repoRelative(options.baselineFile)} is inside ${repoRelative(DEFAULT_BASELINES_DIR)}, which holds only each model's default baseline; ` +
-        `this run's model ${options.model} writes ${repoRelative(defaultBaselinePath(options.model))}. Save elsewhere, or run with --model matching the file name.`
+        `this run's model ${modelLabel(options.model, options.reasoningEffort)} writes ${repoRelative(defaultBaselinePath(options.model, options.reasoningEffort))}. ` +
+        'Save elsewhere, or run with --model (and --reasoning-effort) matching the file name.'
     );
   }
   if (writesDefaultBaseline(options)) {
@@ -444,9 +460,9 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   return options;
 }
 
-/** Where --write-baseline writes: --baseline-file, else eval/baselines/<model>.json. */
+/** Where --write-baseline writes: --baseline-file, else eval/baselines/<model>[.<effort>].json. */
 export function baselineTarget(options) {
-  return options.baselineFile || defaultBaselinePath(options.model);
+  return options.baselineFile || defaultBaselinePath(options.model, options.reasoningEffort);
 }
 
 /**
@@ -935,10 +951,10 @@ export async function writeReport(report, { reportPath, cli, revealHoldout = fal
   return markdownPath;
 }
 
-async function loadBaseline(options, model, cli) {
+async function loadBaseline(options, model, cli, reasoningEffort = options.reasoningEffort ?? null) {
   let baselinePath = options.compare;
   if (!baselinePath && !options.noBaseline) {
-    const candidate = defaultBaselinePath(model);
+    const candidate = defaultBaselinePath(model, reasoningEffort);
     if (await fileExists(candidate)) {
       baselinePath = candidate;
     }
@@ -948,10 +964,27 @@ async function loadBaseline(options, model, cli) {
   }
   const report = await readBaselineReport(baselinePath);
   cli.log(`Baseline: ${baselinePath}`);
-  if (report.model && report.model !== model) {
-    cli.log(`  note: the baseline was run with ${report.model}, this run uses ${model}.`);
+  const note = baselineModelNote(report, model, reasoningEffort);
+  if (note) {
+    cli.log(note);
   }
   return { path: baselinePath, report };
+}
+
+/**
+ * The console note when a baseline ran another model or reasoning effort
+ * than this run (a report from before REASONING_EFFORT sent none); null when
+ * both match.
+ */
+export function baselineModelNote(report, model, reasoningEffort = null) {
+  const baselineEffort = report?.provenance?.product?.reasoningEffort ?? null;
+  if ((!report?.model || report.model === model) && baselineEffort === (reasoningEffort ?? null)) {
+    return null;
+  }
+  return (
+    `  note: the baseline was run with ${modelLabel(report?.model || 'an unrecorded model', baselineEffort)}, this run uses ${modelLabel(model, reasoningEffort)}: ` +
+    'the comparison measures the model change too.'
+  );
 }
 
 function finish(result, options, cli) {
@@ -991,7 +1024,7 @@ async function checkGateBaseline(options, cli) {
   if (!options.gate || options.compare || options.rescore) {
     return;
   }
-  const candidate = defaultBaselinePath(options.model);
+  const candidate = defaultBaselinePath(options.model, options.reasoningEffort);
   if (!options.noBaseline && (await fileExists(candidate))) {
     return;
   }
@@ -1116,7 +1149,8 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
   const completionSettings = completionSettingsOf(modelConfig);
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
-  const runPaths = createBenchmarkRunPaths({ datasetName: selection.name, model, outputDir: options.outputDir, traceDir: options.traceDir });
+  // generated/runs/<timestamp>/<suite>/<model>[.<effort>]/
+  const runPaths = createBenchmarkRunPaths({ datasetName: selection.name, model: modelFileLabel(model, reasoningEffort), outputDir: options.outputDir, traceDir: options.traceDir });
   const reportPath = options.resultsFile || runPaths.reportPath;
   const tracePath = options.traceFile || runPaths.tracePath;
   const runner = {
@@ -1152,7 +1186,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
   });
   const suite = describeSuite(selection, { repoRelative });
   // Read the baseline before spending anything: a broken file fails fast.
-  const baseline = await loadBaseline(options, model, cli);
+  const baseline = await loadBaseline(options, model, cli, reasoningEffort);
   const trace = await createTraceLogger({
     enabled: true,
     logToStdout: options.traceToStdout,
@@ -1293,7 +1327,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
 async function runRescore({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification }) {
   let sourcePath = options.rescore;
   if (!sourcePath) {
-    const candidate = defaultBaselinePath(options.model);
+    const candidate = defaultBaselinePath(options.model, options.reasoningEffort);
     if (!(await fileExists(candidate))) {
       if (options.gate) {
         throw new HarnessError(`--offline --gate needs a baseline to rescore, and there is none at ${repoRelative(candidate)}.`, { code: 'NO_BASELINE' });
@@ -1438,7 +1472,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
   );
   // Today's suite (with the same filters): what the gate must have checked.
   comparison.suiteCoverage = describeSuiteCoverage(describeFilters(filters) ? filterSuiteEntries(selection.entries, filters) : selection.entries, comparison);
-  const runPaths = createBenchmarkRunPaths({ datasetName: `${suite.name}-rescore`, model, outputDir: options.outputDir });
+  const runPaths = createBenchmarkRunPaths({ datasetName: `${suite.name}-rescore`, model: modelFileLabel(model, recordedModelConfig.reasoningEffort), outputDir: options.outputDir });
   const reportPath = options.resultsFile || runPaths.reportPath;
   const report = buildReport({
     mode: 'rescore',
