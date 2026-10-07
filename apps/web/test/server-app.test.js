@@ -259,6 +259,35 @@ test('the hints version from the web config reaches the question runner (never p
   assert.equal(calls[0].hintsVersion, 1);
 });
 
+test('the model settings from the web config reach the question runner (never process.env)', async () => {
+  const { factory } = createRuntimeFactory();
+  const { runQuestion, calls } = recordingRunner();
+  const saved = process.env.REASONING_EFFORT;
+  process.env.REASONING_EFFORT = 'high';
+  try {
+    await withApp(
+      { config: testConfig({ MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'low', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' }), runtimeFactory: factory, runQuestion },
+      async (app) => {
+        const response = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+        assert.equal(response.status, 200);
+        const health = await app.request({ method: 'GET', path: '/api/health' });
+        assert.equal(health.json.model, 'gpt-6-luna');
+        assert.equal(health.json.reasoningEffort, 'low');
+      }
+    );
+  } finally {
+    if (saved === undefined) {
+      delete process.env.REASONING_EFFORT;
+    } else {
+      process.env.REASONING_EFFORT = saved;
+    }
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].reasoningEffort, 'low');
+  assert.equal(calls[0].completionSettings.isOpenRouter, true);
+  assert.equal(calls[0].completionSettings.requireParameters, true);
+});
+
 test('responses carry the allow-list and retrieval\'s ranking separately (JSON and the SSE sql frame)', async () => {
   const { factory } = createRuntimeFactory();
   const all = ['Customer', 'Product', 'SalesDocument'];

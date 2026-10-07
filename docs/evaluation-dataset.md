@@ -1261,7 +1261,10 @@ npm run eval -- --help                              # every flag
    run too. A failure stops the run with exit 2 before any LLM call;
    `--skip-verify` runs anyway, `--skip-controls` verifies the gold only.
 4. **The run** (needs `OPENAI_API_KEY`; `OPENAI_BASE_URL` for an
-   OpenAI-compatible endpoint; `MODEL_NAME` or `--model`). Every selected case
+   OpenAI-compatible endpoint; `MODEL_NAME` or `--model`, and for a reasoning
+   model `REASONING_EFFORT` or `--reasoning-effort`, checked per model family
+   before anything starts; the header line names both with their source and
+   the endpoint host, see "Models" in the root README). Every selected case
    goes through the product loop (`evaluateQuestion` -> `runOptimizedQuestion`)
    on `--concurrency` workers (default 4), each repetition under a deadline
    (`--case-timeout-ms`, default 120000) that covers the whole repetition:
@@ -1423,9 +1426,12 @@ rule).
   hashes `metadata/semantic-layer.json` and its overlay
   `metadata/semantic-layer.hints-v2.json` together, and the overlay is named),
   the schema scope (requested and effective, the full-schema token estimate,
-  widen-on-demand), the hints version (`product.hintsVersion`), schema,
-  fixture, dataset and controls hashes, model, the LLM endpoint host (never
-  keys), Node and every runner flag. The comparison table shows both reports'
+  widen-on-demand), the hints version (`product.hintsVersion`), the model
+  settings (`product.model`, `product.modelSource`: `--model`, `MODEL_NAME`
+  or `default`, `recorded` in a rescore; `product.reasoningEffort` and its
+  source; `product.requestOptions`, the optimized request's options as sent
+  without the response format), schema, fixture, dataset and controls hashes,
+  model, the LLM endpoint host (never keys), Node and every runner flag. The comparison table shows both reports'
   schema scopes and hints versions (a report from before a setting reads "not
   recorded (before SCHEMA_SCOPE: retrieved, no widening)" or "not recorded
   (before HINTS_VERSION: 1)"), and so does the console when they differ.

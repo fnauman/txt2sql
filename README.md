@@ -175,7 +175,7 @@ Common variables:
 - `DB_HOST`, `DB_PORT`, `DB_SOCKET`
 - `DB_USER` (query user, default `demo_readonly`)
 - `DB_READONLY_USER` / `DB_READONLY_PASSWORD` (Docker Compose only: the query user the init script creates; they default to `demo_readonly` / `DB_PASSWORD`)
-- `MODEL_NAME`, `OPENAI_BASE_URL`
+- `MODEL_NAME` (default `gpt-4o-mini`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
@@ -506,6 +506,41 @@ Default local URLs (`WEB_FRONTEND_PORT` and `WEB_API_PORT` change them; `web:dev
 - API: `http://127.0.0.1:8787`
 
 The API server (`apps/web/src/server/main.js`) loads the env file first, then validates its settings: an invalid `WEB_*` value stops startup with one error listing every problem, so values set only in `.env` (such as `WEB_API_TOKEN`) take effect. It loads the repository root `.env` by default unless `--dotenv`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set; pass the flag through npm as `npm run web:start -- --dotenv <path>` (same for `web:dev`), and relative paths resolve against the directory you ran npm from. It binds to `127.0.0.1` by default; on a loopback bind, requests whose `Host` header is not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403, and API requests from an `Origin` outside `WEB_ALLOWED_ORIGINS` get 403. Set `WEB_API_HOST=0.0.0.0` only for trusted networks, together with `WEB_API_TOKEN`. SIGTERM/SIGINT drain in-flight requests for up to `WEB_SHUTDOWN_TIMEOUT_MS`. See `apps/web/README.md` for every setting, the admin schema-refresh endpoint and the health checks.
+
+## Models
+
+The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-4o-mini`
+(`DEFAULT_MODEL` in `src/model-config.js`). A reasoning model also takes
+`REASONING_EFFORT` (or `--reasoning-effort`). Every entry point prints both with
+where they came from: the eval header (`model gpt-6-luna (MODEL_NAME from
+/home/you/.env); reasoning effort low (--reasoning-effort); endpoint
+api.openai.com`), the web server's `[config]` startup line, and the CLIs'
+`Model:` line; `--model` that overrides a different `MODEL_NAME` prints a note.
+Reports record them in `provenance.product` (`model`, `modelSource`,
+`reasoningEffort`, `reasoningEffortSource` and the `requestOptions` sent).
+
+Each model family gets the request it accepts (`src/model-config.js`; the
+capability map is keyed by the model id without a vendor prefix, so
+`openai/gpt-6-luna` is `gpt-6-luna`):
+
+| Family | Reasoning | `REASONING_EFFORT` values | Request |
+|---|---|---|---|
+| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the committed baseline's request, byte for byte |
+| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium` (provider default), `high`, `xhigh`, `max` | see below |
+| `gpt-5*` | yes | `none`, `low`, `medium`, `high` | see below |
+| o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | see below |
+| anything else | unknown | unset, or `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | unset: the `gpt-4o*` request |
+
+With reasoning on (a reasoning model at any effort but `none`) the request
+drops `temperature` / `top_p`, sends `reasoning_effort` when one is set (unset:
+none is sent and the provider's default applies) and raises
+`max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
+because reasoning tokens count against that limit and 3200 would truncate. At
+effort `none` the request keeps `temperature: 0` and the 1200 / 3200 limits,
+plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
+does not list, stops every entry point before anything starts, with the
+allowed values in the message. (An effort set in an env file can be cleared
+for one run with an empty `REASONING_EFFORT=` in the shell.)
 
 ## LLM Cost Tracking
 

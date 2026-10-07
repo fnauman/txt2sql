@@ -119,6 +119,7 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     schemaFullEstimatedTokens: provenance.product.schemaScope.fullSchemaEstimatedTokens,
     schemaWidenOnDemand: true,
     hintsVersion: 2,
+    reasoningEffort: null,
   });
 });
 

@@ -48,6 +48,10 @@ export function createDefaultRuntimeFactory(config) {
       clientOptions: { timeoutMs: config.openAi.timeoutMs, maxRetries: config.openAi.maxRetries },
       schemaScope: config.schemaScope,
       hintsVersion: config.hintsVersion ?? undefined,
+      // MODEL_NAME, REASONING_EFFORT & co. as the config read them.
+      model: config.model,
+      reasoningEffort: config.reasoningEffort ?? null,
+      completionSettings: config.completionSettings ?? undefined,
       trace: createBufferedTraceLogger({ enabled: false, pipeline: 'web-runtime' }),
     });
 }
@@ -531,6 +535,9 @@ export function createApp({
         connection: runtime.connection,
         schema: runtime.schema,
         model: runtime.model,
+        // From the web config (REASONING_EFFORT & co.), never process.env.
+        reasoningEffort: config.reasoningEffort ?? null,
+        completionSettings: config.completionSettings ?? undefined,
         question,
         trace,
         includeInsights,
@@ -618,6 +625,7 @@ export function createApp({
       openAiConfigured: config.openAi.configured,
       dbConfigured: config.database.configured,
       model: config.model,
+      reasoningEffort: config.reasoningEffort ?? null,
       authRequired: config.authEnabled,
       debugAllowed: config.allowDebug,
       // The result cache and client cross-filter only engage for the demo

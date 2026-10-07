@@ -246,3 +246,95 @@ export function buildCompletionOptions(base, settings = {}) {
   }
   return options;
 }
+
+function sourceLabel(source, file, name) {
+  return file && source === name ? `${source} from ${file}` : source;
+}
+
+/**
+ * The whole model configuration of a run from an env object and the eval's
+ * flags ({ model: --model, reasoningEffort: --reasoning-effort }; null or
+ * undefined when absent):
+ * { model, modelSource ('--model' | 'MODEL_NAME' | 'default'),
+ *   reasoningEffort (null when unset), reasoningEffortSource
+ *   ('--reasoning-effort' | 'REASONING_EFFORT' | 'default'),
+ *   modelSourceFile / reasoningEffortSourceFile (the env file a variable came
+ *   from, when `envFile` = { path, vars } says so; else null),
+ *   baseUrlHost, isOpenRouter, requireParameters, maxCompletionTokens,
+ *   capability, notices (a flag that overrides a different env value) }.
+ * Throws INVALID_CONFIG on an invalid effort or endpoint setting.
+ */
+export function resolveModelConfig({ env = process.env, flags = {}, envFile = null } = {}) {
+  const { model, source: modelSource } = resolveModelName(env, { flag: flags.model });
+  const flagEffort = nonBlank(flags.reasoningEffort);
+  const envEffort = nonBlank(env.REASONING_EFFORT);
+  const reasoningEffortSource = flagEffort ? '--reasoning-effort' : envEffort ? 'REASONING_EFFORT' : 'default';
+  const reasoningEffort = normalizeReasoningEffort(model, flagEffort ?? envEffort, {
+    source: reasoningEffortSource === 'default' ? 'REASONING_EFFORT' : reasoningEffortSource,
+  });
+  const fromFile = (name) => (envFile?.path && (envFile.vars || []).includes(name) ? envFile.path : null);
+  const notices = [];
+  const envModel = nonBlank(env.MODEL_NAME);
+  if (modelSource === '--model' && envModel && envModel !== model) {
+    notices.push(`--model ${model} overrides MODEL_NAME=${envModel}${fromFile('MODEL_NAME') ? ` (from ${fromFile('MODEL_NAME')})` : ''}.`);
+  }
+  if (reasoningEffortSource === '--reasoning-effort' && envEffort && envEffort.toLowerCase() !== reasoningEffort) {
+    notices.push(
+      `--reasoning-effort ${reasoningEffort} overrides REASONING_EFFORT=${envEffort}${fromFile('REASONING_EFFORT') ? ` (from ${fromFile('REASONING_EFFORT')})` : ''}.`
+    );
+  }
+  return {
+    model,
+    modelSource,
+    modelSourceFile: modelSource === 'MODEL_NAME' ? fromFile('MODEL_NAME') : null,
+    reasoningEffort,
+    reasoningEffortSource,
+    reasoningEffortSourceFile: reasoningEffortSource === 'REASONING_EFFORT' ? fromFile('REASONING_EFFORT') : null,
+    ...resolveCompletionSettings(env),
+    capability: modelCapabilities(model),
+    notices,
+  };
+}
+
+/** The endpoint-level settings of a model config (what runOptimizedQuestion takes as completionSettings). */
+export function completionSettingsOf(config) {
+  return {
+    baseUrlHost: config.baseUrlHost ?? null,
+    isOpenRouter: Boolean(config.isOpenRouter),
+    requireParameters: config.requireParameters ?? true,
+    maxCompletionTokens: config.maxCompletionTokens ?? DEFAULT_REASONING_MAX_COMPLETION_TOKENS,
+  };
+}
+
+/**
+ * The effort as logs show it: the effort, else `provider default` for a
+ * reasoning model (no reasoning_effort is sent) or `unset`.
+ */
+export function describeReasoningEffort(model, reasoningEffort) {
+  if (reasoningEffort) {
+    return reasoningEffort;
+  }
+  return modelCapabilities(model).reasoning === true ? 'provider default' : 'unset';
+}
+
+/**
+ * One line for a run header: "model gpt-6-luna (MODEL_NAME from /x/.env);
+ * reasoning effort low (--reasoning-effort); endpoint openrouter.ai
+ * (OpenRouter, require_parameters on)".
+ */
+export function describeModelConfig(config) {
+  const endpoint = config.isOpenRouter
+    ? `${config.baseUrlHost} (OpenRouter, require_parameters ${config.requireParameters ? 'on' : 'off'})`
+    : `${config.baseUrlHost ?? 'unparseable OPENAI_BASE_URL'}`;
+  return (
+    `model ${config.model} (${sourceLabel(config.modelSource, config.modelSourceFile, 'MODEL_NAME')}); ` +
+    `reasoning effort ${describeReasoningEffort(config.model, config.reasoningEffort)} ` +
+    `(${sourceLabel(config.reasoningEffortSource, config.reasoningEffortSourceFile, 'REASONING_EFFORT')}); ` +
+    `endpoint ${endpoint}`
+  );
+}
+
+/** "gpt-6-luna" or, with an effort, "gpt-6-luna (reasoning effort low)": a short label for reports. */
+export function modelLabel(model, reasoningEffort = null) {
+  return reasoningEffort ? `${model} (reasoning effort ${reasoningEffort})` : String(model);
+}

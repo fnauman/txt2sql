@@ -18,10 +18,16 @@
 // - product: the product configuration that shapes the prompt and the
 //   validator: the schema scope (requested and effective, the full-schema
 //   token estimate and budget, widen-on-demand) and the hints version
-//   (HINTS_VERSION). Reports from before SCHEMA_SCOPE existed have no
-//   `product` block; they ran the retrieved scope without widening. Reports
-//   from before HINTS_VERSION existed have no `product.hintsVersion`; they ran
-//   hints version 1.
+//   (HINTS_VERSION); and the model settings: product.model, modelSource
+//   (--model, MODEL_NAME or default; `recorded` in a rescore, which reuses
+//   the recording's), reasoningEffort (null: none set), reasoningEffortSource
+//   and requestOptions (the optimized request's options as sent, without the
+//   response_format that the prompt version already covers). Reports from
+//   before SCHEMA_SCOPE existed have no `product` block; they ran the
+//   retrieved scope without widening. Reports from before HINTS_VERSION
+//   existed have no `product.hintsVersion`; they ran hints version 1. Reports
+//   from before REASONING_EFFORT have no `product.reasoningEffort`; they sent
+//   none.
 // Paths are stored relative to the repository root.
 
 import { execFile } from 'node:child_process';
@@ -33,6 +39,7 @@ import { promisify } from 'node:util';
 
 import { businessRulesFor, FEW_SHOT_EXAMPLES } from '../constants.js';
 import { normalizeHintsVersion } from '../hints-version.js';
+import { buildCompletionOptions } from '../model-config.js';
 import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffectiveSchemaScope } from '../pipeline.js';
 
 const execFileAsync = promisify(execFile);
@@ -141,13 +148,43 @@ export function shortHash(hash, length = 12) {
 }
 
 /**
+ * The model part of the product block for `modelConfig` ({ model,
+ * modelSource, reasoningEffort, reasoningEffortSource, and either
+ * completionSettings, from which the request options are built, or the
+ * recorded requestOptions }); `model` alone when there is no modelConfig.
+ */
+export function describeModelProduct(modelConfig = null, model = null) {
+  const config = modelConfig || {};
+  const resolvedModel = config.model ?? model ?? null;
+  const reasoningEffort = config.reasoningEffort ?? null;
+  let requestOptions = config.requestOptions ?? null;
+  if (requestOptions === null && config.completionSettings && resolvedModel) {
+    const options = buildCompletionOptions(OPTIMIZED_MODEL_REQUEST_OPTIONS, { ...config.completionSettings, model: resolvedModel, reasoningEffort });
+    requestOptions = Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'response_format'));
+  }
+  return {
+    model: resolvedModel,
+    modelSource: config.modelSource ?? null,
+    reasoningEffort,
+    reasoningEffortSource: config.reasoningEffortSource ?? null,
+    requestOptions,
+  };
+}
+
+/**
  * The product configuration block: { schemaScope: { requested, effective,
  * fullSchemaEstimatedTokens, fullSchemaMaxTokens, widenOnDemand,
- * inScopeTableCount }, hintsVersion } for `schemaScope` (a scope name or
- * config) and `hintsVersion` (1 or 2; default 2).
+ * inScopeTableCount }, hintsVersion, model, modelSource, reasoningEffort,
+ * reasoningEffortSource, requestOptions } for `schemaScope` (a scope name or
+ * config), `hintsVersion` (1 or 2; default 2) and `modelConfig` (see
+ * describeModelProduct).
  */
-export function describeProductConfig(schema, schemaScope = undefined, hintsVersion = undefined) {
-  return { schemaScope: resolveEffectiveSchemaScope(schema, schemaScope), hintsVersion: normalizeHintsVersion(hintsVersion) };
+export function describeProductConfig(schema, schemaScope = undefined, hintsVersion = undefined, modelConfig = null, model = null) {
+  return {
+    schemaScope: resolveEffectiveSchemaScope(schema, schemaScope),
+    hintsVersion: normalizeHintsVersion(hintsVersion),
+    ...describeModelProduct(modelConfig, model),
+  };
 }
 
 /**
@@ -155,6 +192,7 @@ export function describeProductConfig(schema, schemaScope = undefined, hintsVers
  * - fixtures: [{ name, database, status, contentHash, expectedContentHash }]
  * - datasets: [{ name, path }] (hashed here); controlsFiles: [paths]
  * - runner: the run's options (recorded verbatim)
+ * - modelConfig: the model settings (see describeModelProduct)
  */
 export async function collectProvenance({
   schema,
@@ -163,6 +201,7 @@ export async function collectProvenance({
   datasets = [],
   controlsFiles = [],
   model = null,
+  modelConfig = null,
   env = process.env,
   runner = {},
   repoRoot = REPO_ROOT,
@@ -199,7 +238,7 @@ export async function collectProvenance({
   return {
     git,
     promptVersion: computePromptVersion(schema, { schemaScope, hintsVersion }),
-    product: describeProductConfig(schema, schemaScope, hintsVersion),
+    product: describeProductConfig(schema, schemaScope, hintsVersion, modelConfig, model),
     semanticLayerVersion,
     semanticLayerOverlay: overlay,
     schemaVersion: computeSchemaVersion(schema),
@@ -234,5 +273,6 @@ export function traceMetadataFromProvenance(provenance) {
     schemaFullEstimatedTokens: provenance?.product?.schemaScope?.fullSchemaEstimatedTokens ?? null,
     schemaWidenOnDemand: provenance?.product?.schemaScope?.widenOnDemand ?? null,
     hintsVersion: provenance?.product?.hintsVersion ?? null,
+    reasoningEffort: provenance?.product?.reasoningEffort ?? null,
   };
 }
