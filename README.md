@@ -180,7 +180,7 @@ Common variables:
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
 - `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved` on its own reproduces the product loop of the previous (retrieved-scope) baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baseline ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
-- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions of the committed baseline byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
+- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions from before hints v2 (the version-1 baselines') byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -360,8 +360,9 @@ accuracy**: the mean over cases of each case's pass rate across repetitions,
 with a 95% confidence interval from a case bootstrap (over the dev cases
 while the holdout is hidden: the whole-suite figure is then a point estimate,
 see [Evaluation](#evaluation)). The case is the unit
-because repetitions of one case are strongly correlated (failures at
-temperature 0 are systematic), so pooling them as independent trials overstates
+because repetitions of one case are strongly correlated (most failures are
+systematic: nearly all at temperature 0, and most for the default reasoning
+model too, whose repetitions vary more), so pooling them as independent trials overstates
 confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
 still written for older consumers, labelled as such. A repeated run is a
 measurement and does not fail the process on run-to-run variance.
@@ -434,37 +435,51 @@ contains:
 - `report.json` (everything, every repetition) and `trace.jsonl`; both cover
   every case, holdout included, so reading them reveals the holdout.
 
-**Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
-whole 404-case suite, 3 repetitions, full-schema prompting and hints v2 — the
-defaults `SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-06):
+**Current baseline** (`eval/baselines/gpt-6-luna.low.json`: gpt-6-luna at
+reasoning effort low, the default model, on the whole 404-case suite, 3
+repetitions, full-schema prompting and hints v2 — the defaults
+`SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-07, the low arm
+of [Experiment 3](docs/experiments/03-models.md)):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, every split) | **73.6%** |
-| By split | dev **88.3%** (245 cases, 95% CI 84.4%–92.0%) · fresh holdout **49.2%** (147 cases) |
-| Failures by cause (repetitions, dev cases) | model 86 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
-| Guardrails over every dev attempt | precision 100%, recall 30.4%, false-rejection rate 0% |
+| Strict accuracy (392 answer cases, every split) | **89.4%** |
+| By split | dev **94.0%** (245 cases, 95% CI 91.2%–96.6%) · fresh holdout **81.6%** (147 cases) |
+| Failures by cause (repetitions, dev cases) | model 44, every one a wrong result · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
+| Guardrails over every dev attempt | no guardrail rejection: false-rejection rate 0%, recall 0.0% (none of the 44 wrong queries was caught: they are valid SQL with the wrong meaning) |
 | Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
-| Cost and latency | $0.63 for the whole run · dev cases: $0.00060 per correct answer, p50 2.4 s, p95 4.4 s, 83.5% of prompt tokens cached |
+| Cost and latency | $0.3276 for the whole run · dev cases: $0.00024 per question, $0.00027 per correct answer, p50 3.04 s, p95 5.73 s, retry rate 0.3% |
 
-How it got here, each step a paired experiment against the previous baseline:
+The reference it replaced, gpt-4o-mini on the same prompt and suite
+(`eval/baselines/gpt-4o-mini.json`, kept for comparisons), scored 73.6%:
+dev 88.3%, fresh holdout 49.2%, $0.00060 per correct answer, p95 4.40 s. How
+it got here, each step a paired experiment against the previous baseline:
 [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting:
-68.8% → 72.8% on the earlier 255-case suite) and
+68.8% → 72.8% on the earlier 255-case suite),
 [Experiment 2](docs/experiments/02-hints-v2.md) (hints v2 — unambiguous
 business rules, safer date handling, a cleaned semantic layer: 62.2% → 73.6%
 on the 404-case suite, McNemar p < 0.001 on the paired dev cases, and on the
 blind holdout alone 41.3% → 49.2%, p = 0.035 in the live run's paired
-holdout test). The fresh holdout is 77 new intents written blind
-and audited by two independent annotators; reports show it in aggregate only.
-The dev number is in-sample (experiments are designed from dev failures); the
-holdout number is the honest estimate for new kinds of questions — shares and
-ratios, overdue and ageing balances, running totals, period-over-period
-change — and it is where the remaining work is. With perfect SQL the suite's
-ceiling is 99.0% (4 holdout cases are known validator rejections); every dev
-failure of this baseline is a model error. (The interval, failure causes,
-guardrail, behaviour and per-question cost figures are what `npm run eval --
---offline` prints by default: they cover the dev cases, the holdout only as
-its split accuracy.) These are measurements of the product, not targets.
+holdout test) and [Experiment 3](docs/experiments/03-models.md) (the model:
+gpt-4o-mini → gpt-6-luna at reasoning effort low with the same prompt, 73.6%
+→ 89.4%; 74 improvements against 8 regressions over the 392 paired answer
+cases, McNemar p < 0.001; medium effort scored 89.6%, not significantly
+better, at a higher cost). Experiment 3's out-of-sample evidence is the blind
+holdout: 49.2% → 81.6%, 56 improvements against 5 regressions, p < 0.001 in
+its paired holdout test, where the paired dev cases moved 88.3% → 94.0%. The
+fresh holdout is 77 new intents written blind and audited by two independent
+annotators; reports show it in aggregate only. The dev number is in-sample
+(experiments are designed from dev failures); the holdout number is the
+honest estimate for new kinds of questions — shares and ratios, overdue and
+ageing balances, running totals, period-over-period change — and the
+12-point gap between them is where the remaining work is. With perfect SQL
+the suite's ceiling is 99.0% (4 holdout cases are known validator
+rejections); every dev failure of this baseline is a model error. A
+reasoning model is not deterministic (see [Models](#models)), so these are
+averages over 3 repetitions. (The interval, failure causes, guardrail,
+behaviour and per-question cost figures are what `npm run eval -- --offline`
+prints by default: they cover the dev cases, the holdout only as its split
+accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
 when committed, `/` in a model id written `__`; that is the whole rule for a
@@ -483,7 +498,8 @@ provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
 `--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole 404-case suite costs
-about 21 cents on gpt-4o-mini (the committed baseline: $0.63 for 3 repetitions). The dataset composition, the generator, how to add a
+about 11 cents on gpt-6-luna at low effort (the committed default baseline: $0.33 for 3 repetitions;
+gpt-4o-mini cost about twice as much). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 
