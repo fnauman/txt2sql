@@ -348,9 +348,11 @@ function devAccuracyText(accuracy) {
 }
 
 // "N of M answer case(s) had no counted repetition" (null when none had).
-// While the holdout is hidden it counts the listed (dev) cases: which holdout
-// answer cases had no counted repetition is a holdout outcome the split
-// accuracy does not show.
+// While the holdout is hidden it counts the listed (dev) cases, so it agrees
+// with the dev figures beside it (the attribution, the intervals). It hides
+// no holdout count: the holdout split row counts the holdout cases with a
+// counted repetition, so the holdout's case count, less its abstain/clarify
+// cases and that row's count, is its number left out.
 function excludedCasesText(shown) {
   const { selected, excluded } = shown.cases || {};
   const behavior = shown.cases?.behavior || 0;

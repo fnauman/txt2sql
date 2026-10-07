@@ -509,7 +509,9 @@ test('with the holdout hidden, the headline counts the dev answer cases left out
   // Fifth review: the "N of M answer case(s) had no counted repetition" line
   // counted every case while the holdout was hidden, so a holdout answer case
   // with no counted repetition changed it although the holdout's accuracy by
-  // split stayed 50.0%. dev_b1 has no counted repetition in every run.
+  // split stayed 50.0%. dev_b1 has no counted repetition in every run. (The
+  // line counts dev cases so it agrees with the dev figures beside it; the
+  // holdout split row's case count still gives the holdout's number away.)
   const dev = { ...DEV_REPETITIONS, dev_b1: [skipped, skipped, skipped] };
   const variants = {
     counted: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
