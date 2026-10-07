@@ -78,8 +78,8 @@ const MAX_COMPLETION_TOKENS_LIMIT = 1_000_000;
 // every entry point refuses it before anything starts (resolveModelConfig,
 // and again wherever a request is built). The -pro models (gpt-5-pro,
 // gpt-5.2-pro, gpt-5.4-pro, ...; o1-pro, o3-pro) are served only by the
-// Responses API (the gpt-5*-pro ones also take no structured outputs, and
-// only medium / high / xhigh), while every request here is a Chat
+// Responses API (OpenAI's model pages list Chat Completions as not
+// supported, verified on 2026-10-07), while every request here is a Chat
 // Completions request with a strict json_schema response format.
 const CHAT_COMPLETIONS_ONLY = 'this pipeline sends Chat Completions requests with a strict json_schema response format';
 
@@ -94,7 +94,7 @@ export const MODEL_FAMILIES = Object.freeze([
     reasoning: true,
     efforts: Object.freeze([]),
     defaultEffort: null,
-    unsupported: `the gpt-5*-pro models are served only by the Responses API and do not support structured outputs; ${CHAT_COMPLETIONS_ONLY}`,
+    unsupported: `the gpt-5*-pro models are served only by the Responses API; ${CHAT_COMPLETIONS_ONLY}`,
   }),
   Object.freeze({
     family: 'gpt-5.2+',

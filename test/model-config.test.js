@@ -162,8 +162,7 @@ test('the capability map is keyed by the model id without a vendor prefix or var
 
 test('the -pro models (Responses API only) are refused before anything starts, on every entry point', () => {
   const RESPONSES_ONLY = /served only by the Responses API/;
-  // gpt-5*-pro: Responses API only and no structured outputs (medium / high /
-  // xhigh only, too); o-series -pro (o1-pro, o3-pro): Responses API only.
+  // gpt-5*-pro and the o-series -pro (o1-pro, o3-pro): Responses API only.
   for (const [model, family] of [
     ['gpt-5.4-pro', 'gpt-5-pro'],
     ['gpt-5.4-pro-2026-03-05', 'gpt-5-pro'],
@@ -176,7 +175,8 @@ test('the -pro models (Responses API only) are refused before anything starts, o
     assert.equal(modelCapabilities(model).family, family, model);
     assert.match(unsupportedModelReason(model) || '', RESPONSES_ONLY, model);
   }
-  assert.match(unsupportedModelReason('gpt-5.4-pro'), /do not support structured outputs/);
+  // The reason is the Responses API alone: OpenAI lists structured outputs for gpt-5-pro.
+  assert.doesNotMatch(unsupportedModelReason('gpt-5-pro'), /structured outputs/);
   // Their siblings stay what they were.
   for (const [model, family] of [
     ['gpt-5.4', 'gpt-5.2+'],
@@ -196,7 +196,7 @@ test('the -pro models (Responses API only) are refused before anything starts, o
   // The shared resolver (CLIs, eval, web), with where the model came from.
   refused(
     () => resolveModelConfig({ env: { MODEL_NAME: 'gpt-5.4-pro' } }),
-    /^MODEL_NAME "gpt-5\.4-pro" is not supported: the gpt-5\*-pro models are served only by the Responses API and do not support structured outputs; this pipeline sends Chat Completions requests with a strict json_schema response format\. Pick another model\.$/
+    /^MODEL_NAME "gpt-5\.4-pro" is not supported: the gpt-5\*-pro models are served only by the Responses API; this pipeline sends Chat Completions requests with a strict json_schema response format\. Pick another model\.$/
   );
   refused(() => resolveModelConfig({ env: { MODEL_NAME: 'o3-pro' }, envFile: { path: '/home/you/.env', vars: ['MODEL_NAME'] } }), /^MODEL_NAME \(from \/home\/you\/\.env\) "o3-pro" is not supported: /);
   // Also with an effort the model would list: the model is refused first.
