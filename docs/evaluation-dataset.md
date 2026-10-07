@@ -206,6 +206,7 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   the holdout's flips). The
   headline's intervals, the majority-pass cases, the intent-clustered
   accuracy, the holdout split row's majority passes, the legacy pooled rate,
+  the count of answer cases left out of accuracy (no counted repetition),
   the count of cases a run stopped early did not finish, and the comparison
   (its paired table, accuracy change and interval, McNemar p, verdict and
   lists) are dev figures: two runs with the same holdout accuracy can differ

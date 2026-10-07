@@ -504,3 +504,48 @@ test('with the holdout hidden and only holdout cases paired, the verdict does no
   const unpaired = await suiteReport(HOLDOUT_VARIANTS.spread, { baseline: { ...baseline, results: [] } });
   assert.match(renderHeadline(unpaired, { revealHoldout: true }), /→ no case could be paired with the baseline/);
 });
+
+test('with the holdout hidden, the headline counts the dev answer cases left out of accuracy, never the holdout ones', async () => {
+  // Fifth review: the "N of M answer case(s) had no counted repetition" line
+  // counted every case while the holdout was hidden, so a holdout answer case
+  // with no counted repetition changed it although the holdout's accuracy by
+  // split stayed 50.0%. dev_b1 has no counted repetition in every run.
+  const dev = { ...DEV_REPETITIONS, dev_b1: [skipped, skipped, skipped] };
+  const variants = {
+    counted: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+    excluded: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [skipped, infraFailure, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+  };
+  const reports = {};
+  for (const [name, holdout] of Object.entries(variants)) {
+    reports[name] = await suiteReport(holdout, { dev });
+  }
+  assert.deepEqual(
+    Object.values(reports).map((report) => [report.stats.cases.excluded, report.stats.bySplit.find((entry) => entry.key === 'holdout').accuracy]),
+    [[1, 0.5], [2, 0.5]]
+  );
+  const line =
+    '\n1 of 3 dev answer case(s) had no counted repetition and are left out of accuracy (see Attribution; holdout cases are not counted here); ' +
+    'the 1 dev abstain/clarify case(s) are scored apart.\n';
+  for (const [name, report] of Object.entries(reports)) {
+    const markdown = renderReportMarkdown(report);
+    assert.ok(markdown.includes(line), name);
+    assert.doesNotMatch(markdown, /of 6 answer case|the 2 abstain/, name);
+  }
+  // --reveal-holdout counts every case, as before.
+  assert.match(
+    renderReportMarkdown(reports.excluded, { revealHoldout: true }),
+    /\n2 of 6 answer case\(s\) had no counted repetition and are left out of accuracy \(see Attribution\); the 2 abstain\/clarify case\(s\) are scored apart\.\n/
+  );
+  // No dev case left out: no line while the holdout is hidden, whatever the
+  // holdout's cases did.
+  const devCounted = await suiteReport(variants.excluded);
+  assert.doesNotMatch(renderReportMarkdown(devCounted), /had no counted repetition/);
+  assert.match(renderReportMarkdown(devCounted, { revealHoldout: true }), /\n1 of 6 answer case\(s\) had no counted repetition/);
+  // Without a dev behaviour case the line counts the selected dev cases.
+  const { dev_abstain: _devAbstain, ...devAnswers } = dev;
+  const answersOnly = await suiteReport(variants.excluded, { dev: devAnswers });
+  assert.match(
+    renderReportMarkdown(answersOnly),
+    /\n1 of 3 selected dev case\(s\) had no counted repetition and are left out of accuracy \(see Attribution; holdout cases are not counted here\)\.\n/
+  );
+});

@@ -155,21 +155,30 @@ function displayedSummaries(report, hidden = new Set()) {
       hidden: false,
       hiddenAnswerCases: 0,
       hiddenBehaviorCases: 0,
+      cases: report.stats?.cases,
     };
   }
   const hiddenRecords = results.filter((record) => hidden.has(record.id));
   const listedAnswers = listed.filter((record) => !isBehaviorRecord(record));
+  const accuracy = summarizeAccuracy(listedAnswers, statsOptionsOf(report));
   return {
     attribution: summarizeAttribution(listedAnswers),
     behavior: summarizeBehavior(listed),
     usage: summarizeRunUsage(listed),
-    accuracy: summarizeAccuracy(listedAnswers, statsOptionsOf(report)),
+    accuracy,
     // A report without the legacy block (a compact baseline) shows none.
     reliability: report.reliability ? legacySummary(listedAnswers.filter((record) => Array.isArray(record.repetitions))).reliability : null,
     records: listed,
     hidden: true,
     hiddenAnswerCases: hiddenRecords.filter((record) => !isBehaviorRecord(record)).length,
     hiddenBehaviorCases: hiddenRecords.filter(isBehaviorRecord).length,
+    // The listed cases as report.stats.cases counts every case (selected,
+    // excluded: answer cases with no counted repetition, behaviour cases).
+    cases: {
+      selected: listed.length,
+      excluded: listedAnswers.length - accuracy.cases.counted,
+      behavior: listed.length - listedAnswers.length,
+    },
   };
 }
 
@@ -295,6 +304,27 @@ function devAccuracyText(accuracy) {
   );
 }
 
+// "N of M answer case(s) had no counted repetition" (null when none had).
+// While the holdout is hidden it counts the listed (dev) cases: which holdout
+// answer cases had no counted repetition is a holdout outcome the split
+// accuracy does not show.
+function excludedCasesText(shown) {
+  const { selected, excluded } = shown.cases || {};
+  const behavior = shown.cases?.behavior || 0;
+  if (!(excluded > 0)) {
+    return null;
+  }
+  const dev = shown.hidden ? 'dev ' : '';
+  const scope = shown.hidden ? '(see Attribution; holdout cases are not counted here)' : '(see Attribution)';
+  // The denominator is the answer cases: abstain/clarify cases never have a
+  // counted repetition and are reported on their own, so counting them here
+  // would make "excluded of selected" disagree with the accuracy's n.
+  return behavior > 0
+    ? `${excluded} of ${selected - behavior} ${dev}answer case(s) had no counted repetition and are left out of accuracy ${scope}; ` +
+        `the ${behavior} ${dev}abstain/clarify case(s) are scored apart.`
+    : `${excluded} of ${selected} selected ${dev}case(s) had no counted repetition and are left out of accuracy ${scope}.`;
+}
+
 // "N case(s) did not finish" of a stopped run. While the holdout is hidden it
 // counts the listed (dev) cases: which holdout repetitions a stop cut off is
 // a holdout outcome the split accuracy does not show (a case cut off after
@@ -354,19 +384,10 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
     lines.push('');
     lines.push(`${behaviorText} Not in strict accuracy (see Behaviour cases).`);
   }
-  if (stats.cases.excluded > 0) {
+  const excludedText = excludedCasesText(shown);
+  if (excludedText) {
     lines.push('');
-    // The denominator is the answer cases: abstain/clarify cases never have a
-    // counted repetition and are reported on their own, so counting them here
-    // would make "excluded of selected" disagree with the accuracy's n.
-    const behaviorCases = stats.cases.behavior || 0;
-    const answerCases = stats.cases.selected - behaviorCases;
-    lines.push(
-      behaviorCases > 0
-        ? `${stats.cases.excluded} of ${answerCases} answer case(s) had no counted repetition and are left out of accuracy (see Attribution); ` +
-            `the ${behaviorCases} abstain/clarify case(s) are scored apart.`
-        : `${stats.cases.excluded} of ${stats.cases.selected} selected case(s) had no counted repetition and are left out of accuracy (see Attribution).`
-    );
+    lines.push(excludedText);
   }
   if (report.stopped) {
     lines.push('');
