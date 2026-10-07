@@ -244,6 +244,31 @@ test('with your own provider key (OpenRouter BYOK) the charge includes the upstr
   assert.deepEqual(run.skippedCaseIds, ['c']);
 });
 
+test('a reported charge (USD) replaces only a USD estimate: a price in another currency stays the cost', () => {
+  const previous = process.env.MODEL_PRICING_OVERRIDES;
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({ 'gpt-5.4-mini': { currency: 'EUR' } });
+  try {
+    const reported = calculateCost('openai/gpt-5.4-mini', reasoningUsage({ cost: 0.01 }));
+    // Was { currency: 'EUR', totalCost: 0.01 }: a USD charge labelled EUR.
+    assert.deepEqual([reported.currency, reported.totalCost, reported.providerCost], ['EUR', 0.0048588, 0.01]);
+    assert.equal('source' in reported, false);
+    assert.equal('estimatedCost' in reported, false);
+    const estimated = calculateCost('openai/gpt-5.4-mini', reasoningUsage());
+    const total = mergeCosts([reported, estimated]);
+    assert.deepEqual([total.currency, total.totalCost, total.providerCost], ['EUR', 0.0097176, 0.01]);
+    assert.equal('source' in total, false);
+    assert.match(formatUsageAndCost({ usage: reasoningUsage({ cost: 0.01 }), cost: reported, model: 'openai/gpt-5.4-mini' }), /^\$0\.004859 \(.*, gpt-5\.4-mini\)$/);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.MODEL_PRICING_OVERRIDES;
+    } else {
+      process.env.MODEL_PRICING_OVERRIDES = previous;
+    }
+  }
+  // A USD price (the listed row) is still replaced by the charge.
+  assert.deepEqual([calculateCost('openai/gpt-5.4-mini', reasoningUsage({ cost: 0.01 })).totalCost], [0.01]);
+});
+
 test('the product loop keeps each call\'s reasoning tokens and sums them over retries (result, trace)', async () => {
   const first = reasoningUsage();
   const second = reasoningUsage({ completion_tokens: 500, total_tokens: 2500, completion_tokens_details: { reasoning_tokens: 300 } });

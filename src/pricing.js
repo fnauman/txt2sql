@@ -43,6 +43,9 @@
 // is their sum. A BYOK usage without that upstream cost says nothing
 // complete about the charge: a priced model then keeps its local estimate as
 // the cost (as with no reported cost), and a model with no price has none.
+// A reported charge is in USD, so it replaces only a USD estimate: a price
+// row in another currency (a MODEL_PRICING_OVERRIDES currency) keeps its
+// estimate as the cost, with the charge beside it as providerCost (USD).
 const BASE_MODEL_PRICING = Object.freeze({
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
@@ -291,13 +294,14 @@ export function calculateCost(model, usage) {
   const outputCost = roundCurrency((completionTokens / 1_000_000) * pricing.outputPerMillion);
   const estimatedCost = roundCurrency(inputCost + outputCost);
 
-  if (providerCost !== null) {
+  const currency = pricing.currency || 'USD';
+  if (providerCost !== null && currency === 'USD') {
     // Priced here, but the provider said what it charged: that is the cost
     // (what totals and --budget-usd count); inputCost / outputCost stay the
     // local estimate's split, and estimatedCost its sum.
     return {
       model: pricing.model,
-      currency: pricing.currency || 'USD',
+      currency,
       source: 'provider',
       promptTokens,
       cachedPromptTokens,
@@ -313,9 +317,11 @@ export function calculateCost(model, usage) {
     };
   }
 
+  // The local estimate is the cost; a charge in USD next to an estimate in
+  // another currency stays beside it.
   return {
     model: pricing.model,
-    currency: pricing.currency || 'USD',
+    currency,
     promptTokens,
     cachedPromptTokens,
     uncachedPromptTokens,
@@ -325,6 +331,7 @@ export function calculateCost(model, usage) {
     inputCost,
     outputCost,
     totalCost: estimatedCost,
+    ...(providerCost !== null ? { providerCost: roundCurrency(providerCost) } : {}),
   };
 }
 
