@@ -212,7 +212,12 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   lists) are dev figures: two runs with the same holdout accuracy can differ
   in how its pass rates spread over cases and intents, in excluded, skipped
   and cancelled holdout repetitions, or in which holdout cases flipped, and
-  those figures would show it. The exit code can give a hidden holdout outcome away in edge
+  those figures would show it. A comparison recorded without its paired
+  cases cannot be recomputed over the dev cases: its own figures are shown
+  when none of its holdout cases is paired (each is listed as new, not in
+  the run, not counted or with a changed gold), and otherwise report.md and
+  the console say that the dev-only comparison cannot be reconstructed from
+  that recording and show no figure. The exit code can give a hidden holdout outcome away in edge
   cases: in the benchmark profile a run whose dev cases all pass exits 1
   when a holdout case failed, a holdout abstain / clarify case included
   (whose outcome report.md does not show; the reason does not itemize
