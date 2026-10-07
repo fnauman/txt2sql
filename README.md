@@ -534,6 +534,7 @@ capability map is keyed by the model id without a vendor prefix, so
 | `gpt-5.1*` | yes | `none`, `low`, `medium`, `high` | the provider default is `none`: the `gpt-4o*` request |
 | `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
 | o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
+| `gpt-5*-pro` (e.g. `gpt-5.4-pro`), o-series `-pro` (`o1-pro`, `o3-pro`) | not supported | none (the model is refused) | every entry point stops before anything starts: these models are served only by the Responses API (and the `gpt-5*-pro` ones take no structured outputs), while every request here is a Chat Completions request with a strict `json_schema` response format |
 | anything else (also the `gpt-5*-chat` models) | unknown | `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | the `gpt-4o*` request |
 
 With reasoning on (any effort but `none`, set or the family's default) the

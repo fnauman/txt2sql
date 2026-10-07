@@ -41,6 +41,13 @@ function headerLines(stdout) {
 }
 
 for (const script of ['scripts/basic.js', 'scripts/optimized.js']) {
+  test(`${script} refuses a Responses-API-only model before anything starts`, () => {
+    const result = runCli(script, { MODEL_NAME: 'gpt-5.4-pro', OPENROUTER_API_KEY: 'sk-or-test-not-a-key' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /pipeline failed: MODEL_NAME "gpt-5\.4-pro" is not supported: the gpt-5\*-pro models are served only by the Responses API/);
+    assert.doesNotMatch(result.stdout, /^Model: |offline test client/m, 'nothing was started');
+  });
+
   test(`${script} prints the model notices beside its header`, () => {
     const both = runCli(script, { OPENAI_API_KEY: 'sk-test-not-a-key', OPENROUTER_API_KEY: 'sk-or-test-not-a-key' });
     const [model, note] = headerLines(both.stdout);

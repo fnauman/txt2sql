@@ -389,9 +389,11 @@ test('a paid eval with --budget-usd refuses to start for a model without a price
     /^--budget-usd needs a price for model "anthropic\/claude-sonnet-4\.5" \(src\/pricing\.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion\); without it the budget cannot be enforced, so the run does not start\.$/
   );
   // Another tier that shares a priced prefix has no price of its own: refused.
-  for (const model of ['gpt-6-sol-pro', 'gpt-6-luna-mini', 'gpt-5.4-pro']) {
+  for (const model of ['gpt-6-sol-pro', 'gpt-6-luna-mini', 'gpt-5.4-nano-preview']) {
     assert.match(budgetPricingRefusal(parseEvalArgs(['--model', model, '--budget-usd', '1'], { env: {} })) || '', /^--budget-usd needs a price for model/, model);
   }
+  // gpt-5.4-pro never gets that far: the pipeline cannot call it at all.
+  assert.throws(() => parseEvalArgs(['--model', 'gpt-5.4-pro', '--budget-usd', '1'], { env: {} }), { code: 'INVALID_CONFIG', message: /^--model "gpt-5\.4-pro" is not supported/ });
   assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna-2026-10-01', '--budget-usd', '1'], { env: {} })), null);
 });
 

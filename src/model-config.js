@@ -15,7 +15,9 @@
 //   effort; gpt-6*, gpt-5* and the o-series are reasoning models. A model
 //   outside the map keeps the request every model got before this module
 //   existed, unless a reasoning effort is set (then it is treated as a
-//   reasoning model with the conservative effort list).
+//   reasoning model with the conservative effort list). The -pro models
+//   (gpt-5*-pro, o1-pro, o3-pro) are Responses-API-only: every entry point
+//   refuses them before anything starts (assertModelSupported).
 // - With no effort set, a family whose provider default reasons (gpt-6*,
 //   gpt-5 / -mini / -nano, the o-series: medium) runs at that default, sent
 //   and recorded explicitly, so a provider changing its default cannot change
@@ -71,10 +73,29 @@ const MAX_COMPLETION_TOKENS_LIMIT = 1_000_000;
 // add xhigh. The -chat models of gpt-5.x take no effort and stay outside the
 // map (the request they always had). A snapshot that differs needs its own
 // entry here.
+//
+// `unsupported` marks a family this pipeline cannot call at all, with why:
+// every entry point refuses it before anything starts (resolveModelConfig,
+// and again wherever a request is built). The -pro models (gpt-5-pro,
+// gpt-5.2-pro, gpt-5.4-pro, ...; o1-pro, o3-pro) are served only by the
+// Responses API (the gpt-5*-pro ones also take no structured outputs, and
+// only medium / high / xhigh), while every request here is a Chat
+// Completions request with a strict json_schema response format.
+const CHAT_COMPLETIONS_ONLY = 'this pipeline sends Chat Completions requests with a strict json_schema response format';
+
 export const MODEL_FAMILIES = Object.freeze([
   Object.freeze({ family: 'gpt-4o', label: 'gpt-4o*', pattern: /^gpt-4o(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
   Object.freeze({ family: 'gpt-4.1', label: 'gpt-4.1*', pattern: /^gpt-4\.1(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
   Object.freeze({ family: 'gpt-6', label: 'gpt-6*', pattern: /^gpt-6(?:[.-]|$)/, reasoning: true, efforts: REASONING_EFFORTS, defaultEffort: 'medium' }),
+  Object.freeze({
+    family: 'gpt-5-pro',
+    label: 'gpt-5*-pro',
+    pattern: /^gpt-5(?:\.\d+)?-pro(?:-|$)/,
+    reasoning: true,
+    efforts: Object.freeze([]),
+    defaultEffort: null,
+    unsupported: `the gpt-5*-pro models are served only by the Responses API and do not support structured outputs; ${CHAT_COMPLETIONS_ONLY}`,
+  }),
   Object.freeze({
     family: 'gpt-5.2+',
     label: 'gpt-5.2* and later',
@@ -98,6 +119,15 @@ export const MODEL_FAMILIES = Object.freeze([
     reasoning: true,
     efforts: Object.freeze(['low', 'medium', 'high']),
     defaultEffort: 'medium',
+  }),
+  Object.freeze({
+    family: 'o-series-pro',
+    label: 'o1-pro, o3-pro, ...',
+    pattern: /^o\d+-pro(?:-|$)/,
+    reasoning: true,
+    efforts: Object.freeze([]),
+    defaultEffort: null,
+    unsupported: `the o-series -pro models are served only by the Responses API; ${CHAT_COMPLETIONS_ONLY}`,
   }),
   Object.freeze({
     family: 'o-series',
@@ -162,6 +192,28 @@ export function modelCapabilities(model) {
 }
 
 /**
+ * Why this pipeline cannot call `model` at all (its family's `unsupported`
+ * reason: the -pro models, Responses API only), else null.
+ */
+export function unsupportedModelReason(model) {
+  const id = baseModelId(model);
+  return MODEL_FAMILIES.find((candidate) => candidate.pattern.test(id))?.unsupported ?? null;
+}
+
+/**
+ * Throws INVALID_CONFIG when this pipeline cannot call `model`
+ * (unsupportedModelReason). `source` names the setting in the message
+ * (MODEL_NAME, --model, model); `file`, the env file it came from.
+ */
+export function assertModelSupported(model, { source = 'model', file = null } = {}) {
+  const reason = unsupportedModelReason(model);
+  if (reason) {
+    const named = file ? `${source} (from ${file})` : source;
+    throw configError(`${named} "${model}" is not supported: ${reason}. Pick another model.`);
+  }
+}
+
+/**
  * The effort a run of `model` uses when none is set: its family's provider
  * default when that default reasons (medium for gpt-6*, gpt-5 / -mini /
  * -nano and the o-series), sent and recorded like a set one; null for a
@@ -190,6 +242,8 @@ export function normalizeReasoningEffort(model, effort, { source = 'REASONING_EF
   // An env file never overrides the shell, so an empty value there clears it.
   const unset = file ? `Unset ${source} in ${file} (or override it with an empty ${source}= in the shell)` : `Unset ${source}`;
   const value = raw.toLowerCase();
+  // A model the pipeline cannot call is refused as such, whatever the effort.
+  assertModelSupported(model);
   if (!REASONING_EFFORTS.includes(value)) {
     throw configError(`${named} must be one of ${REASONING_EFFORTS.join(', ')}; got "${raw}".`);
   }
@@ -313,6 +367,8 @@ export function buildCompletionOptions(base, settings = {}) {
     requireParameters = true,
     maxCompletionTokens = DEFAULT_REASONING_MAX_COMPLETION_TOKENS,
   } = settings;
+  // Never build a request for a model the pipeline cannot call.
+  assertModelSupported(model);
   const effort = normalizeReasoningEffort(model, reasoningEffort, { source: 'reasoningEffort' }) ?? defaultReasoningEffort(model);
   let options = base;
   if (reasoningEnabled(model, effort)) {
@@ -345,7 +401,8 @@ function sourceLabel(source, file, name) {
  *   baseUrlHost, isOpenRouter, requireParameters, maxCompletionTokens,
  *   capability, notices (a flag that overrides a different env value; an
  *   OPENAI_API_KEY that, set next to OPENROUTER_API_KEY, goes to OpenRouter) }.
- * Throws INVALID_CONFIG on an invalid effort or endpoint setting.
+ * Throws INVALID_CONFIG on a model the pipeline cannot call (the -pro
+ * models), an invalid effort or an invalid endpoint setting.
  */
 export function resolveModelConfig({ env = process.env, flags = {}, envFile = null } = {}) {
   const { model, source: modelSource } = resolveModelName(env, { flag: flags.model });
@@ -353,6 +410,12 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
   const envEffort = nonBlank(env.REASONING_EFFORT);
   const reasoningEffortSource = flagEffort ? '--reasoning-effort' : envEffort ? 'REASONING_EFFORT' : 'default';
   const fromFile = (name) => (envFile?.path && (envFile.vars || []).includes(name) ? envFile.path : null);
+  // A model the pipeline cannot call stops every entry point here, before
+  // anything is started (and before its effort is looked at).
+  assertModelSupported(model, {
+    source: modelSource === 'default' ? 'the default model' : modelSource,
+    file: modelSource === 'MODEL_NAME' ? fromFile('MODEL_NAME') : null,
+  });
   const reasoningEffort =
     normalizeReasoningEffort(model, flagEffort ?? envEffort, {
       source: reasoningEffortSource === 'default' ? 'REASONING_EFFORT' : reasoningEffortSource,

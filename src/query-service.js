@@ -20,7 +20,7 @@ import {
 import { normalizeHintsVersion, resolveHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
-import { defaultReasoningEffort, normalizeReasoningEffort, resolveCompletionSettings, resolveModelName } from './model-config.js';
+import { assertModelSupported, defaultReasoningEffort, normalizeReasoningEffort, resolveCompletionSettings, resolveModelName } from './model-config.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
 import { clearSemanticLayerCache } from './semantic-layer.js';
 import { createTimer, serializeError } from './trace.js';
@@ -303,6 +303,8 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
  */
 export function resolveRunModelSettings({ model = undefined, reasoningEffort = undefined, completionSettings = undefined } = {}, env = process.env) {
   const resolvedModel = model ?? resolveModelName(env).model;
+  const modelSource = model === undefined || model === null ? resolveModelName(env).source : 'model';
+  assertModelSupported(resolvedModel, { source: modelSource === 'default' ? 'the default model' : modelSource });
   const fromEnv = reasoningEffort === undefined;
   return {
     model: resolvedModel,

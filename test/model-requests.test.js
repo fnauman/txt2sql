@@ -202,6 +202,9 @@ test('an effort that does not fit the model never reaches the provider', async (
   const before = received.length;
   await assert.rejects(generateOptimizedResponse({ client, model: 'gpt-4o-mini', prompt, modelConfig: { reasoningEffort: 'low' } }), { code: 'INVALID_CONFIG' });
   await assert.rejects(generateBasicSql({ client, model: 'gpt-6-luna', prompt, modelConfig: { reasoningEffort: 'extreme' } }), { code: 'INVALID_CONFIG' });
+  // A Responses-API-only model: no Chat Completions request is ever sent.
+  await assert.rejects(generateOptimizedResponse({ client, model: 'gpt-5.4-pro', prompt }), { code: 'INVALID_CONFIG' });
+  await assert.rejects(generateBasicSql({ client, model: 'openai/o3-pro', prompt, modelConfig: { reasoningEffort: 'high' } }), { code: 'INVALID_CONFIG' });
   assert.equal(received.length, before);
 });
 

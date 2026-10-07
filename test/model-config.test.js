@@ -16,9 +16,12 @@ import {
   reasoningEnabled,
   resolveCompletionSettings,
   resolveEndpoint,
+  resolveModelConfig,
   resolveModelName,
   UNKNOWN_FAMILY_REASONING_EFFORTS,
+  unsupportedModelReason,
 } from '../src/model-config.js';
+import { resolveRunModelSettings } from '../src/query-service.js';
 import { parseEvalArgs } from '../scripts/eval.js';
 import { DEFAULT_WEB_CONFIG, loadWebConfig } from '../apps/web/src/server/config.js';
 
@@ -155,6 +158,56 @@ test('the capability map is keyed by the model id without a vendor prefix or var
   assert.deepEqual(modelCapabilities('gpt-5.1').efforts, ['none', 'low', 'medium', 'high']);
   assert.deepEqual(modelCapabilities('gpt-5.4-mini').efforts, ['none', 'low', 'medium', 'high', 'xhigh']);
   assert.deepEqual(REASONING_EFFORTS, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+});
+
+test('the -pro models (Responses API only) are refused before anything starts, on every entry point', () => {
+  const RESPONSES_ONLY = /served only by the Responses API/;
+  // gpt-5*-pro: Responses API only and no structured outputs (medium / high /
+  // xhigh only, too); o-series -pro (o1-pro, o3-pro): Responses API only.
+  for (const [model, family] of [
+    ['gpt-5.4-pro', 'gpt-5-pro'],
+    ['gpt-5.4-pro-2026-03-05', 'gpt-5-pro'],
+    ['openai/gpt-5.4-pro', 'gpt-5-pro'],
+    ['gpt-5.2-pro', 'gpt-5-pro'],
+    ['gpt-5-pro', 'gpt-5-pro'],
+    ['o3-pro', 'o-series-pro'],
+    ['o1-pro-2025-03-19', 'o-series-pro'],
+  ]) {
+    assert.equal(modelCapabilities(model).family, family, model);
+    assert.match(unsupportedModelReason(model) || '', RESPONSES_ONLY, model);
+  }
+  assert.match(unsupportedModelReason('gpt-5.4-pro'), /do not support structured outputs/);
+  // Their siblings stay what they were.
+  for (const [model, family] of [
+    ['gpt-5.4', 'gpt-5.2+'],
+    ['gpt-5.4-mini', 'gpt-5.2+'],
+    ['gpt-5', 'gpt-5'],
+    ['o3', 'o-series'],
+    ['o3-mini', 'o-series'],
+  ]) {
+    assert.equal(modelCapabilities(model).family, family, model);
+    assert.equal(unsupportedModelReason(model), null, model);
+  }
+  for (const model of ['gpt-4o-mini', 'gpt-6-luna', 'acme/sql-1']) {
+    assert.equal(unsupportedModelReason(model), null, model);
+  }
+
+  const refused = (fn, pattern) => assert.throws(fn, (error) => error.code === 'INVALID_CONFIG' && pattern.test(error.message));
+  // The shared resolver (CLIs, eval, web), with where the model came from.
+  refused(
+    () => resolveModelConfig({ env: { MODEL_NAME: 'gpt-5.4-pro' } }),
+    /^MODEL_NAME "gpt-5\.4-pro" is not supported: the gpt-5\*-pro models are served only by the Responses API and do not support structured outputs; this pipeline sends Chat Completions requests with a strict json_schema response format\. Pick another model\.$/
+  );
+  refused(() => resolveModelConfig({ env: { MODEL_NAME: 'o3-pro' }, envFile: { path: '/home/you/.env', vars: ['MODEL_NAME'] } }), /^MODEL_NAME \(from \/home\/you\/\.env\) "o3-pro" is not supported: /);
+  // Also with an effort the model would list: the model is refused first.
+  refused(() => resolveModelConfig({ env: { MODEL_NAME: 'gpt-5.4-pro', REASONING_EFFORT: 'high' } }), /^MODEL_NAME "gpt-5\.4-pro" is not supported/);
+  assert.throws(() => parseEvalArgs(['--model', 'openai/gpt-5.4-pro', '--reasoning-effort', 'high'], { env: {} }), (error) => error.code === 'INVALID_CONFIG' && /^--model "openai\/gpt-5\.4-pro" is not supported/.test(error.message));
+  assert.throws(() => loadWebConfig({ MODEL_NAME: 'gpt-5.4-pro' }), /MODEL_NAME "gpt-5\.4-pro" is not supported/);
+  // And where a request is built, or the query service resolves its model.
+  refused(() => buildCompletionOptions({ temperature: 0 }, { model: 'gpt-5.4-pro' }), /^model "gpt-5\.4-pro" is not supported/);
+  refused(() => normalizeReasoningEffort('gpt-5.4-pro', 'high'), /^model "gpt-5\.4-pro" is not supported/);
+  refused(() => resolveRunModelSettings({ model: 'o1-pro' }, {}), /^model "o1-pro" is not supported/);
+  refused(() => resolveRunModelSettings({}, { MODEL_NAME: 'gpt-5-pro' }), /^MODEL_NAME "gpt-5-pro" is not supported/);
 });
 
 test('normalizeReasoningEffort validates the effort per family and fails with the allowed values', () => {
