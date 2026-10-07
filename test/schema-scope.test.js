@@ -794,3 +794,47 @@ test('widening keeps the same allow-list for every order and only grows with the
   }
   assert.ok(checked > 100, `${checked} widenings checked`);
 });
+
+test('a widening past the schema token budget is reported in the prompt context, the result and the trace', async () => {
+  // Widening never cuts a join path to fit the budget (a cut path is a join
+  // the retry cannot write); the cap is the in-scope schema, and going over
+  // the budget is reported instead.
+  const over = chainPrompt({ extraTables: ['Territory'] });
+  assert.equal(over.context.schemaScope.widenOverBudget, true);
+  assert.ok(over.context.schemaScope.widenedSchemaEstimatedTokens > over.context.schemaScope.fullSchemaMaxTokens);
+  // No widening, no report.
+  assert.ok(!('widenOverBudget' in chainPrompt().context.schemaScope));
+  // Under the budget: reported as such.
+  const roomy = chainPrompt({ schemaScope: { schemaScope: 'retrieved', widenOnDemand: true }, extraTables: ['Territory'] });
+  assert.equal(roomy.context.schemaScope.widenOverBudget, false);
+  assert.deepEqual(roomy.tables.map((table) => table.tableName), over.tables.map((table) => table.tableName));
+
+  const guess = 'SELECT t.TerritoryLabel, SUM(s.ShipmentWeight) AS total_weight FROM Shipment s JOIN Territory t ON s.ShipmentId = t.TerritoryId GROUP BY t.TerritoryLabel';
+  const run = async (schemaScope) => {
+    const trace = createBufferedTraceLogger();
+    const result = await runOptimizedQuestion({
+      client: scriptedClient([guess, CHAIN_TERRITORY_SQL], CHAIN_TABLES),
+      connection: fakeConnection(),
+      schema: CHAIN_SCHEMA,
+      question: CHAIN_QUESTION,
+      trace,
+      maxRetries: 1,
+      schemaScope,
+      statementTimeoutMs: 0,
+    });
+    return { result, events: trace.events.filter((event) => event.event === 'prompt.widen_over_budget') };
+  };
+  const reported = await run(CHAIN_AUTO_RETRIEVED);
+  assert.equal(reported.result.success, true, reported.result.error?.message);
+  assert.equal(reported.result.schemaScope.widenOverBudget, true);
+  assert.equal(reported.events.length, 1);
+  assert.deepEqual(
+    [reported.events[0].widenedTables, reported.events[0].connectorTableCount, reported.events[0].allowedTableCount, reported.events[0].fullSchemaMaxTokens],
+    [['Territory'], 4, 6, 1]
+  );
+  assert.ok(reported.events[0].widenedSchemaEstimatedTokens > 1);
+  const quiet = await run({ schemaScope: 'retrieved', widenOnDemand: true });
+  assert.equal(quiet.result.success, true, quiet.result.error?.message);
+  assert.equal(quiet.result.schemaScope.widenOverBudget, false);
+  assert.equal(quiet.events.length, 0);
+});

@@ -9,7 +9,10 @@
 //   1aa30a3, prompt version 0c314451d4b7; the current committed baseline ran
 //   'auto'): widen-on-demand is off unless SCHEMA_WIDEN_ON_DEMAND=1. With
 //   widen-on-demand a TABLE_SCOPE rejection of an in-scope table rebuilds the
-//   prompt with that table for the retry.
+//   prompt with that table and its join paths for the retry. Widening never
+//   cuts a join path to stay within SCHEMA_FULL_MAX_TOKENS (the cap is the
+//   in-scope schema); a widened schema block over it is reported
+//   (schemaScope.widenOverBudget, trace event prompt.widen_over_budget).
 // - 'full': the prompt shows every in-scope table in one stable schema block
 //   (the same for every question, so it caches as one prefix), retrieval output
 //   is only a one-line relevance hint, and the validator allows every in-scope

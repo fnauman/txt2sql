@@ -2114,7 +2114,10 @@ function isLinkedWithin(adjacency, within, from, to) {
 // passes them in rejection order, verify.js and rescore sorted), and a later
 // widening with more tables keeps every table an earlier one allowed (a retry
 // never loses a connector its previous attempt could use). They are processed
-// in name order, so the connector list is stable too.
+// in name order, so the connector list is stable too. The cap is the
+// in-scope schema: no path is cut to keep the prompt small, since a cut path
+// is a join the retry cannot write; a widened schema block over the scope's
+// token budget is reported instead (widenBudgetReport).
 // Unknown or already retrieved names are ignored. Null when nothing is added.
 function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
@@ -2166,6 +2169,18 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
     addedTableNames: added.map(tableNameOf),
     connectorTableNames: [...connectors].map(tableNameOf),
   };
+}
+
+// A widened retrieved prompt's schema block (`schemaContext`) against the
+// token budget that sends auto to the retrieved scope (`scope`'s
+// fullSchemaMaxTokens): { widenedSchemaEstimatedTokens, widenOverBudget }.
+// Widening never cuts a join path to fit (widenRetrievedTables), so a
+// widening past the budget, which long paths on a large schema can cause, is
+// reported instead: in the prompt context's schemaScope (and so the result's)
+// and in the live loop's trace (prompt.widen_over_budget).
+function widenBudgetReport(schemaContext, scope) {
+  const widenedSchemaEstimatedTokens = estimatePromptTokens(schemaContext);
+  return { widenedSchemaEstimatedTokens, widenOverBudget: widenedSchemaEstimatedTokens > scope.fullSchemaMaxTokens };
 }
 
 /**
@@ -2221,7 +2236,9 @@ function resolvePromptHintsVersion(hintsVersion, semanticPlan) {
  *   Version 1 is the prompt every question had before HINTS_VERSION existed,
  *   byte for byte.
  * `tables` is the allow-list; `context.schemaScope` says which scope applied
- * and `context.hintsVersion` which hints version.
+ * (for a widened prompt also its schema block's token estimate and whether
+ * it is over the budget: widenBudgetReport) and `context.hintsVersion` which
+ * hints version.
  */
 export function buildOptimizedPrompt(
   schema,
@@ -2281,6 +2298,7 @@ export function buildOptimizedPrompt(
         ...scope,
         widenedTables: widened ? widened.addedTableNames : [],
         widenConnectorTables: widened ? widened.connectorTableNames : [],
+        ...(widened ? widenBudgetReport(schemaContext, scope) : {}),
       },
       hintsVersion: version,
       examples: summarizeExamples(relevantExamples),

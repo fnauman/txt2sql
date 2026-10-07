@@ -53,8 +53,11 @@ in-scope schema the prompt shows and which tables the validator allows:
   every retrieved table the added table reaches, at any length; the widened
   allow-list depends on the set of added tables, not their order (so the
   offline verifier and rescore rebuild it exactly), and a later widening keeps
-  every table an earlier one allowed. A table outside the in-scope schema is
-  rejected in every scope.
+  every table an earlier one allowed. No path is cut to fit the token budget
+  (the cap is the in-scope schema); a widened schema block over
+  `SCHEMA_FULL_MAX_TOKENS` is reported instead (`schemaScope.widenOverBudget`
+  and the `prompt.widen_over_budget` trace event). A table outside the
+  in-scope schema is rejected in every scope.
 - **auto**: full while the full schema block fits `SCHEMA_FULL_MAX_TOKENS`
   (default 8,000 estimated tokens), else retrieved.
 

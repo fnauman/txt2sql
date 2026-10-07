@@ -45,7 +45,11 @@ table gets the shortest path to every retrieved table it reaches (any
 length); the widened set is the union over the added tables, so it does not
 depend on the order they were added in (the live loop and the offline
 verifier and rescore, which sort them, allow the same tables) and a second
-widening never drops a connector the first allowed. It is on by
+widening never drops a connector the first allowed. Paths are never cut to
+fit the budget, since a cut path is a join the retry cannot write; a widened
+schema block over `SCHEMA_FULL_MAX_TOKENS` is reported in the prompt
+context (`schemaScope.widenOverBudget`, `widenedSchemaEstimatedTokens`) and
+the trace (`prompt.widen_over_budget`). It is on by
 default when `auto` falls back to `retrieved` (a schema over the budget) and
 off by default for an explicit `SCHEMA_SCOPE=retrieved`, which is therefore
 the previous baseline's product loop with one variable: the same prompt, byte for byte,
