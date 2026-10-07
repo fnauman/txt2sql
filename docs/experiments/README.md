@@ -34,22 +34,29 @@ is the protocol on top of it.
      model would have answered a different prompt.
    - `npm run verify-dataset` under the new setting (every gate), so the
      dataset flags match the product.
-3. **One paid run, paired.** `npm run eval -- --repeat 3` with the new
-   setting. A live run compares itself with `eval/baselines/<model>.json`
-   automatically (`--compare <report.json>` for another baseline): cases are
-   paired by id (a case whose gold or scoring changed is excluded and listed).
-   Add `--budget-usd` as a cap.
+3. **One paid run, paired, pre-registered.** Before it, write down the
+   hypothesis, the arms and the decision rule (what the paired holdout test
+   of step 4 must show for the setting to be kept). Then
+   `npm run eval -- --repeat 3` with the new setting. A live run compares
+   itself with `eval/baselines/<model>.json` automatically (`--compare
+   <report.json>` for another baseline): cases are paired by id (a case whose
+   gold or scoring changed is excluded and listed). Add `--budget-usd` as a
+   cap.
 4. **Conclude on the holdout, once.** The out-of-sample evidence an
-   experiment ends with is the paired holdout test, pre-registered: write
-   down the hypothesis, the arms and the decision rule before the run. Pass
-   `--holdout-summary` on the concluding run (or afterwards, with zero LLM
-   calls: `npm run eval -- --rescore <its report.json> --compare <baseline
-   report.json> --holdout-summary`). report.md's comparison section and the
-   console then add one line over the paired holdout cases: their number,
-   improvements, regressions, the exact McNemar p and verdict, and strict
-   accuracy baseline → candidate with the change and its paired bootstrap
-   95% CI; nothing per case. Never pass it while designing or tuning the
-   change: error analysis uses dev failures only (see
+   experiment ends with is the paired holdout test, read against the
+   decision rule written down in step 3. Pass `--holdout-summary` on the
+   concluding run, or afterwards, with zero LLM calls, on a rescore of it
+   under the candidate arm's setting: `SETTING=<candidate value> npm run eval
+   -- --rescore <its report.json> --compare <baseline report.json>
+   --holdout-summary`
+   (the rescore re-judges the recorded SQL with today's settings; it must
+   print no "note: the recording ran with …" line, or its holdout line is
+   not the run's and does not conclude anything). report.md's comparison
+   section and the console then add one line over the paired holdout cases:
+   their number, improvements, regressions, the exact McNemar p and verdict,
+   and strict accuracy baseline → candidate with the change and its paired
+   bootstrap 95% CI; nothing per case. Never pass it while designing or
+   tuning the change: error analysis uses dev failures only (see
    [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy)),
    and a change reworked after its holdout line was read is no longer
    measured blind on that holdout.

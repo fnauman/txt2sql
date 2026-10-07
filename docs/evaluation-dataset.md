@@ -234,27 +234,40 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   McNemar p = 0.035 → significantly better than the baseline; strict
   accuracy … → …, Δ … (95% CI …)"). The figures come from `summarizePairs`
   over the comparison's paired holdout cases with the comparison's alpha and
-  bootstrap settings, so the counts, accuracies, change and p are those of
-  the holdout cases in the full comparison `--reveal-holdout` lists; the
-  bootstrap draws the holdout pairs in a canonical order of their outcomes
-  instead of by id, so the interval (like every other figure on the line)
-  depends only on the paired outcomes, never on which cases they are.
-  Nothing else about the holdout is shown: no ids, no per-case verdicts, no
-  attribution, behaviour, guardrail or cost figures, no pass-rate changes.
-  Without a comparison, or when no holdout case is paired, it prints nothing
-  extra; without the flag nothing changes, and `--gate` and its reasons are
-  the same either way. Use it **only to conclude a pre-registered
-  experiment** (hypothesis, arms and decision rule written down before the
-  run, see [docs/experiments/README.md](experiments/README.md)), never while
+  bootstrap settings: the number of cases, the improvements and
+  regressions, p and the verdict are exactly those of the holdout cases in
+  the full comparison `--reveal-holdout` lists, and so are the accuracies
+  and the change up to the order of a floating-point sum (at a rounding tie,
+  one unit in the last printed digit; with one repetition they are exact).
+  The pairs are taken in a canonical order of their outcomes instead of by
+  id, so every figure on the line, the bootstrap interval included, depends
+  only on the paired outcomes, never on which cases they are (the interval
+  is a paired bootstrap like the dev one, not the same draw as one over the
+  holdout cases in id order). Nothing else about the holdout is shown: no
+  ids, no per-case verdicts, no attribution, behaviour, guardrail or cost
+  figures, no pass-rate changes. Without a comparison, or when no holdout
+  case is paired, it prints nothing extra; without the flag nothing changes. `--gate` decides the same either
+  way; a gate that fails while a holdout case is paired still gives no
+  counts in its reason, which with the flag points at the line too. Use it
+  **only to conclude a pre-registered experiment** (hypothesis, arms and
+  decision rule written down before the paid run, see
+  [docs/experiments/README.md](experiments/README.md)), never while
   designing or tuning a change: a holdout figure read between iterations
   becomes a target. Error analysis stays dev-only. Pass it on the concluding
   run, or afterwards, with zero LLM calls, on a rescore of that run against
-  the same baseline (`npm run eval -- --rescore <its report.json> --compare
-  <baseline report.json> --holdout-summary`: today's code re-judges the
-  recorded SQL, the same verdicts when nothing changed since). With
-  `--reveal-holdout` (which lists every case and gives the all-case
-  comparison) the same line is printed too: it is the holdout subset's own
-  test, which the all-case comparison does not give.
+  the same baseline under the candidate arm's setting
+  (`<SETTING>=<candidate value> npm run eval -- --rescore <its report.json>
+  --compare <baseline report.json> --holdout-summary`): a rescore re-judges
+  the recorded SQL with today's code and today's settings, so without the
+  arm's setting it re-runs the validator's decisions under another arm. The
+  rescore must print no "note: the recording ran with schema scope …" or
+  "… hints version …" line (report.md's Provenance then shows a "Recorded
+  schema scope" or "Recorded hints version" row); if it does, its line is
+  not the run's paired holdout test and must not conclude the experiment.
+  With the right setting and nothing else changed since, it gives the run's
+  verdicts. With `--reveal-holdout` (which lists every case and gives the
+  all-case comparison) the same line is printed too: it is the holdout
+  subset's own test, which the all-case comparison does not give.
 - **Any change to the holdout** (a case added, removed, reworded, re-scored,
   re-labelled, for example a `known_validator_rejection` flag, or moved to
   dev) requires a manifest update with a note saying what and
