@@ -546,7 +546,14 @@ test('a cancelled read that overflows the cap after a failed KILL is dropped, ne
   controller.abort(deadline());
 
   await assert.rejects(settlesWithin(running, 500), isDeadlineAbort);
-  await delay(60);
+  // Row maxRows + 1 comes a few ms after the abort on an idle machine, much
+  // later on a loaded one: wait for the verdict instead of a fixed time, but
+  // well inside the 2 s KILL settle window, so a destroy seen here is the
+  // overflow's and not the settle timeout's.
+  const until = Date.now() + 1500;
+  while (events.length === 0 && Date.now() < until) {
+    await delay(5);
+  }
   assert.equal(core.finished, false, 'the statement is still streaming rows');
   assert.deepEqual(events, ['destroy'], 'a still-streaming thread must not go back to the pool');
   core.stopped = true;
