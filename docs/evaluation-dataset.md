@@ -189,8 +189,9 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   included: the headline strict accuracy (a point estimate without an
   interval: the split accuracies weighted by their case counts), the budget
   row's spend, and **the exit code with its reasons** (a failed `--gate`
-  tests every paired case, but its reason gives no counts: every case's
-  counts minus the dev ones shown would be the holdout's flips). The
+  tests every paired case, but when a holdout case is paired its reason
+  gives no counts: every case's counts minus the dev ones shown would be
+  the holdout's flips). The
   headline's intervals, the majority-pass cases, the intent-clustered
   accuracy, the holdout split row's majority passes, the legacy pooled rate,
   the count of cases a run stopped early did not finish, and the comparison

@@ -127,6 +127,14 @@ test('exit codes: 2 for harness/infra, 1 for a failed gate, else 0', () => {
   assert.match(hidden.reasons[0], /^significantly worse than the baseline \(exact McNemar test over every paired case, holdout included; its counts are not shown/);
   assert.doesNotMatch(hidden.reasons[0], /\d/);
   assert.match(computeExitCode(fakeReport({ comparison: withHoldout }), { gate: true, revealHoldout: true }).reasons[0], /6 regression\(s\) vs 0 improvement\(s\)/);
+  // Counts are withheld only when a holdout case is paired: a holdout case
+  // only the baseline has (a --split dev run) leaves the dev comparison,
+  // which report.md shows in full.
+  const pairedOf = (...ids) => ids.map((id) => ({ id, baseline: { majorityPass: true }, candidate: { majorityPass: false } }));
+  const devPairsOnly = { ...withHoldout, pairedCases: pairedOf('d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8') };
+  assert.match(computeExitCode(fakeReport({ comparison: devPairsOnly }), { gate: true }).reasons[0], /: 6 regression\(s\) vs 0 improvement\(s\), exact McNemar p = 0\.03125$/);
+  const holdoutPaired = { ...withHoldout, pairedCases: pairedOf('d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'ho_1') };
+  assert.doesNotMatch(computeExitCode(fakeReport({ comparison: holdoutPaired }), { gate: true }).reasons[0], /\d/);
   assert.equal(computeExitCode(fakeReport({ comparison: { verdict: 'no_significant_difference', paired: 3, candidateCases: 3 } }), { gate: true }).code, 0);
   assert.equal(computeExitCode(fakeReport({ strict: 0.5 }), { gate: true, minAccuracy: 0.6 }).code, 1);
   assert.equal(computeExitCode(fakeReport({ strict: 0.6 }), { gate: true, minAccuracy: 0.6 }).code, 0);

@@ -652,9 +652,15 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   if (gate) {
     // The gate tests every paired case, holdout included. Unless
     // revealHoldout, report.md and the console show the comparison over the
-    // dev cases only, so the reason gives no counts: every case's counts
-    // minus the dev ones would be the holdout's flips.
-    const holdoutHidden = !revealHoldout && (report.comparison?.holdoutCases?.length || 0) > 0;
+    // dev cases only, so when a holdout case is paired the reason gives no
+    // counts: every case's counts minus the dev ones would be the holdout's
+    // flips. With no holdout case paired (a baseline-only holdout case, say)
+    // the counts are the dev comparison's own. A comparison without its
+    // pairs is treated as pairing its holdout cases.
+    const holdoutIds = new Set(report.comparison?.holdoutCases || []);
+    const pairs = report.comparison?.pairedCases;
+    const holdoutPaired = Array.isArray(pairs) ? pairs.some((entry) => holdoutIds.has(entry.id)) : holdoutIds.size > 0;
+    const holdoutHidden = !revealHoldout && holdoutPaired;
     if (report.comparison?.verdict === 'worse' && holdoutHidden) {
       failures.push(
         'significantly worse than the baseline (exact McNemar test over every paired case, holdout included; its counts are not shown while ' +
