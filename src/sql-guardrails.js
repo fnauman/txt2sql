@@ -1119,15 +1119,17 @@ function columnMentioned(sqlText, qualifiedColumn) {
 }
 
 // Wrappers an operand of a column difference may have: a NULL default
-// (COALESCE(col, 0)) or a cast to a non-integer number type, which keep the
-// value; and a SUM, which distributes over the difference, or a ROUND to n
-// places, which both sides must share. (TRUNCATE never reaches this check:
-// the safety layer rejects the word.)
+// (COALESCE(col, 0)) or a cast that keeps the decimals (a decimal type with
+// a scale, or a floating-point type), which keep the value; and a SUM, which
+// distributes over the difference, or a ROUND to n places, which both sides
+// must share. (TRUNCATE never reaches this check: the safety layer rejects
+// the word.)
 const DIFFERENCE_NULL_DEFAULT_FUNCTIONS = new Set(['COALESCE', 'IFNULL', 'NVL']);
 const DIFFERENCE_AGGREGATE_FUNCTIONS = new Set(['SUM']);
 const DIFFERENCE_ROUNDING_FUNCTIONS = new Set(['ROUND']);
 const DIFFERENCE_CAST_FUNCTIONS = new Set(['CAST', 'CONVERT']);
-const DIFFERENCE_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED', 'DOUBLE', 'FLOAT', 'REAL']);
+const DIFFERENCE_DECIMAL_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED']);
+const DIFFERENCE_FLOAT_CAST_TYPES = new Set(['DOUBLE', 'FLOAT', 'REAL']);
 // Operators binding tighter than binary minus: next to an operand they take
 // it away from the difference ("a - b * 2", "2 * a - b").
 const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
@@ -1178,21 +1180,64 @@ function isIntegerLiteral(tokens, start, end) {
   return valueStart === end && tokens[end]?.type === 'number' && /^\d+$/.test(tokens[end].value);
 }
 
-// Whether tokens[start..end] names a non-integer number type ("DECIMAL",
-// "DECIMAL(12,2)", "DOUBLE").
+// Whether tokens[start..end] names a number type that keeps the decimals: a
+// floating-point type ("DOUBLE", "FLOAT") or a decimal type with a scale of
+// at least one and an integer digit ("DECIMAL(12,2)"). A bare DECIMAL is
+// DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED, UNSIGNED or INTEGER
+// drop the decimals. (A precision too small for the amounts, which
+// overflows, is not caught: the check does not know the columns' types.)
 function isValueKeepingCastType(tokens, start, end, parens) {
   const typeName = tokens[start];
-  if (typeName?.type !== 'word' || !DIFFERENCE_CAST_TYPES.has(typeName.upper)) {
+  if (typeName?.type !== 'word') {
     return false;
   }
-  return start === end || (isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end);
+  const hasArguments = isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end;
+  if (DIFFERENCE_FLOAT_CAST_TYPES.has(typeName.upper)) {
+    return start === end || hasArguments;
+  }
+  if (!DIFFERENCE_DECIMAL_CAST_TYPES.has(typeName.upper) || !hasArguments) {
+    return false;
+  }
+  const args = splitTopLevelArguments(tokens, start + 2, end - 1, parens);
+  const plainNumber = ([from, to]) => (from === to && tokens[from]?.type === 'number' && /^\d+$/.test(tokens[from].value) ? Number(tokens[from].value) : null);
+  const [precision, scale] = args.map(plainNumber);
+  return args.length === 2 && precision !== null && scale !== null && scale >= 1 && precision > scale;
+}
+
+// The operand range [start, end] of the CAST(<operand> AS <type>) or
+// CONVERT(<operand>, <type>) whose '(' is tokens[open], when its type keeps
+// the decimals (isValueKeepingCastType); null otherwise (CONVERT ... USING
+// included).
+function valueKeepingCastOperand(tokens, open, parens) {
+  const close = parens.closeOf.get(open);
+  const functionName = tokens[open - 1]?.upper;
+  if (close === undefined || !DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
+    return null;
+  }
+  const args = splitTopLevelArguments(tokens, open + 1, close - 1, parens);
+  if (functionName === 'CONVERT') {
+    return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? args[0] : null;
+  }
+  if (args.length !== 1) {
+    return null;
+  }
+  // CAST(<operand> AS <type>): the last top-level AS splits them.
+  let asIndex = -1;
+  for (let index = args[0][0]; index <= args[0][1]; index += 1) {
+    if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+      index = parens.closeOf.get(index);
+    } else if (isKeywordToken(tokens[index], 'AS')) {
+      asIndex = index;
+    }
+  }
+  return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? [args[0][0], asIndex - 1] : null;
 }
 
 /**
  * The column tokens[start..end] reads as a whole, or null: a column reference
  * (`col`, `t.col`, `db.t.col`, quoted or not), in grouping parentheses, in a
- * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast to a non-integer number
- * type (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
+ * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast that keeps the decimals
+ * (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
  * Returns { column (lower-case name), wrappers (the SUM and ROUND wrappers,
  * outermost first, e.g. ['ROUND(2)', 'SUM']) }.
  */
@@ -1223,22 +1268,8 @@ function columnOperandOf(tokens, start, end, parens) {
       return inner ? { ...inner, wrappers: [`${functionName}(${places ?? 0})`, ...inner.wrappers] } : null;
     }
     if (DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
-      if (functionName === 'CONVERT') {
-        return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
-      }
-      if (args.length !== 1) {
-        return null;
-      }
-      // CAST(<operand> AS <type>): the last top-level AS splits them.
-      let asIndex = -1;
-      for (let index = args[0][0]; index <= args[0][1]; index += 1) {
-        if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
-          index = parens.closeOf.get(index);
-        } else if (isKeywordToken(tokens[index], 'AS')) {
-          asIndex = index;
-        }
-      }
-      return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? columnOperandOf(tokens, args[0][0], asIndex - 1, parens) : null;
+      const operand = valueKeepingCastOperand(tokens, open, parens);
+      return operand ? columnOperandOf(tokens, operand[0], operand[1], parens) : null;
     }
     if (DIFFERENCE_NULL_DEFAULT_FUNCTIONS.has(functionName)) {
       const defaultsAreNumbers = args.slice(1).every(([from, to]) => {
@@ -1466,9 +1497,10 @@ function groupOperandStart(tokens, open) {
  * Whether the expression tokens[start..end] is a computed value: it reaches a
  * SELECT list (of the query, a derived table, a CTE or a scalar subquery
  * there) through function arguments, arithmetic and CASE results, without
- * being an operand of a comparison or logical operator or sitting in a WHERE,
- * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as
- * "AND NetPayableAmount - PaidAmount > 0" computes no value.
+ * being an operand of a comparison or logical operator, inside a cast that
+ * drops the decimals (CAST(... AS SIGNED)), or sitting in a WHERE, HAVING,
+ * ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND
+ * NetPayableAmount - PaidAmount > 0" computes no value.
  */
 function expressionIsComputedValue(tokens, start, end, parens) {
   for (let guard = 0; guard <= tokens.length; guard += 1) {
@@ -1488,6 +1520,10 @@ function expressionIsComputedValue(tokens, start, end, parens) {
       } else if (isPunctToken(token, '(')) {
         const close = parens.closeOf.get(at);
         if (close === undefined) {
+          return false;
+        }
+        // A cast to a type without decimals drops the value.
+        if (isFunctionCallName(tokens, at - 1) && DIFFERENCE_CAST_FUNCTIONS.has(tokens[at - 1].upper) && !valueKeepingCastOperand(tokens, at, parens)) {
           return false;
         }
         next = [groupOperandStart(tokens, at), close];
@@ -1548,13 +1584,14 @@ function expressionIsComputedValue(tokens, start, end, parens) {
  * matched by column name like columnMentioned): a binary minus whose left
  * operand is exactly the minuend column and whose right operand is exactly
  * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
- * defaults, non-integer casts, SUM and ROUND(x, n) (both sides
+ * defaults, casts that keep the decimals, SUM and ROUND(x, n) (both sides
  * summed and rounded alike), and neither operand bound to a
  * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
  * difference must be a computed value (expressionIsComputedValue): in a
  * SELECT list, a derived table's included, not in a filter, join, grouping,
- * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count). A
- * difference of aliases of the two columns ("np - pa") does not count.
+ * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count) nor
+ * inside a cast that drops the decimals. A difference of aliases of the two
+ * columns ("np - pa") does not count.
  */
 function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
   const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();

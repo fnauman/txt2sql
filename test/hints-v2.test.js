@@ -519,6 +519,48 @@ test('v2 METRIC_COLUMN: the open-balance alternative needs NetPayableAmount - Pa
   });
 });
 
+test('v2 METRIC_COLUMN: an open-balance difference cast without its decimals computes no balance', () => {
+  // Third review: a bare DECIMAL or NUMERIC (DECIMAL(10,0) in MariaDB), scale
+  // 0, SIGNED, UNSIGNED or INTEGER, on either side or around the difference,
+  // passed although it drops the cents.
+  const open = 'Total open amount on documents with a due date in April 2026.';
+  const prompt = buildOptimizedPrompt(schema, open);
+  const allowed = prompt.tables.map((table) => table.tableName);
+  const rejects = (sql) => {
+    try {
+      validateReadOnlySql(sql, allowed, { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const april = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DueDate >= '2026-04-01' AND d.DueDate < '2026-05-01'";
+  for (const sql of [
+    `SELECT SUM(CAST(d.NetPayableAmount AS DECIMAL) - CAST(d.PaidAmount AS DECIMAL)) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount AS NUMERIC) - CAST(d.PaidAmount AS NUMERIC)) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount AS DECIMAL(12,0)) - CAST(d.PaidAmount AS DECIMAL(12,0))) AS open_amount ${april}`,
+    `SELECT SUM(CONVERT(d.NetPayableAmount, DECIMAL) - CONVERT(d.PaidAmount, DECIMAL)) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount AS INTEGER) - CAST(d.PaidAmount AS INTEGER)) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount - d.PaidAmount AS SIGNED)) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount - d.PaidAmount AS UNSIGNED)) AS open_amount ${april}`,
+    `SELECT CAST(SUM(d.NetPayableAmount - d.PaidAmount) AS DECIMAL) AS open_amount ${april}`,
+    `SELECT CONVERT(SUM(d.NetPayableAmount - d.PaidAmount), SIGNED) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount - d.PaidAmount AS CHAR)) AS open_amount ${april}`,
+  ]) {
+    assert.equal(rejects(sql), 'METRIC_COLUMN', sql);
+  }
+  // Casts that keep the decimals, on each side or around the difference.
+  for (const sql of [
+    `SELECT SUM(CAST(d.NetPayableAmount AS DECIMAL(12,2)) - CAST(d.PaidAmount AS DECIMAL(12,2))) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount AS NUMERIC(14,4)) - CAST(d.PaidAmount AS NUMERIC(14,4))) AS open_amount ${april}`,
+    `SELECT SUM(CAST(d.NetPayableAmount - d.PaidAmount AS DECIMAL(14,2))) AS open_amount ${april}`,
+    `SELECT CAST(SUM(d.NetPayableAmount - d.PaidAmount) AS DOUBLE) AS open_amount ${april}`,
+    `SELECT CONVERT(SUM(d.NetPayableAmount - d.PaidAmount), DECIMAL(14,2)) AS open_amount ${april}`,
+  ]) {
+    assert.equal(rejects(sql), null, sql);
+  }
+});
+
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
   // Review finding: "gross" anywhere in the question made an explicit
   // "revenue" / "average order value" advisory, so "Show revenue and gross
