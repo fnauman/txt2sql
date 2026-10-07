@@ -58,7 +58,7 @@ import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../s
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
-import { calculateCost } from '../src/pricing.js';
+import { hasModelPrice } from '../src/pricing.js';
 import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, describeReasoningEffort, modelLabel, REASONING_EFFORTS, resolveModelConfig, resolveModelName } from '../src/model-config.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
@@ -1086,13 +1086,27 @@ function createLiveClient(options) {
       { code: error.code || 'OPENAI_NOT_CONFIGURED', cause: error }
     );
   }
-  if (options.budgetUsd != null && calculateCost(options.model, { prompt_tokens: 1, completion_tokens: 1 }) === null) {
-    throw new HarnessError(
-      `--budget-usd needs a price for model "${options.model}" (src/pricing.js or MODEL_PRICING_OVERRIDES); without it the cost cannot be tracked.`,
-      { code: 'NO_PRICING' }
-    );
+  const pricingRefusal = budgetPricingRefusal(options);
+  if (pricingRefusal) {
+    throw new HarnessError(pricingRefusal, { code: 'NO_PRICING' });
   }
   return client;
+}
+
+/**
+ * Why a live run with --budget-usd must not start (null when it may): the
+ * model has no price (a row in src/pricing.js, found without a vendor prefix,
+ * or a MODEL_PRICING_OVERRIDES entry), so its spend, and the budget, cannot
+ * be tracked. A provider-reported cost only arrives after a call.
+ */
+export function budgetPricingRefusal(options) {
+  if (options.budgetUsd == null || hasModelPrice(options.model)) {
+    return null;
+  }
+  return (
+    `--budget-usd needs a price for model "${options.model}" (src/pricing.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion); ` +
+    'without it the budget cannot be enforced, so the run does not start.'
+  );
 }
 
 async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {

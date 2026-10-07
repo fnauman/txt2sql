@@ -2,13 +2,23 @@
 // CLI/web UI and traces. These are not billing figures. Verify against the
 // provider's current price list before relying on them.
 //
-// Provenance: gpt-4o-mini rates are OpenAI's published prices. The gpt-5.4-*
-// rows are the rates configured for the OpenAI-compatible gateway this repo
-// targets (set via OPENAI_BASE_URL); confirm them with your provider.
-// Last reviewed: 2026-06.
+// Provenance: gpt-4o-mini rates are OpenAI's published prices. gpt-6-luna
+// and gpt-6-sol are OpenAI's published prices, verified on 2026-10-07 at
+// developers.openai.com/api/docs/models/gpt-6-luna and .../gpt-6-sol. The
+// gpt-5.4-* rows are the rates configured for the OpenAI-compatible gateway
+// this repo targets (set via OPENAI_BASE_URL); confirm them with your provider.
+// Last reviewed: 2026-10.
+//
+// A model id is looked up without its vendor prefix, so OpenRouter's
+// openai/gpt-6-luna resolves to the gpt-6-luna row (a variant such as
+// openai/gpt-6-luna:free does not: its price differs).
 //
 // Override without editing code by setting MODEL_PRICING_OVERRIDES to a JSON map,
 // e.g. MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'.
+// An override for a listed model replaces the given fields; one for a model
+// that is not listed adds it when it has both inputPerMillion and
+// outputPerMillion (cachedInputPerMillion optional), so --budget-usd can track
+// any model.
 //
 // Reasoning tokens (usage.completion_tokens_details.reasoning_tokens) are
 // part of completion_tokens and billed as output; they are summed and shown
@@ -38,6 +48,18 @@ const BASE_MODEL_PRICING = Object.freeze({
     inputPerMillion: 2.5,
     cachedInputPerMillion: 0.25,
     outputPerMillion: 15,
+    currency: 'USD',
+  }),
+  'gpt-6-luna': Object.freeze({
+    inputPerMillion: 0.1,
+    cachedInputPerMillion: 0.01,
+    outputPerMillion: 0.5,
+    currency: 'USD',
+  }),
+  'gpt-6-sol': Object.freeze({
+    inputPerMillion: 2,
+    cachedInputPerMillion: 0.2,
+    outputPerMillion: 10,
     currency: 'USD',
   }),
 });
@@ -84,6 +106,16 @@ function normalizeModelName(model) {
     .replace(/\s+/g, '-');
 }
 
+// The id a price is looked up by: without a vendor prefix (openai/...).
+function pricingModelId(model) {
+  const normalized = normalizeModelName(model);
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function isPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
 function normalizeTokenCount(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -105,11 +137,12 @@ function providerCostOf(usage) {
 }
 
 function resolveModelPricing(model) {
-  const normalized = normalizeModelName(model);
+  const normalized = pricingModelId(model);
   const overrides = getPricingOverrides();
+  const matches = (modelName) => normalized === modelName || normalized.startsWith(`${modelName}-`);
 
   for (const [modelName, pricing] of MODEL_PRICING_ENTRIES) {
-    if (normalized === modelName || normalized.startsWith(`${modelName}-`)) {
+    if (matches(modelName)) {
       const override = overrides[modelName];
       return {
         model: modelName,
@@ -119,7 +152,33 @@ function resolveModelPricing(model) {
     }
   }
 
+  // A model that is not listed: a complete override entry prices it (the
+  // longest matching key wins, like the listed rows).
+  const added = Object.entries(overrides)
+    .map(([name, pricing]) => [pricingModelId(name), pricing])
+    .filter(([name, pricing]) => name && pricing && typeof pricing === 'object' && isPrice(pricing.inputPerMillion) && isPrice(pricing.outputPerMillion) && matches(name))
+    .sort(([left], [right]) => right.length - left.length);
+  if (added.length > 0) {
+    const [name, pricing] = added[0];
+    return {
+      model: name,
+      inputPerMillion: pricing.inputPerMillion,
+      ...(isPrice(pricing.cachedInputPerMillion) ? { cachedInputPerMillion: pricing.cachedInputPerMillion } : {}),
+      outputPerMillion: pricing.outputPerMillion,
+      currency: typeof pricing.currency === 'string' ? pricing.currency : 'USD',
+    };
+  }
+
   return null;
+}
+
+/**
+ * Whether `model` has a price (a listed row or a MODEL_PRICING_OVERRIDES
+ * entry), i.e. whether its cost, and so a --budget-usd cap, can be computed
+ * before any call.
+ */
+export function hasModelPrice(model) {
+  return resolveModelPricing(model) !== null;
 }
 
 function formatTokenCount(value) {

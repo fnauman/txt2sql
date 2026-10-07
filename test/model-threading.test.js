@@ -7,7 +7,7 @@ import { normalizeBenchmarkCase } from '../src/benchmark.js';
 import { renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 import { createBufferedTraceLogger, loadOptimizedQueryRuntime, resolveRunModelSettings, runOptimizedQuestion } from '../src/query-service.js';
-import { describeRunnerFlags, parseEvalArgs, runEval, USAGE, validateEvalArgv } from '../scripts/eval.js';
+import { budgetPricingRefusal, describeRunnerFlags, parseEvalArgs, runEval, USAGE, validateEvalArgv } from '../scripts/eval.js';
 import { evaluateQuestion } from '../scripts/evaluate.js';
 
 // The model, its source and the reasoning effort travel from the settings
@@ -320,4 +320,15 @@ test('provenance records the model, its source, the effort and the request optio
   const markdown = renderReportMarkdown(report);
   assert.match(markdown, /^# Evaluation report: all · gpt-6-luna \(reasoning effort low\)\n/);
   assert.match(markdown, /\| Model settings \| model from MODEL_NAME; reasoning effort low \(--reasoning-effort\); request options: max_completion_tokens 16000, reasoning_effort low \|/);
+});
+
+test('a paid eval with --budget-usd refuses to start for a model without a price', () => {
+  assert.equal(budgetPricingRefusal(parseEvalArgs(['--budget-usd', '1'], { env: {} })), null);
+  assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--budget-usd', '1'], { env: {} })), null);
+  assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'openai/gpt-6-luna', '--budget-usd', '1'], { env: {} })), null);
+  assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'acme/sql-1'], { env: {} })), null, 'no budget: nothing to enforce');
+  assert.match(
+    budgetPricingRefusal(parseEvalArgs(['--model', 'anthropic/claude-sonnet-4.5', '--budget-usd', '1'], { env: {} })),
+    /^--budget-usd needs a price for model "anthropic\/claude-sonnet-4\.5" \(src\/pricing\.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion\); without it the budget cannot be enforced, so the run does not start\.$/
+  );
 });

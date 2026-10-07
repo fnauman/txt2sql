@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { generateBasicSql, generateOptimizedResponse } from '../src/pipeline.js';
-import { calculateCost, formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
+import { calculateCost, formatUsageAndCost, hasModelPrice, mergeCosts, mergeUsage } from '../src/pricing.js';
 
 function createMockClient(content) {
   return {
@@ -305,4 +305,44 @@ test('calculateCost applies MODEL_PRICING_OVERRIDES parsed after env load', () =
 
   // Removing the override restores the base rate (memo re-parses on change).
   assert.equal(calculateCost('gpt-4o-mini', usage).inputCost, 0.15);
+});
+
+// gpt-6-luna and gpt-6-sol: OpenAI's published prices, verified 2026-10-07.
+test('calculateCost prices gpt-6-luna and gpt-6-sol, also under a vendor prefix (OpenRouter ids)', () => {
+  const usage = { prompt_tokens: 2_000_000, completion_tokens: 1_000_000, prompt_tokens_details: { cached_tokens: 1_000_000 } };
+  const luna = calculateCost('gpt-6-luna', usage);
+  assert.deepEqual([luna.model, luna.inputCost, luna.outputCost, luna.totalCost], ['gpt-6-luna', 0.11, 0.5, 0.61]);
+  const sol = calculateCost('gpt-6-sol', usage);
+  assert.deepEqual([sol.model, sol.inputCost, sol.outputCost, sol.totalCost], ['gpt-6-sol', 2.2, 10, 12.2]);
+  // openai/gpt-6-luna is the same row; a dated snapshot too.
+  assert.deepEqual(calculateCost('openai/gpt-6-luna', usage), luna);
+  assert.deepEqual(calculateCost('OpenAI/GPT-6-Luna', usage), luna);
+  assert.equal(calculateCost('gpt-6-luna-2026-09-30', usage).model, 'gpt-6-luna');
+  assert.equal(calculateCost('openai/gpt-4o-mini', usage).model, 'gpt-4o-mini');
+  // An OpenRouter variant is priced differently, so it is not this row.
+  assert.equal(calculateCost('openai/gpt-6-luna:free', usage), null);
+  assert.equal(hasModelPrice('openai/gpt-6-luna'), true);
+  assert.equal(hasModelPrice('openai/gpt-6-luna:free'), false);
+  assert.equal(hasModelPrice('gpt-6'), false, 'no row for the bare family name');
+});
+
+test('MODEL_PRICING_OVERRIDES can add a model that is not listed, only with both input and output prices', () => {
+  const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
+  assert.equal(hasModelPrice('acme/sql-1'), false);
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({
+    'acme/sql-1': { inputPerMillion: 1, cachedInputPerMillion: 0.5, outputPerMillion: 3 },
+    'half-priced': { inputPerMillion: 1 },
+    negative: { inputPerMillion: -1, outputPerMillion: 1 },
+  });
+  try {
+    const cost = calculateCost('acme/sql-1', usage);
+    assert.deepEqual([cost.model, cost.inputCost, cost.outputCost, cost.totalCost], ['sql-1', 1, 3, 4]);
+    // Keyed without the vendor prefix, like the listed rows.
+    assert.equal(calculateCost('other-vendor/sql-1-2026', usage).totalCost, 4);
+    assert.equal(hasModelPrice('half-priced'), false);
+    assert.equal(hasModelPrice('negative'), false);
+  } finally {
+    delete process.env.MODEL_PRICING_OVERRIDES;
+  }
+  assert.equal(hasModelPrice('acme/sql-1'), false);
 });

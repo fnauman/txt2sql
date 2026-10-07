@@ -548,9 +548,9 @@ Every LLM call automatically estimates token costs based on the model used. Cost
 
 Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset (`DEFAULT_MODEL` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
-Supported cost estimates: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
+Supported cost estimates: `gpt-4o-mini`, `gpt-6-luna` ($0.10 input, $0.01 cached input, $0.50 output per 1M tokens) and `gpt-6-sol` ($2, $0.20, $10; both OpenAI's published prices, verified 2026-10-07), `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`). A model id is looked up without its vendor prefix, so OpenRouter's `openai/gpt-6-luna` gets the `gpt-6-luna` price (a variant such as `openai/gpt-6-luna:free` does not).
 
-To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. Models that are not listed above cannot be added this way, and malformed JSON is ignored.
+To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. An entry for a model that is not listed adds it when it has both `inputPerMillion` and `outputPerMillion` (`cachedInputPerMillion` optional), keyed like the listed rows (without a vendor prefix). Malformed JSON is ignored. `npm run eval -- --budget-usd X` refuses to start for a model without a price: its spend, and so the budget, could not be tracked.
 
 Example CLI output:
 

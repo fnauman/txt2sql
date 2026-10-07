@@ -194,3 +194,46 @@ test('an effort that does not fit the model never reaches the provider', async (
   await assert.rejects(generateBasicSql({ client, model: 'gpt-6-luna', prompt, modelConfig: { reasoningEffort: 'extreme' } }), { code: 'INVALID_CONFIG' });
   assert.equal(received.length, before);
 });
+
+test('a reasoning model\'s usage with completion_tokens_details.reasoning_tokens is recorded and costed (gpt-6-luna)', async () => {
+  const usage = {
+    prompt_tokens: 2000,
+    completion_tokens: 900,
+    total_tokens: 2900,
+    prompt_tokens_details: { cached_tokens: 1024 },
+    completion_tokens_details: { reasoning_tokens: 640 },
+  };
+  const usageServer = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) {
+      body += chunk;
+    }
+    const parsed = JSON.parse(body);
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        id: 'chatcmpl-usage',
+        object: 'chat.completion',
+        model: parsed.model,
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ sql: 'SELECT 1', explanation: '', tables_used: [], assumptions: [] }) } }],
+        usage,
+      })
+    );
+  });
+  await new Promise((resolve) => usageServer.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = createOpenAiClient({ env: { OPENAI_API_KEY: FAKE_KEY, OPENAI_BASE_URL: `http://127.0.0.1:${usageServer.address().port}/v1`, OPENAI_MAX_RETRIES: '0' } });
+    const result = await generateOptimizedResponse({ client, model: 'gpt-6-luna', prompt, modelConfig: { reasoningEffort: 'medium' } });
+    assert.deepEqual(result.usage, usage);
+    // $0.10 / $0.01 cached / $0.50 per 1M: 976 uncached + 1024 cached input, 900 output (640 of them reasoning).
+    assert.deepEqual(
+      { model: result.cost.model, reasoningTokens: result.cost.reasoningTokens, inputCost: result.cost.inputCost, outputCost: result.cost.outputCost, totalCost: result.cost.totalCost },
+      { model: 'gpt-6-luna', reasoningTokens: 640, inputCost: 0.00010784, outputCost: 0.00045, totalCost: 0.00055784 }
+    );
+    // The same id through OpenRouter is the same price.
+    const routed = await generateOptimizedResponse({ client, model: 'openai/gpt-6-luna', prompt, modelConfig: { reasoningEffort: 'medium' } });
+    assert.equal(routed.cost.totalCost, 0.00055784);
+  } finally {
+    await new Promise((resolve) => usageServer.close(resolve));
+  }
+});

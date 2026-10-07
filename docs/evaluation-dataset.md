@@ -1317,7 +1317,9 @@ dev|holdout|all` (default all), `--case-id`, `--tag` (any of), `--intent`;
 (in a rescore too). `--fixtures` scores on a subset (it must include `seed`).
 Flags are checked strictly: an unknown flag, a flag missing its value or a
 stray argument stops with exit 2 before anything starts. A live run also
-checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price) before
+checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price: a row
+in `src/pricing.js`, found without a vendor prefix, or a
+`MODEL_PRICING_OVERRIDES` entry; without one the run refuses to start) before
 the database is touched.
 
 `npm run benchmark` and `npm run evaluate` run the same runner with `--profile
