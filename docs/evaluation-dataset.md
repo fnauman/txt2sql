@@ -1416,8 +1416,9 @@ rule).
 - **Cost, latency, retries, tokens** (every case, behaviour cases included;
   dev cases only while the holdout is hidden): total cost, cost per question
   and per correct answer, p50/p95 product-loop and LLM-call latency, retry
-  rate, prompt (cached) and completion tokens, the budget (always the whole
-  run's spend).
+  rate, prompt (cached) and completion tokens ("completion N (reasoning M)"
+  when a reasoning model reported reasoning tokens, which are part of the
+  completion tokens), the budget (always the whole run's spend).
 - **Verification**: fixture status, the kill rates per dataset, and the
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).

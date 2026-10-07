@@ -17,7 +17,8 @@
 //   failure, its validation and execution verdicts), which the replay
 //   re-judges; top-level suite, runner, oracle, budget, provenance;
 // - the statistics of a rescore (stats.js): llm_cost.totalCost, llm_usage
-//   (prompt, completion, total and cached tokens), timings, attempt_count and
+//   (prompt, completion, total, cached and reasoning tokens; a
+//   provider-reported cost), timings, attempt_count and
 //   each attempt's llm.durationMs and retry flag;
 // - the dataset hygiene test: id and question of every recorded case.
 //
@@ -124,7 +125,8 @@ function shortMessage(message) {
 }
 
 // Token usage as the runner sums it (pricing.js mergeUsage): the provider's
-// per-call breakdowns (audio, reasoning, prediction tokens) are dropped.
+// other per-call breakdowns (audio, prediction tokens) are dropped; reasoning
+// tokens are kept when there are any, and so is a provider-reported cost.
 function compactUsage(usage) {
   if (!usage || typeof usage !== 'object') {
     return usage ?? null;
@@ -133,6 +135,13 @@ function compactUsage(usage) {
   const cached = usage.prompt_tokens_details?.cached_tokens;
   if (cached !== undefined && cached !== null) {
     out.prompt_tokens_details = { cached_tokens: cached };
+  }
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  if (typeof reasoning === 'number' && reasoning > 0) {
+    out.completion_tokens_details = { reasoning_tokens: reasoning };
+  }
+  if (typeof usage.cost === 'number' && Number.isFinite(usage.cost)) {
+    out.cost = usage.cost;
   }
   return out;
 }

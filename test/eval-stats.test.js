@@ -146,7 +146,7 @@ test('run statistics treat the case as the unit and cluster by intent', () => {
   assert.equal(stats.retries.retryCalls, 3);
   assert.equal(stats.latency.questionWallMs.p50, 2000);
   assert.equal(stats.latency.llmCallMs.p95, 3000);
-  assert.deepEqual(stats.tokens, { prompt: 900, cached: 360, completion: 90, total: 990 });
+  assert.deepEqual(stats.tokens, { prompt: 900, cached: 360, completion: 90, reasoning: 0, total: 990 });
   assert.deepEqual(stats.repetitions.excludedByOutcome, { skipped_budget: 3 });
   // Deterministic.
   assert.deepEqual(stats, summarizeRunStatistics(records, { resamples: 1000 }));

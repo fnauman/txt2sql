@@ -219,7 +219,8 @@ export function summarizeRunUsage(caseRecords) {
   const questionMs = (repetition) => repetition.timings?.questionMs ?? repetition.timings?.totalMs;
   const caseMs = (repetition) => repetition.timings?.totalMs;
   const llmCalls = executed.flatMap((repetition) => (repetition.attempts || []).filter((attempt) => attempt.llm));
-  const tokens = { prompt: 0, cached: 0, completion: 0, total: 0 };
+  // Reasoning tokens are part of completion (reported by reasoning models).
+  const tokens = { prompt: 0, cached: 0, completion: 0, reasoning: 0, total: 0 };
   for (const repetition of executed) {
     const usage = repetition.llm_usage;
     if (!usage) {
@@ -229,6 +230,7 @@ export function summarizeRunUsage(caseRecords) {
     tokens.completion += usage.completion_tokens || 0;
     tokens.total += usage.total_tokens || 0;
     tokens.cached += usage.prompt_tokens_details?.cached_tokens || 0;
+    tokens.reasoning += usage.completion_tokens_details?.reasoning_tokens || 0;
   }
 
   return {

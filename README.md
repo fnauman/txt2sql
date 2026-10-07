@@ -571,7 +571,7 @@ LLM attempt 2: $0.001800 (1100 input + 210 output tokens, gpt-5.4-mini)
 Total LLM: $0.003450 (2100 input + 410 output tokens, gpt-5.4-mini)
 ```
 
-For unknown models, the output shows `cost unavailable` with the token counts still visible.
+For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is also kept next to the estimate for priced models (`providerCost`). Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
 
 Quick test (no DB or API key needed):
 

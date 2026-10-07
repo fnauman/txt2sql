@@ -817,7 +817,11 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
       'Retry rate',
       `${formatPercent(retries.rate)} of questions (${retries.questionsWithRetry}/${retries.questions}); ${retries.retryCalls} of ${retries.llmCalls} LLM calls were retries`,
     ],
-    ['Tokens', `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}`],
+    [
+      'Tokens',
+      `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}` +
+        (tokens.reasoning > 0 ? ` (reasoning ${formatCount(tokens.reasoning)})` : ''),
+    ],
   ];
   const rows = noListedCase ? [] : usageRows;
   if (report.budget?.limitUsd != null) {

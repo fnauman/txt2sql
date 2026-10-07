@@ -9,6 +9,12 @@
 //
 // Override without editing code by setting MODEL_PRICING_OVERRIDES to a JSON map,
 // e.g. MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'.
+//
+// Reasoning tokens (usage.completion_tokens_details.reasoning_tokens) are
+// part of completion_tokens and billed as output; they are summed and shown
+// separately. A cost the provider reports itself (usage.cost, as OpenRouter
+// does) is kept as providerCost next to the estimate, and is the cost when
+// the model has no price here.
 const BASE_MODEL_PRICING = Object.freeze({
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
@@ -87,6 +93,17 @@ function roundCurrency(value) {
   return Number(value.toFixed(12));
 }
 
+// The provider's own breakdowns: reasoning tokens (part of completion_tokens)
+// and a reported cost in USD; null when the usage does not carry them.
+function reasoningTokensOf(usage) {
+  return normalizeTokenCount(usage?.completion_tokens_details?.reasoning_tokens);
+}
+
+function providerCostOf(usage) {
+  const value = usage?.cost;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 function resolveModelPricing(model) {
   const normalized = normalizeModelName(model);
   const overrides = getPricingOverrides();
@@ -113,8 +130,10 @@ export function calculateCost(model, usage) {
   const pricing = resolveModelPricing(model);
   const promptTokens = normalizeTokenCount(usage?.prompt_tokens);
   const completionTokens = normalizeTokenCount(usage?.completion_tokens);
+  const reasoningTokens = reasoningTokensOf(usage);
+  const providerCost = providerCostOf(usage);
 
-  if (!pricing || promptTokens === null || completionTokens === null) {
+  if (promptTokens === null || completionTokens === null || (!pricing && providerCost === null)) {
     return null;
   }
 
@@ -124,6 +143,25 @@ export function calculateCost(model, usage) {
   );
   const uncachedPromptTokens = promptTokens - cachedPromptTokens;
   const totalTokens = normalizeTokenCount(usage?.total_tokens) ?? promptTokens + completionTokens;
+  if (!pricing) {
+    // No price here: the provider's reported cost is the cost (with no input /
+    // output split to estimate).
+    return {
+      model: normalizeModelName(model),
+      currency: 'USD',
+      source: 'provider',
+      promptTokens,
+      cachedPromptTokens,
+      uncachedPromptTokens,
+      completionTokens,
+      ...(reasoningTokens !== null ? { reasoningTokens } : {}),
+      totalTokens,
+      inputCost: 0,
+      outputCost: 0,
+      totalCost: roundCurrency(providerCost),
+      providerCost: roundCurrency(providerCost),
+    };
+  }
   const inputCost = roundCurrency(
     (uncachedPromptTokens / 1_000_000) * pricing.inputPerMillion +
       (cachedPromptTokens / 1_000_000) * (pricing.cachedInputPerMillion ?? pricing.inputPerMillion)
@@ -137,10 +175,12 @@ export function calculateCost(model, usage) {
     cachedPromptTokens,
     uncachedPromptTokens,
     completionTokens,
+    ...(reasoningTokens !== null ? { reasoningTokens } : {}),
     totalTokens,
     inputCost,
     outputCost,
     totalCost: roundCurrency(inputCost + outputCost),
+    ...(providerCost !== null ? { providerCost: roundCurrency(providerCost) } : {}),
   };
 }
 
@@ -153,6 +193,10 @@ export function mergeUsage(usages = []) {
   let hasUsage = false;
   let hasCachedPromptTokens = false;
   let cachedPromptTokens = 0;
+  let hasReasoningTokens = false;
+  let reasoningTokens = 0;
+  let hasProviderCost = false;
+  let providerCost = 0;
 
   for (const usage of usages) {
     const promptTokens = normalizeTokenCount(usage?.prompt_tokens);
@@ -172,6 +216,18 @@ export function mergeUsage(usages = []) {
       hasCachedPromptTokens = true;
       cachedPromptTokens += Math.min(promptTokens, Math.max(0, cachedTokens));
     }
+
+    const callReasoningTokens = reasoningTokensOf(usage);
+    if (callReasoningTokens !== null) {
+      hasReasoningTokens = true;
+      reasoningTokens += Math.min(completionTokens, Math.max(0, callReasoningTokens));
+    }
+
+    const callProviderCost = providerCostOf(usage);
+    if (callProviderCost !== null) {
+      hasProviderCost = true;
+      providerCost += callProviderCost;
+    }
   }
 
   if (!hasUsage) {
@@ -182,6 +238,16 @@ export function mergeUsage(usages = []) {
     totals.prompt_tokens_details = {
       cached_tokens: cachedPromptTokens,
     };
+  }
+
+  if (hasReasoningTokens) {
+    totals.completion_tokens_details = {
+      reasoning_tokens: reasoningTokens,
+    };
+  }
+
+  if (hasProviderCost) {
+    totals.cost = roundCurrency(providerCost);
   }
 
   return totals;
@@ -201,6 +267,10 @@ export function mergeCosts(costs = []) {
   let uncachedPromptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
+  let hasReasoningTokens = false;
+  let reasoningTokens = 0;
+  let hasProviderCost = false;
+  let providerCost = 0;
 
   for (const cost of costs) {
     if (!cost) {
@@ -232,6 +302,14 @@ export function mergeCosts(costs = []) {
       completionTokens += normalizeTokenCount(cost.completionTokens) ?? 0;
       totalTokens += normalizeTokenCount(cost.totalTokens) ?? 0;
     }
+    if (normalizeTokenCount(cost.reasoningTokens) !== null) {
+      hasReasoningTokens = true;
+      reasoningTokens += normalizeTokenCount(cost.reasoningTokens);
+    }
+    if (typeof cost.providerCost === 'number' && Number.isFinite(cost.providerCost)) {
+      hasProviderCost = true;
+      providerCost = roundCurrency(providerCost + cost.providerCost);
+    }
   }
 
   if (!hasCost) {
@@ -246,6 +324,12 @@ export function mergeCosts(costs = []) {
     totals.completionTokens = completionTokens;
     totals.totalTokens = totalTokens;
   }
+  if (hasReasoningTokens) {
+    totals.reasoningTokens = reasoningTokens;
+  }
+  if (hasProviderCost) {
+    totals.providerCost = providerCost;
+  }
 
   return totals;
 }
@@ -255,18 +339,21 @@ export function formatUsageAndCost({ usage = null, cost = null, model = null } =
   const completionTokens = normalizeTokenCount(usage?.completion_tokens) ?? normalizeTokenCount(cost?.completionTokens);
   const cachedPromptTokens =
     normalizeTokenCount(usage?.prompt_tokens_details?.cached_tokens) ?? normalizeTokenCount(cost?.cachedPromptTokens);
+  const reasoningTokens = reasoningTokensOf(usage) ?? normalizeTokenCount(cost?.reasoningTokens);
   const resolvedModel = cost?.model || normalizeModelName(model) || 'unknown-model';
   const cachedText =
     cachedPromptTokens !== null && cachedPromptTokens > 0 && promptTokens !== null && promptTokens > 0
       ? `, ${formatTokenCount(cachedPromptTokens)} cached input (${((cachedPromptTokens / promptTokens) * 100).toFixed(1)}%)`
       : '';
+  const reasoningText = reasoningTokens !== null && reasoningTokens > 0 ? ` incl. ${formatTokenCount(reasoningTokens)} reasoning` : '';
+  const sourceText = cost?.source === 'provider' ? ', cost reported by the provider' : '';
 
   if (cost) {
-    return `$${cost.totalCost.toFixed(6)} (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens, ${resolvedModel})`;
+    return `$${cost.totalCost.toFixed(6)} (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens${reasoningText}, ${resolvedModel}${sourceText})`;
   }
 
   if (promptTokens !== null || completionTokens !== null) {
-    return `cost unavailable (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens, ${resolvedModel})`;
+    return `cost unavailable (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens${reasoningText}, ${resolvedModel})`;
   }
 
   return `cost unavailable (${resolvedModel})`;
