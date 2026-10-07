@@ -633,9 +633,13 @@ const SEPARATE_MEASURE_WORDS = new Set([
 // "revenue + gross", "revenue/gross ratio" (splitWords drops them, so they
 // are read from the separator text).
 const MEASURE_JOINING_SYMBOLS = /[&+/]/;
-// Words after an amount in parentheses that add it to the metric instead of
-// qualifying it: "revenue (gross too)", "revenue (gross and net)".
-const PARENTHETICAL_ADDING_WORDS = new Set(['too', 'also', 'and', 'or', 'nor', 'plus', 'versus', 'vs', 'besides', 'alongside']);
+// Words that, as all that follows an amount inside parentheses, add it to the
+// metric instead of qualifying it: "revenue (gross too)", "revenue (gross as
+// well)". Anything else after it still qualifies the metric: "revenue (gross
+// and units)" is gross revenue and units, "revenue (gross/day)" gross revenue
+// per day, "revenue (gross or tax included)" one amount by two names; "net"
+// next to the amount ("revenue (gross and net)") is asksForNetMeasure's.
+const PARENTHETICAL_ADDING_TAIL_WORDS = new Set(['too', 'also', 'as', 'well']);
 // Nouns that, with "of", let an amount before the metric still qualify it:
 // "gross amount of revenue", "the gross value of revenue" (gross revenue).
 const AMOUNT_OF_NOUNS = new Set(['amount', 'amounts', 'value', 'values', 'total', 'totals', 'figure', 'figures']);
@@ -656,18 +660,18 @@ const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the
  *   "gross monthly revenue", "tax inclusive revenue"; or through "<amount
  *   noun> of": "gross amount of revenue";
  * - right after it, at most three glue words apart and no joining symbol
- *   between, when it is a tax phrase ("revenue including tax", "average
- *   order value, tax included": a tax phrase qualifies an amount and never
- *   names one), in parentheses unless an adding word or symbol follows it
- *   ("revenue (gross)", but not "revenue (gross too)" or "revenue (gross and
- *   net)"), as one word set off by commas or ending the clause ("revenue,
- *   gross, in March"), or with no comma between and no measure word after it
- *   ("revenue on a gross basis").
+ *   between: in parentheses unless only an adding tail follows it there
+ *   ("revenue (gross)", "revenue (gross and units)", but not "revenue (gross
+ *   too)"), as a tax phrase ("revenue including tax", "average order value,
+ *   tax included": a tax phrase qualifies an amount and never names one), as
+ *   one word set off by commas or ending the clause ("revenue, gross, in
+ *   March"), or with no comma between and no measure word after it ("revenue
+ *   on a gross basis").
  * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
  * and the bill total", "revenue & gross", "revenue/gross ratio") is a
  * separate measure. The net amount asked for next to the amount ("net and
- * gross revenue", "revenue including tax and excluding tax") is read by
- * asksForNetMeasure.
+ * gross revenue", "revenue (gross and net)", "revenue including tax and
+ * excluding tax") is read by asksForNetMeasure.
  */
 function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
   const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
@@ -703,24 +707,22 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
         if (MEASURE_JOINING_SYMBOLS.test(separators)) {
           return false;
         }
+        if (separators.includes('(')) {
+          // Inside the parentheses, only an adding tail after the amount
+          // makes it a second measure: "(gross too)", "(gross as well)",
+          // "(tax included too)".
+          const tail = [];
+          for (let index = other.end; index < questionWords.length && !separatorAt(index).includes(')'); index += 1) {
+            tail.push(questionWords[index].word);
+          }
+          const adds =
+            tail.length > 0 && tail.every((word) => PARENTHETICAL_ADDING_TAIL_WORDS.has(word)) && (!tail.includes('as') || tail.includes('well'));
+          return !adds;
+        }
         if (isTaxPhrase) {
           return true;
         }
         const nextWord = questionWords[other.end]?.word;
-        if (separators.includes('(')) {
-          // Inside the parentheses, an adding word or a joining symbol after
-          // the amount makes it a second measure: "(gross too)", "(gross as
-          // well)", "(gross and net)", "(gross & net)".
-          const after = separatorAt(other.end);
-          if (after.includes(')') || !nextWord) {
-            return true;
-          }
-          const adds =
-            MEASURE_JOINING_SYMBOLS.test(after) ||
-            PARENTHETICAL_ADDING_WORDS.has(nextWord) ||
-            (nextWord === 'as' && questionWords[other.end + 1]?.word === 'well');
-          return !adds;
-        }
         // An appositive single word, set off by commas and followed by a
         // period or grouping phrase, or ending the sentence: "average order
         // value, gross, in March", "revenue, gross?" (but not a list:

@@ -945,6 +945,48 @@ test('v2 layer: a negated or unrelated "net" leaves a modified metric a hint', (
   }
 });
 
+test('v2 layer: only an adding tail after an amount in parentheses makes it a second measure', () => {
+  // Fourth review: any adding word or joining symbol after the amount inside
+  // the parentheses enforced the metric, whatever followed, so "revenue
+  // (gross and units)", "(gross or tax included)" or "(gross/day)" rejected
+  // the gross SQL they ask for (version 2 accepted it before).
+  for (const [question, name] of [
+    ['Show revenue (gross and units) by customer for March 2026.', 'net_sales'],
+    ['Show revenue (gross, and units) by customer for March 2026.', 'net_sales'],
+    ['Show revenue (gross or tax included) by customer for March 2026.', 'net_sales'],
+    ['Show revenue (gross/tax included) for March 2026.', 'net_sales'],
+    ['Show revenue (gross plus shipping) by customer for March 2026.', 'net_sales'],
+    ['Show revenue (gross/day) for March 2026.', 'net_sales'],
+    ['Show revenue (tax included) and units for March 2026.', 'net_sales'],
+    ['Show the average order value (gross, and the count) for March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+    const sql = name === 'average_order_value' ? 'AVG(COALESCE(d.GrossAmount,0)) AS average_order_value' : 'ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue';
+    assert.equal(metricVerdict(question, `SELECT ${sql} ${marchDocuments}`), null, question);
+  }
+  // An adding tail, or the net amount next to the parenthesized one, is a
+  // second measure: the metric stays enforced and SUM(GrossAmount) as the
+  // revenue is rejected, as in version 1.
+  for (const [question, name] of [
+    ['Show revenue (gross too) in March 2026.', 'net_sales'],
+    ['Show revenue (gross, too) in March 2026.', 'net_sales'],
+    ['Show revenue (gross as well) in March 2026.', 'net_sales'],
+    ['Show revenue (gross also) in March 2026.', 'net_sales'],
+    ['Show revenue (tax included too) for March 2026.', 'net_sales'],
+    ['Show revenue (gross and net) for March 2026.', 'net_sales'],
+    ['Show revenue (gross & net) for March 2026.', 'net_sales'],
+    ['Show revenue (gross vs net) for March 2026.', 'net_sales'],
+    ['Show revenue (gross/net) for March 2026.', 'net_sales'],
+    ['Show average order value (gross too) in March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+  }
+  assert.equal(metricVerdict('Show revenue (tax included too) for March 2026.', `SELECT SUM(d.GrossAmount) AS revenue ${marchDocuments}`), 'METRIC_COLUMN');
+  assert.equal(metricVerdict('Show revenue (tax included too) for March 2026.', `SELECT SUM(d.GrossAmount) AS revenue ${marchDocuments}`, 1), 'METRIC_COLUMN');
+});
+
 test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
   const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
   assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);
