@@ -1632,7 +1632,8 @@ the datasets, the prompt or the default model or effort change on purpose.
 `npm run eval -- --model gpt-6-luna --reasoning-effort low --repeat 3
 --compare eval/baselines/gpt-4o-mini.json --holdout-summary --budget-usd 1.00
 --write-baseline --baseline-file <outside the repository>` on 2026-10-07 at
-commit `a57fa44` (a clean tree) and committed unchanged after the decision:
+commit `a57fa44` (a clean tree) and committed after the decision (its two
+local output paths in the runner flags replaced with `<outside the repository>`):
 gpt-6-luna at reasoning effort low (request options `max_completion_tokens`
 16000, `reasoning_effort` low; the default model at its default effort since
 then) at api.openai.com, `SCHEMA_SCOPE` unset (`auto` → `full`),

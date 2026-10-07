@@ -202,8 +202,10 @@ npm run eval -- --model gpt-6-luna --reasoning-effort medium --repeat 3 \
 
 (plus `--no-docker` and an `--output-dir`). Each saved a compact copy of its
 report outside `eval/baselines/` (step 4: no re-baselining in the run); after
-the decision the low arm's copy was committed unchanged as
-`eval/baselines/gpt-6-luna.low.json`. The medium arm's is not committed. Both
+the decision the low arm's copy was committed as
+`eval/baselines/gpt-6-luna.low.json`, unchanged except that the two local
+paths in its recorded runner flags (`baselineFile`, `outputDir`) read
+`<outside the repository>/…`. The medium arm's is not committed. Both
 runs completed every case (no budget stop) and paired all 392 answer cases
 with the reference (no gold or scoring change between `4ff6ecb` and
 `a57fa44`). The rows marked dev cover the dev cases, as report.md prints
