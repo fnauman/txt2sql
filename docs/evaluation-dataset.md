@@ -892,12 +892,22 @@ comparison: {
   exist. **Empty results**: two empty results match; an empty result never
   equals one row (unless the case opts into `empty_as_zero`, below).
 - **ranked**: the bijection must exist **and** the model's primary value column
-  must be monotonic in `order` (tie reordering by label is tolerated; NULL
-  metrics sort last; values compare as cells match, so two values that both
-  match one gold value tie: rounded to `decimals`, a NULL under
-  `null_as_zero` and 0.004 tie at two decimals; with a tolerance, values within
-  twice it tie, as 9.992 and 10.008 both match a gold 10 at 0.01). The default ranking column is the first truly numeric
-  gold column, never a numeric-looking code string.
+  must be monotonic in `order` up to ties (tie reordering by label is
+  tolerated; NULL metrics sort last). Without a tolerance values compare as cells match, so
+  two values that both match one gold value tie: rounded to `decimals`, a
+  NULL under `null_as_zero` and 0.004 tie at two decimals. With a tolerance
+  the column's own order compares unrounded, so a prediction sorted by its
+  own values always passes the order check (per-line `ROUND` sums can flip a
+  near-tie of two distinct gold values by a cent: gold Zeta 100.01, Alpha
+  100.00 and prediction Alpha 100.01, Zeta 100.00), and a column out of its
+  own order passes only by the row matching: the gold rows the prediction's
+  rows pair with must come in the gold's ranking order, so two out-of-order
+  rows tie only when they pair with equal gold values, as 9.992 listed
+  before 10.008 (descending) both pairing with a gold 10 at 0.01. Gold rows
+  10.015 and 10 are distinct ranks even though their values are within twice
+  the tolerance, so 10 listed before 10.015 fails, and at a cut-off the boundary
+  rows and their ties rank as one tie. The default ranking column is the
+  first truly numeric gold column, never a numeric-looking code string.
 - **Ties at the cut-off** (ranked only): when a gold variant returns as many
   rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), the
   oracle reads it past that `LIMIT` and passes the left-out rows as
