@@ -5,7 +5,7 @@ import { completionSettingsOf, describeModelConfig, modelFileLabel, resolveCompl
 import { compareReports } from '../src/eval/compare.js';
 import { collectProvenance, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { normalizeBenchmarkCase } from '../src/benchmark.js';
-import { renderComparisonConsole, renderReportMarkdown } from '../src/eval/report-markdown.js';
+import { renderComparisonConsole, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 import { createBufferedTraceLogger, loadOptimizedQueryRuntime, resolveRunModelSettings, runOptimizedQuestion } from '../src/query-service.js';
 import {
@@ -374,6 +374,8 @@ test('provenance records the model, its source, the effort and the request optio
   const markdown = renderReportMarkdown(report);
   assert.match(markdown, /^# Evaluation report: all · gpt-6-luna \(reasoning effort low\)\n/);
   assert.match(markdown, /\| Model settings \| model from MODEL_NAME; reasoning effort low \(--reasoning-effort\); request options: max_completion_tokens 16000, reasoning_effort low \|/);
+  // The console headline names the model with its effort too.
+  assert.match(renderHeadline(report), /, 1 repetition\(s\), gpt-6-luna \(reasoning effort low\)\n/);
 });
 
 test('a paid eval with --budget-usd refuses to start for a model without a price', () => {
