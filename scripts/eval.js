@@ -598,7 +598,7 @@ export function minAccuracyRefusal({ gate = false, minAccuracy = null } = {}, te
  * any failed case in a single-repetition run: an answer case that did not
  * pass, or an abstain / clarify case the model answered); else 0.
  */
-export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false, revealHoldout = false } = {}) {
+export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false, revealHoldout = false, holdoutSummary = false } = {}) {
   // A rescore keeps outcomes it could not re-check (a recorded outage or a
   // run cut short); only what happened today counts as a harness failure.
   const repetitions = (report.results || []).flatMap((record) => record.repetitions || []);
@@ -662,15 +662,22 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     // counts: every case's counts minus the dev ones would be the holdout's
     // flips. With no holdout case paired (a baseline-only holdout case, say)
     // the counts are the dev comparison's own. A comparison without its
-    // pairs is treated as pairing its holdout cases.
+    // pairs is treated as pairing its holdout cases. holdoutSummary
+    // (--holdout-summary) changes neither the code nor the counts withheld,
+    // only where the reason points: the paired holdout cases' aggregate line
+    // (when the comparison has its pairs, as that line needs).
     const holdoutIds = new Set(report.comparison?.holdoutCases || []);
     const pairs = report.comparison?.pairedCases;
     const holdoutPaired = Array.isArray(pairs) ? pairs.some((entry) => holdoutIds.has(entry.id)) : holdoutIds.size > 0;
     const holdoutHidden = !revealHoldout && holdoutPaired;
     if (report.comparison?.verdict === 'worse' && holdoutHidden) {
+      const shown =
+        holdoutSummary && Array.isArray(pairs)
+          ? 'report.md shows the dev cases and, in one line (--holdout-summary), the paired holdout cases in aggregate; --reveal-holdout every case'
+          : 'report.md shows the dev cases, --reveal-holdout every case';
       failures.push(
         'significantly worse than the baseline (exact McNemar test over every paired case, holdout included; its counts are not shown while ' +
-          'the holdout is hidden: report.md shows the dev cases, --reveal-holdout every case)'
+          `the holdout is hidden: ${shown})`
       );
     } else if (report.comparison?.verdict === 'worse') {
       failures.push(

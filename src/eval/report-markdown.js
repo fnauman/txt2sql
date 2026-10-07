@@ -79,16 +79,20 @@ function byPairedOutcome(left, right) {
  * --holdout-summary: the paired holdout cases of a recorded comparison in
  * aggregate (the comparison's holdout cases that are paired, which the dev
  * figures leave out): summarizePairs over them, with the comparison's alpha
- * and bootstrap settings, so the counts, accuracies, accuracy change and
- * McNemar p are those of the holdout subset of the full comparison that
- * --reveal-holdout lists. Null without a comparison, without its pairs (a
- * comparison recorded before they were stored) or without a paired holdout
- * case. Each pair keeps only its outcome (pass rates, majority verdicts: no
- * id, question or outcome name), in a canonical order of outcomes instead of
- * by id: the bootstrap draws cases by position, so in id order its interval
- * would move with WHICH holdout cases flipped; in this order every figure
- * depends only on the paired outcomes, and two runs whose holdout pairs
- * differ only in which cases they are print the same line.
+ * and bootstrap settings. The number of pairs, the flips, the 2x2 table, the
+ * McNemar p and the verdict are exactly those of the holdout subset of the
+ * full comparison that --reveal-holdout lists; the accuracies and their
+ * change are too, up to the order of a floating-point sum (at a rounding tie
+ * of round(), one unit in the 4th decimal, which can move the last printed
+ * digit by one; exact with one repetition, where pass rates are 0 or 1).
+ * Null without a comparison, without its pairs (a comparison recorded before
+ * they were stored) or without a paired holdout case. Each pair keeps only
+ * its outcome (pass rates, majority verdicts: no id, question or outcome
+ * name), in a canonical order of outcomes instead of by id: the bootstrap
+ * draws cases by position, so in id order its interval (and, at a tie, a
+ * sum) would move with WHICH holdout cases flipped; in this order every
+ * figure depends only on the paired outcomes, and two runs whose holdout
+ * pairs differ only in which cases they are print the same line.
  */
 export function holdoutPairSummary(comparison) {
   const holdout = new Set(comparison?.holdoutCases || []);

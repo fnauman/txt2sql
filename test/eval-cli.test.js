@@ -72,10 +72,41 @@ test('--holdout-summary is an opt-in boolean output flag, documented in --help, 
   assert.throws(() => parseEvalArgs(['--holdout-sumary'], { env: {} }), /Did you mean --holdout-summary\?/);
   assert.match(USAGE, /\n {2}--holdout-summary {11}add one line for the comparison's paired holdout cases in aggregate\n/);
   assert.match(USAGE, /only to conclude a pre-registered\n {30}experiment, never while designing a change\n/);
-  // The gate's reason withholds the holdout's counts as before.
-  const withHoldout = { verdict: 'worse', mcnemar: { regressions: 6, improvements: 0, p: 0.03125 }, holdoutCases: ['h1'], pairedCases: [{ id: 'h1' }] };
+  // The gate decides the same and its reason still withholds every count;
+  // it only also points at the line, when the line is printed (a paired
+  // holdout case, pairs recorded).
+  const withHoldout = {
+    verdict: 'worse',
+    paired: 8,
+    candidateCases: 8,
+    mcnemar: { regressions: 6, improvements: 0, p: 0.03125 },
+    holdoutCases: ['h1'],
+    pairedCases: [{ id: 'h1' }],
+  };
   const report = { attribution: { repetitions: { byOutcome: { pass: 3 } } }, stats: { strictAccuracy: { value: 0.75 }, repeat: 1 }, comparison: withHoldout, results: [] };
-  assert.deepEqual(computeExitCode(report, { ...options, gate: true }), computeExitCode(report, { gate: true }));
+  const plain = computeExitCode(report, { gate: true });
+  const summarized = computeExitCode(report, { ...options, gate: true });
+  assert.equal(summarized.code, plain.code);
+  assert.equal(summarized.code, 1);
+  assert.equal(
+    plain.reasons[0],
+    'significantly worse than the baseline (exact McNemar test over every paired case, holdout included; its counts are not shown while ' +
+      'the holdout is hidden: report.md shows the dev cases, --reveal-holdout every case)'
+  );
+  assert.equal(
+    summarized.reasons[0],
+    'significantly worse than the baseline (exact McNemar test over every paired case, holdout included; its counts are not shown while ' +
+      'the holdout is hidden: report.md shows the dev cases and, in one line (--holdout-summary), the paired holdout cases in aggregate; ' +
+      '--reveal-holdout every case)'
+  );
+  assert.doesNotMatch(summarized.reasons[0], /\d|h1/);
+  // No line without the pairs (a comparison recorded before they were
+  // stored), and nothing to point at once the holdout is revealed.
+  const legacy = { ...report, comparison: { ...withHoldout, pairedCases: undefined } };
+  assert.deepEqual(computeExitCode(legacy, { ...options, gate: true }), computeExitCode(legacy, { gate: true }));
+  const revealed = { ...options, revealHoldout: true, gate: true };
+  assert.deepEqual(computeExitCode(report, revealed), computeExitCode(report, { gate: true, revealHoldout: true }));
+  assert.match(computeExitCode(report, revealed).reasons[0], /: 6 regression\(s\) vs 0 improvement\(s\)/);
 });
 
 test('bad usage is a harness error (exit 2)', () => {
