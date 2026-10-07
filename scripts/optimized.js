@@ -11,8 +11,10 @@ import {
   loadNarrowSchema,
   printRows,
   reportQueryUserPrivileges,
+  resolveEffectiveSchemaScope,
   resolveStatementTimeoutMs,
 } from '../src/pipeline.js';
+import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
@@ -23,7 +25,9 @@ const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
 const USAGE = `Usage: npm run optimized -- [question] [--refresh-schema] [--trace] [--trace-file <path>]
 ${ENV_USAGE}
-Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).`;
+Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).
+Schema scope: SCHEMA_SCOPE=auto|full|retrieved (default auto), SCHEMA_FULL_MAX_TOKENS (default 8000),
+SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).`;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -36,6 +40,7 @@ async function main() {
   // Validate up front so a bad value fails the run, not every question.
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const maxRetries = resolveMaxRetries();
+  const schemaScope = resolveSchemaScopeConfig();
   const refreshSchema = hasOptionFlag(argv, '--refresh-schema');
   const traceOptions = resolveTraceOptions(argv);
   const trace = await createTraceLogger({
@@ -66,6 +71,7 @@ async function main() {
     traceFile: trace.filePath,
     statementTimeoutMs,
     maxRetries,
+    schemaScope,
   });
 
   let schema;
@@ -85,9 +91,11 @@ async function main() {
     throw error;
   }
 
+  const effectiveSchemaScope = resolveEffectiveSchemaScope(schema, schemaScope);
   await trace.emit('schema.loaded', {
     ...schemaTimer.stop(),
     schemaPath: SCHEMA_PATH,
+    schemaScope: effectiveSchemaScope,
     schema: describeSchema(schema),
   });
 
@@ -130,6 +138,7 @@ async function main() {
   cli.log(`Model: ${model}`);
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);
+  cli.log(`Schema scope: ${describeSchemaScope(effectiveSchemaScope)}`);
 
   let failureCount = 0;
   const runUsages = [];
@@ -147,6 +156,7 @@ async function main() {
         trace,
         maxRetries,
         statementTimeoutMs,
+        schemaScope,
       });
 
       if (result.llmUsage) {
@@ -164,7 +174,15 @@ async function main() {
       if (result.llmUsage || result.llmCost) {
         cli.log(`Total LLM: ${formatUsageAndCost({ usage: result.llmUsage, cost: result.llmCost, model })}`);
       }
-      cli.log(`Retrieved tables: ${result.promptTables.join(', ')}`);
+      if (result.schemaScope?.effective === 'full') {
+        cli.log(`Allowed tables: all ${result.promptTables.length} in-scope tables (full schema scope)`);
+        cli.log(`Ranked tables (hint): ${(result.rankedTables || []).join(', ') || '(none: no table matched the question)'}`);
+      } else {
+        cli.log(`Retrieved tables: ${result.promptTables.join(', ')}`);
+      }
+      if (result.schemaScope?.widenedTables?.length) {
+        cli.log(`Widened on demand: ${result.schemaScope.widenedTables.join(', ')}`);
+      }
       const masterDataCandidateCount = (result.masterDataCandidates || []).reduce(
         (count, group) => count + (group.totalCandidateCount || 0),
         0

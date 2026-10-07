@@ -55,9 +55,9 @@ test('buildOptimizedPrompt puts schema before volatile question context for cach
   assert.ok(prompt.context.promptCache.dynamicEstimatedTokens > 0);
 });
 
-test('buildOptimizedPrompt keeps question-ranked columns out of cacheable prefix', () => {
-  const column20Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn20 customers');
-  const column30Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn30 customers');
+test('buildOptimizedPrompt keeps question-ranked columns out of cacheable prefix (retrieved scope)', () => {
+  const column20Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn20 customers', { schemaScope: 'retrieved' });
+  const column30Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn30 customers', { schemaScope: 'retrieved' });
 
   assert.equal(cacheableUserPrefix(column20Prompt), cacheableUserPrefix(column30Prompt));
   assert.notEqual(column20Prompt.user, column30Prompt.user);
@@ -76,4 +76,15 @@ test('basic and optimized prompts both tell the model not to write SQL comments'
   assert.match(NO_SQL_COMMENTS_RULE, /\/\* \*\//);
   // The rule matches the validator: a commented query is rejected.
   assert.throws(() => validateSqlSafety('SELECT 1 -- note', []), { code: 'SQL_COMMENT' });
+});
+
+test('full scope: one cacheable prefix for every question, no ranked schema block, question-matched columns in the hint', () => {
+  const column20Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn20 customers', { schemaScope: 'full' });
+  const column30Prompt = buildOptimizedPrompt(wideSchema, 'List CustomerColumn30 customers', { schemaScope: 'full' });
+
+  assert.equal(cacheableUserPrefix(column20Prompt), cacheableUserPrefix(column30Prompt));
+  const dynamic = column30Prompt.user.slice(cacheableUserPrefix(column30Prompt).length);
+  assert.doesNotMatch(column30Prompt.user, /Question-ranked schema details:/);
+  assert.match(dynamic, /Retrieval relevance hint \(a ranking only; every allowed table may be used\):\n- Most relevant tables\/columns for this question: Customer \(CustomerColumn30\)/);
+  assert.equal(column30Prompt.context.promptCache.messageLayout[1].cacheBehavior, 'globally_stable_schema_prefix_then_question_context');
 });

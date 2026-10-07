@@ -140,6 +140,7 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
           tablesUsed: action.data.tablesUsed ?? state.result.tablesUsed,
           assumptions: action.data.assumptions ?? state.result.assumptions,
           promptTables: action.data.promptTables ?? state.result.promptTables,
+          rankedTables: action.data.rankedTables ?? state.result.rankedTables,
         },
       };
     case 'columns':

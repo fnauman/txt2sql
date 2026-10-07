@@ -30,8 +30,12 @@ export function DebugPanel({ result }: { result: QueryResponse }) {
       </div>
       <div className="debug-section two-col">
         <div>
-          <h3>Retrieved</h3>
+          <h3>Allowed</h3>
           <ul>{result.promptTables.map((table) => <li key={table}>{table}</li>)}</ul>
+        </div>
+        <div>
+          <h3>Ranked</h3>
+          <ul>{(result.rankedTables?.length ? result.rankedTables : ['(none: no table matched)']).map((table) => <li key={table}>{table}</li>)}</ul>
         </div>
         <div>
           <h3>Used</h3>

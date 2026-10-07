@@ -29,6 +29,14 @@
 // again; that retry cannot be replayed, so the repetition is flagged
 // `rescore.replayTruncated`.
 //
+// Validation follows today's product configuration (SCHEMA_SCOPE, through
+// the validator probe): under the full scope a recorded TABLE_SCOPE rejection
+// of an in-scope table is accepted and the SQL runs; under the retrieved
+// scope with widen-on-demand, the attempt after such a rejection is judged
+// against the widened prompt, as the product loop would have widened it for
+// the retry (`widened_tables`, `rescore.widenedTables`). The recorded retry
+// was still generated from the narrower prompt: only decisions are replayed.
+//
 // Recorded verdicts are never carried over: a replayed attempt loses its
 // recorded `guardrailCheck`, and attribution re-checks every attempt that a
 // guardrail rejects TODAY (attribution.js). Otherwise a rejection that today's
@@ -46,7 +54,7 @@
 // re-measured (null), and all statistics are seeded.
 
 import { classifyBenchmarkStatus, collectBenchmarkWarnings, isBehaviorCase, listGoldVariants, normalizeBenchmarkCase } from '../benchmark.js';
-import { validateSqlSafety } from '../pipeline.js';
+import { rankedTableNames, tablesToWidenFor, validateSqlSafety } from '../pipeline.js';
 import { isEvalInfraError } from './infra-errors.js';
 import { executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 import { withoutCaseFields } from './runner.js';
@@ -191,12 +199,12 @@ function goldErrorRepetition(repetition, error) {
  * { attempt, validation: { ok, code?, layer? }, oracle: { match, matchedGold,
  * reason } | null, error? }. Never part of the repetition's outcome.
  */
-async function judgeLaterAttempt(attempt, { testCase, prompt, validate, score, connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs }) {
+async function judgeLaterAttempt(attempt, { testCase, prompt, extraTables, validate, score, connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs }) {
   const sql = attempt.generatedSql;
   if (!sql) {
     return { attempt: attempt.attempt, validation: null, oracle: null };
   }
-  const rejection = await validate(testCase.question, sql, { tablesUsed: attempt.llm?.tablesUsed ?? null });
+  const rejection = await validate(testCase.question, sql, { tablesUsed: attempt.llm?.tablesUsed ?? null, extraTables });
   if (rejection) {
     return { attempt: attempt.attempt, validation: { ok: false, code: rejection.code, layer: rejection.layer }, oracle: null };
   }
@@ -294,6 +302,13 @@ export async function rescoreRepetition(repetition, {
   let final = null;
   let lastFailure = null;
   let stoppedOnInfra = false;
+  // Widen-on-demand (retrieved scope): after a TABLE_SCOPE rejection of an
+  // in-scope table the product loop retries with that table in the prompt and
+  // the allow-list, so the next recorded attempt is judged against the
+  // widened prompt. (The recorded retry was generated from the narrower
+  // prompt; only the product's decisions are replayed.)
+  let extraTables = [];
+  const widenedTables = [];
 
   let finalIndex = -1;
   for (const [index, recordedAttempt] of attempts.entries()) {
@@ -304,7 +319,7 @@ export async function rescoreRepetition(repetition, {
       lastFailure = { stage: 'llm', code: attempt.llm?.code ?? null, message: attempt.llm?.error?.message || 'LLM call failed' };
       continue;
     }
-    const rejection = await validate(testCase.question, sql, { tablesUsed: attempt.llm?.tablesUsed ?? null });
+    const rejection = await validate(testCase.question, sql, { tablesUsed: attempt.llm?.tablesUsed ?? null, extraTables });
     if (rejection) {
       replayed.push({
         ...attempt,
@@ -312,6 +327,15 @@ export async function rescoreRepetition(repetition, {
         execution: null,
       });
       lastFailure = { stage: 'validation', code: rejection.code, message: rejection.message };
+      const scope = prompt.schemaScope;
+      if (index < attempts.length - 1 && scope?.effective === 'retrieved' && scope.widenOnDemand) {
+        const toAdd = tablesToWidenFor(rejection, sql, { schema, allowedTables: prompt.allowedTables });
+        if (toAdd.length > 0) {
+          extraTables = [...extraTables, ...toAdd];
+          widenedTables.push(...toAdd);
+          prompt = await validate.promptFor(testCase.question, { extraTables });
+        }
+      }
       continue;
     }
     const safety = validateSqlSafety(sql, prompt.allowedTables);
@@ -366,6 +390,7 @@ export async function rescoreRepetition(repetition, {
         await judgeLaterAttempt(attempt, {
           testCase,
           prompt,
+          extraTables,
           validate,
           score,
           connections,
@@ -384,6 +409,7 @@ export async function rescoreRepetition(repetition, {
   const base = {
     ...recorded,
     retrieved_tables: prompt.allowedTables,
+    ...(prompt.context?.retrieval ? { ranked_tables: rankedTableNames(prompt.context.retrieval) } : {}),
     master_data_candidates: prompt.masterDataCandidates || [],
     attempts: [...replayed.map((attempt) => ({ ...attempt, replay: 'reached' })), ...notReached],
     // The original run's attempts (and LLM calls); the replay's are counted in
@@ -395,6 +421,10 @@ export async function rescoreRepetition(repetition, {
   delete base.error_code;
   delete base.timed_out;
   delete base.late_status;
+  delete base.widened_tables;
+  if (widenedTables.length > 0) {
+    base.widened_tables = prompt.schemaScope?.widenedTables || widenedTables;
+  }
 
   const rescore = {
     replayed: true,
@@ -406,6 +436,7 @@ export async function rescoreRepetition(repetition, {
     // outage), not something the replay found today.
     inherited: false,
     ...(laterAttempts.length ? { laterAttempts } : {}),
+    ...(widenedTables.length ? { widenedTables: base.widened_tables } : {}),
   };
 
   if (final) {

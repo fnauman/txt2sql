@@ -90,6 +90,8 @@ function sumDurations(attempts, step) {
  *   case whose signal fired before it finished is reported as 'aborted' (with
  *   whatever it recorded): a gold run or a scoring cut short is neither a
  *   broken gold nor a verdict.
+ * - `schemaScope` (a scope name or config, src/schema-scope.js) is passed to
+ *   the product loop; omitted, the product loop reads SCHEMA_SCOPE & co.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  * - An abstain / clarify case (expected_behavior) has no gold: nothing is run
@@ -112,6 +114,7 @@ export async function evaluateQuestion({
   statementTimeoutMs = null,
   goldTimeoutMs = GOLD_STATEMENT_TIMEOUT_MS,
   signal = null,
+  schemaScope = undefined,
   dependencies = {},
 }) {
   const { runQuestion = runOptimizedQuestion, scorePrediction = scoreAgainstGold } = dependencies;
@@ -201,11 +204,15 @@ export async function evaluateQuestion({
     includeInsights: false,
     statementTimeoutMs,
     signal,
+    ...(schemaScope === undefined ? {} : { schemaScope }),
   });
   const questionMs = questionTimer.stop().durationMs;
   const attempts = extractAttempts(caseTrace.events);
   const promptEvent = caseTrace.events.find((entry) => entry.event === 'prompt.built');
+  // The allow-list (every in-scope table in the full scope); attribution's
+  // retrieval_miss tag reads it.
   const retrievedTables = Array.isArray(run.promptTables) ? run.promptTables : [];
+  const widenedTables = run.schemaScope?.widenedTables || [];
   if (promptEvent?.context?.retrieval) {
     await trace.emit('retrieval.completed', { ...caseContext, retrieval: promptEvent.context.retrieval });
   }
@@ -307,6 +314,10 @@ export async function evaluateQuestion({
     assumptions: response?.assumptions || [],
     tables_used: response?.tables_used || [],
     retrieved_tables: retrievedTables,
+    // What retrieval ranked (the hint in the full scope), and the in-scope
+    // tables widen-on-demand added for a retry (retrieved scope).
+    ranked_tables: Array.isArray(run.rankedTables) ? run.rankedTables : [],
+    ...(widenedTables.length > 0 ? { widened_tables: widenedTables } : {}),
     master_data_candidates: run.masterDataCandidates || [],
     attempts,
     attempt_count: run.attemptCount ?? attempts.length,

@@ -5,7 +5,7 @@ This document explains **why** the system is built the way it is. The
 descriptions); this is the design narrative behind it.
 
 The guiding idea throughout: **the LLM proposes, a small deterministic layer
-disposes.** Retrieval is *enforced*, not advisory; safety is *checked*, not
+disposes.** Table scope is *enforced*, not advisory; safety is *checked*, not
 assumed; dates and entity names are *resolved* before the model ever sees the
 question. Every deterministic step is plain, testable JavaScript and adds no
 extra LLM calls.
@@ -14,7 +14,8 @@ extra LLM calls.
 question
    │
    ▼  temporal normalization      "March 2026" → [2026-03-01, 2026-04-01)
-   ▼  semantic retrieval          narrow the prompt to the highest-scoring in-scope tables (+ FK paths)
+   ▼  semantic retrieval          rank the in-scope tables; full schema scope: every in-scope table in
+   ▼                              the prompt, ranking as a hint; retrieved scope: only the top tables (+ FK paths)
    ▼  master-data resolution      resolve "sparkling water" → bounded candidate rows
    ▼  LLM (structured JSON out)    { sql, explanation, tables_used, assumptions }
    ▼  deterministic validation     read-only safety layer + schema guardrails vs the exact schema it saw
@@ -33,12 +34,45 @@ lives in `src/pipeline.js`, `src/sql-tokenizer.js` and `src/sql-guardrails.js`.
 
 ## Core pipeline design decisions
 
+### Why the schema scope depends on the schema size
+
+`SCHEMA_SCOPE` (`src/schema-scope.js`, default `auto`) decides how much of the
+in-scope schema the prompt shows and which tables the validator allows:
+
+- **full**: every in-scope table in one stable schema block, the same for every
+  question (one prompt-cache prefix), and every in-scope table allowed.
+  Retrieval only adds a one-line hint ("most relevant tables/columns for this
+  question: ...") to the question part.
+- **retrieved**: the retrieved tables (plus their foreign-key paths) are both
+  the schema shown and the allow-list. With **widen-on-demand** (on by default
+  when auto falls back to retrieved; off for an explicit `SCHEMA_SCOPE=retrieved`,
+  which is exactly the behaviour before scopes existed), a
+  `TABLE_SCOPE` rejection of a table that is in scope but was not retrieved
+  rebuilds the prompt with that table and its join path for the retry, within
+  the same retry budget (`prompt.widened` in the trace). A table outside the
+  in-scope schema is rejected in every scope.
+- **auto**: full while the full schema block fits `SCHEMA_FULL_MAX_TOKENS`
+  (default 8,000 estimated tokens), else retrieved.
+
+The reason is measured, not assumed (`docs/experiments/01-schema-scope.md`). On
+the 13-table demo schema (about 2,300 estimated tokens in full) the retrieved
+scope saved only about 8% of uncached prompt tokens (it printed its tables
+twice, once stable and once ranked), split the cacheable prefix 48 ways, and
+cost more than the full scope once prompt caching is counted. It also made
+every retrieval miss unrecoverable: the allow-list was the retrieved set and
+retries never widened it, which capped accuracy at 86.5% even with perfect
+SQL. The full scope removes that failure class (ceiling 99.6%) for about 8.6%
+more uncached prompt tokens. Retrieval matters again when the schema does not fit: an
+ERP with hundreds of tables keeps the retrieved scope, and widen-on-demand turns
+its misses back into a retry instead of a dead end.
+
 ### Why rule-based semantic retrieval instead of embeddings
 
-Retrieval narrows a potentially huge ERP schema to a small set of relevant
-tables, so the prompt stays small and the model can't invent
-joins across tables it never saw. It is deliberately **rule-based and lexical**,
-not an embedding model or a vector database:
+Retrieval ranks the in-scope tables for a question; in the retrieved scope it
+narrows a potentially huge ERP schema to a small set of relevant tables, so the
+prompt stays small and the model can't invent joins across tables it never saw.
+It is deliberately **rule-based and lexical**, not an embedding model or a vector
+database:
 
 - Lexical token scoring weights matches by where they land — table name, table
   alias, table description, column name, column comment (`scoreTableDetailed` in
@@ -55,8 +89,8 @@ testable edit** in `metadata/semantic-layer.json` plus a retrieval test, not an
 opaque vector nudge. Embedding or hybrid retrieval is not implemented.
 
 Retrieval narrows rather than minimizes: "How many active customers do we
-have?" still retrieves 5 of the 13 tables. The point is that the prompt does not
-grow with the whole schema.
+have?" still retrieves 5 of the 13 tables. In the retrieved scope the point is
+that the prompt does not grow with the whole schema.
 
 ### Why guardrails re-validate the model's SQL deterministically
 
@@ -156,12 +190,13 @@ The prompt is laid out in three segments to maximize provider prompt-cache reuse
 
 - **System message** — globally stable instructions and business rules.
 - **Schema-context prefix** — built with the question tokens *empty*, so it is
-  identical for any two questions that retrieve the same tables.
+  identical for every question in the full schema scope, and for any two
+  questions that retrieve the same tables in the retrieved scope.
 - **Question-specific context** — the volatile tail (the question, resolved
   candidates, retry context).
 
-Because the long, stable prefix comes first, repeated questions over the same
-retrieved tables reuse a large cached prefix instead of re-sending the full
+Because the long, stable prefix comes first, questions reuse a large cached
+prefix (in the retrieved scope only questions over the same retrieved tables) instead of re-sending the full
 context (`summarizePromptCacheLayout` reports the cacheable-prefix size offline;
 real savings are confirmed from provider `cached_tokens` on live runs).
 
@@ -349,10 +384,12 @@ one error listing every problem.
 When a question produces the wrong answer, separate the failure class before
 fixing anything:
 
-1. **Retrieval miss** — the right tables weren't selected. Run
+1. **Retrieval miss** (retrieved schema scope) — the right tables weren't
+   selected, so the SQL was rejected with `TABLE_SCOPE` or written around the
+   missing table; look for `prompt.widened` in the trace. Run
    `npm run debug-retrieval -- "<question>"` and inspect semantic matches,
    temporal normalization, retrieved examples, and expanded tables. Fix semantic
-   metadata or scoring.
+   metadata or scoring. In the full scope a poor ranking only weakens the hint.
 2. **Validation error** — the model's SQL failed a check. The
    `sql.validation_failed` trace event carries `error.code` and `error.layer`
    (`safety` or `guardrail`); for SQL that passed, advisory metric warnings are

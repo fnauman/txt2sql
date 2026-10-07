@@ -7,6 +7,7 @@
 // loadWebConfig is pure: it validates every value, reports ALL problems in one
 // startup error, and returns a deeply frozen object.
 
+import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
 export class WebConfigError extends Error {
@@ -189,6 +190,20 @@ export function loadWebConfig(env = process.env) {
   const openAiTimeoutMs = read.integer('OPENAI_TIMEOUT_MS', defaults.openAiTimeoutMs, { min: 1, max: 600_000 });
   const openAiMaxRetries = read.integer('OPENAI_MAX_RETRIES', defaults.openAiMaxRetries, { min: 0, max: 10 });
 
+  // Schema scope (SCHEMA_SCOPE, SCHEMA_FULL_MAX_TOKENS, SCHEMA_WIDEN_ON_DEMAND),
+  // read by the same resolver as the CLI and npm run eval.
+  let schemaScope = null;
+  for (const name of ['SCHEMA_SCOPE', 'SCHEMA_FULL_MAX_TOKENS', 'SCHEMA_WIDEN_ON_DEMAND']) {
+    try {
+      resolveSchemaScopeConfig({ [name]: env[name] });
+    } catch (error) {
+      problems.push(error.message);
+    }
+  }
+  if (problems.length === 0) {
+    schemaScope = resolveSchemaScopeConfig(env);
+  }
+
   if (problems.length > 0) {
     throw new WebConfigError(problems);
   }
@@ -233,6 +248,7 @@ export function loadWebConfig(env = process.env) {
       maxRetries: openAiMaxRetries,
     },
     model: read.string('MODEL_NAME', defaults.model),
+    schemaScope: { ...schemaScope },
     database: {
       name: read.string('DB_NAME', '') || null,
       // The query paths connect as DB_USER, defaulting to demo_readonly.
@@ -257,5 +273,16 @@ export function describeWebConfig(config) {
     `rowLimit=${config.rowLimit}`,
     `maxQuestionLength=${config.maxQuestionLength}`,
     `cache=${config.resultCache.enabled ? 'on' : 'off'}`,
+    describeSchemaScopeSetting(config.schemaScope),
   ].join(' ');
+}
+
+function describeSchemaScopeSetting(scope) {
+  if (!scope) {
+    return 'schemaScope=default';
+  }
+  // 'full' needs no budget and never widens; 'auto' may resolve to retrieved.
+  return scope.schemaScope === 'full'
+    ? 'schemaScope=full'
+    : `schemaScope=${scope.schemaScope}(fullMaxTokens=${scope.fullSchemaMaxTokens},widen=${scope.widenOnDemand ? 'on' : 'off'})`;
 }

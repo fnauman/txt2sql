@@ -201,3 +201,38 @@ test('the Verification section counts undecided, invalid and unscored controls p
   assert.match(markdown, /Unscored controls \(infrastructure error; a problem, not a kill\): c2\/h1\./);
   assert.match(markdown, /Undecided controls \(mapping search cut off; counted as not killed\): c1\/m3\./);
 });
+
+test('the schema scope is in the provenance, the comparison table and the console when it changed', async () => {
+  const full = { requested: 'auto', effective: 'full', fullSchemaEstimatedTokens: 2258, fullSchemaMaxTokens: 8000, widenOnDemand: true, inScopeTableCount: 13 };
+  // The committed baseline predates the product block (it ran the retrieved scope).
+  const baseline = await sampleReport();
+  const report = await sampleReport({ mode: 'rescore' });
+  report.provenance.product = { schemaScope: full };
+  report.rescoredFrom.schemaScope = null;
+  report.comparison = compareReports(
+    baseline,
+    { results: report.results, model: report.model, generatedAt: report.generatedAt, provenance: report.provenance, mode: 'rescore' },
+    { baselineLabel: 'eval/baselines/gpt-4o-mini.json', resamples: 200 }
+  );
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /\| Schema scope \| auto -> full \(2,258 of 8,000 estimated tokens for the full schema; 13 in-scope tables\) \|/);
+  assert.match(
+    markdown,
+    /\| Schema scope \| not recorded \(before SCHEMA_SCOPE: retrieved, no widening\) \| auto -> full \(2,258 of 8,000 estimated tokens for the full schema; 13 in-scope tables\) \|/
+  );
+  assert.match(markdown, /\| Recorded schema scope \| not recorded \(before SCHEMA_SCOPE: retrieved, no widening\) \(recorded SQL re-judged with today's scope\) \|/);
+  assert.match(renderHeadline(report), /\n {2}schema scope: not recorded \(before SCHEMA_SCOPE: retrieved, no widening\) → auto -> full \(2,258 of 8,000/);
+
+  // The same behaviour (auto -> full vs full) is not called a change.
+  const same = await sampleReport();
+  same.provenance.product = { schemaScope: { ...full, requested: 'full' } };
+  same.comparison = compareReports(
+    { ...baseline, provenance: { ...baseline.provenance, product: { schemaScope: full } } },
+    { results: same.results, model: same.model, provenance: same.provenance },
+    { resamples: 200 }
+  );
+  assert.doesNotMatch(renderHeadline(same), /schema scope:/);
+  // A retrieved scope says whether it widens.
+  same.provenance.product = { schemaScope: { ...full, requested: 'retrieved', effective: 'retrieved', widenOnDemand: false } };
+  assert.match(renderReportMarkdown(same), /\| Schema scope \| retrieved \(2,258 of 8,000 estimated tokens for the full schema; 13 in-scope tables; widen-on-demand off\) \|/);
+});

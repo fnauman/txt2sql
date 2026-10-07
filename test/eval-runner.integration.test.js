@@ -391,6 +391,12 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   assert.ok(systemFailures >= flagged.length - 1, `${systemFailures} of ${flagged.length}`);
   const passes = report.results.filter((record) => record.summary.outcome === 'pass').length;
   assert.equal(passes, answer.length - systemFailures - 2);
+  // The default schema scope (auto: full at 13 tables) allows every in-scope
+  // table, so a perfect answer is never a retrieval miss, and the report says
+  // which scope ran.
+  assert.equal(report.provenance.product.schemaScope.effective, 'full');
+  assert.equal(report.attribution.system.retrievalMisses, 0);
+  assert.equal(flagged.length, 1);
   assert.equal(report.stats.strictAccuracy.value, Number((passes / answer.length).toFixed(4)));
   assert.deepEqual(report.stats.bySplit.map((entry) => entry.key), ['dev', 'holdout']);
   assert.equal(report.stats.bySplit.reduce((sum, entry) => sum + entry.cases, 0), answer.length);

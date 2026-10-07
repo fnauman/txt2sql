@@ -1,6 +1,7 @@
 // report.md: the human-readable view of report.json, readable in a terminal
 // and rendered on GitHub (plain Markdown tables, no HTML).
 
+import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER } from './attribution.js';
 
 const BUCKET_LABELS = {
@@ -54,6 +55,16 @@ function formatCount(value) {
 function short(hash, length = 12) {
   return hash ? String(hash).slice(0, length) : 'n/a';
 }
+
+// The schema scope of a report's product configuration; a report from before
+// it was recorded ran the retrieved scope without widen-on-demand.
+function schemaScopeText(scope) {
+  return scope ? describeSchemaScope(scope) : 'not recorded (before SCHEMA_SCOPE: retrieved, no widening)';
+}
+
+// Same behaviour: the same effective scope (and, for the retrieved scope, the
+// same widen-on-demand setting); auto -> full behaves like full.
+const sameSchemaScope = sameSchemaScopeBehaviour;
 
 /** Escapes a value for a Markdown table cell (pipes, newlines). */
 export function cell(value) {
@@ -206,6 +217,9 @@ export function renderComparisonConsole(comparison) {
     `  regressions: ${flipList(comparison.flips.regressions)}`,
     `  improvements: ${flipList(comparison.flips.improvements)}`,
   ];
+  if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
+    lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
+  }
   const notes = [
     excluded.goldChanged.length ? `${excluded.goldChanged.length} gold changed` : null,
     excluded.notCounted.length ? `${excluded.notCounted.length} not counted or timed out in one report` : null,
@@ -471,6 +485,7 @@ function comparisonSection(comparison) {
         ['Generated', base.generatedAt || 'n/a', cand.generatedAt || 'n/a'],
         ['Git', `${short(base.gitSha, 10)}${base.gitDirty ? ' (dirty)' : ''}`, `${short(cand.gitSha, 10)}${cand.gitDirty ? ' (dirty)' : ''}`],
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
+        ['Schema scope', schemaScopeText(base.schemaScope), schemaScopeText(cand.schemaScope)],
         ['Strict accuracy (paired cases)', formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
         ['Majority passes (paired cases)', `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
       ]
@@ -607,6 +622,7 @@ function provenanceSection(report) {
   const rows = [
     ['Git', provenance.git?.sha ? `${provenance.git.sha.slice(0, 12)}${provenance.git.dirty ? ' (dirty working tree)' : ''}` : 'n/a'],
     ['Prompt version', short(provenance.promptVersion)],
+    ['Schema scope', schemaScopeText(provenance.product?.schemaScope)],
     ['Semantic layer version', short(provenance.semanticLayerVersion)],
     ['Schema version', short(provenance.schemaVersion)],
     ['Fixtures', (provenance.fixtures || []).map((fixture) => `${fixture.name} ${short(fixture.contentHash)}`).join(', ') || 'n/a'],
@@ -623,6 +639,9 @@ function provenanceSection(report) {
   ];
   if (report.rescoredFrom) {
     rows.push(['Rescored from', `${report.rescoredFrom.path} (sha256 ${short(report.rescoredFrom.sha256)}, git ${short(report.rescoredFrom.gitSha, 10)})`]);
+    if ('schemaScope' in report.rescoredFrom && !sameSchemaScope(report.rescoredFrom.schemaScope, provenance.product?.schemaScope)) {
+      rows.push(['Recorded schema scope', `${schemaScopeText(report.rescoredFrom.schemaScope)} (recorded SQL re-judged with today's scope)`]);
+    }
   }
   return ['## Provenance', '', table(['', ''], rows)].join('\n');
 }

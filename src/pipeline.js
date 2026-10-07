@@ -12,6 +12,7 @@ import {
 } from './constants.js';
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
+import { normalizeSchemaScopeConfig } from './schema-scope.js';
 import { loadSemanticLayerSync } from './semantic-layer.js';
 import { SqlValidationError, validateSqlGuardrails } from './sql-guardrails.js';
 import {
@@ -1336,7 +1337,15 @@ ${context.tableBlocks}`,
   };
 }
 
-function buildOptimizedSystemPrompt() {
+// The schema block's caching note per effective schema scope. The 'retrieved'
+// text is the one every prompt had before schema scopes existed (the previous,
+// retrieved-scope baseline's prompt version, 0c314451d4b7).
+const SCHEMA_PREFIX_NOTES = {
+  retrieved: 'In-scope schema context comes first and may be reused across questions with the same retrieved tables.',
+  full: 'In-scope schema context comes first: it lists every in-scope table and is the same for every question.',
+};
+
+function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved' } = {}) {
   const rules = BUSINESS_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n');
 
   return `You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.
@@ -1346,7 +1355,7 @@ Use only in-scope foreign keys and in-scope tables.
 ${EXACT_SCHEMA_GUARD}
 
 The user message is arranged for prompt caching:
-1. In-scope schema context comes first and may be reused across questions with the same retrieved tables.
+1. ${SCHEMA_PREFIX_NOTES[effectiveScope] || SCHEMA_PREFIX_NOTES.retrieved}
 2. Question-specific context comes after the schema context.
 3. The final answer must still answer only the user's current question.
 
@@ -1397,6 +1406,109 @@ Few-shot examples:
 ${examples}`;
 }
 
+// Full scope: the schema block above already lists every in-scope table, so
+// the question part carries retrieval's output as a one-line hint instead of
+// re-printing the retrieved tables (the 'Question-ranked schema details' block
+// of the retrieved scope, about a quarter of that prompt; audit D8).
+function buildFullScopeQuestionContext({ question, retrieval, relevanceHint, masterDataCandidates, examples }) {
+  return `Question-specific context:
+
+Question:
+${question}
+
+Resolved temporal references:
+${formatTemporalReferences(retrieval.temporalReferences)}
+
+Semantic retrieval hints:
+${formatSemanticHints(retrieval.semanticPlan)}
+
+Resolved master-data candidates:
+${formatMasterDataCandidates(masterDataCandidates)}
+
+Retrieval relevance hint (a ranking only; every allowed table may be used):
+${relevanceHint}
+
+Few-shot examples:
+${examples}`;
+}
+
+const MAX_HINT_COLUMNS_PER_TABLE = 4;
+
+// Columns of `table` whose name or comment shares a token with the question,
+// most shared tokens first, ignoring the table's own name tokens ("customer"
+// says nothing about which Customer column matters) and primary keys.
+function questionMatchedColumns(table, questionTokens) {
+  const tableTokens = new Set(normalizeTokens(table.name));
+  const tokens = questionTokens.filter((token) => !tableTokens.has(token));
+  if (tokens.length === 0) {
+    return [];
+  }
+  return table.columns
+    .filter((column) => !column.primaryKey)
+    .map((column, index) => {
+      const columnTokens = new Set([...normalizeTokens(column.name), ...normalizeTokens(column.comment || '')]);
+      return { name: column.name, index, matches: tokens.filter((token) => columnTokens.has(token)).length };
+    })
+    .filter((entry) => entry.matches > 0)
+    .sort((left, right) => right.matches - left.matches || left.index - right.index)
+    .slice(0, MAX_HINT_COLUMNS_PER_TABLE)
+    .map((entry) => entry.name);
+}
+
+/**
+ * The tables retrieval ranked for the question, as shown to people (web debug
+ * panel, CLI, eval records): the picked tables in score order (strongest match
+ * first, the order of the full scope's relevance hint), then the join-path
+ * connectors retrieval added. Empty when nothing matched the question:
+ * retrieval then falls back to a default selection, which is not a ranking
+ * (the prompt's hint says no table matched).
+ */
+export function rankedTableNames(retrieval) {
+  if (!retrieval || retrieval.fallbackToDefaultSelection) {
+    return [];
+  }
+  // initialTableNames holds schema names; report physical table names, as the
+  // allow-list and the relevance hint do.
+  const tableNameOf = new Map((retrieval.tableScores || []).map((entry) => [entry.name, entry.tableName || entry.name]));
+  const ranked = uniqueStrings((retrieval.initialTableNames || []).map((name) => tableNameOf.get(name) || name));
+  const connectors = uniqueStrings(retrieval.connectorTableNames || []).filter((name) => !ranked.includes(name));
+  return [...ranked, ...connectors];
+}
+
+/**
+ * The full scope's relevance hint: the tables retrieval ranked highest (score
+ * order, then the join-path connectors it added) with the columns whose names
+ * match the question. Returns { text, tables: [{ tableName, columns, connector }] }.
+ */
+export function buildRelevanceHint(schema, retrieval) {
+  if (retrieval.fallbackToDefaultSelection) {
+    return {
+      text: '- No table matched the wording of this question; choose tables from the schema above.',
+      tables: [],
+    };
+  }
+  const byName = new Map(schema.tables.map((table) => [table.name, table]));
+  const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
+  const ranked = uniqueStrings(retrieval.initialTableNames)
+    .map((name) => byName.get(name) || byTableName.get(name))
+    .filter(Boolean);
+  const rankedNames = new Set(ranked.map((table) => table.tableName));
+  const connectors = uniqueStrings(retrieval.connectorTableNames)
+    .map((name) => byTableName.get(name) || byName.get(name))
+    .filter((table) => table && !rankedNames.has(table.tableName));
+  const tables = [
+    ...ranked.map((table) => ({ tableName: table.tableName, columns: questionMatchedColumns(table, retrieval.questionTokens), connector: false })),
+    ...connectors.map((table) => ({ tableName: table.tableName, columns: [], connector: true })),
+  ];
+  const format = (entry) => (entry.columns.length > 0 ? `${entry.tableName} (${entry.columns.join(', ')})` : entry.tableName);
+  const rankedText = tables.filter((entry) => !entry.connector).map(format).join('; ');
+  const connectorText = connectors.length > 0 ? `; join path via ${connectors.map((table) => table.tableName).join(', ')}` : '';
+  return {
+    text: `- Most relevant tables/columns for this question: ${rankedText || 'none'}${connectorText}`,
+    tables,
+  };
+}
+
 function buildLegacyOptimizedCacheablePrefix() {
   return `You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.
 
@@ -1407,7 +1519,7 @@ ${EXACT_SCHEMA_GUARD}
 `;
 }
 
-function summarizePromptCacheLayout({ system, schemaContext, questionContext }) {
+function summarizePromptCacheLayout({ system, schemaContext, questionContext, effectiveScope = 'retrieved' }) {
   const staticSystemChars = system.length;
   const schemaPrefixChars = system.length + schemaContext.length;
   const dynamicChars = questionContext.length;
@@ -1423,7 +1535,13 @@ function summarizePromptCacheLayout({ system, schemaContext, questionContext }) 
     strategy: 'static-system-and-schema-prefix',
     messageLayout: [
       { role: 'system', cacheBehavior: 'globally_stable_instructions' },
-      { role: 'user', cacheBehavior: 'table_stable_schema_prefix_then_question_context' },
+      {
+        role: 'user',
+        cacheBehavior:
+          effectiveScope === 'full'
+            ? 'globally_stable_schema_prefix_then_question_context'
+            : 'table_stable_schema_prefix_then_question_context',
+      },
     ],
     staticSystemChars,
     staticSystemEstimatedTokens: systemEstimatedTokens,
@@ -1440,10 +1558,180 @@ function summarizePromptCacheLayout({ system, schemaContext, questionContext }) 
   };
 }
 
-export function buildOptimizedPrompt(schema, question, { masterDataCandidates = [], semanticPlan = null } = {}) {
+// The full in-scope schema block (stable: no question tokens), per schema
+// object. It is both the full scope's cacheable prefix and what 'auto'
+// measures against SCHEMA_FULL_MAX_TOKENS.
+const fullSchemaContextCache = new WeakMap();
+
+function fullSchemaStableContext(schema) {
+  const key = schema.tables;
+  let entry = fullSchemaContextCache.get(key);
+  if (!entry) {
+    const stableContext = buildPromptContext(schema.tables, []);
+    const schemaContext = buildOptimizedSchemaContext(stableContext);
+    entry = { stableContext, schemaContext, estimatedTokens: estimatePromptTokens(schemaContext) };
+    fullSchemaContextCache.set(key, entry);
+  }
+  return entry;
+}
+
+/** Estimated tokens (characters / 4) of the full in-scope schema block. */
+export function estimateFullSchemaTokens(schema) {
+  return fullSchemaStableContext(schema).estimatedTokens;
+}
+
+/**
+ * The schema scope in effect for `schema` (src/schema-scope.js):
+ * { requested, effective: 'retrieved' | 'full', fullSchemaEstimatedTokens,
+ * fullSchemaMaxTokens, widenOnDemand, inScopeTableCount }. 'auto' is 'full'
+ * when the full schema block fits fullSchemaMaxTokens, else 'retrieved'.
+ * `option` is a scope name or a (partial) config; omitted means the defaults
+ * (auto, 8000 tokens, widen-on-demand on), not the environment.
+ */
+export function resolveEffectiveSchemaScope(schema, option = undefined) {
+  const config = normalizeSchemaScopeConfig(option);
+  const fullSchemaEstimatedTokens = estimateFullSchemaTokens(schema);
+  const effective =
+    config.schemaScope === 'auto'
+      ? fullSchemaEstimatedTokens <= config.fullSchemaMaxTokens
+        ? 'full'
+        : 'retrieved'
+      : config.schemaScope;
+  return {
+    requested: config.schemaScope,
+    effective,
+    fullSchemaEstimatedTokens,
+    fullSchemaMaxTokens: config.fullSchemaMaxTokens,
+    widenOnDemand: config.widenOnDemand,
+    inScopeTableCount: schema.tables.length,
+  };
+}
+
+// Whether `from` reaches `to` through foreign keys between tables in `within`.
+function isLinkedWithin(adjacency, within, from, to) {
+  const seen = new Set([from]);
+  const queue = [from];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (name === to) {
+      return true;
+    }
+    for (const neighbor of adjacency.get(name) || []) {
+      if (within.has(neighbor) && !seen.has(neighbor)) {
+        seen.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  return false;
+}
+
+// Retrieved scope, widen-on-demand: the retrieved tables plus `extraTables`
+// (in-scope table names) and their connector tables. First, as before, the
+// shortest foreign-key path from each added table to each retrieved one
+// within three hops (the retrieval join-path bound). Then every retrieved
+// table the foreign-key graph links to the added table but the widened set
+// does not yet link to it gets the shortest path at any length (a simple path
+// has fewer hops than the in-scope schema has tables), nearest first (ties in
+// retrieval order), skipping tables an earlier path already linked. Large
+// schemas (where auto falls back to retrieved) are the ones whose retrieved
+// set can be split into parts more than three hops apart; without the long
+// paths the retry could not join the added table to the part its SQL needs
+// without being rejected again. Where the three-hop paths already link
+// everything the prompt is unchanged. Each long path is one shortest path
+// (findShortestJoinPath breaks ties by table name), not the union of tied
+// ones, which on hub-heavy schemas could pull in much of the schema.
+// Unknown or already retrieved names are ignored. Null when nothing is added.
+function widenRetrievedTables(schema, retrievedTables, extraTables) {
+  const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
+  const current = new Set(retrievedTables.map((table) => table.name));
+  const added = uniqueStrings(extraTables)
+    .map((tableName) => byTableName.get(tableName))
+    .filter((table) => table && !current.has(table.name))
+    .map((table) => table.name);
+  if (added.length === 0) {
+    return null;
+  }
+  const { adjacency } = buildForeignKeyGraph(schema.tables);
+  const expanded = new Set([...current, ...added]);
+  const connectors = new Set();
+  const addPath = (path) => {
+    for (const pathName of path) {
+      if (!expanded.has(pathName)) {
+        connectors.add(pathName);
+      }
+      expanded.add(pathName);
+    }
+  };
+  const anyLength = schema.tables.length;
+  for (const addedName of added) {
+    for (const currentName of current) {
+      const path = findShortestJoinPath(adjacency, addedName, currentName);
+      if (path) {
+        addPath(path);
+      }
+    }
+    const longPaths = [...current]
+      .filter((currentName) => !isLinkedWithin(adjacency, expanded, addedName, currentName))
+      .map((currentName) => findShortestJoinPath(adjacency, addedName, currentName, anyLength))
+      .filter(Boolean)
+      .sort((left, right) => left.length - right.length);
+    for (const path of longPaths) {
+      if (!isLinkedWithin(adjacency, expanded, addedName, path[path.length - 1])) {
+        addPath(path);
+      }
+    }
+  }
+  const tableNameOf = (name) => schema.tables.find((table) => table.name === name)?.tableName || name;
+  return {
+    tables: schema.tables.filter((table) => expanded.has(table.name)),
+    addedTableNames: added.map(tableNameOf),
+    connectorTableNames: [...connectors].map(tableNameOf),
+  };
+}
+
+/**
+ * In-scope tables to add to a retrieved-scope prompt after `rejection` (a
+ * validation error or a { code, layer, table } verdict) of `sql`: when the
+ * safety layer rejected an IN-SCOPE table as outside the allow-list
+ * (TABLE_SCOPE), every in-scope table the SQL references that is not allowed
+ * yet. Anything else (another code, a table outside the in-scope schema, a
+ * metadata schema or another database) yields [] and stays rejected.
+ */
+export function tablesToWidenFor(rejection, sql, { schema, allowedTables = [] }) {
+  if (rejection?.code !== 'TABLE_SCOPE' || rejection.layer !== 'safety') {
+    return [];
+  }
+  const inScope = new Set(schema.tables.map((table) => table.tableName));
+  const rejected = rejection.table ?? rejection.details?.table ?? null;
+  if (!inScope.has(rejected)) {
+    return [];
+  }
+  const allowed = new Set(allowedTables);
+  return uniqueStrings([rejected, ...extractTablesFromSql(sql)]).filter((name) => inScope.has(name) && !allowed.has(name));
+}
+
+/**
+ * The optimized prompt for `question`. Options:
+ * - masterDataCandidates, semanticPlan: question context resolved upstream;
+ * - schemaScope: a scope name or config (src/schema-scope.js; default auto).
+ *   'full' shows every in-scope table in one stable block and allows them
+ *   all; 'retrieved' shows and allows the retrieved tables (the prompt every
+ *   question had before schema scopes existed, byte for byte);
+ * - extraTables: retrieved scope only, in-scope tables to add (widen-on-demand
+ *   after a TABLE_SCOPE rejection; see tablesToWidenFor).
+ * `tables` is the allow-list; `context.schemaScope` says which scope applied.
+ */
+export function buildOptimizedPrompt(schema, question, { masterDataCandidates = [], semanticPlan = null, schemaScope = undefined, extraTables = [] } = {}) {
+  const scope = resolveEffectiveSchemaScope(schema, schemaScope);
   const retrieval = retrieveRelevantTables(schema, question, { semanticPlan });
-  const context = buildPromptContext(retrieval.tables, retrieval.questionTokens);
-  const stableContext = buildPromptContext(retrieval.tables, []);
+  if (scope.effective === 'full') {
+    return buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates });
+  }
+  const widened = extraTables.length > 0 ? widenRetrievedTables(schema, retrieval.tables, extraTables) : null;
+  const promptTables = widened ? widened.tables : retrieval.tables;
+  const context = buildPromptContext(promptTables, retrieval.questionTokens);
+  const stableContext = buildPromptContext(promptTables, []);
   const relevantExamples = retrieveRelevantExamples(question, {
     maxExamples: 2,
     minScore: 1,
@@ -1467,7 +1755,7 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
   return {
     system,
     user: `${schemaContext}\n\n${questionContext}`,
-    tables: retrieval.tables,
+    tables: promptTables,
     context: {
       ...context,
       normalizedQuestion: retrieval.normalizedQuestion,
@@ -1482,12 +1770,64 @@ export function buildOptimizedPrompt(schema, question, { masterDataCandidates = 
       semanticPlan: retrieval.semanticPlan,
       masterDataCandidates,
       promptCache,
-      examples: relevantExamples.map((example) => ({
-        question: example.question,
-        tables: example.tables,
-        score: example.score,
-        matchedTokens: example.matchedTokens,
-      })),
+      schemaScope: {
+        ...scope,
+        widenedTables: widened ? widened.addedTableNames : [],
+        widenConnectorTables: widened ? widened.connectorTableNames : [],
+      },
+      examples: summarizeExamples(relevantExamples),
+    },
+  };
+}
+
+function summarizeExamples(examples) {
+  return examples.map((example) => ({
+    question: example.question,
+    tables: example.tables,
+    score: example.score,
+    matchedTokens: example.matchedTokens,
+  }));
+}
+
+// Full scope: every in-scope table in one stable schema block (the cacheable
+// prefix, identical for every question), retrieval as a one-line hint, and
+// every in-scope table allowed.
+function buildFullScopePrompt(schema, question, { retrieval, scope, masterDataCandidates }) {
+  const { schemaContext } = fullSchemaStableContext(schema);
+  const context = buildPromptContext(schema.tables, retrieval.questionTokens);
+  const relevanceHint = buildRelevanceHint(schema, retrieval);
+  const relevantExamples = retrieveRelevantExamples(question, { maxExamples: 2, minScore: 1 });
+  const system = buildOptimizedSystemPrompt({ effectiveScope: 'full' });
+  const questionContext = buildFullScopeQuestionContext({
+    question,
+    retrieval,
+    relevanceHint: relevanceHint.text,
+    masterDataCandidates,
+    examples: formatExamples(relevantExamples),
+  });
+  const promptCache = summarizePromptCacheLayout({ system, schemaContext, questionContext, effectiveScope: 'full' });
+
+  return {
+    system,
+    user: `${schemaContext}\n\n${questionContext}`,
+    tables: schema.tables,
+    context: {
+      ...context,
+      normalizedQuestion: retrieval.normalizedQuestion,
+      temporalReferences: retrieval.temporalReferences,
+      retrieval: {
+        initialTableNames: retrieval.initialTableNames,
+        expandedTableNames: retrieval.expandedTableNames,
+        connectorTableNames: retrieval.connectorTableNames,
+        fallbackToDefaultSelection: retrieval.fallbackToDefaultSelection,
+        tableScores: retrieval.tableScores,
+      },
+      relevanceHint: relevanceHint.tables,
+      semanticPlan: retrieval.semanticPlan,
+      masterDataCandidates,
+      promptCache,
+      schemaScope: { ...scope, widenedTables: [], widenConnectorTables: [] },
+      examples: summarizeExamples(relevantExamples),
     },
   };
 }
@@ -1653,13 +1993,17 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
     });
     // Phrase the corrective hint by the stage that actually failed. A validation
     // rejection is not a "database error", and saying so misdirects the model's
-    // fix. Unknown/execution stages keep the original wording.
+    // fix. Unknown/execution stages keep the original wording. After
+    // widen-on-demand ('schema_widened') the rejected table is in the schema
+    // context of this retry, so the model must not be told to avoid it.
     const failureLabel =
       retryContext.stage === 'validation'
         ? 'was rejected by SQL validation (guardrails) with this error'
-        : retryContext.stage === 'llm'
-          ? 'could not be generated; the previous attempt failed with this error'
-          : 'failed with this database error';
+        : retryContext.stage === 'schema_widened'
+          ? 'used a table that was missing from the schema context; the schema context above has been widened'
+          : retryContext.stage === 'llm'
+            ? 'could not be generated; the previous attempt failed with this error'
+            : 'failed with this database error';
     messages.push({
       role: 'user',
       content: `The SQL above ${failureLabel}:\n${retryContext.error}\n\nReturn corrected JSON only.`,

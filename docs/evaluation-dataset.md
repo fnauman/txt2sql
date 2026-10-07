@@ -43,9 +43,9 @@ intents**, 45 of them holdout.
 | `core-public` | 9 | 9 | 9 | 0 | 0 | 0 | 2 |
 | `paraphrase-public` | 9 | 9 | 0 (paraphrases of core) | 0 | 0 | 0 | 2 |
 | `edge-cases-public` | 17 | 17 | 8 (+ the 9 core cases) | 0 | 0 | 0 | 3 |
-| `templated-public` | 189 | 94 | 94 | 35 (70) | 0 | 21 | 36 |
-| `hard-cases-public` | 40 | 37 | 29 (8 rephrase an existing intent) | 10 (11) | 10 (5 abstain, 5 clarify) | 13 | 8 |
-| **Suite (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **34** | |
+| `templated-public` | 189 | 94 | 94 | 35 (70) | 0 | 1 | 36 |
+| `hard-cases-public` | 40 | 37 | 29 (8 rephrase an existing intent) | 10 (11) | 10 (5 abstain, 5 clarify) | 0 | 8 |
+| **Suite (unique)** | **255** | **140** | **140** | **45 (81)** | **10** | **1** | |
 
 The original three datasets hold 17 intents; the templated and hard-case
 datasets add 123. Dev: 174 cases over 95 intents.
@@ -333,13 +333,11 @@ changes.
 ## Known validator rejections
 
 `known_validator_rejection: '<code>'` marks a case whose correct answers the
-production validator rejects today, a product gap the suite measures instead
-of hiding: 33 `TABLE_SCOPE` (retrieval does not pick a table the answer needs,
-so it is outside the allow-list: a named store, brand, campaign, product or
-customer; Swedish; typos; "units"; new vocabulary such as "turnover" or "net
-takings" for a product, brand, category or campaign breakdown), 1
-`METRIC_COLUMN` (the account name "Sales Revenue" trips the net-sales metric
-guardrail on a ledger question).
+production validator rejects today, in the default product configuration, a
+product gap the suite measures instead of hiding. One case is flagged:
+`METRIC_COLUMN` (`tpl_revenue_credits_monthly_q1_2026_e1b20a`: the account
+name "Sales Revenue" trips the net-sales metric guardrail on a ledger
+question).
 
 - verify-dataset reports a rejection of the gold, an alternative or a positive
   control with that code as a note, and fails when the validator accepts every
@@ -351,11 +349,23 @@ guardrail on a ledger question).
   updated; the dataset change then follows in the same pull request.
 - In a run the case counts like any other. A correct answer the validator
   throws away is a system failure: `guardrail_false_rejection`, or a
-  `safety_rejection` tagged `retrieval_miss`. A case whose flag concerns only
-  an alternative reading (`hard_ambiguous_orders_mar_2026`: its gold passes
-  the validator, the Online-Order alternative does not) can still pass with
-  the gold; the flag stays because verify-dataset would otherwise report the
-  alternative's rejection as a problem.
+  `safety_rejection` tagged `retrieval_miss`.
+
+**Retrieval misses and the schema scope.** Validation follows the product
+configuration (`SCHEMA_SCOPE`, see the README). Until the schema scope existed
+the retrieved tables were the allow-list, and 33 more cases were flagged
+`TABLE_SCOPE`: retrieval did not pick a table the answer needs (a named store,
+brand, campaign, product or customer; Swedish; typos; "units"; new vocabulary
+such as "turnover" or "net takings"), which capped accuracy at 86.5% even with
+perfect SQL. The default scope (`auto`, full at 13 tables) allows every
+in-scope table, so those flags were stale and are gone (the ceiling is now
+99.6%). Under `SCHEMA_SCOPE=retrieved` verify-dataset (and the in-process
+verification) notes such a gold as "rejected under the retrieved schema scope
+because retrieval did not pick <table>", a retrieval miss the run measures,
+not a dataset problem; `test/gold-sql-validator.test.js` pins that exactly
+those 33 golds are rejected there. A table outside the in-scope schema is a
+problem in every scope. See
+[docs/experiments/01-schema-scope.md](experiments/01-schema-scope.md).
 
 ## How to add a case
 
@@ -890,7 +900,7 @@ rule).
   | `execution_error` | model | counted | MariaDB rejected the final SQL |
   | `llm_error` | model | counted | truncated, refused or unusable output |
   | `guardrail_false_rejection` | system | counted | a guardrail rejected SQL that matches the gold on every fixture, in any attempt of a repetition that would otherwise be a model failure |
-  | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not retrieved, so it was not allowed |
+  | any model outcome tagged `retrieval_miss` | system | counted | an expected table was not in the allow-list (retrieved schema scope only: in the full scope every in-scope table is allowed) |
   | `timeout` / `aborted` | infra | counted | the case deadline fired |
   | `infra_error` | infra | excluded | the database failed (in the product loop, a gold query, or a guardrail re-check: tagged `guardrail_unverified`) |
   | `llm_outage` | infra | excluded | provider timeout, unreachable, 401/403/404/429/5xx, unknown model (`LLM_MODEL_NOT_FOUND`) |
@@ -932,8 +942,12 @@ rule).
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).
 - **Provenance**: git sha (and whether the tree was dirty), prompt and
-  semantic-layer versions, schema, fixture, dataset and controls hashes,
-  model, the LLM endpoint host (never keys), Node and every runner flag.
+  semantic-layer versions, the schema scope (requested and effective, the
+  full-schema token estimate, widen-on-demand), schema, fixture, dataset and
+  controls hashes, model, the LLM endpoint host (never keys), Node and every
+  runner flag. The comparison table shows both reports' schema scopes (a report
+  from before the setting reads "not recorded (before SCHEMA_SCOPE: retrieved,
+  no widening)"), and so does the console when they differ.
 
 ### Statistics
 
@@ -956,7 +970,7 @@ repeats), so pooling them as independent trials overstates confidence.
 ### Rescore (no LLM calls)
 
 `--rescore <report.json>` re-judges recorded generations with today's
-validator, fixtures and oracle. Per repetition it replays the recorded
+validator (in today's `SCHEMA_SCOPE`), fixtures and oracle. Per repetition it replays the recorded
 attempts (each SQL re-validated in the real prompt context; the first
 accepted one re-executed and re-scored on every fixture); later attempts are
 judged and recorded in `rescore.laterAttempts` without changing the outcome; a
@@ -975,6 +989,15 @@ Behaviour cases are kept as recorded (their outcome
 only depends on whether the run produced SQL). Cost, latency and tokens stay
 the original run's. The selection filters (`--split`, `--case-id`, `--tag`,
 `--intent`) pick which recorded cases are rescored.
+
+The schema scope is today's: under the full scope a recorded `TABLE_SCOPE`
+rejection of an in-scope table is accepted and the SQL runs; under the
+retrieved scope with widen-on-demand the attempt after such a rejection is
+judged against the widened prompt (`widened_tables`, `rescore.widenedTables`),
+as the product loop would have widened it. The console and report.md say when
+the recording ran another scope or another widen-on-demand setting.
+`SCHEMA_SCOPE=retrieved` (widen-on-demand is off by default for an explicit
+retrieved scope) re-judges a pre-scope report exactly as it ran.
 
 `--offline` runs the preflight, fixtures and verification, then rescores
 `eval/baselines/<model>.json` when it exists, or says there is none and exits 0
@@ -1058,33 +1081,46 @@ purpose.
 ### Current baseline
 
 `eval/baselines/gpt-4o-mini.json`, written by
-`npm run eval -- --repeat 3 --write-baseline` on 2026-10-06: gpt-4o-mini at
-api.openai.com, prompt version `0c314451d4b7`, fixtures seed `094282546fe5` /
-v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default suite (255 unique
-cases), compact file 1.33 MB.
+`npm run eval -- --repeat 3 --budget-usd 1 --write-baseline` on 2026-10-06
+(the Experiment 1 live run): gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE`
+unset (`auto` → `full`, 2,258 of 8,000 estimated tokens), prompt version
+`b264e57d8e15`, fixtures seed `094282546fe5` / v2 `7adec1b3bc33` / v3
+`51d1c42c3b88`, the whole default suite (255 unique cases), compact file
+1.28 MB.
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (245 answer cases / 130 intents) | 68.8% (95% CI 63.1%–74.6%, case bootstrap) |
-| Majority-pass cases | 169/245 (Wilson 95% 62.9%–74.4%) |
-| Intent-clustered accuracy | 66.1% |
-| By split | dev 72.6% (168 cases) · holdout 60.6% (77 cases) |
-| Attribution (repetitions) | pass 506 · model 137 · system 92 (retrieval misses 92, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion (823 attempts) | 72 wrong SQL caught, 0 correct SQL rejected, 201 wrong SQL accepted; precision 100%, recall 26.4% |
+| Strict accuracy (245 answer cases / 130 intents) | 72.8% (95% CI 67.2%–78.2%, case bootstrap) |
+| Majority-pass cases | 179/245 (Wilson 95% 67.2%–78.2%) |
+| Intent-clustered accuracy | 69.6% (95% CI 62.3%–76.5%) |
+| By split | dev 74.6% (168 cases) · holdout 68.8% (77 cases) |
+| Attribution (repetitions) | pass 535 · model 200 · system 0 (retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion (778 attempts) | 55 wrong SQL caught, 0 correct SQL rejected, 188 wrong SQL accepted; precision 100%, recall 22.6% |
 | Behaviour cases | 0 of 10 handled (5 abstain, 5 clarify) |
-| Cost | $0.3709 total · $0.00049 per question · $0.00073 per correct answer |
-| Latency | p50 2.41 s · p95 5.39 s (product loop) · retry rate 11.5% |
+| Cost | $0.3331 total · $0.00044 per question · $0.00062 per correct answer · 91.5% of prompt tokens cached |
+| Latency | p50 2.64 s · p95 5.25 s (product loop) · retry rate 5.6% |
 
-How to read it: the known-validator-rejection flags cap strict accuracy at
-86.5% (dev 89.3%, holdout 80.5%) even with perfect SQL, and the 92 system
-failures are exactly those retrieval-scope rejections. The holdout gap
-(60.6% vs 72.6%) reflects performance on new intents in partly new wording:
+How to read it: with the full in-scope schema as the allow-list there are no
+retrieval misses, and with perfect SQL the suite's ceiling is 99.6% (one
+`METRIC_COLUMN` known validator rejection remains). Every failure is now a
+model error; the systematic ones are metric-column confusion between
+near-synonyms (net vs payable vs bill total vs balance), joins through bridge
+tables (`ProductBrand`) and wrong result shapes. The two `hard_zero_harbor_kiosk_*`
+cases have an empty or zero gold on every fixture, so the oracle cannot tell
+right from wrong SQL there; treat their outcomes as unscored. The holdout gap
+(68.8% vs 74.6%) reflects performance on new intents in partly new wording:
 the holdout differs from dev in its intents as well as its wording, so the gap
 does not say how much of it comes from vocabulary the semantic layer and
 prompt rules were tuned on and how much from the questions themselves (see
-[Known limits](#known-limits)). Guardrails no longer reject
-correct SQL, but they catch only about a quarter of wrong SQL; most wrong
-answers are semantically wrong SQL that is still valid.
+[Known limits](#known-limits)). Guardrails never reject correct SQL, but they
+catch only about a fifth of wrong SQL; most wrong answers are semantically
+wrong SQL that is still valid.
+
+The previous baseline (prompt version `0c314451d4b7`, retrieved scope without
+widen-on-demand, which `SCHEMA_SCOPE=retrieved` reproduces exactly) scored
+68.8% (dev 72.6%, holdout 60.6%) with 92 system failures, all retrieval
+misses. The paired comparison and the decision are in
+[docs/experiments/01-schema-scope.md](experiments/01-schema-scope.md).
 
 ### CI
 
@@ -1103,10 +1139,10 @@ answers are semantically wrong SQL that is still valid.
 
 ### Cost
 
-LLM cost is small: the committed gpt-4o-mini baseline cost $0.00049 per
+LLM cost is small: the committed gpt-4o-mini baseline cost $0.00044 per
 question (one case repetition, up to two LLM calls), so one repetition of the
-255-case suite is about 12 cents and `--repeat 3` about 37 cents (measured:
-$0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
+255-case suite is about 11 cents and `--repeat 3` about 33 cents (measured:
+$0.3331; the previous, retrieved-scope baseline cost $0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
 
 ## Known limits
 
@@ -1141,7 +1177,8 @@ $0.3709). `--budget-usd` caps it. Rescoring and `--offline` cost nothing.
   intents are regular by construction (one metric, at most two dimensions).
 - **Swedish, typos and shorthand** are a handful of cases; the product's
   ASCII-only normalization fails them today, and so does retrieval on most new
-  vocabulary and named entities (34 known validator rejections).
+  vocabulary and named entities (with the full schema scope that only weakens
+  the ranking hint; under the retrieved scope it is a table-scope rejection).
 - **Behaviour cases** are 10 and are scored only on whether SQL was produced;
   a future clarification answer will need its own check.
 - **Ambiguity is partly encoded as alternatives**: where two readings are both

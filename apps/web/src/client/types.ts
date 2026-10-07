@@ -89,7 +89,10 @@ export interface QueryResponse {
   explanation: string;
   assumptions: string[];
   tablesUsed: string[];
+  // The validator's allow-list (every in-scope table in the full schema scope).
   promptTables: string[];
+  // Retrieval's ranking for the question; empty when nothing matched.
+  rankedTables?: string[];
   visualizations: VisualizationSuggestion[];
   insights: InsightCard[];
   layout?: LayoutSpec | null;

@@ -217,6 +217,44 @@ test('without a validated Host (non-loopback bind, no WEB_ALLOWED_HOSTS) only li
   assert.equal(calls.length, 2);
 });
 
+test('the schema scope from the web config reaches the question runner (never process.env)', async () => {
+  const { factory } = createRuntimeFactory();
+  const { runQuestion, calls } = recordingRunner();
+  const saved = process.env.SCHEMA_SCOPE;
+  process.env.SCHEMA_SCOPE = 'full';
+  try {
+    await withApp({ config: testConfig({ SCHEMA_SCOPE: 'retrieved', SCHEMA_WIDEN_ON_DEMAND: 'off' }), runtimeFactory: factory, runQuestion }, async (app) => {
+      const response = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+      assert.equal(response.status, 200);
+    });
+  } finally {
+    if (saved === undefined) {
+      delete process.env.SCHEMA_SCOPE;
+    } else {
+      process.env.SCHEMA_SCOPE = saved;
+    }
+  }
+  assert.equal(calls.length, 1);
+  assert.deepEqual({ ...calls[0].schemaScope }, { schemaScope: 'retrieved', fullSchemaMaxTokens: 8000, widenOnDemand: false });
+});
+
+test('responses carry the allow-list and retrieval\'s ranking separately (JSON and the SSE sql frame)', async () => {
+  const { factory } = createRuntimeFactory();
+  const all = ['Customer', 'Product', 'SalesDocument'];
+  const { runQuestion } = recordingRunner((args) => successResult(args.question, undefined, { promptTables: all, rankedTables: ['Customer'] }));
+  await withApp({ config: testConfig(), runtimeFactory: factory, runQuestion }, async (app) => {
+    const json = await app.request({ method: 'POST', path: '/api/query', body: { question: 'top customers' } });
+    assert.equal(json.status, 200);
+    assert.deepEqual(json.json.promptTables, all);
+    assert.deepEqual(json.json.rankedTables, ['Customer']);
+
+    const frames = parseSse((await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'top customers again' } })).text);
+    const sqlFrame = frames.find((frame) => frame.event === 'sql');
+    assert.deepEqual(sqlFrame.data.promptTables, all);
+    assert.deepEqual(sqlFrame.data.rankedTables, ['Customer']);
+  });
+});
+
 test('security headers are set on API responses and on the built SPA, which still serves', async () => {
   const distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'txt2sql-dist-'));
   fs.writeFileSync(path.join(distDir, 'index.html'), '<!doctype html><div id="root"></div>');

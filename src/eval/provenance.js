@@ -12,7 +12,12 @@
 // - fixtures: expected and actual content hashes per fixture database;
 // - datasets and controls: sha256 of every file read;
 // - model, the OpenAI-compatible endpoint HOST only (never a key, path or
-//   query), Node version and the runner flags.
+//   query), Node version and the runner flags;
+// - product: the product configuration that shapes the prompt and the
+//   validator: the schema scope (requested and effective, the full-schema
+//   token estimate and budget, widen-on-demand). Reports from before
+//   SCHEMA_SCOPE existed have no `product` block; they ran the retrieved scope
+//   without widening.
 // Paths are stored relative to the repository root.
 
 import { execFile } from 'node:child_process';
@@ -23,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { BUSINESS_RULES, FEW_SHOT_EXAMPLES } from '../constants.js';
-import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt } from '../pipeline.js';
+import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffectiveSchemaScope } from '../pipeline.js';
 
 const execFileAsync = promisify(execFile);
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -86,11 +91,14 @@ export async function resolveGitState(cwd = REPO_ROOT, { run = execFileAsync } =
 /**
  * Prompt version: sha256 of what decides the prompt the model sees apart from
  * the question and the schema (hashed separately): the optimized system prompt
- * as the product builds it, the business rules, the few-shot pool and the
- * request options. `parts` lets tests vary one input.
+ * as the product builds it under `parts.schemaScope` (default: the product
+ * default), the business rules, the few-shot pool and the request options.
+ * `parts` lets tests vary one input. The retrieved scope's system prompt is
+ * the one every run had before schema scopes existed, so its version matches
+ * older reports.
  */
 export function computePromptVersion(schema, parts = {}) {
-  const systemPrompt = parts.systemPrompt ?? buildOptimizedPrompt(schema, 'Prompt version probe').system;
+  const systemPrompt = parts.systemPrompt ?? buildOptimizedPrompt(schema, 'Prompt version probe', { schemaScope: parts.schemaScope }).system;
   const material = {
     systemPrompt,
     businessRules: parts.businessRules ?? BUSINESS_RULES,
@@ -125,6 +133,15 @@ export function shortHash(hash, length = 12) {
 }
 
 /**
+ * The product configuration block: { schemaScope: { requested, effective,
+ * fullSchemaEstimatedTokens, fullSchemaMaxTokens, widenOnDemand,
+ * inScopeTableCount } } for `schemaScope` (a scope name or config).
+ */
+export function describeProductConfig(schema, schemaScope = undefined) {
+  return { schemaScope: resolveEffectiveSchemaScope(schema, schemaScope) };
+}
+
+/**
  * Provenance block of a report.
  * - fixtures: [{ name, database, status, contentHash, expectedContentHash }]
  * - datasets: [{ name, path }] (hashed here); controlsFiles: [paths]
@@ -142,6 +159,7 @@ export async function collectProvenance({
   repoRoot = REPO_ROOT,
   semanticLayerPath = SEMANTIC_LAYER_PATH,
   gitState = null,
+  schemaScope = undefined,
 } = {}) {
   const git = gitState || (await resolveGitState(repoRoot));
   const datasetEntries = [];
@@ -161,7 +179,8 @@ export async function collectProvenance({
   }));
   return {
     git,
-    promptVersion: computePromptVersion(schema),
+    promptVersion: computePromptVersion(schema, { schemaScope }),
+    product: describeProductConfig(schema, schemaScope),
     semanticLayerVersion: await hashFile(semanticLayerPath),
     schemaVersion: computeSchemaVersion(schema),
     schemaPath: repoRelative(schemaPath, repoRoot),
@@ -177,7 +196,12 @@ export async function collectProvenance({
   };
 }
 
-/** The short form stamped on every trace line (createTraceLogger metadata). */
+/**
+ * The short form stamped on every trace line (createTraceLogger metadata). The
+ * scope keys are flat strings/numbers and never `schemaScope`: prompt.built and
+ * prompt.widened carry a `schemaScope` object in their payload, which would
+ * override a metadata key of that name on those lines.
+ */
 export function traceMetadataFromProvenance(provenance) {
   return {
     promptVersion: shortHash(provenance?.promptVersion),
@@ -185,5 +209,9 @@ export function traceMetadataFromProvenance(provenance) {
     dbProfileVersion: shortHash(provenance?.fixturesVersion),
     gitSha: provenance?.git?.sha || null,
     gitDirty: provenance?.git?.dirty ?? null,
+    schemaScopeRequested: provenance?.product?.schemaScope?.requested ?? null,
+    schemaScopeEffective: provenance?.product?.schemaScope?.effective ?? null,
+    schemaFullEstimatedTokens: provenance?.product?.schemaScope?.fullSchemaEstimatedTokens ?? null,
+    schemaWidenOnDemand: provenance?.product?.schemaScope?.widenOnDemand ?? null,
   };
 }

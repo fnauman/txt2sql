@@ -54,7 +54,8 @@ import { runScriptMain } from '../src/eval/script-exit.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { describeFilters, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
-import { createOpenAiClient, loadNarrowSchema, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
+import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
+import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
 import { calculateCost } from '../src/pricing.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
@@ -209,6 +210,23 @@ function suggestFlag(name) {
  * Rejects unknown flags, stray arguments, value flags without a value (or
  * whose value is empty or another flag) and boolean flags given a value.
  */
+/**
+ * The rescore's console note when the recording ran another schema scope or,
+ * in the retrieved scope, another widen-on-demand setting (the same test as
+ * report.md's "Recorded schema scope" row); null when they behave the same.
+ * recordedScope null = a report from before SCHEMA_SCOPE (retrieved, no
+ * widening).
+ */
+export function rescoreSchemaScopeNote(recordedScope, todayScope) {
+  if (sameSchemaScopeBehaviour(recordedScope, todayScope)) {
+    return null;
+  }
+  return (
+    `  note: the recording ran with schema scope ${recordedScope ? describeSchemaScope(recordedScope) : 'retrieved, no widening (not recorded: before SCHEMA_SCOPE)'}; ` +
+    `today's validator uses ${describeSchemaScope(todayScope)}, so recorded SQL is re-judged with today's scope.`
+  );
+}
+
 export function validateEvalArgv(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -960,7 +978,7 @@ function createLiveClient(options) {
   return client;
 }
 
-async function runLive({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
+async function runLive({ options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
   const model = options.model;
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
@@ -988,6 +1006,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
     controlsFiles: (controlsIndex?.files || []).map((name) => path.join(options.controlsDir, name)),
     model,
     runner,
+    schemaScope,
   });
   const suite = describeSuite(selection, { repoRelative });
   // Read the baseline before spending anything: a broken file fails fast.
@@ -1042,6 +1061,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
           maxRetries,
           statementTimeoutMs,
           signal,
+          schemaScope,
         }),
       onResult: async (info) => {
         cli.log(formatProgress({ ...info, repeat: options.repeat }));
@@ -1123,7 +1143,7 @@ async function runLive({ options, cli, schema, selection, connections, fixtureSt
   }
 }
 
-async function runRescore({ options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification }) {
+async function runRescore({ options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification }) {
   let sourcePath = options.rescore;
   if (!sourcePath) {
     const candidate = defaultBaselinePath(options.model);
@@ -1175,9 +1195,14 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     throw new HarnessError(thresholdRefusal, { code: 'NO_ANSWER_CASES' });
   }
   const primary = connections.find((entry) => entry.name === PRIMARY_FIXTURE.name) || connections[0];
-  const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs });
+  const validate = createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs, schemaScope });
   const goldCache = createGoldCache();
+  const recordedScope = source.provenance?.product?.schemaScope || null;
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
+  const scopeNote = rescoreSchemaScopeNote(recordedScope, validate.schemaScope);
+  if (scopeNote) {
+    cli.log(scopeNote);
+  }
   const rescored = await rescoreReportCases(source, {
     currentCases,
     connections,
@@ -1228,6 +1253,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
     controlsFiles: (controlsIndex?.files || []).map((name) => path.join(options.controlsDir, name)),
     model,
     runner,
+    schemaScope,
   });
   const generatedAt = new Date().toISOString();
   const baseline = options.compare
@@ -1263,6 +1289,7 @@ async function runRescore({ options, cli, schema, selection, connections, fixtur
       mode: source.mode || 'run',
       gitSha: source.provenance?.git?.sha || source.gitSha || null,
       promptVersion: source.provenance?.promptVersion || null,
+      schemaScope: recordedScope,
       reportVersion: source.reportVersion || 1,
       compact: isCompactReport(source),
     },
@@ -1285,9 +1312,19 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
   );
   // Configuration problems fail before anything is started, seeded or spent.
   await checkGateBaseline(options, cli);
+  let schemaScope;
+  try {
+    // The product setting (SCHEMA_SCOPE, SCHEMA_FULL_MAX_TOKENS,
+    // SCHEMA_WIDEN_ON_DEMAND), read like the web server and the CLI read it;
+    // a live run, a rescore and the verification all use it.
+    schemaScope = resolveSchemaScopeConfig(env);
+  } catch (error) {
+    throw new HarnessError(error.message, { code: error.code || 'INVALID_CONFIG', cause: error });
+  }
   const client = rescoreMode ? null : createLiveClient(options);
 
   const schema = await loadNarrowSchema({ modelsDir: MODELS_DIR, schemaPath: SCHEMA_PATH, refreshSchema: options.refreshSchema });
+  cli.log(`Schema scope: ${describeSchemaScope(resolveEffectiveSchemaScope(schema, schemaScope))}`);
 
   const database = await preflightDatabase({ env, allowDocker: options.docker, allowSeed: options.seed, repoRoot: REPO_ROOT, log: (line) => cli.log(line) });
   cli.log(`Database: ${database.status === 'started' ? 'started with docker compose' : 'reachable'}.`);
@@ -1383,7 +1420,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
           datasets: selection.datasets,
           connections,
           goldCache: createGoldCache(),
-          validate: createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs: resolveStatementTimeoutMs() }),
+          validate: createValidatorProbe({ schema, connection: primary.connection, statementTimeoutMs: resolveStatementTimeoutMs(), schemaScope }),
           controlsIndex,
           checkControls: options.checkControls,
           minKillRate: options.minKillRate,
@@ -1409,7 +1446,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       cli.log('Verify: skipped.');
     }
 
-    const context = { options, cli, schema, selection, connections, fixtureStatus, controlsIndex, verification, client };
+    const context = { options, cli, schema, schemaScope, selection, connections, fixtureStatus, controlsIndex, verification, client };
     return rescoreMode ? await runRescore(context) : await runLive(context);
   } finally {
     await closeFixtureConnections(connections);

@@ -22,10 +22,13 @@
 // Wording is curated, not generated: each intent lists 2-3 phrasings a
 // retail/distribution manager would plausibly type. A phrasing written as
 // `{ q, knownRejection: '<code>' }` is one the production validator rejects
-// every correct answer to today (retrieval misses a table the answer needs,
-// or a guardrail misreads the wording): the case gets
-// `known_validator_rejection` and still counts, so the gap is measured
-// (verify-dataset fails once the validator accepts its gold). A holdout intent's
+// every correct answer to today in the default product configuration (a
+// guardrail misreads the wording): the case gets `known_validator_rejection`
+// and still counts, so the gap is measured (verify-dataset fails once the
+// validator accepts its gold). Retrieval misses are no such gap any more: the
+// default schema scope (SCHEMA_SCOPE=auto, full at this schema size) allows
+// every in-scope table, and under SCHEMA_SCOPE=retrieved verify-dataset notes
+// them instead. A holdout intent's
 // phrasings must not contain any multi-word synonym of the semantic layer
 // (metadata/semantic-layer.json): the layer and the prompt rules were tuned on
 // the dev wording, so the holdout measures unseen vocabulary as well as unseen
@@ -828,7 +831,7 @@ const INTENTS = [
     filters: [{ dim: 'doctype', value: 'Online Order' }],
     phrasings: [
       'Monthly net sales from Online Order documents in 2026.',
-      { q: 'How much net revenue came in through online orders each month of 2026?', knownRejection: 'TABLE_SCOPE' },
+      'How much net revenue came in through online orders each month of 2026?',
     ],
   },
   {
@@ -907,7 +910,7 @@ const INTENTS = [
   {
     intentId: 'product_net_sales_rank_dec_2025', template: 'fact', metric: 'line_net', dims: ['product'], window: '2025-12', shape: 'rank',
     phrasings: [
-      { q: 'Rank products by turnover for December 2025.', knownRejection: 'TABLE_SCOPE' },
+      'Rank products by turnover for December 2025.',
       'Order every product we sold in December 2025 by its net takings, highest first.',
     ],
   },
@@ -921,23 +924,23 @@ const INTENTS = [
   {
     intentId: 'brand_net_sales_top3_q1_2026', template: 'fact', metric: 'line_net', dims: ['brand'], window: 'q1-2026', shape: 'top', limit: 3,
     phrasings: [
-      { q: 'Top 3 brands by turnover in Q1 2026.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'Which three brands brought in the most money, net of tax, from January to March 2026?', knownRejection: 'TABLE_SCOPE' },
+      'Top 3 brands by turnover in Q1 2026.',
+      'Which three brands brought in the most money, net of tax, from January to March 2026?',
     ],
   },
   {
     intentId: 'sunvale_net_sales_monthly_q1_2026', template: 'fact', metric: 'line_net', window: 'q1-2026', series: true,
     filters: [{ dim: 'brand', value: 'Sunvale Foods' }],
     phrasings: [
-      { q: 'Monthly net sales of Sunvale Foods products in Q1 2026.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'How did Sunvale Foods revenue develop month by month in the first quarter of 2026?', knownRejection: 'TABLE_SCOPE' },
+      'Monthly net sales of Sunvale Foods products in Q1 2026.',
+      'How did Sunvale Foods revenue develop month by month in the first quarter of 2026?',
     ],
   },
   {
     intentId: 'category_net_sales_apr_2026', template: 'fact', metric: 'line_net', dims: ['category'], window: '2026-04', shape: 'breakdown',
     phrasings: [
-      { q: 'Turnover by category in April 2026.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'Net takings per category for April 2026.', knownRejection: 'TABLE_SCOPE' },
+      'Turnover by category in April 2026.',
+      'Net takings per category for April 2026.',
     ],
   },
   {
@@ -950,14 +953,14 @@ const INTENTS = [
   {
     intentId: 'category_net_sales_q1_2025', template: 'fact', metric: 'line_net', dims: ['category'], window: 'q1-2025', shape: 'breakdown',
     phrasings: [
-      { q: 'Turnover by category in Q1 2025.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'Break down first-quarter 2025 net takings by category.', knownRejection: 'TABLE_SCOPE' },
+      'Turnover by category in Q1 2025.',
+      'Break down first-quarter 2025 net takings by category.',
     ],
   },
   {
     intentId: 'campaign_net_sales_q1_2026', template: 'fact', metric: 'line_net', dims: ['campaign'], window: 'q1-2026', shape: 'breakdown',
     phrasings: [
-      { q: 'Turnover by campaign for Q1 2026.', knownRejection: 'TABLE_SCOPE' },
+      'Turnover by campaign for Q1 2026.',
       'How much did each promotion take in, net of tax, in January–March 2026?',
     ],
   },
@@ -974,7 +977,7 @@ const INTENTS = [
     filters: [{ dim: 'store', value: 'Online Fulfillment' }],
     phrasings: [
       'Top 5 products by net sales at the Online Fulfillment location in March 2026.',
-      { q: 'Which five products earned the most revenue through Online Fulfillment in March 2026?', knownRejection: 'TABLE_SCOPE' },
+      'Which five products earned the most revenue through Online Fulfillment in March 2026?',
     ],
   },
   {
@@ -1004,8 +1007,8 @@ const INTENTS = [
     intentId: 'herbal_tea_net_sales_monthly_nov_2025_feb_2026', template: 'fact', metric: 'line_net', window: 'nov25-feb26', series: true,
     filters: [{ dim: 'product', value: 'Herbal Tea Variety Pack' }],
     phrasings: [
-      { q: 'Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.', knownRejection: 'TABLE_SCOPE' },
-      { q: 'How much did the Herbal Tea Variety Pack take, net of tax, in each month between November 2025 and February 2026?', knownRejection: 'TABLE_SCOPE' },
+      'Monthly turnover of Herbal Tea Variety Pack from November 2025 to February 2026.',
+      'How much did the Herbal Tea Variety Pack take, net of tax, in each month between November 2025 and February 2026?',
     ],
   },
   // ---- quantity ----
@@ -1019,7 +1022,7 @@ const INTENTS = [
   {
     intentId: 'product_qty_top3_apr_2026', template: 'fact', metric: 'qty', dims: ['product'], window: '2026-04', shape: 'top', limit: 3,
     phrasings: [
-      { q: 'Top 3 items by units in April 2026.', knownRejection: 'TABLE_SCOPE' },
+      'Top 3 items by units in April 2026.',
       'Which three products sold the highest number of units in April 2026?',
     ],
   },
@@ -1129,8 +1132,8 @@ const INTENTS = [
     intentId: 'north_district_document_count_q1_2026', template: 'fact', metric: 'docs', window: 'q1-2026', shape: 'scalar', boundary: 'end',
     filters: [{ dim: 'customer', value: 'North District Market' }],
     phrasings: [
-      { q: 'How many documents did North District Market have in Q1 2026?', knownRejection: 'TABLE_SCOPE' },
-      { q: 'Number of sales documents for North District Market between January and March 2026.', knownRejection: 'TABLE_SCOPE' },
+      'How many documents did North District Market have in Q1 2026?',
+      'Number of sales documents for North District Market between January and March 2026.',
     ],
   },
   {
@@ -1181,7 +1184,7 @@ const INTENTS = [
   {
     intentId: 'category_distinct_customers_mar_2026', template: 'fact', metric: 'customers', dims: ['category'], window: '2026-03', shape: 'breakdown',
     phrasings: [
-      { q: 'How many different customers bought each category in March 2026?', knownRejection: 'TABLE_SCOPE' },
+      'How many different customers bought each category in March 2026?',
       'For March 2026, count the distinct buyers of every category.',
     ],
   },
@@ -1189,8 +1192,8 @@ const INTENTS = [
     intentId: 'urban_refresh_customers_q1_2026', template: 'fact', metric: 'customers', window: 'q1-2026', shape: 'scalar',
     filters: [{ dim: 'campaign', value: 'Urban Refresh' }],
     phrasings: [
-      { q: 'How many customers bought Urban Refresh campaign products in Q1 2026?', knownRejection: 'TABLE_SCOPE' },
-      { q: 'Number of distinct customers who purchased anything from the Urban Refresh promotion in January–March 2026.', knownRejection: 'TABLE_SCOPE' },
+      'How many customers bought Urban Refresh campaign products in Q1 2026?',
+      'Number of distinct customers who purchased anything from the Urban Refresh promotion in January–March 2026.',
     ],
   },
   {
