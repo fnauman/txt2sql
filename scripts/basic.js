@@ -17,6 +17,7 @@ import {
   resolveStatementTimeoutMs,
   validateReadOnlySql,
 } from '../src/pipeline.js';
+import { resolveModelName } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
@@ -52,7 +53,7 @@ async function main() {
   });
   const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const { model } = resolveModelName(process.env);
   const questions = customQuestion ? [customQuestion] : DEFAULT_BASIC_QUESTIONS;
 
   await trace.emit('run.started', {

@@ -59,6 +59,7 @@ import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, reso
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
 import { calculateCost } from '../src/pricing.js';
+import { DEFAULT_MODEL, resolveModelName } from '../src/model-config.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
 import { evaluateQuestion } from './evaluate.js';
@@ -87,7 +88,7 @@ identical question + gold):
   --split dev|holdout|all     cases without a split count as dev (default all)
   --case-id <id[,id]>  --tag <tag[,tag]>  --intent <intentId[,intentId]>
 Run:
-  --model <name>              default MODEL_NAME, else gpt-4o-mini
+  --model <name>              default MODEL_NAME, else ${DEFAULT_MODEL}
   --repeat N                  repetitions per case, all kept (default 1)
   --concurrency N             cases in flight (default ${DEFAULT_CONCURRENCY})
   --case-timeout-ms N         per-case deadline, 0 disables (default ${DEFAULT_CASE_TIMEOUT_MS})
@@ -312,6 +313,14 @@ export function defaultBaselinePath(model, baselinesDir = DEFAULT_BASELINES_DIR)
   return path.resolve(baselinesDir, `${sanitizeSegment(model)}.json`);
 }
 
+/**
+ * The default baseline of a run configured by `env` alone (no flags), as the
+ * CI db job checks for it before an offline --gate.
+ */
+export function defaultBaselineForEnv(env = process.env) {
+  return defaultBaselinePath(resolveModelName(env).model);
+}
+
 /** Parses the command line into run options (throws HarnessError on bad usage). */
 export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = process.env } = {}) {
   validateEvalArgv(argv);
@@ -346,7 +355,7 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     caseIds: parseList(getOptionValue(argv, '--case-id')),
     tags: parseList(getOptionValue(argv, '--tag')),
     intents: parseList(getOptionValue(argv, '--intent')),
-    model: getOptionValue(argv, '--model') || env.MODEL_NAME || 'gpt-4o-mini',
+    model: resolveModelName(env, { flag: getOptionValue(argv, '--model') }).model,
     repeat: parseInteger(argv, '--repeat', 1, { min: 1, max: 100 }),
     concurrency: parseInteger(argv, '--concurrency', DEFAULT_CONCURRENCY, { min: 1, max: 64 }),
     caseTimeoutMs: parseInteger(argv, '--case-timeout-ms', DEFAULT_CASE_TIMEOUT_MS, { min: 0 }),

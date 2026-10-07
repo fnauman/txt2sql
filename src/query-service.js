@@ -20,6 +20,7 @@ import {
 import { normalizeHintsVersion, resolveHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
+import { resolveModelName } from './model-config.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
 import { clearSemanticLayerCache } from './semantic-layer.js';
 import { createTimer, serializeError } from './trace.js';
@@ -301,7 +302,7 @@ export async function loadOptimizedQueryRuntime({
   schemaScope = undefined,
   hintsVersion = undefined,
 } = {}) {
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const { model } = resolveModelName(process.env);
   const effectiveConnectionLimit = connectionLimit ?? resolveDbConnectionLimit();
   // SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS / SCHEMA_WIDEN_ON_DEMAND and
   // HINTS_VERSION unless the caller (the web server's config) passes its own;
@@ -394,7 +395,7 @@ export async function runOptimizedQuestion({
   client,
   connection,
   schema,
-  model = process.env.MODEL_NAME || 'gpt-4o-mini',
+  model = resolveModelName(process.env).model,
   question,
   questionIndex = 1,
   trace = createNoopTraceLogger(),

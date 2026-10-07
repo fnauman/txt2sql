@@ -16,6 +16,7 @@ import {
 } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
+import { resolveModelName } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
@@ -58,7 +59,7 @@ async function main() {
   });
   const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const { model } = resolveModelName(process.env);
   const questions = customQuestion ? [customQuestion] : DEFAULT_OPTIMIZED_QUESTIONS;
 
   await trace.emit('run.started', {

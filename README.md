@@ -511,7 +511,7 @@ The API server (`apps/web/src/server/main.js`) loads the env file first, then va
 
 Every LLM call automatically estimates token costs based on the model used. Costs are printed per-call and as a run total.
 
-Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset. The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
+Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset (`DEFAULT_MODEL` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
 Supported cost estimates: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
 

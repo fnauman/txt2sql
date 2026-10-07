@@ -8,6 +8,7 @@
 // startup error, and returns a deeply frozen object.
 
 import { resolveHintsVersion } from '../../../../src/hints-version.js';
+import { DEFAULT_MODEL } from '../../../../src/model-config.js';
 import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
@@ -121,7 +122,7 @@ export const DEFAULT_WEB_CONFIG = Object.freeze({
   shutdownTimeoutMs: 10_000,
   openAiTimeoutMs: 60_000,
   openAiMaxRetries: 1,
-  model: 'gpt-4o-mini',
+  model: DEFAULT_MODEL,
 });
 
 export function loadWebConfig(env = process.env) {
