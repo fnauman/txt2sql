@@ -46,6 +46,7 @@ function requireAdmin() {
 
 const REGRESSED = ['paraphrase_public_001', 'paraphrase_public_002', 'paraphrase_public_003', 'paraphrase_public_005', 'paraphrase_public_008', 'paraphrase_public_009'];
 let mode = 'base';
+let llmRequests = 0;
 let server;
 let baseUrl;
 let outputRoot;
@@ -65,6 +66,7 @@ before(async () => {
       body += chunk;
     });
     request.on('end', () => {
+      llmRequests += 1;
       if (mode === 'unauthorized') {
         response.writeHead(401, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } }));
@@ -405,6 +407,24 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   const { report: holdoutReport } = await findReport(holdout.outputDir);
   assert.ok(holdoutReport.results.length > 0 && holdoutReport.results.every((record) => record.split === 'holdout'));
   assert.equal(holdoutReport.suite.filters.split, 'holdout');
+});
+
+test('behaviour-only selections: the benchmark profile fails an answered case; --min-accuracy is refused before any LLM call', { skip }, async () => {
+  mode = 'base';
+  // The stand-in answers every abstain case with SQL except
+  // hard_abstain_competitor_prices, which it declines.
+  const unanswerable = ['--dataset', 'hard-cases-public', '--tag', 'unanswerable'];
+  const answered = await runEval(['--profile', 'benchmark', ...unanswerable], 'benchmark-behaviour');
+  assert.equal(answered.code, 1, `${answered.stdout}\n${answered.stderr}`);
+  assert.match(answered.stdout, /FAIL: 4 case\(s\) failed \(benchmark profile, single run; 4 abstain\/clarify case\(s\) not declined: 4 answered\)/);
+  const declined = await runEval(['--profile', 'benchmark', '--dataset', 'hard-cases-public', '--case-id', 'hard_abstain_competitor_prices'], 'benchmark-declined');
+  assert.equal(declined.code, 0, `${declined.stdout}\n${declined.stderr}`);
+
+  const before = llmRequests;
+  const gated = await runEval([...unanswerable, '--skip-verify', '--gate', '--min-accuracy', '0.8'], 'min-accuracy-behaviour');
+  assert.equal(gated.code, 2, `${gated.stdout}\n${gated.stderr}`);
+  assert.match(`${gated.stdout}${gated.stderr}`, /--min-accuracy 0\.8 cannot be checked: no answer case was selected \(only 5 abstain \/ clarify case\(s\)/);
+  assert.equal(llmRequests, before, 'refused before any LLM call');
 });
 
 test('--budget-usd stops starting cases once the spend reaches the budget', { skip }, async () => {

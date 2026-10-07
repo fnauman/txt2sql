@@ -168,6 +168,191 @@ test('ranked: a NULL metric must not reset monotonicity mid-sequence', () => {
   assert.equal(compareResults(gold, interrupted, spec), false);
 });
 
+test('ranked: a null_as_zero metric is ranked as 0, as it is matched', () => {
+  const gold = [
+    { name: 'A', v: 10 },
+    { name: 'C', v: 5 },
+    { name: 'B', v: 0 },
+  ];
+  const spec = { mode: 'ranked', order: 'desc', value_columns: ['v'], null_as_zero: ['v'] };
+  // B's NULL matches the gold's 0, so it ranks as 0 too: 10, 0, 5 is not descending.
+  const misordered = [
+    { name: 'A', v: 10 },
+    { name: 'B', v: null },
+    { name: 'C', v: 5 },
+  ];
+  assert.deepEqual(
+    [compareResultsDetailed(gold, misordered, spec).match, compareResultsDetailed(gold, misordered, spec).reason],
+    [false, 'ranking']
+  );
+  // The same NULL in the 0's place is a correct ranking.
+  assert.equal(compareResults(gold, [misordered[0], misordered[2], misordered[1]], spec), true);
+  // Ascending: the NULL (MariaDB sorts NULL first) ranks as 0, ahead of 5 and 10.
+  const ascending = { ...spec, order: 'asc' };
+  assert.equal(compareResults([...gold].reverse(), [misordered[1], misordered[2], misordered[0]], ascending), true);
+  // Without null_as_zero a NULL is not a ranking value: it is not 0 either, so
+  // the values do not match in the first place.
+  const strict = { mode: 'ranked', order: 'desc', value_columns: ['v'] };
+  assert.equal(compareResultsDetailed(gold, misordered, strict).reason, 'values');
+});
+
+test('ranked: ranking values compare as the cells match, rounded to decimals (or within the tolerance)', () => {
+  const gold = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0 },
+    { name: 'C', v: 0 },
+  ];
+  const spec = { mode: 'ranked', order: 'desc', value_columns: ['v'], null_as_zero: ['v'] };
+  // NULL and 0.004 both match the gold's 0 at two decimals: a tie, not a
+  // misordering, in either order.
+  for (const tail of [[null, 0.004], [0.004, null]]) {
+    const actual = [{ name: 'A', v: 5 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    assert.deepEqual([compareResultsDetailed(gold, actual, spec).match, compareResultsDetailed(gold, actual, spec).reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // Without null_as_zero: 0.001 then 0.004 is the same tie.
+  const strict = { mode: 'ranked', order: 'desc', value_columns: ['v'] };
+  assert.equal(compareResults(gold, [{ name: 'A', v: 5 }, { name: 'B', v: 0.001 }, { name: 'C', v: 0.004 }], strict), true);
+  // Ascending, the same.
+  assert.equal(compareResults([...gold].reverse(), [{ name: 'C', v: 0.004 }, { name: 'B', v: null }, { name: 'A', v: 5 }], { ...spec, order: 'asc' }), true);
+  // Values that differ after rounding still have to be ranked.
+  const distinct = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0.01 },
+    { name: 'C', v: 0 },
+  ];
+  assert.equal(compareResultsDetailed(distinct, [distinct[0], distinct[2], distinct[1]], strict).reason, 'ranking');
+  // With decimals: 3, 0.004 is not 0.
+  assert.equal(compareResultsDetailed(gold, [{ name: 'A', v: 5 }, { name: 'B', v: null }, { name: 'C', v: 0.004 }], { ...spec, decimals: 3 }).reason, 'values');
+  // With a tolerance, values within it tie (as they match).
+  assert.equal(compareResults(gold, [{ name: 'A', v: 5 }, { name: 'B', v: null }, { name: 'C', v: 0.004 }], { ...spec, tolerance: 0.005 }), true);
+});
+
+test('ranked: under a tolerance, two values that both match one gold value tie, even 2x the tolerance apart', () => {
+  const tolerant = { mode: 'ranked', order: 'desc', value_columns: ['v'], tolerance: 0.01 };
+  // A NULL read as 0 and 0.012 both match the gold's 0.005 within 0.01.
+  const tied = [
+    { name: 'A', v: 5 },
+    { name: 'B', v: 0.005 },
+    { name: 'C', v: 0.005 },
+  ];
+  for (const tail of [[null, 0.012], [0.012, null]]) {
+    const actual = [{ name: 'A', v: 5 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    const detailed = compareResultsDetailed(tied, actual, { ...tolerant, null_as_zero: ['v'] });
+    assert.deepEqual([detailed.match, detailed.reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // A tied gold 10.00 summed per line can come back as 9.992 / 10.008: both
+  // match, in either order.
+  const cents = [
+    { name: 'A', v: 20 },
+    { name: 'B', v: 10 },
+    { name: 'C', v: 10 },
+  ];
+  for (const tail of [[9.992, 10.008], [10.008, 9.992]]) {
+    const actual = [{ name: 'A', v: 20 }, { name: 'B', v: tail[0] }, { name: 'C', v: tail[1] }];
+    const detailed = compareResultsDetailed(cents, actual, tolerant);
+    assert.deepEqual([detailed.match, detailed.reason], [true, 'match'], JSON.stringify(tail));
+  }
+  // Values further apart than any one gold value allows are still ranked.
+  const distinct = [
+    { name: 'A', v: 20 },
+    { name: 'B', v: 10.05 },
+    { name: 'C', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(distinct, [distinct[0], distinct[2], distinct[1]], tolerant).reason, 'ranking');
+});
+
+test('ranked: under a tolerance, a tie is two rows matched to equal gold values, not two values within twice it', () => {
+  const tolerant = { mode: 'ranked', order: 'desc', value_columns: ['v'], tolerance: 0.01 };
+  // 10.015 and 10 are distinct gold ranks; no gold value matches both, and the
+  // 0.015 inversion is no tie although it is under twice the tolerance.
+  const gold = [
+    { name: 'A', v: 10.015 },
+    { name: 'B', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(gold, [gold[1], gold[0]], tolerant).reason, 'ranking');
+  // The same inversion under noise within the tolerance: values out of order.
+  assert.equal(compareResultsDetailed(gold, [{ name: 'B', v: 10.009 }, { name: 'A', v: 10.016 }], tolerant).reason, 'ranking');
+  assert.deepEqual(
+    [compareResultsDetailed(gold, gold, tolerant).reason, compareResultsDetailed(gold, [{ name: 'A', v: 10.006 }, { name: 'B', v: 10.009 }], tolerant).reason],
+    ['match', 'match']
+  );
+  // Within the tolerance of each other, distinct gold values are still
+  // distinct ranks: the labels pair each row with its own gold row.
+  const near = [
+    { name: 'A', v: 10.008 },
+    { name: 'B', v: 10 },
+  ];
+  assert.equal(compareResultsDetailed(near, [near[1], near[0]], tolerant).reason, 'ranking');
+  assert.equal(compareResultsDetailed(near, [{ name: 'A', v: 10 }, { name: 'B', v: 10.008 }], tolerant).reason, 'match');
+  // Ascending, and with the ranking column elsewhere than first.
+  const asc = { ...tolerant, order: 'asc' };
+  const ascGold = [
+    { v: 10, name: 'B' },
+    { v: 10.015, name: 'A' },
+  ];
+  assert.equal(compareResultsDetailed(ascGold, [ascGold[1], ascGold[0]], asc).reason, 'ranking');
+  assert.equal(compareResultsDetailed(ascGold, ascGold, asc).reason, 'match');
+  // NULL metric rows still sort anywhere without breaking the order of the rest.
+  const withNull = [...gold, { name: 'C', v: null }];
+  assert.equal(compareResultsDetailed(withNull, [withNull[2], withNull[0], withNull[1]], tolerant).reason, 'match');
+  assert.equal(compareResultsDetailed(withNull, [withNull[1], withNull[2], withNull[0]], tolerant).reason, 'ranking');
+});
+
+test('ranked: under a tolerance, a prediction sorted by its own values passes even where noise flips a gold near-tie', () => {
+  const tolerant = { mode: 'ranked', order: 'desc', value_columns: ['net_sales'], tolerance: 0.01 };
+  // Per-line ROUND (SUM(ROUND(x, 2))) against ROUND(SUM(x), 2) on near-tied
+  // brands: Zeta lines 0.004 + 0.004 + 100, Alpha 0.005 + 0.005 + 99.99.
+  const gold = [
+    { BrandName: 'Zeta', net_sales: 100.01 },
+    { BrandName: 'Alpha', net_sales: 100 },
+  ];
+  const perLineRound = [
+    { BrandName: 'Alpha', net_sales: 100.01 },
+    { BrandName: 'Zeta', net_sales: 100 },
+  ];
+  assert.equal(compareResultsDetailed(gold, perLineRound, tolerant).reason, 'match');
+  assert.equal(compareResultsDetailed(gold, perLineRound, tolerant, { goldTies: [{ BrandName: 'Beta', net_sales: 100 }] }).reason, 'match');
+  // An exact tie in the prediction's own values, broken by label.
+  const exactTie = [
+    { BrandName: 'Alpha', net_sales: 100 },
+    { BrandName: 'Zeta', net_sales: 100 },
+  ];
+  assert.equal(compareResultsDetailed(gold, exactTie, tolerant).reason, 'match');
+  // Noise on both sides, the prediction in its own descending order.
+  const near = [
+    { BrandName: 'A', net_sales: 10.001 },
+    { BrandName: 'B', net_sales: 10 },
+  ];
+  const noisy = [
+    { BrandName: 'B', net_sales: 10.004 },
+    { BrandName: 'A', net_sales: 10.003 },
+  ];
+  assert.equal(compareResultsDetailed(near, noisy, tolerant).reason, 'match');
+  // The own-order check does not round: 10.0054 before 10.0051 is out of
+  // order even though both round to 10.01, and the gold ranks differ.
+  const distinct = [
+    { BrandName: 'A', net_sales: 10.015 },
+    { BrandName: 'B', net_sales: 10 },
+  ];
+  const hidden = [
+    { BrandName: 'B', net_sales: 10.0051 },
+    { BrandName: 'A', net_sales: 10.0054 },
+  ];
+  assert.equal(compareResultsDetailed(distinct, hidden, tolerant).reason, 'ranking');
+  assert.equal(compareResultsDetailed(distinct, [hidden[1], hidden[0]], { ...tolerant, order: 'asc' }).reason, 'ranking');
+  assert.equal(compareResultsDetailed(distinct, [hidden[1], hidden[0]], tolerant).reason, 'match');
+  // Under null_as_zero a prediction NULL ranks as 0 in its own order.
+  const zeros = [
+    { BrandName: 'A', net_sales: 0.008 },
+    { BrandName: 'B', net_sales: 0 },
+  ];
+  const nullFirst = [
+    { BrandName: 'B', net_sales: 0.004 },
+    { BrandName: 'A', net_sales: null },
+  ];
+  assert.equal(compareResultsDetailed(zeros, nullFirst, { ...tolerant, null_as_zero: ['net_sales'] }).reason, 'match');
+});
+
 // Behavior change (EVAL-1 / ORACLE-10): signal checks and the disallowed-column
 // lint used to turn a value match into 'low_signal_success' /
 // 'disallowed_column_used' failures. Only values decide now; both are warnings.

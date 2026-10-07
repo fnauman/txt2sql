@@ -113,10 +113,12 @@ other words).
   only names of those things.
 
 So dev measures the product on the wording it was tuned on, and holdout on new
-intents in partly new wording. A dev score well above the holdout score is the
-tuning showing. Keep it that way: **never tune the prompt rules, the few-shot
-pool or the semantic layer on holdout wording**, and add a synonym that a
-holdout question uses only together with a fresh holdout. Limit: the holdout
+intents in partly new wording. A dev score well above the holdout score is
+what the tuning would show, but the splits also differ in their intents, so it
+does not prove it (see the limit below). Keep it that way: **never tune the
+prompt rules, the few-shot pool or the semantic layer on holdout wording**,
+and add a synonym that a holdout question uses only together with a fresh
+holdout. Limit: the holdout
 mixes two effects, unseen intents and unseen vocabulary (dev and holdout
 wording differ systematically: "revenue" versus "turnover" / "takings"), so a
 gap does not say which one hurts; several holdout questions are known
@@ -495,7 +497,9 @@ Oracle rules (`scoreAgainstGold`):
   and refuses to write anything unless every fixture is `current` with the
   shared master data: run `npm run seed-fixtures` first; behaviour cases have
   none). An external dataset may still carry the older single
-  `expected_row_count`; it is read as the seed's pin.
+  `expected_row_count`; it is read as the seed's pin (and ignored next to
+  `expected_row_counts`), and a result record (live or rescored) keeps it
+  among its case fields.
 - `alternative_expected_sql: [sql, ...]` lists other readings a case accepts,
   each explained in the case `notes`: the original ledger rankings without
   zero-total accounts (`core_public_005` / `009`), the `edge_public_008` pivot
@@ -567,9 +571,22 @@ comparison: {
   exist. **Empty results**: two empty results match; an empty result never
   equals one row.
 - **ranked**: the bijection must exist **and** the model's primary value column
-  must be monotonic in `order` (tie reordering by label is tolerated; NULL
-  metrics sort last). The default ranking column is the first truly numeric
-  gold column, never a numeric-looking code string.
+  must be monotonic in `order` up to ties (tie reordering by label is
+  tolerated; NULL metrics sort last). Without a tolerance values compare as cells match, so
+  two values that both match one gold value tie: rounded to `decimals`, a
+  NULL under `null_as_zero` and 0.004 tie at two decimals. With a tolerance
+  the column's own order compares unrounded, so a prediction sorted by its
+  own values always passes the order check (per-line `ROUND` sums can flip a
+  near-tie of two distinct gold values by a cent: gold Zeta 100.01, Alpha
+  100.00 and prediction Alpha 100.01, Zeta 100.00), and a column out of its
+  own order passes only by the row matching: the gold rows the prediction's
+  rows pair with must come in the gold's ranking order, so two out-of-order
+  rows tie only when they pair with equal gold values, as 9.992 listed
+  before 10.008 (descending) both pairing with a gold 10 at 0.01. Gold rows
+  10.015 and 10 are distinct ranks even though their values are within twice
+  the tolerance, so 10 listed before 10.015 fails, and at a cut-off the boundary
+  rows and their ties rank as one tie. The default ranking column is the
+  first truly numeric gold column, never a numeric-looking code string.
 - **Ties at the cut-off** (ranked only): when a gold variant returns as many
   rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), the
   oracle reads it past that `LIMIT` and passes the left-out rows as
@@ -606,8 +623,9 @@ comparison: {
   column identifies itself; the others must keep the gold's relative order.
   Limit: carriers named unlike any listed column are judged by position only.
 - **null_as_zero**: NULL counts as 0 on both sides in the listed columns (a
-  pivot's month without sales, a SUM over an empty window). Without it a NULL
-  gold never equals 0.
+  pivot's month without sales, a SUM over an empty window), in a ranked case's
+  order check too (a NULL between 10 and 5 in a descending ranking is a 0 out
+  of place). Without it a NULL gold never equals 0.
 - **Scalar rule**: when the gold is a single value and the prediction has
   several columns, the carrier must be the column named exactly like the gold
   column when there is one, else the only column of the value's kind, else the
@@ -811,10 +829,30 @@ npm run eval -- --help                              # every flag
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
-comparison spec and expected behaviour): today 255 cases over 140 intents. A
-case id with a different question or gold in two datasets is a dataset
-conflict (exit 2), also when its first appearance was dropped as a duplicate
-of another id. Filters: `--dataset a,b` or `--dataset-file`, `--split
+comparison spec and expected behaviour): today 255 cases over 140 intents.
+Only the kept definition runs, so a duplicate is dropped only when dataset
+order cannot matter; anything else is a dataset conflict (exit 2). A case id
+that appears in two datasets must be the same case in every field that is run,
+verified, scored, selected or reported on: a different question or gold, but
+equally a different split, `known_validator_rejection`, `expected_row_counts`
+(a legacy `expected_row_count` counts as the seed's pin, so it equals
+`expected_row_counts: { seed: n }`), `signal_checks`, intent, tags, expected tables or columns, difficulty or
+failure class is a conflict, also when its first appearance was dropped as a
+duplicate of another id. Whitespace in the question and SQL and the order of
+the top-level list fields (tags, expected / disallowed columns, expected
+tables) are not differences; list order inside `signal_checks` or the
+comparison spec is. Free-text `notes` is not compared. Rejecting the second definition,
+rather than verifying both and running the first, is the conservative choice:
+no definition is left unused without a word. A question duplicate under
+another id is merged only when every other compared field agrees too (split,
+`known_validator_rejection`, `expected_row_counts`, `signal_checks`, intent,
+tags, expected / disallowed columns and tables, canonical question up to
+letter case, difficulty and failure class): only the kept case's are read, and
+they decide which split counts the case, how verification treats a validator
+rejection, what `--intent` / `--tag` select, how the statistics group the case,
+whether a miss is attributed to retrieval, which warnings are raised and what
+the case record says. An intent left out defaults to the case's own id, so it
+takes an explicit shared `intentId`. Filters: `--dataset a,b` or `--dataset-file`, `--split
 dev|holdout|all` (default all), `--case-id`, `--tag` (any of), `--intent`;
 `--case-id` with a dropped duplicate's id selects the case kept in its place
 (in a rescore too). `--fixtures` scores on a subset (it must include `seed`).
@@ -825,8 +863,11 @@ the database is touched.
 
 `npm run benchmark` and `npm run evaluate` run the same runner with `--profile
 benchmark`: one dataset (default `core-public`), no Docker start, no seeding,
-no verification, and exit 1 when any answer case fails in a single-repetition
-run.
+no verification, and exit 1 when any case fails in a single-repetition run: an
+answer case that does not pass, or an abstain / clarify case that is not
+declined: the model answers it, or its call fails without SQL and without a
+decline code (behaviour cases stay out of strict accuracy, but not out of this
+rule).
 
 ### Reading report.md
 
@@ -927,7 +968,10 @@ execution under `recorded`), so a later rescore can still replay them, and
 `attempt_count` and the retry statistics stay those of the original run.
 Recorded guardrail verdicts are never reused. The case definition is today's
 dataset case with the same id (so a fixed gold is rescored with the fix),
-else the recorded one. Behaviour cases are kept as recorded (their outcome
+else the recorded one, and the rescored report records the definition its
+verdicts used: recorded case fields never override it (a report from before
+`repetitions[]` existed is its own single repetition, minus its case fields).
+Behaviour cases are kept as recorded (their outcome
 only depends on whether the run produced SQL). Cost, latency and tokens stay
 the original run's. The selection filters (`--split`, `--case-id`, `--tag`,
 `--intent`) pick which recorded cases are rescored.
@@ -952,7 +996,10 @@ flips with their questions.
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`, when
 strict accuracy is below X. `--gate` with nothing to compare with stops with
-exit 2 (with `--min-accuracy` it only warns). A loaded baseline must be an
+exit 2 (with `--min-accuracy` it only warns). A selection of only abstain /
+clarify cases has no strict accuracy, so `--min-accuracy` is refused for it
+with exit 2 before any LLM call (and before a rescore), instead of comparing a
+missing accuracy with the threshold. A loaded baseline must be an
 evaluation report (a non-empty `results[]` of cases with ids, a known
 `reportVersion`), else exit 2. `--gate` also exits 2, not 0, when the
 comparison pairs no case or fewer than half of the run's answer cases
@@ -967,9 +1014,10 @@ Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
 case); 2 harness, dataset or infrastructure failure (unreachable database,
 fixtures that cannot be seeded, failed verification, bad flags, any
 `expected_sql_error`, `harness_error`, `infra_error`, `llm_outage`, `timeout`,
-`aborted` or `cancelled` repetition, a run stopped early, or a run with no
-counted answer case unless only behaviour cases were selected); 130 when
-interrupted. Exit 2 wins over 1.
+`aborted` or `cancelled` repetition, a run stopped early, a run with no
+counted answer case unless only behaviour cases were selected, or
+`--min-accuracy` with only behaviour cases selected); 130 when interrupted.
+Exit 2 wins over 1.
 
 ### Baselines
 
@@ -1030,8 +1078,11 @@ cases), compact file 1.33 MB.
 How to read it: the known-validator-rejection flags cap strict accuracy at
 86.5% (dev 89.3%, holdout 80.5%) even with perfect SQL, and the 92 system
 failures are exactly those retrieval-scope rejections. The holdout gap
-(60.6% vs 72.6%) measures how much of today's accuracy depends on vocabulary
-the semantic layer and prompt rules were tuned on. Guardrails no longer reject
+(60.6% vs 72.6%) reflects performance on new intents in partly new wording:
+the holdout differs from dev in its intents as well as its wording, so the gap
+does not say how much of it comes from vocabulary the semantic layer and
+prompt rules were tuned on and how much from the questions themselves (see
+[Known limits](#known-limits)). Guardrails no longer reject
 correct SQL, but they catch only about a quarter of wrong SQL; most wrong
 answers are semantically wrong SQL that is still valid.
 
