@@ -1,35 +1,45 @@
 // The holdout freeze: datasets/holdout-manifest.json lists every holdout case
-// of every dataset with its question, gold, scoring, measurement and
-// definition (the whole case definition) fingerprints (src/eval/holdout.js). test/holdout-manifest.test.js fails when the holdout
-// and the manifest differ, so every change to the holdout is an explicit,
-// reviewable manifest diff with a dated note.
+// of every dataset with its question, gold, scoring, measurement, definition
+// (the whole case definition) and controls (the oracle controls that apply to
+// it) fingerprints (src/eval/holdout.js). test/holdout-manifest.test.js fails
+// when the holdout and the manifest differ, so every change to the holdout is
+// an explicit, reviewable manifest diff with a dated note.
 //
 //   npm run holdout-manifest                                  # check: exit 1 on any difference
 //   npm run holdout-manifest -- --write --note "what and why"  # record today's holdout
-//   options: --datasets-dir <dir>  --manifest <path>
+//   options: --datasets-dir <dir>  --controls-dir <dir> (default <datasets-dir>/controls)  --manifest <path>
 //
-// No database and no LLM: it reads the dataset files only.
+// No database and no LLM: it reads the dataset and controls files only.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE } from '../src/benchmark.js';
 import { getOptionValue, hasOptionFlag } from '../src/env.js';
-import { buildHoldoutManifest, compareHoldoutManifest, computeHoldoutEntries, readHoldoutManifest, serializeHoldoutManifest } from '../src/eval/holdout.js';
+import {
+  buildHoldoutManifest,
+  compareHoldoutManifest,
+  computeHoldoutEntries,
+  loadFreezeControls,
+  readHoldoutManifest,
+  serializeHoldoutManifest,
+} from '../src/eval/holdout.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
 import { loadSuiteDatasets } from '../src/eval/suite.js';
 
 const __filename = fileURLToPath(import.meta.url);
 
-export const USAGE = `Usage: npm run holdout-manifest -- [--write --note "<what changed and why>"] [--datasets-dir <dir>] [--manifest <path>]
+export const USAGE = `Usage: npm run holdout-manifest -- [--write --note "<what changed and why>"] [--datasets-dir <dir>] [--controls-dir <dir>] [--manifest <path>]
 
 Checks (default) or rewrites datasets/holdout-manifest.json, the frozen list of
 holdout cases with their question, gold, scoring, measurement (attribution
 and report labels: known_validator_rejection, expected tables, split, expected
-behaviour, failure class, difficulty, tags) and definition (every field of the
+behaviour, failure class, difficulty, tags), definition (every field of the
 case but its free-text notes: row-count pins, signal checks, disallowed
-columns included) fingerprints. A change to the holdout needs --note,
-recorded with the date in the manifest history.
+columns included) and controls (the oracle controls verify-dataset applies to
+the case, from --controls-dir, default <datasets-dir>/controls) fingerprints.
+A change to the holdout needs --note, recorded with the date in the manifest
+history.
 Exit codes: 0 up to date (or written); 1 the holdout and the manifest differ; 2 bad usage.`;
 
 export async function main(argv = process.argv.slice(2), { output = console, date } = {}) {
@@ -45,7 +55,8 @@ export async function main(argv = process.argv.slice(2), { output = console, dat
     output.error('--note is only used with --write.');
     return 2;
   }
-  const entries = computeHoldoutEntries(await loadSuiteDatasets({ datasetsDir }));
+  const controlsDir = path.resolve(getOptionValue(argv, '--controls-dir') || path.join(datasetsDir, 'controls'));
+  const entries = computeHoldoutEntries(await loadSuiteDatasets({ datasetsDir }), { controls: await loadFreezeControls(controlsDir) });
   const manifest = await readHoldoutManifest(manifestPath);
   const comparison = compareHoldoutManifest(manifest, entries);
   const relative = path.relative(process.cwd(), manifestPath) || manifestPath;

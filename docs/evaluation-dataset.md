@@ -153,17 +153,25 @@ alternatives and comparison spec; what a comparison pairs cases on), its
 measurement (`measurement_fingerprint`: split, expected behaviour,
 `known_validator_rejection`, expected tables, failure class, difficulty and
 tags, the fields that move a failure between attribution buckets or report
-breakdowns) and its whole definition (`definition_fingerprint`: the suite's
+breakdowns), its whole definition (`definition_fingerprint`: the suite's
 own notion of one case definition, `caseDefinitionFingerprint`, which also
 covers the row-count pins, signal checks, expected and disallowed columns and
-the canonical question; only the free-text `notes` is left out, since nothing
-reads it, and a hygiene test fails on a dataset field that is in neither
-list), its intent and datasets, and a dated `history` of notes. The
+the canonical question, with the gold and alternative SQL also compared
+inside quoted literals, where `'A  B'` and `'A B'` are different values; only
+the free-text `notes` is left out, since nothing reads it, and a hygiene test
+fails on a dataset field that is in neither list) and its oracle controls
+(`controls_fingerprint`: the negative and positive controls verify-dataset
+applies to the case, found by id or intent as verification finds them, each
+control's id, type, held-out and validator flags and SQL; a control's
+free-text note is left out; `null` for a case without controls), its intent
+and datasets, and a dated `history` of notes. The
 manifest `fingerprint` covers every one of those fields, so every change the
 check reports needs a note. `manifestVersion` is the fingerprint scheme (2
-since the definition fingerprint was added on 2026-10-07, a change recorded
-with a note and no case changed); a manifest of another scheme fails the
-check until it is rewritten with a note. `test/holdout-manifest.test.js` fails when a
+since the definition and controls fingerprints were added on 2026-10-07, a
+change recorded with a note and no case or control changed); a manifest of
+another scheme fails the check until it is rewritten with a note. The check
+reads the controls of `<datasets-dir>/controls` (`--controls-dir` to point
+elsewhere; none there means every controls fingerprint is `null`). `test/holdout-manifest.test.js` fails when a
 holdout case is added, removed (or moved to dev) or changed without the
 manifest being rewritten, when the manifest is edited by hand, and when its
 current state has no note:

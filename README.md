@@ -399,8 +399,9 @@ now, tagged `formerly_holdout`. The fresh holdout is new intents whose
 questions avoid every multi-word phrase of the semantic layer and its tuned
 word "revenue" (single words such as customer, store or units still match
 it), so it measures new intents in partly new wording. It is frozen by
-`datasets/holdout-manifest.json`: a test fails when a holdout case is added,
-removed or changed without a reviewed manifest update
+`datasets/holdout-manifest.json`: a test fails when a holdout case (or an
+oracle control that verifies one) is added, removed or changed without a
+reviewed manifest update
 (`npm run holdout-manifest -- --write --note "..."`). Error analysis and
 experiment design use dev failures only; report.md and the console show the
 holdout in aggregate (accuracy by split), never per case, unless

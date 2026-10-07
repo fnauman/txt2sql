@@ -8,8 +8,9 @@
 // measurement fingerprint (the case-definition fields that move a failure
 // between attribution buckets or report breakdowns: split, expected
 // behaviour, known_validator_rejection, expected tables, failure class,
-// difficulty and tags) and the definition fingerprint (the whole case
-// definition, below), with its intent and datasets. A
+// difficulty and tags), the definition fingerprint (the whole case
+// definition, below) and the controls fingerprint (the oracle controls
+// verify-dataset applies to the case), with its intent and datasets. A
 // hygiene test (test/holdout-manifest.test.js) fails when a holdout case is
 // added, removed or changed without the manifest being rewritten, and the
 // manifest must carry a dated note for its current state (`history`), so a
@@ -32,13 +33,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE } from '../benchmark.js';
-import { goldFingerprint, normalizeSqlText } from './controls.js';
+import { DEFAULT_CONTROLS_DIR, goldFingerprint, loadControlsIndex, normalizeSqlText, resolveCaseControls } from './controls.js';
 import { sha256Hex, stableStringify } from './provenance.js';
 import { caseDefinitionFingerprint, caseSplit, scoringFingerprint } from './suite.js';
 
 // The fingerprint scheme. 1: question, gold, scoring and measurement
-// fingerprints; 2: plus the definition fingerprint. A manifest of another
-// version fails the check until it is rewritten (with a note).
+// fingerprints; 2: plus the definition and controls fingerprints. A manifest
+// of another version fails the check until it is rewritten (with a note).
 export const MANIFEST_VERSION = 2;
 export const DEFAULT_HOLDOUT_MANIFEST_PATH = path.join(DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE);
 
@@ -78,6 +79,44 @@ export function measurementFingerprint(testCase) {
   ).slice(0, 16);
 }
 
+/**
+ * SQL text as the freeze compares it: a whitespace run outside quoted strings
+ * and quoted identifiers is one space (formatting is not a change), and the
+ * text inside quotes is kept as written: 'A  B' and 'A B' are different
+ * values, which normalizeSqlText (the gold and scoring fingerprints) equates.
+ * A backslash escapes the next character inside a string; an unterminated
+ * quote keeps the rest as written, so the comparison only gets stricter.
+ */
+export function freezeSqlText(sql) {
+  const text = String(sql || '');
+  let output = '';
+  let quote = null;
+  let space = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      output += char;
+      if (char === '\\' && quote !== '`' && index + 1 < text.length) {
+        index += 1;
+        output += text[index];
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (/\s/.test(char)) {
+      space = true;
+      continue;
+    }
+    output += space && output ? ` ${char}` : char;
+    space = false;
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+    }
+  }
+  return output;
+}
+
 // The case fields the definition fingerprint covers, and the ones it leaves
 // out. It is the suite's own notion of one case definition
 // (caseDefinitionFingerprint in suite.js: two definitions of an id that
@@ -85,7 +124,9 @@ export function measurementFingerprint(testCase) {
 // suite agree on what "the same case" is: every field anything runs,
 // verifies, scores, selects or reports on, the row-count pins, signal checks
 // and disallowed columns that verification and the warnings read included.
-// Whitespace in the question and SQL and the order of the top-level lists are
+// On top of it the gold and alternative SQL are compared as freezeSqlText
+// keeps them, so whitespace inside a quoted literal is a change. Other
+// whitespace in the question and SQL and the order of the top-level lists are
 // not changes, as in the other fingerprints. Free-text `notes` is editorial:
 // nothing reads it (test/holdout-manifest.test.js checks that every field a
 // dataset case carries is in one of these lists, so a new field is never
@@ -112,8 +153,63 @@ export const DEFINITION_FIELDS = Object.freeze([
 ]);
 export const EDITORIAL_FIELDS = Object.freeze(['notes']);
 
-/** The manifest entry of one holdout case. */
-export function holdoutManifestEntry(testCase, datasetNames = []) {
+/** Fingerprint of the whole case definition (DEFINITION_FIELDS, the SQL inside quotes as written). */
+export function definitionFingerprint(testCase) {
+  return sha256Hex(
+    stableStringify({
+      definition: caseDefinitionFingerprint(testCase),
+      expected_sql: freezeSqlText(testCase.expected_sql),
+      alternative_expected_sql: [...(testCase.alternative_expected_sql || [])].map(freezeSqlText).sort(),
+    })
+  ).slice(0, 16);
+}
+
+/**
+ * Fingerprint of the oracle controls that apply to a case
+ * (resolveCaseControls: its own id's, else a same-intent entry written for
+ * the same gold), or null when none does or no controls index is given.
+ * verify-dataset measures the oracle with them (the kill-rate gate and the
+ * positive controls), so they are verification inputs like the row-count
+ * pins. Each control's id, type, held-out and validator flags and SQL
+ * (freezeSqlText) count, and how it was found (by id or intent, or stale:
+ * written for another gold); its free-text note is editorial, as a case's
+ * notes are.
+ */
+export function controlsFingerprint(testCase, controlsIndex) {
+  const resolved = controlsIndex ? resolveCaseControls(testCase, controlsIndex) : null;
+  if (!resolved?.source) {
+    return null;
+  }
+  const control = ({ note: _note, sql, ...rest }) => ({ ...rest, sql: freezeSqlText(sql) });
+  return sha256Hex(
+    stableStringify({
+      matchedBy: resolved.matchedBy,
+      stale: resolved.stale,
+      negative: resolved.negative.map(control),
+      positive: resolved.positive.map(control),
+    })
+  ).slice(0, 16);
+}
+
+/**
+ * The controls index of the freeze: every controls file of `controlsDir`
+ * (loadControlsIndex), or null when there is none, so every controls
+ * fingerprint is null (a manifest that lists controls then reports each of
+ * those cases as changed).
+ */
+export async function loadFreezeControls(controlsDir = DEFAULT_CONTROLS_DIR) {
+  try {
+    return await loadControlsIndex({ controlsDir });
+  } catch (error) {
+    if (error?.code === 'CONTROLS_NOT_FOUND') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** The manifest entry of one holdout case (`controlsIndex`: loadFreezeControls). */
+export function holdoutManifestEntry(testCase, datasetNames = [], controlsIndex = null) {
   return {
     id: testCase.id,
     datasets: [...new Set(datasetNames)].sort(),
@@ -124,16 +220,18 @@ export function holdoutManifestEntry(testCase, datasetNames = []) {
     measurement_fingerprint: measurementFingerprint(testCase),
     // The complete definition (DEFINITION_FIELDS); the fingerprints above say
     // which part of it changed.
-    definition_fingerprint: caseDefinitionFingerprint(testCase),
+    definition_fingerprint: definitionFingerprint(testCase),
+    controls_fingerprint: controlsFingerprint(testCase, controlsIndex),
   };
 }
 
 /**
  * Manifest entries for every holdout case of `datasets` ([{ name, cases }],
  * normalized cases), one per id (a case repeated in several datasets lists
- * them all), sorted by id.
+ * them all), sorted by id. `controls` is the controls index
+ * (loadFreezeControls); without it every controls fingerprint is null.
  */
-export function computeHoldoutEntries(datasets) {
+export function computeHoldoutEntries(datasets, { controls = null } = {}) {
   const byId = new Map();
   for (const dataset of datasets || []) {
     for (const testCase of dataset.cases || []) {
@@ -141,7 +239,7 @@ export function computeHoldoutEntries(datasets) {
         continue;
       }
       const previous = byId.get(testCase.id);
-      byId.set(testCase.id, holdoutManifestEntry(testCase, [...(previous?.datasets || []), dataset.name]));
+      byId.set(testCase.id, holdoutManifestEntry(testCase, [...(previous?.datasets || []), dataset.name], controls));
     }
   }
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
@@ -151,7 +249,16 @@ export function computeHoldoutEntries(datasets) {
 // all of them, so any change the check reports changes the fingerprint too
 // and needs a note (a field compared but not hashed could be rewritten
 // silently by --write, and could never get its note).
-const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'measurement_fingerprint', 'definition_fingerprint', 'intentId', 'datasets'];
+const COMPARED_FIELDS = [
+  'question_fingerprint',
+  'gold_fingerprint',
+  'scoring_fingerprint',
+  'measurement_fingerprint',
+  'definition_fingerprint',
+  'controls_fingerprint',
+  'intentId',
+  'datasets',
+];
 
 /** Fingerprint of a set of entries (what the history notes are written for): every compared field. */
 export function holdoutEntriesFingerprint(entries) {
