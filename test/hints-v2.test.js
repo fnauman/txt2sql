@@ -741,6 +741,48 @@ test('v2 METRIC_COLUMN: a qualified derived-table or CTE column counts only thro
   }
 });
 
+test('v2 METRIC_COLUMN: a derived-table or CTE column counts only where its own query block reads it, in nested scopes and under shadowed names', () => {
+  // Fifth review: an unqualified reference counted wherever the CTE or derived
+  // table was visible, and a qualifier counted wherever it was spelled, so a
+  // same-named column of another source (another derived table, a nested
+  // query's own source, another UNION branch, an alias reused in a separate
+  // query) let a difference used only as a filter count. Each of these sums
+  // NetPayableAmount, or nothing, over the open documents.
+  const april = aprilDueDocuments;
+  const diff = 'd.NetPayableAmount - d.PaidAmount';
+  for (const sql of [
+    // The review's examples.
+    'WITH t AS (SELECT NetPayableAmount - PaidAmount AS bal FROM SalesDocument) SELECT SUM(d.NetPayableAmount) FROM SalesDocument d WHERE EXISTS (SELECT SUM(bal) FROM (SELECT NetPayableAmount AS bal FROM SalesDocument) x)',
+    `WITH t AS (SELECT NetPayableAmount - PaidAmount AS bal FROM SalesDocument) SELECT SUM(bal) AS open_amount FROM (SELECT d.NetPayableAmount AS bal ${april}) x WHERE EXISTS (SELECT 1 FROM t WHERE t.bal > 0)`,
+    `WITH docs AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT SUM(bal) AS open_amount FROM (SELECT d.NetPayableAmount AS bal ${april} AND EXISTS (SELECT 1 FROM docs WHERE docs.bal > 0 AND docs.SalesDocumentId = d.SalesDocumentId)) z`,
+    `WITH docs AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT SUM(x.bal) AS open_amount FROM (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) x WHERE EXISTS (SELECT 1 FROM docs x WHERE x.bal > 0)`,
+    // A nested query's own source shadows the outer derived table.
+    `SELECT (SELECT SUM(t.bal) FROM (SELECT d.NetPayableAmount AS bal ${april}) t) AS open_amount FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal FROM SalesDocument x) t WHERE t.bal > 0`,
+    `SELECT (SELECT SUM(bal) FROM (SELECT d.NetPayableAmount AS bal ${april}) z) AS open_amount FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal FROM SalesDocument x) t WHERE t.bal > 0`,
+    `WITH t AS (SELECT ${diff} AS bal ${april}) SELECT (WITH t AS (SELECT d.NetPayableAmount AS bal ${april}) SELECT SUM(bal) FROM t) AS open_amount FROM t LIMIT 1`,
+    // Another UNION branch, or another CTE that the outer query reads.
+    `SELECT SUM(t.np) AS open_amount FROM (SELECT d.NetPayableAmount AS np, ${diff} AS bal ${april}) t WHERE t.bal > 0 UNION ALL SELECT SUM(bal) FROM (SELECT 0 AS bal) y`,
+    `WITH t AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}), o AS (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) SELECT SUM(bal) AS open_amount FROM o WHERE EXISTS (SELECT 1 FROM t WHERE t.bal > 0 AND t.SalesDocumentId = o.SalesDocumentId)`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
+  }
+  // Read from its own block, or from a nested query whose own FROM has no
+  // such column (a correlated reference), the column still counts.
+  for (const sql of [
+    `WITH t AS (SELECT ${diff} AS bal ${april}) SELECT ROUND(SUM(bal), 2) AS open_amount FROM t`,
+    `SELECT t.SalesDocumentId, (SELECT t.bal) AS open_amount FROM (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) t`,
+    `SELECT t.SalesDocumentId, (SELECT bal) AS open_amount FROM (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) t`,
+    `SELECT (SELECT SUM(bal) FROM (SELECT ${diff} AS bal ${april}) t) AS open_amount FROM (SELECT 0 AS bal) z`,
+    `SELECT 0 AS open_amount UNION ALL SELECT SUM(bal) FROM (SELECT ${diff} AS bal ${april}) t`,
+    `WITH t AS (SELECT d.SalesDocumentId, ${diff} AS bal ${april}) SELECT o.SalesDocumentId, (SELECT SUM(bal) FROM t WHERE t.SalesDocumentId = o.SalesDocumentId) AS open_amount FROM SalesDocument o`,
+    `WITH t AS (SELECT d.CustomerId, ${diff} AS bal ${april}) SELECT x.CustomerId, SUM(x.bal) AS open_amount FROM t x GROUP BY x.CustomerId`,
+    `WITH a AS (SELECT ${diff} AS bal ${april}), b AS (SELECT * FROM a) SELECT SUM(bal) AS open_amount FROM b`,
+    `SELECT SUM(u.bal) AS open_amount FROM (SELECT t.* FROM (SELECT ${diff} AS bal ${april}) t) u`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), null, sql);
+  }
+});
+
 test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like, or with its decimals dropped, computes no balance', () => {
   // Fourth review: SUM(SIGN(a - b) * a) sums NetPayableAmount over the open
   // documents like the IF() condition does, and FLOOR(), DIV or FORMAT(x, 0)

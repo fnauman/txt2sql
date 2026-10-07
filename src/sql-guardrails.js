@@ -601,6 +601,13 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     qualifiers,
     outputNames,
     relationOf: (ref) => relationOfRef.get(ref) || null,
+    // The relations a block's own FROM clause binds, the block whose FROM it
+    // sees next (null past a derived-table or CTE body), whether a relation
+    // has a column, and the '(' that opens a derived table's or CTE's body.
+    sourcesOf: (blockId) => [...(bindings.get(blockId) || new Map()).values()],
+    enclosingBlock,
+    hasColumn,
+    bodyOpenOf: (relationName) => (isDerivedTableName(relationName) ? (bodies.get(derivedAliasFromTableName(relationName))?.openIndex ?? null) : null),
   };
 }
 
@@ -1585,34 +1592,38 @@ function selectItemColumnName(tokens, from, to) {
 const MAX_DERIVED_COLUMN_DEPTH = 8;
 const MAX_DERIVED_COLUMN_REFERENCES = 256;
 
-// The lower-case name of the identifier token, or null.
-function lowerIdentifierName(token) {
-  const name = token?.type === 'word' || token?.type === 'quoted_identifier' ? identifierTokenName(token) : null;
-  return name === null ? null : String(name).toLowerCase();
-}
-
-// The alias of the derived table whose body closes at tokens[close]
-// ("(...) t", "(...) AS t"), lower-case, or null.
-function derivedTableAlias(tokens, close) {
-  const alias = isKeywordToken(tokens[close + 1], 'AS') ? tokens[close + 2] : tokens[close + 1];
-  return isPlainIdentifierToken(alias) ? lowerIdentifierName(alias) : null;
-}
-
-// The names that qualify a column of the CTE `cteName` in
-// tokens[scope[0]..scope[1]]: its own name and the aliases it is given there
-// ("FROM docs d", "JOIN docs AS x"), lower-case.
-function cteQualifiers(tokens, cteName, scope) {
-  const names = new Set([cteName]);
-  for (let at = scope[0]; at <= scope[1]; at += 1) {
-    if (lowerIdentifierName(tokens[at]) !== cteName || tokens[at].afterDot || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
-      continue;
+// Whether the reference at tokens[at] (a column `name`, a qualified `q.name`,
+// or a `*` / `q.*` select item) reads the derived table or CTE whose body
+// opens at tokens[bodyOpen], resolved the way MariaDB resolves it (see
+// buildRelationModel; `relations` is that model, `tokens` the analyzed
+// tokens): a qualifier names the innermost FROM source so called, from the
+// reference's own query block outwards; a bare name reads the innermost
+// block's FROM source that has the column, so a nested query's own source, a
+// derived table of another UNION branch or another CTE in the same FROM, with
+// a column of that name, is read instead; a bare `*` reads every FROM source
+// of its own block.
+function referenceReadsBody(tokens, at, bodyOpen, relations) {
+  const isBody = (relationName) => relations.bodyOpenOf(relationName) === bodyOpen;
+  const { blockId } = tokens[at];
+  if (isPunctToken(tokens[at - 1], '.')) {
+    const qualifier = identifierTokenName(tokens[at - 2]);
+    const relationName = qualifier === null ? null : relations.resolve(blockId, qualifier);
+    return relationName !== null && isBody(relationName);
+  }
+  if (isOperatorToken(tokens[at], '*')) {
+    return relations.sourcesOf(blockId).some(isBody);
+  }
+  const name = identifierTokenName(tokens[at]);
+  for (let current = blockId; current; current = relations.enclosingBlock(current)) {
+    const sources = relations.sourcesOf(current);
+    if (sources.some(isBody)) {
+      return true;
     }
-    const alias = isKeywordToken(tokens[at + 1], 'AS') ? tokens[at + 2] : tokens[at + 1];
-    if (isPlainIdentifierToken(alias)) {
-      names.add(lowerIdentifierName(alias));
+    if (sources.some((relationName) => relations.hasColumn(relationName, name))) {
+      return false;
     }
   }
-  return names;
+  return false;
 }
 
 /**
@@ -1623,14 +1634,14 @@ function cteQualifiers(tokens, cteName, scope) {
  * computed value (expressionIsComputedValue), or a `*` / `q.*` select item
  * that passes it on and is one (the only way to read an unnamed column,
  * `name` null). A column only used to filter, join, group or order rows
- * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)). A qualified
- * reference counts only with one of `qualifiers` (the derived table's alias,
- * or the CTE's name and aliases; null when unknown), so a same-named column
- * of another source ("SUM(o.bal)" next to "WHERE t.bal > 0") is not it.
+ * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)). A reference
+ * counts only when it reads this body in its own query block
+ * (referenceReadsBody), so a same-named column of another source ("SUM(o.bal)"
+ * next to "WHERE t.bal > 0", or "SUM(bal)" over another derived table next
+ * to "EXISTS (SELECT 1 FROM t WHERE t.bal > 0)") is not it.
  */
-function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, budget, qualifiers = null) {
+function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, walk) {
   const wanted = name === null ? null : String(name).toLowerCase();
-  const otherQualifier = (dot) => qualifiers !== null && !qualifiers.has(lowerIdentifierName(tokens[dot - 1]));
   for (let at = scope[0]; at <= scope[1]; at += 1) {
     if (at === body[0]) {
       at = body[1];
@@ -1642,8 +1653,8 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
       const before = tokens[start - 1];
       if (
         (isKeywordToken(before, 'SELECT', ...SELECT_OPTION_WORDS) || isPunctToken(before, ',')) &&
-        !(start < at && otherQualifier(at - 1)) &&
-        expressionIsComputedValue(tokens, start, at, parens, depth + 1, name, budget)
+        referenceReadsBody(tokens, at, body[0], walk.relations) &&
+        expressionIsComputedValue(tokens, start, at, parens, depth + 1, name, walk)
       ) {
         return true;
       }
@@ -1654,14 +1665,14 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
       continue;
     }
     const qualified = isPunctToken(tokens[at - 1], '.');
-    if (qualified && otherQualifier(at - 1)) {
-      continue;
-    }
     // Not an alias of the same name ("SUM(x) AS bal", "FROM docs bal").
     if (!qualified && (isKeywordToken(tokens[at - 1], 'AS') || endsExpression(tokens[at - 1]))) {
       continue;
     }
-    if (expressionIsComputedValue(tokens, qualified ? operandStartBefore(tokens, at, parens) : at, at, parens, depth + 1, null, budget)) {
+    if (!referenceReadsBody(tokens, at, body[0], walk.relations)) {
+      continue;
+    }
+    if (expressionIsComputedValue(tokens, qualified ? operandStartBefore(tokens, at, parens) : at, at, parens, depth + 1, null, walk)) {
       return true;
     }
   }
@@ -1680,11 +1691,13 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
  * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
  * 0" computes no value. `passedName` is the column name a `*` select item
  * passes on when that `*` is the expression (see derivedColumnReachesValue);
- * `budget` bounds the references followed (past it the answer is no).
+ * `walk` carries the relation model that resolves the references to a
+ * derived-table or CTE column (see referenceReadsBody) and the references
+ * left to follow (past none the answer is no).
  */
-function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passedName = null, budget = { references: MAX_DERIVED_COLUMN_REFERENCES }) {
-  budget.references -= 1;
-  if (depth > MAX_DERIVED_COLUMN_DEPTH || budget.references < 0) {
+function expressionIsComputedValue(tokens, start, end, parens, depth, passedName, walk) {
+  walk.references -= 1;
+  if (depth > MAX_DERIVED_COLUMN_DEPTH || walk.references < 0) {
     return false;
   }
   // Set when the previous step left a subquery's select list: the item's
@@ -1785,8 +1798,7 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
           }
           const open = enclosingOpenParen(tokens, at, parens);
           const scope = open < 0 ? [0, tokens.length - 1] : [open + 1, (parens.closeOf.get(open) ?? tokens.length) - 1];
-          const alias = derivedTableAlias(tokens, end);
-          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, budget, alias === null ? null : new Set([alias]));
+          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, walk);
         } else if (word === 'AS') {
           // A CTE body ("name [(columns)] AS (SELECT ...)"), read by the rest
           // of its statement; any other AS names an alias.
@@ -1797,7 +1809,6 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
             return false;
           }
           let columnName = selectItem.name;
-          let cteNameIndex = at - 1;
           if (isPunctToken(tokens[at - 1], ')') && parens.openOf.get(at - 1) !== undefined) {
             // A column list names the CTE's columns by position.
             const columns = splitTopLevelArguments(tokens, parens.openOf.get(at - 1) + 1, at - 2, parens);
@@ -1806,13 +1817,10 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
             if (!columnName) {
               return false;
             }
-            cteNameIndex = parens.openOf.get(at - 1) - 1;
           }
           const open = enclosingOpenParen(tokens, start, parens);
           const scopeEnd = open < 0 ? tokens.length - 1 : (parens.closeOf.get(open) ?? tokens.length) - 1;
-          const cteName = lowerIdentifierName(tokens[cteNameIndex]);
-          const qualifiers = cteName === null ? null : cteQualifiers(tokens, cteName, [end + 1, scopeEnd]);
-          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, budget, qualifiers);
+          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, walk);
         } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
           return false;
         } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {
@@ -1844,9 +1852,12 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
  * by SIGN() and the like, nor inside a cast, function or operator that drops
  * the decimals. A difference of aliases of the two columns ("np - pa")
  * does not count, and neither do the sum forms "a + (-b)" and "-b + a" (the
- * rejection names the difference, so a retry writes it plainly).
+ * rejection names the difference, so a retry writes it plainly). `tokens` are
+ * the analyzed tokens of the SQL and `relations` its relation model
+ * (extractTableContext), which resolve the references to a derived-table or
+ * CTE column.
  */
-function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
+function computesColumnDifference(tokens, minuend, subtrahend, relations, parens = matchingParens(tokens)) {
   const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();
   const wantLeft = columnName(minuend);
   const wantRight = columnName(subtrahend);
@@ -1875,7 +1886,7 @@ function computesColumnDifference(tokens, minuend, subtrahend, parens = matching
       !negatesMinuend(tokens[leftStart - 1]) &&
       !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
       !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER') &&
-      expressionIsComputedValue(tokens, leftStart, rightEnd, parens)
+      expressionIsComputedValue(tokens, leftStart, rightEnd, parens, 0, null, { references: MAX_DERIVED_COLUMN_REFERENCES, relations })
     ) {
       return true;
     }
@@ -1903,11 +1914,10 @@ function metricEnforcement(metric) {
  *   Revenue" ledger account) is removed earlier, by span arbitration in
  *   buildSemanticPlan, so it never reaches this check.
  */
-function validateMetricGuardrails(sql, promptContext = {}) {
+function validateMetricGuardrails(sql, promptContext = {}, { analysis, model }) {
   const metrics = promptContext.semanticPlan?.metrics || [];
   const hasLineMetric = metrics.some((metric) => metric.name === 'line_net_sales');
   const sqlText = normalizeSqlForColumnSearch(sql);
-  let sqlTokens = null;
   const checkedMetrics = [];
   const warnings = [];
 
@@ -1940,7 +1950,7 @@ function validateMetricGuardrails(sql, promptContext = {}) {
       satisfied:
         preferredColumns.some((column) => columnMentioned(sqlText, column)) ||
         (alternativeDifferences.length > 0 &&
-          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference((sqlTokens ??= significantTokensOf(sql)), minuend, subtrahend))),
+          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference(analysis.tokens, minuend, subtrahend, model))),
       ...(alternativeDifferences.length > 0 ? { alternativeDifferences } : {}),
     });
   }
@@ -3230,7 +3240,7 @@ export function validateSqlGuardrails(
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, model.qualifiers, model.derivedTables);
   const joinChecks = validateJoinGuardrails(analysis, knownTables, model, promptContext);
   const fanOutChecks = validateFanOut(analysis, knownTables, promptContext, model);
-  const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
+  const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext, { analysis, model });
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);
 
   return {
