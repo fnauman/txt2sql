@@ -3,9 +3,9 @@
 
 import { describeHintsVersion, sameHintsVersion } from '../hints-version.js';
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
-import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER } from './attribution.js';
+import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
 import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
-import { summarizeBreakdowns } from './stats.js';
+import { summarizeBreakdowns, summarizeRunUsage } from './stats.js';
 
 // Holdout display policy (src/eval/holdout.js): unless `revealHoldout` is
 // set, report.md and the console show holdout results in aggregate only (the
@@ -23,6 +23,59 @@ function hiddenIds(report, { revealHoldout = false } = {}) {
 
 function comparisonHiddenIds(comparison, { revealHoldout = false } = {}) {
   return revealHoldout ? new Set() : new Set(comparison?.holdoutCases || []);
+}
+
+const isBehaviorRecord = (record) => Boolean(record.expected_behavior && record.expected_behavior !== 'answer');
+
+// The summaries report.md and the console show. A summary over every case
+// next to the listed dev rows gives the hidden holdout outcomes away by
+// subtraction (combined behaviour or attribution counts minus the dev rows),
+// so with holdout cases hidden the behaviour summary, the attribution, the
+// guardrail confusion matrix and the cost, latency, retry and token figures
+// are recomputed from the listed records (a holdout case that completed no
+// LLM call, or made a retry, would otherwise show up in those counts; a live
+// run's console also prints each dev repetition's cost). Hidden holdout
+// behaviour cases are only counted (the dataset says how many there are),
+// never with their outcomes. The holdout's one shown aggregate is its
+// accuracy by split. Without hidden cases these are the report's own.
+function displayedSummaries(report, hidden = new Set()) {
+  const results = report.results || [];
+  const listed = results.filter((record) => !hidden.has(record.id));
+  if (listed.length === results.length) {
+    const { cost, latency, retries, tokens } = report.stats || {};
+    return {
+      attribution: report.attribution,
+      behavior: report.behavior,
+      usage: { cost, latency, retries, tokens },
+      records: results,
+      hidden: false,
+      hiddenAnswerCases: 0,
+      hiddenBehaviorCases: 0,
+    };
+  }
+  const hiddenRecords = results.filter((record) => hidden.has(record.id));
+  return {
+    attribution: summarizeAttribution(listed.filter((record) => !isBehaviorRecord(record))),
+    behavior: summarizeBehavior(listed),
+    usage: summarizeRunUsage(listed),
+    records: listed,
+    hidden: true,
+    hiddenAnswerCases: hiddenRecords.filter((record) => !isBehaviorRecord(record)).length,
+    hiddenBehaviorCases: hiddenRecords.filter(isBehaviorRecord).length,
+  };
+}
+
+// With the holdout hidden, a run can list no dev answer case (or no dev case
+// at all, e.g. --split holdout): its sections then say so in one line
+// instead of printing empty or all-zero tables.
+const noListedAnswerCase = (shown) => shown.hidden && !shown.records.some((record) => !isBehaviorRecord(record));
+const NO_DEV_ANSWER_CASE = 'No dev answer case in this run';
+
+function hiddenBehaviorNote(count) {
+  return count > 0
+    ? `${count} holdout behaviour case(s) not listed and not in these counts: holdout results are read in aggregate only, and the ` +
+        'behaviour cases are not in the split accuracy, so their outcomes are not shown; pass --reveal-holdout to list them.'
+    : null;
 }
 
 const BUCKET_LABELS = {
@@ -119,7 +172,7 @@ function passRateText(summary) {
   return `${summary.passes}/${summary.counted}`;
 }
 
-function headline(report, hidden = new Set()) {
+function headline(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
   const stats = report.stats;
   const strict = stats.strictAccuracy;
   const date = report.generatedAt ? report.generatedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'n/a';
@@ -148,12 +201,13 @@ function headline(report, hidden = new Set()) {
     lines.push('');
     lines.push(
       `Holdout: ${hiddenHoldout} case(s), shown in aggregate only (accuracy by split); error analysis and experiment design use dev ` +
-        'failures only. `--reveal-holdout` lists them.'
+        'failures only (attribution, the guardrail matrix, behaviour cases, cost, latency and the finer breakdowns cover dev cases). `--reveal-holdout` lists them.'
     );
   }
-  if (report.behavior?.cases > 0) {
+  const behaviorText = behaviorSummaryText(shown);
+  if (behaviorText) {
     lines.push('');
-    lines.push(behaviorLine(report.behavior) + ' Not in strict accuracy (see Behaviour cases).');
+    lines.push(`${behaviorText} Not in strict accuracy (see Behaviour cases).`);
   }
   if (stats.cases.excluded > 0) {
     lines.push('');
@@ -289,12 +343,21 @@ function bucketText(attribution, outcome) {
   return entries.map(([bucket, count]) => `${bucket} ${count}`).join(' / ');
 }
 
-function attributionSection(report) {
-  const attribution = report.attribution;
+function attributionSection(report, shown = displayedSummaries(report)) {
+  const attribution = shown.attribution;
   const lines = ['## Attribution', ''];
+  if (noListedAnswerCase(shown)) {
+    lines.push(
+      `${NO_DEV_ANSWER_CASE}${shown.hiddenAnswerCases > 0 ? `: the ${shown.hiddenAnswerCases} holdout answer case(s) are shown in aggregate (accuracy by split)` : ''}.`
+    );
+    lines.push('');
+    lines.push(excludedLine(attribution, shown));
+    return lines.join('\n');
+  }
   lines.push(
     'Who caused each outcome. Repetitions are every (case, repetition) run; cases use each case\'s majority outcome. ' +
-      'Excluded outcomes are not in the accuracy denominator.'
+      'Excluded outcomes are not in the accuracy denominator.' +
+      (shown.hiddenAnswerCases > 0 ? ` Dev cases only: the ${shown.hiddenAnswerCases} holdout answer case(s) are shown in aggregate (accuracy by split).` : '')
   );
   lines.push('');
   lines.push(
@@ -342,10 +405,16 @@ function attributionSection(report) {
         'are infra_error, not model errors: the rejection might have been a false one.'
     );
   }
-  // Excluded outcomes (repetitions of answer cases), and the abstain /
-  // clarify cases, which are never in accuracy or in the tables above.
+  lines.push('');
+  lines.push(excludedLine(attribution, shown));
+  return lines.join('\n');
+}
+
+// Excluded outcomes (repetitions of answer cases), and the abstain / clarify
+// cases, which are never in accuracy or in the attribution tables.
+function excludedLine(attribution, shown) {
   const excluded = Object.entries(attribution.excluded);
-  const behaviorCases = (report.results || []).filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
+  const behaviorCases = shown.records.filter(isBehaviorRecord);
   const parts = [];
   if (excluded.length > 0) {
     parts.push(excluded.map(([outcome, count]) => `${outcome} ${count}`).join(', '));
@@ -357,9 +426,10 @@ function attributionSection(report) {
         `(${repetitions} repetition${repetitions === 1 ? '' : 's'}; see Behaviour cases)`
     );
   }
-  lines.push('');
-  lines.push(`Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`);
-  return lines.join('\n');
+  if (shown.hiddenBehaviorCases > 0) {
+    parts.push(`${shown.hiddenBehaviorCases} holdout abstain/clarify case(s) (not listed)`);
+  }
+  return `Excluded from accuracy: ${parts.length > 0 ? parts.join('; ') : 'none'}.`;
 }
 
 const UNKNOWN_LABELS = {
@@ -377,12 +447,17 @@ function unknownBreakdown(unknownBy) {
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
-function confusionSection(report) {
-  const matrix = report.attribution.guardrailConfusion;
+function confusionSection(report, shown = displayedSummaries(report)) {
+  const matrix = shown.attribution.guardrailConfusion;
   const lines = ['## Guardrail confusion matrix', ''];
+  if (noListedAnswerCase(shown)) {
+    lines.push(`${NO_DEV_ANSWER_CASE} (the holdout is shown in aggregate, by split).`);
+    return lines.join('\n');
+  }
   lines.push(
     'Every attempt, retries included. "Rejected" = a guardrail-layer rejection; correctness of rejected SQL is decided by re-running it ' +
-      'read-only on every fixture (only after it passes the safety layer). An accepted attempt that failed at execution counts as incorrect.'
+      'read-only on every fixture (only after it passes the safety layer). An accepted attempt that failed at execution counts as incorrect.' +
+      (shown.hiddenAnswerCases > 0 ? ' Dev cases only (the holdout is shown in aggregate, by split).' : '')
   );
   lines.push('');
   lines.push(
@@ -455,34 +530,46 @@ export function behaviorLine(behavior) {
     '.';
 }
 
-function behaviorSection(report, hidden = new Set()) {
-  const behavior = report.behavior;
-  if (!behavior || behavior.cases === 0) {
+// The behaviour line of the shown summary; hidden holdout behaviour cases are
+// counted apart, without their outcomes. Null when there is none of either.
+function behaviorSummaryText(shown) {
+  const hidden = shown.hiddenBehaviorCases;
+  const hiddenText = hidden > 0 ? `${hidden} holdout abstain/clarify case(s), outcomes not shown` : '';
+  if (shown.behavior?.cases > 0) {
+    return `${behaviorLine(shown.behavior)}${hiddenText ? ` Not counted here: ${hiddenText}.` : ''}`;
+  }
+  return hiddenText ? `Behaviour cases: ${hiddenText}.` : null;
+}
+
+function behaviorSection(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
+  const behavior = shown.behavior;
+  const text = behaviorSummaryText(shown);
+  if (!text) {
     return '';
   }
-  const lines = ['## Behaviour cases (abstain / clarify)', '', behaviorLine(behavior), ''];
+  const lines = ['## Behaviour cases (abstain / clarify)', '', text, ''];
   lines.push(
     'These questions have no correct SQL: the data cannot answer them (abstain) or they are ambiguous (clarify). A case is handled when the ' +
       'product returned no SQL in more than half of its counted repetitions (`declined`); producing SQL is `answered_instead_of_abstain` / ' +
       '`answered_instead_of_clarify` (model bucket, tagged `not_executed` when the SQL was rejected or failed). The product has no ' +
       'abstention or clarification channel yet, so today it is expected to fail these. They are not in strict accuracy or the paired comparison.'
   );
-  lines.push('');
-  lines.push(
-    table(
-      ['Expected behaviour', 'Cases', 'Handled', 'Outcomes (majority)'],
-      Object.entries(behavior.byBehavior).map(([name, entry]) => [
-        name,
-        entry.cases,
-        `${entry.handled}/${entry.counted}`,
-        Object.entries(entry.outcomes)
-          .map(([outcome, count]) => `${outcome} ${count}`)
-          .join(', '),
-      ])
-    )
+  const summary = table(
+    ['Expected behaviour', 'Cases', 'Handled', 'Outcomes (majority)'],
+    Object.entries(behavior?.byBehavior || {}).map(([name, entry]) => [
+      name,
+      entry.cases,
+      `${entry.handled}/${entry.counted}`,
+      Object.entries(entry.outcomes)
+        .map(([outcome, count]) => `${outcome} ${count}`)
+        .join(', '),
+    ])
   );
-  const behaviorCases = report.results.filter((record) => record.expected_behavior && record.expected_behavior !== 'answer');
-  const cases = behaviorCases.filter((record) => !hidden.has(record.id));
+  if (summary) {
+    lines.push('');
+    lines.push(summary);
+  }
+  const cases = shown.records.filter(isBehaviorRecord);
   if (cases.length > 0) {
     lines.push('');
     lines.push(
@@ -492,7 +579,7 @@ function behaviorSection(report, hidden = new Set()) {
       )
     );
   }
-  const note = hiddenHoldoutNote(behaviorCases.length - cases.length, 'behaviour case(s)');
+  const note = hiddenBehaviorNote(shown.hiddenBehaviorCases);
   if (note) {
     lines.push('');
     lines.push(note);
@@ -500,9 +587,10 @@ function behaviorSection(report, hidden = new Set()) {
   return lines.join('\n');
 }
 
-function costSection(report, hidden = new Set()) {
-  const { cost, latency, retries, tokens } = report.stats;
-  const rows = [
+function costSection(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
+  const { cost, latency, retries, tokens } = shown.usage;
+  const noListedCase = shown.hidden && shown.records.length === 0;
+  const usageRows = [
     [
       'Total LLM cost',
       `${formatUsd(cost.total)}${cost.questionsWithoutCost ? ` (${cost.questionsWithoutCost} question(s) used tokens without a known price, so this is a lower bound)` : ''}` +
@@ -521,6 +609,7 @@ function costSection(report, hidden = new Set()) {
     ],
     ['Tokens', `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}`],
   ];
+  const rows = noListedCase ? [] : usageRows;
   if (report.budget?.limitUsd != null) {
     // Skipped holdout cases are counted, not named (aggregate only).
     const skipped = report.budget.skippedCases || [];
@@ -529,7 +618,17 @@ function costSection(report, hidden = new Set()) {
     const names = [...listed, ...(holdoutSkipped > 0 ? [`${holdoutSkipped} holdout case(s)`] : [])].join(', ');
     rows.push(['Budget', `${formatUsd(report.budget.spentUsd)} of ${formatLimitUsd(report.budget.limitUsd)}${skipped.length ? `; ${skipped.length} case(s) skipped: ${names}` : ''}`]);
   }
-  return ['## Cost, latency, retries, tokens', '', table(['Metric', 'Value'], rows)].join('\n');
+  return [
+    '## Cost, latency, retries, tokens',
+    '',
+    ...(shown.hidden
+      ? [
+          `${noListedCase ? 'No dev case in this run: c' : 'C'}ost, latency, retries and tokens cover the dev cases only (the holdout is shown in ` +
+            'aggregate, by split; the Budget row, when there is one, is the whole run\'s spend). `--reveal-holdout` covers every case.',
+        ]
+      : []),
+    ...(rows.length > 0 ? [...(shown.hidden ? [''] : []), table(['Metric', 'Value'], rows)] : []),
+  ].join('\n');
 }
 
 function comparisonSection(comparison, { revealHoldout = false } = {}) {
@@ -758,17 +857,18 @@ function legacySection(report) {
  */
 export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
   const hidden = hiddenIds(report, { revealHoldout });
+  const shown = displayedSummaries(report, hidden);
   const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${report.model}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
   const sections = [
     title,
-    headline(report, hidden),
-    attributionSection(report),
-    confusionSection(report),
+    headline(report, hidden, shown),
+    attributionSection(report, shown),
+    confusionSection(report, shown),
     report.comparison ? comparisonSection(report.comparison, { revealHoldout }) : '',
-    behaviorSection(report, hidden),
+    behaviorSection(report, hidden, shown),
     casesSection(report, hidden),
     breakdownSection(report, hidden),
-    costSection(report, hidden),
+    costSection(report, hidden, shown),
     verificationSection(report),
     provenanceSection(report),
     legacySection(report),
@@ -779,22 +879,31 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
 /** Short console headline (a few lines); holdout flips only counted unless `revealHoldout`. */
 export function renderHeadline(report, { revealHoldout = false } = {}) {
   const stats = report.stats;
-  const attribution = report.attribution;
+  // As in report.md: with holdout cases hidden, attribution and behaviour
+  // cover the listed (dev) cases, so nothing hidden can be subtracted out.
+  const shown = displayedSummaries(report, hiddenIds(report, { revealHoldout }));
+  const attribution = shown.attribution;
+  const usage = shown.usage;
   const buckets = attribution.repetitions.byBucket;
   const lines = [
     `Strict accuracy ${formatPercent(stats.strictAccuracy.value)} (95% CI ${formatInterval(stats.strictAccuracy.ci95)}) over ${stats.cases.counted} cases / ${stats.cases.intents} intents, ` +
       `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`,
     `Majority-pass cases ${stats.majority.passes}/${stats.majority.n} (Wilson 95% ${formatInterval(stats.majority.wilson95)}); intent-clustered ${formatPercent(stats.intentClustered.value)}`,
-    `Attribution (repetitions): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
-      `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}, ` +
-      `known validator rejections ${attribution.system.knownValidatorRejections ?? 0}) · ` +
-      `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
+    noListedAnswerCase(shown)
+      ? `Attribution: ${NO_DEV_ANSWER_CASE.toLowerCase()} (the holdout is shown in aggregate, by split)`
+      : `Attribution (repetitions${shown.hiddenAnswerCases > 0 ? ', dev cases' : ''}): pass ${buckets.pass || 0} · model ${buckets.model || 0} · system ${buckets.system || 0} ` +
+        `(guardrail false rejections ${attribution.system.guardrailFalseRejections}, retrieval misses ${attribution.system.retrievalMisses}, ` +
+        `known validator rejections ${attribution.system.knownValidatorRejections ?? 0}) · ` +
+        `infra ${buckets.infra || 0} · skipped ${buckets.skipped || 0} · harness ${buckets.harness || 0}`,
     ...((stats.bySplit || []).length > 1
       ? [`By split: ${stats.bySplit.map((entry) => `${entry.key} ${formatPercent(entry.accuracy)} (${entry.cases})`).join(' · ')}`]
       : []),
-    ...(report.behavior?.cases > 0 ? [`${behaviorLine(report.behavior)} (not in accuracy)`] : []),
-    `Cost ${formatUsd(stats.cost.total)} (${formatUsd(stats.cost.perQuestion, 5)}/question, ${formatUsd(stats.cost.perCorrect, 5)}/correct) · ` +
-      `latency p50 ${formatMs(stats.latency.questionWallMs.p50)} p95 ${formatMs(stats.latency.questionWallMs.p95)} · retry rate ${formatPercent(stats.retries.rate)}`,
+    ...(behaviorSummaryText(shown) ? [`${behaviorSummaryText(shown)} (not in accuracy)`] : []),
+    shown.hidden && shown.records.length === 0
+      ? 'Cost: no dev case in this run (cost, latency and retries cover dev cases only while the holdout is hidden)'
+      : `Cost${shown.hidden ? ' (dev cases)' : ''} ${formatUsd(usage.cost.total)} (${formatUsd(usage.cost.perQuestion, 5)}/question, ` +
+        `${formatUsd(usage.cost.perCorrect, 5)}/correct) · ` +
+        `latency p50 ${formatMs(usage.latency.questionWallMs.p50)} p95 ${formatMs(usage.latency.questionWallMs.p95)} · retry rate ${formatPercent(usage.retries.rate)}`,
   ];
   if (report.stopped) {
     lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);

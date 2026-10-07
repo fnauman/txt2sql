@@ -176,6 +176,18 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   documented look, for example when retiring a holdout). `report.json` keeps
   every case for the rescore, the comparison and the gate; opening it is
   revealing the holdout.
+- While the holdout is hidden, these still cover every case, holdout
+  included: the headline accuracy and its intervals (their holdout share is
+  the split aggregate), the budget row's spend, and **the exit code with its
+  reasons**. The exit code can give a hidden holdout outcome away in edge
+  cases: in the benchmark profile a run whose dev cases all pass exits 1
+  when a holdout case failed, a holdout abstain / clarify case included
+  (whose outcome report.md does not show; the reason does not itemize
+  holdout cases), and an exit 2's harness reasons (gold, runner,
+  infrastructure and provider errors, timeouts, aborted or cancelled
+  repetitions) count every repetition. Both are kept on purpose: the
+  benchmark gate fails on any failed case, and an exit 2 run is not a
+  measurement and cannot become a baseline.
 - **Any change to the holdout** (a case added, removed, reworded, re-scored,
   re-labelled, for example a `known_validator_rejection` flag, or moved to
   dev) requires a manifest update with a note saying what and
@@ -899,12 +911,22 @@ comparison: {
   exist. **Empty results**: two empty results match; an empty result never
   equals one row (unless the case opts into `empty_as_zero`, below).
 - **ranked**: the bijection must exist **and** the model's primary value column
-  must be monotonic in `order` (tie reordering by label is tolerated; NULL
-  metrics sort last; values compare as cells match, so two values that both
-  match one gold value tie: rounded to `decimals`, a NULL under
-  `null_as_zero` and 0.004 tie at two decimals; with a tolerance, values within
-  twice it tie, as 9.992 and 10.008 both match a gold 10 at 0.01). The default ranking column is the first truly numeric
-  gold column, never a numeric-looking code string.
+  must be monotonic in `order` up to ties (tie reordering by label is
+  tolerated; NULL metrics sort last). Without a tolerance values compare as cells match, so
+  two values that both match one gold value tie: rounded to `decimals`, a
+  NULL under `null_as_zero` and 0.004 tie at two decimals. With a tolerance
+  the column's own order compares unrounded, so a prediction sorted by its
+  own values always passes the order check (per-line `ROUND` sums can flip a
+  near-tie of two distinct gold values by a cent: gold Zeta 100.01, Alpha
+  100.00 and prediction Alpha 100.01, Zeta 100.00), and a column out of its
+  own order passes only by the row matching: the gold rows the prediction's
+  rows pair with must come in the gold's ranking order, so two out-of-order
+  rows tie only when they pair with equal gold values, as 9.992 listed
+  before 10.008 (descending) both pairing with a gold 10 at 0.01. Gold rows
+  10.015 and 10 are distinct ranks even though their values are within twice
+  the tolerance, so 10 listed before 10.015 fails, and at a cut-off the boundary
+  rows and their ties rank as one tie. The default ranking column is the
+  first truly numeric gold column, never a numeric-looking code string.
 - **Ties at the cut-off** (ranked only): when a gold variant returns as many
   rows as its own outermost `LIMIT` on a fixture (`isCutByLimit`), the
   oracle reads it past that `LIMIT` and passes the left-out rows as
@@ -1271,8 +1293,13 @@ rule).
   split line and rows only; the case tables, the behaviour-case table, the
   comparison's flip and exclusion lists and the console's progress, rescore
   and flip lines leave them out and count them ("N holdout case(s) not
-  listed"), and the failure-class, difficulty and tag breakdowns cover dev
-  cases. `--reveal-holdout` lists them. See
+  listed"), and the failure-class, difficulty and tag breakdowns, the
+  attribution tables, the guardrail confusion matrix, the behaviour summary
+  and the cost, latency, retry and token figures (report.md and the console)
+  cover dev cases, so that subtracting
+  the listed dev rows from a total cannot give a holdout outcome away;
+  holdout behaviour cases are counted, without their outcomes (they are not
+  in the split accuracy). `--reveal-holdout` lists them. See
   [Splits and the holdout policy](#splits-and-the-holdout-policy).
 - **Cases**: id, question, passes / counted repetitions (declined / counted
   for behaviour cases), the case outcome and its attribution. The case
@@ -1289,10 +1316,11 @@ rule).
   `declined` only when more than half of its scored repetitions declined.
 - **By split, failure class, difficulty and tag**: cases, accuracy, majority
   passes.
-- **Cost, latency, retries, tokens** (every case, behaviour cases included):
-  total cost, cost per question and per correct answer, p50/p95 product-loop
-  and LLM-call latency, retry rate, prompt (cached) and completion tokens, the
-  budget.
+- **Cost, latency, retries, tokens** (every case, behaviour cases included;
+  dev cases only while the holdout is hidden): total cost, cost per question
+  and per correct answer, p50/p95 product-loop and LLM-call latency, retry
+  rate, prompt (cached) and completion tokens, the budget (always the whole
+  run's spend).
 - **Verification**: fixture status, the kill rates per dataset, and the
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).
@@ -1400,9 +1428,11 @@ then not tested the run, and the baseline is stale. On a rescore
 and scoring, counted in both). A significant change needs at least 6
 unanimous flips in one direction (p = 0.031).
 
-Exit codes: 0 success; 1 failed gate (or, in the benchmark profile, a failed
-case); 2 harness, dataset or infrastructure failure (unreachable database,
-fixtures that cannot be seeded, failed verification, bad flags, any
+Exit codes (over every case, holdout included: see the
+[holdout policy](#splits-and-the-holdout-policy)): 0 success; 1 failed gate
+(or, in the benchmark profile, a failed case); 2 harness, dataset or
+infrastructure failure (unreachable database, fixtures that cannot be
+seeded, failed verification, bad flags, any
 `expected_sql_error`, `harness_error`, `infra_error`, `llm_outage`, `timeout`,
 `aborted` or `cancelled` repetition, a run stopped early, a run with no
 counted answer case unless only behaviour cases were selected, or
@@ -1454,19 +1484,24 @@ purpose.
 `full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
 seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.07 MB.
+255, fresh holdout 149), compact file 2.07 MB. The attribution, guardrail,
+behaviour, per-question cost and latency rows below are what the offline
+rescore (`npm run eval -- --offline`) prints by default: they cover the dev
+cases, and the holdout is read only as its accuracy by split (see the
+[holdout policy](#splits-and-the-holdout-policy); `--reveal-holdout` prints
+every case).
 
 | Measure | Result |
 |---|---|
 | Strict accuracy (392 answer cases / 205 intents) | 73.6% (95% CI 69.2%–77.9%, case bootstrap) |
 | Majority-pass cases | 288/392 (Wilson 95% 68.9%–77.6%) |
-| Intent-clustered accuracy | 73.3% |
+| Intent-clustered accuracy | 73.3% (95% CI 67.8%–78.5%) |
 | By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
-| Attribution (repetitions) | pass 866 · model 310 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion (1,233 attempts) | 0 correct SQL rejected; precision 100%, recall 19.4% |
-| Behaviour cases | 0 of 12 handled (abstain / clarify) |
-| Cost | $0.6347 total · $0.00052 per question · $0.00073 per correct answer · 83.4% of prompt tokens cached |
-| Latency | p50 2.39 s · p95 4.25 s (product loop) · retry rate 5.0% |
+| Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
+| Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
+| Cost | $0.6347 for the whole run (the budget row) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
+| Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
 
 How to read it:
 
@@ -1482,13 +1517,17 @@ How to read it:
   breakdowns) and on unfamiliar wording. Per the
   [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
-- **System failures.** None. Under hints v2 the dev flagged case
-  (`e1b20a`) is no longer rejected; the 4 holdout cases flagged
-  `known_validator_rejection` (`METRIC_COLUMN`) cap strict accuracy at 99.0%
-  with perfect SQL, and none of their failures in this run ended in the
-  flagged rejection.
-- **Guardrails** never reject correct SQL but catch about a fifth of wrong
-  SQL; most wrong answers are semantically wrong SQL that is still valid.
+- **Gold audit effect.** A run on the same code before the audit scored the
+  holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
+  readings, 2 rewordings, 1 wrong gold). The rest of the difference is
+  run-to-run variation between two live runs.
+- **System failures.** None among the dev cases (the holdout's failure
+  causes are not shown). Under hints v2 the dev flagged case (`e1b20a`) is no
+  longer rejected; the 4 holdout cases flagged `known_validator_rejection`
+  (`METRIC_COLUMN`) cap strict accuracy at 99.0% with perfect SQL.
+- **Guardrails** (dev cases) never reject correct SQL but catch under a
+  third of wrong SQL (34 of 112 attempts); most wrong answers are
+  semantically wrong SQL that is still valid.
 - **Reproduction.** `npm run eval -- --offline --gate` rescores this file's
   recorded SQL with today's code and reproduces it exactly (0 flips).
 

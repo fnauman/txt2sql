@@ -592,7 +592,7 @@ export function minAccuracyRefusal({ gate = false, minAccuracy = null } = {}, te
  * any failed case in a single-repetition run: an answer case that did not
  * pass, or an abstain / clarify case the model answered); else 0.
  */
-export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false } = {}) {
+export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false, revealHoldout = false } = {}) {
   // A rescore keeps outcomes it could not re-check (a recorded outage or a
   // run cut short); only what happened today counts as a harness failure.
   const repetitions = (report.results || []).flatMap((record) => record.repetitions || []);
@@ -664,17 +664,30 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     // / clarify case (never counted in accuracy) when a repetition scored for
     // its behaviour did not decline: the model answered, or (outcome
     // llm_error) its call failed without SQL and without a decline code.
-    const records = report.results || [];
-    const answerFailed = records.filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
-    const behaviorFailedRecords = records.filter((record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted);
+    //
+    // The reason is printed: unless revealHoldout it counts the dev cases
+    // only (holdout display policy), since counts over every case minus the
+    // listed dev rows would give hidden holdout outcomes away. A failed
+    // holdout case still fails the run.
+    const all = report.results || [];
+    const answerFailedOf = (record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted;
+    const behaviorFailedOf = (record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted;
+    const hiddenRecords = revealHoldout ? [] : all.filter(isHoldoutCase);
+    const records = revealHoldout ? all : all.filter((record) => !isHoldoutCase(record));
+    const answerFailed = records.filter(answerFailedOf).length;
+    const behaviorFailedRecords = records.filter(behaviorFailedOf);
     const behaviorFailed = behaviorFailedRecords.length;
-    if (answerFailed + behaviorFailed > 0) {
+    const holdoutNote = 'holdout results are read in aggregate only, --reveal-holdout counts them';
+    if (answerFailed + behaviorFailed === 0 && hiddenRecords.some((record) => answerFailedOf(record) || behaviorFailedOf(record))) {
+      failures.push(`holdout case(s) failed (benchmark profile, single run; not itemized: ${holdoutNote})`);
+    } else if (answerFailed + behaviorFailed > 0) {
       const answered = behaviorFailedRecords.filter((record) =>
         (record.repetitions || []).some((repetition) => repetition.behavior_counted && String(repetition.outcome).startsWith('answered_instead_of_'))
       ).length;
       const parts = [answered > 0 ? `${answered} answered` : '', behaviorFailed - answered > 0 ? `${behaviorFailed - answered} errored` : ''].filter(Boolean);
       const behavior = behaviorFailed > 0 ? `; ${behaviorFailed} abstain/clarify case(s) not declined: ${parts.join(', ')}` : '';
-      failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior})`);
+      const hidden = hiddenRecords.length > 0 ? `; holdout cases are not counted here: ${holdoutNote}` : '';
+      failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior}${hidden})`);
     }
   }
   return failures.length > 0 ? { code: 1, reasons: failures } : { code: 0, reasons: [] };
