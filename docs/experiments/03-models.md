@@ -3,9 +3,11 @@
 **Variable:** the model and its reasoning effort (`MODEL_NAME` /
 `REASONING_EFFORT`, or `--model` / `--reasoning-effort`), from `gpt-4o-mini`
 (no reasoning) to `gpt-6-luna` at effort `low` and at effort `medium`.
-**Status:** pre-registered — not yet run. Written before any paid call; the
-decision rule below is fixed, the results sections are placeholders. Nothing
-here is a measurement yet.
+**Status:** complete — adopted (live runs on 2026-10-07 at commit `a57fa44`;
+`gpt-6-luna` at reasoning effort `low` is the default and its run is the
+committed default baseline, `eval/baselines/gpt-6-luna.low.json`). The
+Hypothesis and Design sections are the pre-registration, written before any
+paid call and unchanged since, except where marked.
 **Source:** the model-support change (`src/model-config.js`): the request each
 model family accepts, the effort and its source in every header and report,
 reasoning tokens in the usage, and the gpt-6-luna price.
@@ -35,7 +37,7 @@ measured.
 - **Pairing:** each candidate run compares itself with the reference
   explicitly (`--compare eval/baselines/gpt-4o-mini.json`: the default
   baseline of `gpt-6-luna` at an effort would be
-  `eval/baselines/gpt-6-luna.<effort>.json`, which does not exist). The
+  `eval/baselines/gpt-6-luna.<effort>.json`, which did not exist then). The
   comparison flags the model change by design.
 - **Budget:** $4.00 for all remaining paid work, every run capped with
   `--budget-usd`.
@@ -135,28 +137,236 @@ between the two arms). If no arm qualifies, gpt-4o-mini stays the default.
    (`eval/baselines/gpt-6-luna.<effort>.json`) is written only after the
    decision, from a clean tree.
 
+
 ## Offline measurements
 
-Not yet run. To fill in before the pilot: prompt size per question (unchanged
-from the reference, same prompt version), and a dry run of both arms against
-a local OpenAI-compatible stand-in to check the request bodies and the
-headers (no paid call).
+No LLM calls; on the final code unless stated otherwise.
+
+- **Prompt size: unchanged.** The prompt does not depend on the model: the
+  reference and both arms recorded prompt version `4358263bcf82` (report.md,
+  Provenance), and `npm run measure-prompt-cache -- --suite --split dev`
+  prints, for any model, 255 dev questions with one cacheable prefix, an
+  average prompt of 19,493 characters (4,874.4 estimated tokens) and an
+  average cacheable prefix of 4,361.0 estimated tokens. What the live runs
+  billed is in the Tokens row below (per LLM call over the dev cases, the
+  Tokens row divided by the LLM calls of the Retry rate row: 4,377 prompt
+  tokens for the reference, 4,362 for either arm; the cached share fell from
+  83.5% to 81.9% and 80.4%).
+- **Requests.** Only the request options change, as `src/model-config.js`
+  requires for a reasoning model: both arms recorded
+  `max_completion_tokens 16000, reasoning_effort low` (or `medium`) and no
+  `temperature` (report.md, "Model settings"), and the exact request bodies
+  of both efforts are pinned by `test/model-requests.test.js` (the OpenAI SDK
+  against a local stand-in). Every live run's header read
+  `model gpt-6-luna (--model); reasoning effort low (--reasoning-effort);
+  endpoint api.openai.com` (or `medium`), as step 2 requires.
+- **Ceiling.** The validator, fixtures and oracle are the reference's, so the
+  ceiling with perfect SQL is unchanged: 99.0% (the 4 holdout cases flagged
+  `known_validator_rejection`).
+
+### Pilot
+
+The 24 dev cases listed above, 1 repetition per arm, run as written in step 1
+(with `--no-docker` and an `--output-dir`). Figures as each run's console and
+report.md print them:
+
+| Arm | Passed | Cost (per question) | Latency p50 / p95 | Prompt tokens (cached) | Completion tokens (reasoning) | `LLM_TRUNCATED` |
+|---|---|---|---|---|---|---|
+| low | 24/24 | $0.0095 ($0.00040) | 3.16 s / 4.90 s | 104,242 (42,987) | 5,863 (1,434) | 0 |
+| medium | 24/24 | $0.0104 ($0.00043) | 3.63 s / 5.36 s | 104,242 (42,987) | 7,677 (3,090) | 0 |
+
+The reference passes the same 24 cases (24 paired, no flip in either arm).
+No repetition was cut off at the 16000-token limit, so it stayed. Recomputed
+full-run estimates: about $0.48 (low) and $0.52 (medium) for 1,212
+repetitions at the pilot's cost per question, against the planning estimate
+of $0.8 and $1.5-2. Both arms therefore ran with `--repeat 3` under
+`--budget-usd 1.00` each. The full runs cost less than estimated ($0.3276 and
+$0.3992): over 1,212 repetitions far more of the prompt is served from the
+cache (81.9% and 80.4% of the dev cases' prompt tokens, against 41.2% in the
+pilot).
 
 ## Live results
 
-Not yet run. Placeholders, one column per arm:
+Two paid runs on 2026-10-07 at commit `a57fa44` (a clean tree), endpoint
+api.openai.com, one per arm:
+
+```bash
+npm run eval -- --model gpt-6-luna --reasoning-effort low --repeat 3 \
+  --compare eval/baselines/gpt-4o-mini.json --holdout-summary --budget-usd 1.00 \
+  --write-baseline --baseline-file <outside the repository>
+npm run eval -- --model gpt-6-luna --reasoning-effort medium --repeat 3 \
+  --compare eval/baselines/gpt-4o-mini.json --holdout-summary --budget-usd 1.00 \
+  --write-baseline --baseline-file <outside the repository>
+```
+
+(plus `--no-docker` and an `--output-dir`). Each saved a compact copy of its
+report outside `eval/baselines/` (step 4: no re-baselining in the run); after
+the decision the low arm's copy was committed unchanged as
+`eval/baselines/gpt-6-luna.low.json`. The medium arm's is not committed. Both
+runs completed every case (no budget stop) and paired all 392 answer cases
+with the reference (no gold or scoring change between `4ff6ecb` and
+`a57fa44`). The rows marked dev cover the dev cases, as report.md prints
+them by default; the holdout is read only as its accuracy by split and the
+`--holdout-summary` line.
 
 | Measure | gpt-4o-mini (reference) | gpt-6-luna low | gpt-6-luna medium |
 |---|---|---|---|
-| Git sha / prompt version | — | not yet run | not yet run |
-| Strict accuracy (95% CI) | 73.6% | not yet run | not yet run |
-| Dev / holdout accuracy | 88.3% / 49.2% | not yet run | not yet run |
-| Paired table, McNemar p vs reference | — | not yet run | not yet run |
-| Cost per question / per correct answer | — / $0.00060 | not yet run | not yet run |
-| Completion tokens (reasoning) per call | — | not yet run | not yet run |
-| `LLM_TRUNCATED` repetitions | — | not yet run | not yet run |
-| Question latency p50 / p95 | 2.4 s / 4.4 s | not yet run | not yet run |
+| Git sha / prompt version | `4ff6ecb` / `4358263bcf82` | `a57fa44` / `4358263bcf82` | `a57fa44` / `4358263bcf82` |
+| Strict accuracy, every split (392 answer cases) | 73.6% | **89.4%** | 89.6% |
+| By split: dev (245) / fresh holdout (147) | 88.3% / 49.2% | 94.0% / **81.6%** | 93.6% / 83.0% |
+| Strict accuracy, dev (95% CI) | 88.3% (84.4%–92.0%) | 94.0% (91.2%–96.6%) | 93.6% (90.6%–96.5%) |
+| Majority-pass cases, dev | 217/245 | 232/245 | 229/245 |
+| Intent-clustered accuracy, dev (130 intents) | 86.5% | 94.1% | 93.6% |
+| vs reference, every paired answer case (392): improvements / regressions, exact McNemar p | | 74 / 8, p < 0.001 | 75 / 12, p < 0.001 |
+| Δ strict accuracy, every paired case (paired bootstrap 95% CI) | | +15.7 pts (+11.7 to +19.7) | +16.0 pts (+11.8 to +20.3) |
+| vs reference, paired dev cases (245): improvements / regressions, p | | 18 / 3, p = 0.001 | 19 / 7, p = 0.029 |
+| Δ strict accuracy, paired dev cases (95% CI) | | +5.7 pts (+2.5 to +9.4) | +5.3 pts (+1.6 to +9.3) |
+| Attribution, dev (repetitions) | pass 649 · model 86 · system 0 | pass 691 · model 44 · system 0 | pass 688 · model 47 · system 0 |
+| Guardrails, dev attempts: wrong SQL caught / correct SQL rejected / wrong SQL accepted | 34 / 0 / 78 (recall 30.4%) | 0 / 0 / 44 (recall 0.0%) | 0 / 0 / 47 (recall 0.0%) |
+| `LLM_TRUNCATED`, dev (repetitions) | | 0 | 0 |
+| Abstain / clarify handled, dev | 0 / 10 | 0 / 10 | 0 / 10 |
+| Cost per question / per correct answer, dev | $0.00051 / $0.00060 | $0.00024 / $0.00027 | $0.00028 / $0.00031 |
+| Whole-run spend (the Budget row) | $0.6347 | $0.3276 | $0.3992 |
+| Tokens, dev: prompt (cached) · completion (reasoning) | 3,475,276 (2,902,528) · 147,513 | 3,345,434 (2,740,668) · 194,015 (51,171) | 3,345,914 (2,691,420) · 247,399 (102,539) |
+| Question latency p50 / p95, retry rate, dev | 2.39 s / 4.40 s, 3.8% | 3.04 s / 5.73 s, 0.3% | 4.03 s / 6.36 s, 0.3% |
+
+The reference column is `npm run eval -- --rescore eval/baselines/gpt-4o-mini.json`,
+the low column `npm run eval -- --offline` (the committed default baseline)
+and the medium column that run's report.md; all rescore to the same figures
+on today's code with zero LLM calls. The every-paired-case rows are the test
+`--gate` applies and pre-registered rule 1 reads (the run's report.json,
+`comparison`); report.md and the console show the dev rows and the holdout
+line, whose counts add up to them. The low arm's paired-dev row is what
+`npm run eval -- --offline --compare eval/baselines/gpt-4o-mini.json` prints.
+
+**The holdout, in aggregate** (the one readout, the `--holdout-summary` line
+of each full run; `npm run eval -- --offline --compare
+eval/baselines/gpt-4o-mini.json --holdout-summary` prints the low arm's
+again):
+
+- low: `147 paired holdout case(s); 56 improvement(s), 5 regression(s); exact
+  McNemar p = 0.000 → significantly better than the baseline; strict accuracy
+  49.2% → 81.6%, Δ +32.4 pts (95% CI +24.3 pts to +40.4 pts)`
+- medium: `147 paired holdout case(s); 56 improvement(s), 5 regression(s);
+  exact McNemar p = 0.000 → significantly better than the baseline; strict
+  accuracy 49.2% → 83.0%, Δ +33.8 pts (95% CI +25.2 pts to +41.9 pts)`
+
+**Medium vs low.** A zero-cost rescore of the medium run compared with the
+low run (`npm run eval -- --rescore <medium report.json> --compare <low
+report.json>`): every paired answer case (392), 89.4% → 89.6%, 3 improvements
+and 6 regressions, exact McNemar p = 0.508 → no significant difference. Medium
+spent twice the reasoning tokens (102,539 against 51,171 over the dev cases)
+and 1 s more at the median for no measurable gain.
+
+**Spend.** $0.747 of the $4.00 budget: pilots $0.0199 ($0.0095 + $0.0104),
+low $0.3276, medium $0.3992.
+
+**Reading it.** The gain is the model's alone: prompt, hints, schema scope,
+validator, retries, datasets, fixtures and oracle are the reference's, and
+the prompt version is identical. On the dev cases, the ones the prompt was
+tuned on for gpt-4o-mini, the gain is +5.7 pts (88.3% → 94.0%); on the blind
+holdout it is +32.4 pts (49.2% → 81.6%, 56 improvements against 5
+regressions), so most of the improvement is on the new intents and wording
+that gpt-4o-mini handled worst. It is out-of-sample evidence twice over: the
+holdout was written blind before this experiment, and neither the model nor
+the prompt was tuned on it. The dev-holdout gap narrows from 39 to 12 points.
+Cost per correct answer falls by more than half ($0.00060 → $0.00027): the
+gpt-6-luna price per token is lower, and retries almost vanish (3.8% →
+0.3%). Latency rises (p95 4.40 s → 5.73 s) with the reasoning tokens. The
+guardrails rejected none of the low arm's dev SQL (0 caught, 0 false
+rejections): every wrong dev answer is a valid query that returns the wrong
+result, which the validator cannot see (the product retries only a query
+that fails generation, validation or execution).
+
+**Repetitions vary.** A reasoning model takes no `temperature`, so the three
+repetitions of a case disagree more often: 11 of the 245 dev cases have 1 or
+2 passes out of 3 at low effort (5 at medium), against 6 for gpt-4o-mini at
+temperature 0 (report.md, Cases). Every figure here averages 3 repetitions
+per case.
+
+**Threats to validity.** One 3-repetition run per arm on one day; a provider
+update of the model could move it. The reference ran a day earlier
+(2026-10-06, `4ff6ecb`) with the same prompt version, datasets, fixtures and
+oracle. The prompt and the semantic layer were tuned on gpt-4o-mini's dev
+failures, which may favour or handicap another model on the dev cases; the
+holdout is the measurement that does not depend on that. The holdout is
+small (147 answer cases over 75 intents) and is read only in aggregate, so
+its gain says nothing about which kinds of holdout question improved.
+
+### Remaining gaps (dev cases only)
+
+**Every dev failure is a wrong result.** The low arm's 44 failing dev
+repetitions are all `wrong_result` (model bucket; no system error, no
+`LLM_TRUNCATED`, no guardrail rejection). They make up 13 dev cases that fail
+by majority; 10 of them failed in the reference too and 3 are the low arm's
+regressions against it (`tpl_category_distinct_customers_mar_2026_cd96b8`,
+`tpl_product_qty_top5_feb_2026_8a9dc1`, `tpl_store_qty_mar_2026_651565`). By
+failure class (the low run's report.md and its report.json, dev cases only):
+
+| `failure_class` | Cases | Which (passes of 3) |
+|---|---|---|
+| `default_filter` | 5 | the ledger-account rankings by debit or credit in March 2026, `core_public_005`, `core_public_009` and their paraphrases `paraphrase_public_005`, `paraphrase_public_009` (0/3 each: postings of non-canceled sales documents only); `tpl_store_qty_mar_2026_651565` (1/3: product lines only for units) |
+| `aggregation_shape` | 2 | monthly series, `tpl_net_sales_online_orders_monthly_2026_25aa4c`, `tpl_sunvale_net_sales_monthly_q1_2026_334c95` (0/3 each) |
+| (none) | 2 | "SKUs that moved the most units", `paraphrase_public_002` (1/3), `tpl_product_qty_top5_feb_2026_8a9dc1` (0/3) |
+| `entity_resolution` | 1 | `hard_entity_clearspring_units_mar_2026` (0/3) |
+| `entity_filter` | 1 | `tpl_net_sales_metro_online_store_q1_2026_87a58f` (0/3) |
+| `grain_confusion` | 1 | `tpl_product_net_sales_top5_online_fulfillment_mar_2026_288feb` (1/3) |
+| `distinct_count` | 1 | `tpl_category_distinct_customers_mar_2026_cd96b8` (0/3) |
+
+By tag, 7 of the 13 are `ranking` cases and 4 are `accounting` (the four
+ledger rankings); report.md's breakdown gives dev accuracy 70.8% for
+`default_filter` (11 of 16 cases pass by majority), 79.4% for `accounting`
+and 88.3% for `ranking`, against 94.0% overall. The conventions behind
+`default_filter` (the cancel filter on ledger postings by document date,
+units on product lines only) are the clearest single target for the next
+product change.
+
+**Abstain / clarify: 0 of 10 dev cases handled**, as before: the model
+answers every unanswerable or ambiguous question with SQL; the product has
+no abstention or clarification channel.
+
+### Reproduce
+
+No LLM calls (the pilot and the full runs are the paid commands above):
+
+```bash
+# the low arm, the committed default baseline: rescored with 0 flips (the CI gate)
+npm run eval -- --offline --gate
+# the low arm vs the gpt-4o-mini reference over the paired dev cases (18 / 3, p = 0.001)
+npm run eval -- --offline --compare eval/baselines/gpt-4o-mini.json
+# the reference column
+npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
+# prompt size (the same for every model)
+npm run measure-prompt-cache -- --suite --split dev
+```
 
 ## Decision
 
-Pending: the experiment has not been run.
+**Adopt `gpt-6-luna` at reasoning effort `low` as the default.** Both arms
+qualify on every pre-registered rule:
+
+| Rule | low | medium |
+|---|---|---|
+| 1. significant overall gain (exact McNemar p < 0.05, every paired answer case) | 74 / 8, p < 0.001: passes | 75 / 12, p < 0.001: passes |
+| 2. holdout not significantly worse (`--holdout-summary`) | 56 / 5, p = 0.000, significantly better; 81.6% (reference 49.2%): passes | 56 / 5, p = 0.000, significantly better; 83.0%: passes |
+| 3. cost per correct answer at most $0.0018 | $0.00027: passes | $0.00031: passes |
+| 4. p95 question latency under 10 s | 5.73 s: passes | 6.36 s: passes |
+
+Between the two qualifying arms the rule prefers the cheaper one (low:
+$0.00027 per correct answer against $0.00031) unless the other is
+significantly better than it; medium is not (3 improvements, 6 regressions,
+exact McNemar p = 0.508). So low.
+
+What changed: `DEFAULT_MODEL` is `gpt-6-luna` and `DEFAULT_REASONING_EFFORT`
+is `low` (`src/model-config.js`). The default is the pair: with no effort set,
+`gpt-6-luna` runs at `low` whether it is defaulted or named (`MODEL_NAME`,
+`--model`; also OpenRouter's `openai/gpt-6-luna`), so a run of it with no
+effort set pairs with `eval/baselines/gpt-6-luna.low.json` like the default
+run; any other model keeps its family's default (`medium` for `gpt-6-sol`,
+none for `gpt-4o-mini`). The low arm's
+run is the committed default baseline, which `npm run eval -- --offline
+--gate` (and the CI `db` job) rescores with 0 flips.
+`eval/baselines/gpt-4o-mini.json` stays, unchanged, as the reference of
+experiments 1-3 (`MODEL_NAME=gpt-4o-mini` still runs it and pairs with it).
+The next product work is in the remaining gaps above: the `default_filter`
+conventions and an abstain / clarify channel.

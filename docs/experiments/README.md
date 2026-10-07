@@ -1,8 +1,10 @@
 # Experiments
 
 Each experiment changes **one product variable**, measures it against the
-committed baseline (`eval/baselines/gpt-4o-mini.json`) with a paired
-comparison, and writes the result up here. The evaluation harness is
+committed default baseline with a paired comparison
+(`eval/baselines/gpt-6-luna.low.json` since Experiment 3; experiments 1-3
+used `eval/baselines/gpt-4o-mini.json`, kept as their reference), and writes
+the result up here. The evaluation harness is
 described in [docs/evaluation-dataset.md](../evaluation-dataset.md); this page
 is the protocol on top of it.
 
@@ -10,7 +12,7 @@ is the protocol on top of it.
 |---|---|---|---|
 | 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | complete — adopted |
 | 02 | [Hints v2](02-hints-v2.md) | `HINTS_VERSION` (1 → 2: de-poisoned rules, temporal resolution, semantic layer) | complete — adopted |
-| 03 | [Models](03-models.md) | `MODEL_NAME` / `REASONING_EFFORT` (gpt-4o-mini → gpt-6-luna at low / medium) | pre-registered — not yet run |
+| 03 | [Models](03-models.md) | `MODEL_NAME` / `REASONING_EFFORT` (gpt-4o-mini → gpt-6-luna at low / medium) | complete — adopted |
 
 ## How an experiment is run
 
@@ -31,10 +33,10 @@ is the protocol on top of it.
    - the ceiling: `npm run eval` against a local stand-in for the OpenAI API
      that answers every case with its gold SQL (accuracy with perfect SQL, so
      what the validator alone takes away);
-   - a rescore of the committed baseline under the new setting: `SETTING=...
-     npm run eval -- --rescore eval/baselines/gpt-4o-mini.json` (or
-     `--offline`) re-validates, re-executes and re-scores the recorded SQL with
-     zero LLM calls. It shows which recorded rejections the change turns into
+   - a rescore of the committed default baseline under the new setting:
+     `SETTING=... npm run eval -- --offline` (or `--rescore
+     eval/baselines/gpt-6-luna.low.json`) re-validates, re-executes and
+     re-scores the recorded SQL with zero LLM calls. It shows which recorded rejections the change turns into
      executable SQL and whether that SQL is correct. It cannot show how the
      model would have answered a different prompt.
    - `npm run verify-dataset` under the new setting (every gate), so the
@@ -65,9 +67,9 @@ is the protocol on top of it.
    [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy)),
    and a change reworked after its holdout line was read is no longer
    measured blind on that holdout.
-5. **Do not re-baseline in the same step.** The committed baseline is replaced
-   (`--write-baseline`, from a clean tree) only after the result is reviewed
-   and the setting is kept.
+5. **Do not re-baseline in the same step.** The committed default baseline
+   is replaced (`--write-baseline`, from a clean tree) only after the result
+   is reviewed and the setting is kept.
 
 ## The statistics
 

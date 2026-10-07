@@ -226,8 +226,8 @@ git show 1aa30a3:eval/baselines/gpt-4o-mini.json > /tmp/gpt-4o-mini-retrieved-ba
 SCHEMA_SCOPE=retrieved npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
 SCHEMA_SCOPE=retrieved SCHEMA_WIDEN_ON_DEMAND=1 npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
 SCHEMA_SCOPE=full npm run eval -- --rescore /tmp/gpt-4o-mini-retrieved-baseline.json
-# separately: the current committed (full-schema) baseline under the default
-# setting, the gate check (72.8%, exits 0)
+# separately: the gate check of the current default baseline under the
+# default setting (exits 0; its numbers: docs/evaluation-dataset.md#current-baseline)
 npm run eval -- --offline --gate
 # ceiling: point OPENAI_BASE_URL at a local server that answers each case's gold SQL, then
 OPENAI_API_KEY=sk-local OPENAI_BASE_URL=http://127.0.0.1:<port>/v1 npm run eval -- --skip-verify --no-baseline
