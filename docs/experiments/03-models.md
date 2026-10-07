@@ -54,6 +54,16 @@ A candidate arm is adopted as the default model only if all of these hold:
 Cost per correct answer and latency are read as report.md shows them by
 default (dev cases, the holdout hidden), like the reference's figures.
 
+Rule 2 is a point estimate on purpose, and it is conservative: with 147
+holdout cases, a candidate exactly as accurate as the reference lands below
+49.2% about half the time, so the rule can reject an arm that meets every
+other criterion. That is the intended trade: the holdout is the only check
+that a gain carries over from the dev cases the prompt was tuned on, and an
+arm that clears rule 1 by a wide margin is expected to clear it too. A
+looser reading ("not significantly worse": an exact McNemar test on the
+paired holdout cases, in aggregate) would have to be written here before the
+pilot; the reading is not changed after any result is seen.
+
 Between two qualifying arms, prefer the cheaper (cost per correct answer)
 unless the other is significantly better than it (exact McNemar p < 0.05
 between the two arms). If no arm qualifies, gpt-4o-mini stays the default.
