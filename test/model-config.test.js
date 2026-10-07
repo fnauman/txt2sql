@@ -23,6 +23,7 @@ import {
   UNKNOWN_FAMILY_REASONING_EFFORTS,
   unsupportedModelReason,
 } from '../src/model-config.js';
+import { calculateCost } from '../src/pricing.js';
 import { resolveRunModelSettings } from '../src/query-service.js';
 import { defaultBaselineForEnv, parseEvalArgs } from '../scripts/eval.js';
 import { DEFAULT_WEB_CONFIG, loadWebConfig } from '../apps/web/src/server/config.js';
@@ -131,10 +132,19 @@ test('the default model runs at the product default effort whenever no effort is
     assert.equal(isDefaultModel(model), true, model);
     assert.equal(defaultReasoningEffort(model), 'low', model);
   }
+  // A dated snapshot of the default model is the default model too, as the
+  // price table reads it (src/pricing.js prices it as gpt-6-luna).
+  for (const model of ['gpt-6-luna-2026-09-30', 'gpt-6-luna-20260930', 'openai/gpt-6-luna-2026-09-30']) {
+    assert.equal(isDefaultModel(model), true, model);
+    assert.equal(defaultReasoningEffort(model), 'low', model);
+    assert.equal(calculateCost(model, { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })?.model, DEFAULT_MODEL, model);
+  }
   // Other models keep their family's default; a lookalike is another model.
   for (const [model, effort] of [
     ['gpt-6-sol', 'medium'],
     ['gpt-6-luna-mini', 'medium'],
+    ['gpt-6-luna-2026', 'medium'],
+    ['gpt-6-luna-mini-2026-09-30', 'medium'],
     ['gpt-4o-mini', null],
   ]) {
     assert.equal(isDefaultModel(model), false, model);

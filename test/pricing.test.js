@@ -83,7 +83,7 @@ test('calculateCost resolves GPT-5.4 snapshot model names without prefix ambigui
   assert.equal(baseAliasCost?.totalCost, 0.0055);
 });
 
-test('calculateCost prices the repo default gpt-4o-mini model', () => {
+test('calculateCost prices gpt-4o-mini (the reference model of experiments 1-3)', () => {
   assert.deepEqual(calculateCost('gpt-4o-mini', {
     prompt_tokens: 1000,
     completion_tokens: 200,

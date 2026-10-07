@@ -13,8 +13,10 @@
 //   and the effort are one pair (gpt-6-luna at low, adopted by Experiment 3,
 //   docs/experiments/03-models.md), so the default model runs at it whenever
 //   no effort is set, whether the model was defaulted or named (MODEL_NAME or
-//   --model, also with a vendor prefix such as openai/gpt-6-luna). Any other
-//   model keeps its family's default effort (below).
+//   --model, also with a vendor prefix such as openai/gpt-6-luna, or as a
+//   dated snapshot such as gpt-6-luna-2026-09-30, which src/pricing.js prices
+//   as gpt-6-luna). Any other model keeps its family's default effort
+//   (below).
 // - The capability map (MODEL_FAMILIES) is keyed by the model id with any
 //   vendor prefix stripped (openai/gpt-6-luna is gpt-6-luna, as OpenRouter
 //   names it): gpt-4o* and gpt-4.1* take temperature 0 and no reasoning
@@ -203,6 +205,10 @@ export function modelCapabilities(model) {
   return { id, family: entry.family, reasoning: entry.reasoning, efforts: entry.efforts, defaultEffort: entry.defaultEffort };
 }
 
+// A dated snapshot suffix, as src/pricing.js reads it: -2026-09-30 (OpenAI)
+// or -20260930.
+const DATED_SNAPSHOT_SUFFIX = /^-(?:\d{4}-\d{2}-\d{2}|\d{8})$/;
+
 /**
  * Why this pipeline cannot call `model` at all (its family's `unsupported`
  * reason: the -pro models, Responses API only), else null.
@@ -227,16 +233,22 @@ export function assertModelSupported(model, { source = 'model', file = null } = 
 
 /**
  * Whether `model` is DEFAULT_MODEL, under any vendor prefix or variant suffix
- * (baseModelId: openai/gpt-6-luna is the default model too).
+ * (baseModelId: openai/gpt-6-luna is the default model too), or one of its
+ * dated snapshots (gpt-6-luna-2026-09-30; the price table prices them as the
+ * default model too). Another id that only starts with it (gpt-6-luna-mini)
+ * is another model.
  */
 export function isDefaultModel(model) {
-  return baseModelId(model) === baseModelId(DEFAULT_MODEL);
+  const id = baseModelId(model);
+  const defaultId = baseModelId(DEFAULT_MODEL);
+  return id === defaultId || (id.startsWith(`${defaultId}-`) && DATED_SNAPSHOT_SUFFIX.test(id.slice(defaultId.length)));
 }
 
 /**
  * The effort a run of `model` uses when none is set, sent and recorded like a
  * set one (source `default`): DEFAULT_REASONING_EFFORT for the default model
- * (low for gpt-6-luna, defaulted or named); else its family's provider
+ * (low for gpt-6-luna, defaulted or named, and its dated snapshots); else its
+ * family's provider
  * default when that default reasons (medium for the other gpt-6* models,
  * gpt-5 / -mini / -nano and the o-series); null for a family whose default
  * is `none` (gpt-5.1 and later keep the base request), a non-reasoning family
