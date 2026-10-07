@@ -1151,6 +1151,55 @@ test('v2 layer: "net" coordinated with another amount before a noun that is no m
   }
 });
 
+test('v2 layer: "net" coordinated with an amount that modifies the metric a word away, or a generic metric word, asks for the net amount', () => {
+  // Sixth review: judging only the word right after the coordinated amounts
+  // made "net and gross monthly revenue" a hint, although "gross monthly
+  // revenue" is the metric with another amount and "net" modifies the same
+  // revenue; SUM(GrossAmount) as the net measure then passed. Likewise "net
+  // and gross sales" next to "gross revenue", where "sales" is the metric's
+  // generic word. Both enforce again, as in version 1; a noun that is no
+  // measure ("margin category") still leaves the metric a hint.
+  const grossForNet = `SELECT SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`;
+  const bothAmounts = `SELECT SUM(d.NetAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`;
+  for (const question of [
+    'Show net and gross monthly revenue for March 2026.',
+    'Show net and gross store revenue for March 2026.',
+    'Show net and gross daily revenue by store for March 2026.',
+    'Show net vs gross store revenue for March 2026.',
+    'Show both net and gross store revenue for March 2026.',
+    'Show net/gross monthly revenue for March 2026.',
+    'Compare net and gross weekly revenue for March 2026.',
+    'Show gross revenue and net and gross sales by store for March 2026.',
+    'Show gross revenue, net and gross sales by store for March 2026.',
+    'Show gross revenue and net turnover by store for March 2026.',
+    'Show gross revenue and net monthly turnover by store for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, grossForNet), 'METRIC_COLUMN', question);
+    assert.equal(metricVerdict(question, bothAmounts), null, question);
+    // Version 1 enforces "revenue", as before.
+    assert.equal(metricOf(v1Plan(question), 'net_sales').enforcement, 'enforced', question);
+    assert.equal(metricVerdict(question, grossForNet, 1), 'METRIC_COLUMN', question);
+  }
+  for (const question of ['Show net and gross monthly average order value for March 2026.', 'Show net and gross store average order value for March 2026.']) {
+    assert.deepEqual([metricOf(v2Plan(question), 'average_order_value').enforcement, metricOf(v2Plan(question), 'average_order_value').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, `SELECT AVG(d.GrossAmount) AS net_aov, AVG(d.GrossAmount) AS gross_aov ${marchDocuments}`), 'METRIC_COLUMN', question);
+    assert.equal(metricVerdict(question, `SELECT AVG(d.NetAmount) AS net_aov, AVG(d.GrossAmount) AS gross_aov ${marchDocuments}`), null, question);
+  }
+  // The coordinated amounts before a noun that is no measure, even with the
+  // metric's word later in the question, leave the gross metric a hint.
+  for (const question of [
+    'Show gross revenue by net and gross margin category for March 2026.',
+    'Show gross revenue by net and gross monthly margin for March 2026.',
+    'Show gross store revenue and the net and gross margin category for March 2026.',
+    'Show gross revenue and net margin by sales channel for March 2026.',
+    'Show gross revenue instead of net turnover for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['advisory', 'other_amount_named'], question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`), null, question);
+  }
+});
+
 test('v2 layer: only an adding tail after an amount in parentheses makes it a second measure', () => {
   // Fourth review: any adding word or joining symbol after the amount inside
   // the parentheses enforced the metric, whatever followed, so "revenue
