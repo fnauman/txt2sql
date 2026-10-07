@@ -357,8 +357,9 @@ never tune on its wording or its failures, and do not edit a question or a gold
 to chase a score (an edited question gets a new id). When it has been looked
 at, retire it to dev and add a new holdout instead. Its golds were audited
 before any model answer to it was looked at (below), and the [current
-baseline](#current-baseline) measures it, read in aggregate only (41.3% on
-its 147 answer cases).
+baseline](#current-baseline) measures it, read in aggregate only (49.2% on
+its 147 answer cases under hints version 2; the version-1 baseline before
+it, 41.3%).
 
 It was authored on a branch where the inspected hash-split holdout was still
 `holdout`, and integrated onto the measurement-hygiene change afterwards: the
@@ -1532,7 +1533,7 @@ its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
 | Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
 | Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
-| Cost | $0.6347 for the whole run (the budget row) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
+| Cost | $0.6347 for the whole run (the budget row; $0.00052 per question) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
 | Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
 
 How to read it:
@@ -1551,10 +1552,13 @@ How to read it:
   breakdowns) and on unfamiliar wording. Per the
   [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
-- **Gold audit effect.** A run on the same code before the audit scored the
-  holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
-  readings, 2 rewordings, 1 wrong gold). The rest of the difference is
-  run-to-run variation between two live runs.
+- **Gold audit effect.** A hints-version-1 run before the audit scored the
+  holdout at 35.4%; the version-1 baseline, on the same code after the audit
+  (the earlier baseline below), scored it at 41.3%. The audit changed 10 of
+  the 147 holdout answer cases (6 every-member alternatives, 2 rewordings, a
+  gold fix on 2); the rest of that difference is run-to-run variation
+  between two live runs. The step from 41.3% to this baseline's 49.2% is
+  hints version 2 (Experiment 2), not the audit.
 - **System failures.** None among the dev cases (the holdout's failure
   causes are not shown). Under hints v2 the dev flagged case (`e1b20a`) is no
   longer rejected; the 4 holdout cases flagged `known_validator_rejection`
@@ -1588,9 +1592,14 @@ version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
 ### Cost
 
 LLM cost is small: the committed gpt-4o-mini baseline cost $0.00052 per
-question (one case repetition, up to two LLM calls), so one repetition of the
+question over the whole run ($0.6347 over its 1,212 case repetitions,
+holdout included; a repetition makes up to two LLM calls), so one repetition of the
 whole 404-case suite is about 21 cents and `--repeat 3` about 63 cents
 (measured: $0.6347), inside the default 1 USD budget. `--budget-usd` caps it.
+(The $0.00051 per question that report.md and the [current
+baseline](#current-baseline) table give is the dev cases' figure: while the
+holdout is hidden, report.md's cost rows cover the dev cases, and only its
+Budget row is the whole run's spend.)
 Rescoring and `--offline` cost nothing.
 
 ## Known limits
@@ -1599,10 +1608,11 @@ Rescoring and `--offline` cost nothing.
   fixtures were designed against; the held-out tiers (about 75-79%) are the
   estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
   and [Known blind spots](#known-blind-spots).
-- **A small holdout, measured once**: the inspected holdout was retired to
-  dev (`formerly_holdout`); the fresh one (147 answer cases over 75 intents)
-  is measured by the [current baseline](#current-baseline) in aggregate only
-  (one 3-repetition run, 41.3%, a wide interval at that size). **A
+- **A small holdout, one run per product version**: the inspected holdout
+  was retired to dev (`formerly_holdout`); the fresh one (147 answer cases
+  over 75 intents) is measured in aggregate only, by one 3-repetition run
+  per hints version on the audited set (the [current baseline](#current-baseline), version 2:
+  49.2%; the version-1 baseline: 41.3%), a wide interval at that size. **A
   holdout mixes two effects**: unseen intents and unseen vocabulary. It avoids
   the semantic layer's multi-word phrases and its enforced word "revenue", not
   its single-word entity synonyms, so its wording differs from dev's

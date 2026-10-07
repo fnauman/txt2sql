@@ -642,7 +642,7 @@ npm run measure-prompt-cache -- --suite --schema-scope all
 npm run measure-prompt-cache -- --dataset paraphrase-public --results-file generated/prompt-cache-paraphrase-public.json
 ```
 
-The report includes average characters and estimated tokens, cacheable-prefix and question-part tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups, per schema scope. Over the 255-question suite the full scope averages 4,127 estimated tokens per prompt with 1 distinct prefix (451 tokens per question outside it), the retrieved scope 3,800 with 48 prefixes (1,312 outside them). It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
+The report includes average characters and estimated tokens, cacheable-prefix and question-part tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups, per schema scope. Over the default 404-question suite with the default hints version 2 (`npm run measure-prompt-cache -- --suite --schema-scope all`, offline) the full scope averages 4,859 estimated tokens per prompt with 1 distinct prefix (498 tokens per question outside it), the retrieved scope 4,518 with 54 prefixes (1,354 outside them); `HINTS_VERSION=1` gives 4,109 for the full scope. It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
 
 ## Structured Output And Guardrails
 
