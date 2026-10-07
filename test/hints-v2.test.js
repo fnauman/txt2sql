@@ -823,6 +823,128 @@ test('v2 layer: "net" asked for as its own measure, or an amount joined by a sym
   assert.equal(rejects('Gross amount of revenue in March 2026.', `SELECT SUM(d.GrossAmount) AS gross_revenue ${march}`, 1), 'METRIC_COLUMN');
 });
 
+// The verdict on `sql` for `question`: null when it passes, else the code.
+function metricVerdict(question, sql, hintsVersion = 2) {
+  const prompt = buildOptimizedPrompt(schema, question, { hintsVersion });
+  try {
+    validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+    return null;
+  } catch (error) {
+    return error.code;
+  }
+}
+const marchDocuments = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+
+test('v2 layer: the net amount asked for in tax wording, or "net of tax" before the amount, leaves the metric enforced', () => {
+  // Fourth review: these ask for the net amount as a measure of its own next
+  // to the tax-included one, like "net and gross revenue", but only the
+  // tax-included phrase was read (the net check matched the literal word
+  // "net" and skipped "net of ..."), so SUM(GrossAmount) passed as the net
+  // measure, which version 1 rejects.
+  for (const [question, name] of [
+    ['Show revenue including tax and excluding tax for March 2026.', 'net_sales'],
+    ['Show revenue with tax and without tax for March 2026.', 'net_sales'],
+    ['Show revenue with tax and without for March 2026.', 'net_sales'],
+    ['Show revenue (tax included and excluded) for March 2026.', 'net_sales'],
+    ['Show revenue (tax included / excluded) for March 2026.', 'net_sales'],
+    ['Show revenue, tax included and excluded, for March 2026.', 'net_sales'],
+    ['Show revenue including tax vs excluding tax for March 2026.', 'net_sales'],
+    ['Show revenue including tax as well as excluding tax for March 2026.', 'net_sales'],
+    ['Show revenue with tax & without tax for March 2026.', 'net_sales'],
+    ['Show revenue including tax and net of tax for March 2026.', 'net_sales'],
+    ['Show revenue incl. tax and excl. tax for March 2026.', 'net_sales'],
+    ['Show revenue (with tax and before tax) for March 2026.', 'net_sales'],
+    ['Show pre-tax and tax-inclusive revenue for March 2026.', 'net_sales'],
+    ['Show ex-tax and incl tax revenue for March 2026.', 'net_sales'],
+    ['Show net-of-tax and gross revenue for March 2026.', 'net_sales'],
+    ['Show net of tax and gross revenue for March 2026.', 'net_sales'],
+    ['Show revenue (gross, and net of tax) for March 2026.', 'net_sales'],
+    ['Show the average order value including tax and excluding tax for March 2026.', 'average_order_value'],
+    ['Show the average order value with tax and without tax for March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricOf(v1Plan(question), name)?.enforcement ?? 'enforced', 'enforced', question);
+  }
+  for (const question of [
+    'Show revenue including tax and excluding tax for March 2026.',
+    'Show revenue (tax included and excluded) for March 2026.',
+    'Show net of tax and gross revenue for March 2026.',
+  ]) {
+    const wrong = `SELECT SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`;
+    assert.equal(metricVerdict(question, wrong), 'METRIC_COLUMN', question);
+    assert.equal(metricVerdict(question, wrong, 1), 'METRIC_COLUMN', `version 1: ${question}`);
+    assert.equal(metricVerdict(question, `SELECT SUM(d.NetAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`), null, question);
+  }
+  assert.equal(
+    metricVerdict('Show the average order value with tax and without tax for March 2026.', `SELECT AVG(d.GrossAmount) AS aov_with_tax, AVG(d.GrossAmount) AS aov_without_tax ${marchDocuments}`),
+    'METRIC_COLUMN'
+  );
+  // One tax-included amount, or "excluding" / "without" something other than
+  // tax, is still a hint.
+  for (const question of [
+    'Show revenue including tax for March 2026.',
+    'Show revenue (tax included) for March 2026.',
+    'Show revenue (incl. tax) for March 2026.',
+    'Show revenue with tax and without discounts for March 2026.',
+    'Show revenue including tax, excluding returns, for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['advisory', 'other_amount_named'], question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS revenue ${marchDocuments}`), null, question);
+  }
+});
+
+test('v2 layer: a negated or unrelated "net" leaves a modified metric a hint', () => {
+  // Fourth review: the previous fix counted the word "net" anywhere, so
+  // "gross revenue, not net", "gross revenue instead of net" or "gross
+  // revenue and net margin" enforced the metric and rejected the SUM(GrossAmount)
+  // that rule 10 asks for (version 2 accepted it before). "net" counts only
+  // when it is asked for: joined to the amount or the metric, not negated,
+  // and not the start of another noun phrase.
+  for (const [question, name] of [
+    ['Show gross revenue, not net, in March 2026.', 'net_sales'],
+    ['Show gross revenue (not net) by customer for March 2026.', 'net_sales'],
+    ['Show revenue (gross, not net) in March 2026.', 'net_sales'],
+    ['Show gross revenue instead of net in March 2026.', 'net_sales'],
+    ['Show gross revenue rather than net in March 2026.', 'net_sales'],
+    ['Show gross revenue excluding net in March 2026.', 'net_sales'],
+    ['Show gross revenue excluding the net amount for March 2026.', 'net_sales'],
+    ['Show gross revenue without net figures in March 2026.', 'net_sales'],
+    ['Show gross revenue, never net, by store for March 2026.', 'net_sales'],
+    ['Show revenue gross of tax, not net, for March 2026.', 'net_sales'],
+    ['Show revenue on a gross (not net) basis for March 2026.', 'net_sales'],
+    ['Show revenue including tax rather than net for March 2026.', 'net_sales'],
+    ['Show gross revenue for March 2026, as opposed to net.', 'net_sales'],
+    ['Gross revenue for March 2026; I do not need net.', 'net_sales'],
+    ['Gross revenue for March 2026 (we already have net).', 'net_sales'],
+    ['Show gross revenue and net margin for March 2026.', 'net_sales'],
+    ['Show gross revenue and net terms by customer for March 2026.', 'net_sales'],
+    ['Show gross revenue by net terms for March 2026.', 'net_sales'],
+    ['Show gross revenue at Net Mart for March 2026.', 'net_sales'],
+    ['Show gross revenue for the Net Store in March 2026.', 'net_sales'],
+    ['Show gross revenue for the net-30 customers in March 2026.', 'net_sales'],
+    ['Show gross revenue and the net amount payable in March 2026.', 'net_sales'],
+    ['Show average order value including tax, not net, for March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+    const sql = name === 'average_order_value' ? 'AVG(COALESCE(d.GrossAmount,0)) AS average_order_value' : 'ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue';
+    assert.equal(metricVerdict(question, `SELECT ${sql} ${marchDocuments}`), null, question);
+  }
+  // "net" asked for next to the metric or another amount still enforces.
+  for (const question of [
+    'Show gross revenue vs net for March 2026.',
+    'Show gross revenue and net by store for March 2026.',
+    'Show revenue in gross and net terms for March 2026.',
+    'Show not only net but also gross revenue for March 2026.',
+    'Show gross minus net revenue for March 2026.',
+    'Show the net to gross revenue ratio for March 2026.',
+    'Show gross vs. net revenue for March 2026.',
+  ]) {
+    assert.equal(metricOf(v2Plan(question), 'net_sales').enforcement, 'enforced', question);
+  }
+});
+
 test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
   const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
   assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);

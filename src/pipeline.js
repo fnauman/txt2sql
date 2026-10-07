@@ -665,7 +665,9 @@ const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the
  *   ("revenue on a gross basis").
  * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
  * and the bill total", "revenue & gross", "revenue/gross ratio") is a
- * separate measure.
+ * separate measure. The net amount asked for next to the amount ("net and
+ * gross revenue", "revenue including tax and excluding tax") is read by
+ * asksForNetMeasure.
  */
 function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
   const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
@@ -747,19 +749,113 @@ function everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) {
   return phrases.length > 0 && phrases.every((phrase) => otherAmountModifiesMetric(otherSpans, [phrase], questionWords));
 }
 
-// Whether the question asks for the net amount as a measure of its own: the
-// word "net" anywhere outside another amount's span ("net payable"), so "net
-// and gross revenue", "net vs gross revenue", "revenue (gross and net)" and
-// "net as a share of gross revenue" ask for the metric's own (net) column next
-// to the gross one. "net of ..." ("gross revenue net of returns") qualifies
-// an amount, and "net (amount) payable" names another one; neither counts.
-function asksForNetMeasure(otherSpans, questionWords) {
-  return questionWords.some((questionWord, index) => {
-    if (questionWord.word !== 'net' || otherSpans.some((span) => span.start <= index && index < span.end)) {
+// The net (tax-exclusive) amount's own wordings. Both metrics that carry
+// `advisory_when_mentioned` measure it, so one of these asked for next to
+// another amount names the metric's own column (asksForNetMeasure).
+const NET_AMOUNT_PHRASES = ['net', 'net of tax', 'excluding tax', 'excl tax', 'ex tax', 'exclusive of tax', 'tax exclusive', 'tax excluded', 'before tax', 'pre tax', 'without tax'];
+// The net side of a tax pair written with "tax" once: "revenue (tax included
+// and excluded)", "revenue with tax and without".
+const NET_ELLIPSIS_WORDS = new Set(['excluded', 'excluding', 'exclusive', 'excl', 'without', 'before', 'pre', 'ex']);
+// Words that join a net wording to another amount or to the metric as two
+// measures, or relate the two ("net as a share of gross revenue", "the net to
+// gross ratio"); a join needs one of NET_JOINING_WORDS (or & + / or a comma).
+const NET_JOINING_WORDS = new Set(['and', 'or', 'nor', 'plus', 'minus', 'vs', 'versus', 'against', 'also', 'well', 'along', 'together', 'compared', 'to', 'share', 'percentage', 'percent', 'proportion', 'fraction', 'ratio', 'over', 'divided', 'relative']);
+const NET_LINK_WORDS = new Set([...NET_JOINING_WORDS, 'both', 'but', 'as', 'with', 'a', 'an', 'the', 'of', 'by']);
+// Words that, among the two before a net wording, ask for something other
+// than it: "gross revenue, not net", "instead of net", "excluding the net
+// amount" ("not only net" is no negation).
+const NET_NEGATING_WORDS = new Set(['not', 'never', 'no', 'without', 'excluding', 'exclude', 'except', 'instead', 'rather', 'opposed', 'ignoring', 'ignore']);
+// Abbreviations whose period is no clause boundary: "net vs. gross".
+const NET_LINK_ABBREVIATIONS = new Set(['vs', 'incl', 'excl']);
+const SUM_NOUNS = new Set([...AMOUNT_OF_NOUNS, 'sum', 'sums']);
+
+/**
+ * Whether the question asks for the net amount as a measure of its own next
+ * to another amount (`otherSpans`) or the metric (`metricSpans`): a net
+ * wording (NET_AMOUNT_PHRASES, or the net side of a tax pair) that is
+ * - joined to one of them by a conjunction, a comparison, a joining symbol
+ *   or a comma ("net and gross revenue", "net vs gross revenue", "revenue
+ *   (gross and net)", "net/gross revenue", "net as a share of gross revenue",
+ *   "revenue including tax and excluding tax", "revenue (tax included and
+ *   excluded)", "net of tax and gross revenue", "gross revenue vs net"), or
+ *   right before the metric ("net revenue");
+ * - not negated ("gross revenue, not net", "(not net)", "instead of net",
+ *   "rather than net", "without net figures");
+ * - followed by a boundary, a joining or period word, an amount noun, the
+ *   metric or another amount, not by another noun ("gross revenue and net
+ *   margin", "at Net Mart"; "terms" and "basis" only after another amount:
+ *   "in gross and net terms").
+ * "net of ..." other than tax ("gross revenue net of returns") qualifies an
+ * amount, and "net (amount) payable" names another one; neither counts.
+ */
+function asksForNetMeasure(otherSpans, metricSpans, questionWords) {
+  const words = questionWords.map((questionWord) => questionWord.word);
+  const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
+  const covered = (span, spans) => spans.some((other) => other !== span && other.start <= span.start && span.end <= other.end);
+  const startsSpan = (index, spans) => spans.some((span) => span.start === index);
+  // A clause boundary in the separators before words start..end.
+  const boundaryBetween = (start, end) => {
+    for (let index = start; index <= end; index += 1) {
+      const separator = separatorAt(index);
+      if (/[;:!?]/.test(separator) || (separator.includes('.') && !NET_LINK_ABBREVIATIONS.has(words[index - 1]))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // Whether `first` and `second` (first before second) are joined.
+  const joined = (first, second) => {
+    if (first.end > second.start || second.start - first.end > 4 || boundaryBetween(first.end, second.start)) {
       return false;
     }
-    const following = questionWords.slice(index + 1, index + 3).map((word) => word.word);
-    return following[0] !== 'of' && !following.includes('payable');
+    const gap = words.slice(first.end, second.start);
+    let separators = '';
+    for (let index = first.end; index <= second.start; index += 1) {
+      separators += separatorAt(index);
+    }
+    return gap.every((word) => NET_LINK_WORDS.has(word)) && (gap.some((word) => NET_JOINING_WORDS.has(word)) || /[&+/,]/.test(separators));
+  };
+
+  const netSpans = findSynonymSpans(NET_AMOUNT_PHRASES, questionWords).filter(
+    (span) =>
+      !otherSpans.some((other) => other.start < span.end && span.start < other.end) &&
+      !(span.end - span.start === 1 && (words[span.end] === 'of' || words.slice(span.end, span.end + 2).includes('payable')))
+  );
+  for (const other of otherSpans.filter((span) => words.slice(span.start, span.end).includes('tax'))) {
+    let index = other.end;
+    while (index < other.end + 4 && NET_LINK_WORDS.has(words[index])) {
+      index += 1;
+    }
+    if (NET_ELLIPSIS_WORDS.has(words[index]) && !netSpans.some((span) => span.start <= index && index < span.end)) {
+      netSpans.push({ start: index, end: index + 1 });
+    }
+  }
+
+  return netSpans.some((net) => {
+    if (covered(net, netSpans)) {
+      return false;
+    }
+    const before = words.slice(Math.max(0, net.start - 2), net.start);
+    if (before.some((word, offset) => NET_NEGATING_WORDS.has(word) && !(word === 'not' && ['only', 'just'].includes(before[offset + 1])))) {
+      return false;
+    }
+    const otherPartner = otherSpans.some((other) => joined(other, net) || joined(net, other));
+    const metricPartner = metricSpans.some(
+      (metric) => joined(metric, net) || joined(net, metric) || (metric.start === net.end && !/\S/.test(separatorAt(net.end)))
+    );
+    if (!otherPartner && !metricPartner) {
+      return false;
+    }
+    const next = words[net.end];
+    return (
+      next === undefined ||
+      /[,.;:!?()&+/]/.test(separatorAt(net.end)) ||
+      NET_LINK_WORDS.has(next) ||
+      APPOSITIVE_FOLLOWING_WORDS.has(next) ||
+      SUM_NOUNS.has(next) ||
+      startsSpan(net.end, [...otherSpans, ...metricSpans, ...netSpans]) ||
+      (otherPartner && (next === 'terms' || next === 'basis'))
+    );
   });
 }
 
@@ -794,17 +890,19 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
   // must be modified: a modified generic word ("revenue and gross sales") or
   // a second, modified mention ("revenue and gross revenue") leaves an
   // unmodified "revenue" enforced. An explicit "net" phrase ("net sales"), or
-  // "net" asked for as its own measure ("net and gross revenue", "revenue
-  // (gross and net)"), still enforces: both metrics that carry the list
-  // measure the net amount.
+  // the net amount asked for as its own measure ("net and gross revenue",
+  // "revenue (gross and net)", "revenue including tax and excluding tax";
+  // not a negated "gross revenue, not net": asksForNetMeasure), still
+  // enforces: both metrics that carry the list measure the net amount.
   const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
   const otherSpans = otherAmounts.length > 0 && questionWords ? findSynonymSpans(otherAmounts, questionWords) : [];
+  const explicitSpans = otherAmounts.length > 0 && questionWords ? findSynonymSpans(explicitMatches, questionWords) : [];
   if (
     otherAmounts.length > 0 &&
     questionWords &&
-    everyExplicitSpanModified(otherSpans, findSynonymSpans(explicitMatches, questionWords), questionWords) &&
+    everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) &&
     !explicitMatches.some((synonym) => splitWords(synonym).includes('net')) &&
-    !asksForNetMeasure(otherSpans, questionWords)
+    !asksForNetMeasure(otherSpans, explicitSpans, questionWords)
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }
