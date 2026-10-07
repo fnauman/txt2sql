@@ -440,10 +440,22 @@ test('comparisons flag a model or reasoning-effort change (comparison, report.md
   const same = compareReports(report('gpt-4o-mini', undefined), report('gpt-4o-mini', null), { resamples: 20 });
   assert.equal(same.modelChange, null, 'a report from before REASONING_EFFORT sent none');
   const model = compareReports(report('gpt-4o-mini', undefined), report('gpt-6-luna', 'low'), { resamples: 20 });
-  assert.deepEqual(model.modelChange, { model: true, reasoningEffort: true });
+  assert.deepEqual(model.modelChange, { model: true, reasoningEffort: true, requestOptions: false });
   assert.equal(model.candidate.reasoningEffort, 'low');
   const effort = compareReports(report('gpt-6-luna', 'low'), report('gpt-6-luna', 'medium'), { resamples: 20 });
-  assert.deepEqual(effort.modelChange, { model: false, reasoningEffort: true });
+  assert.deepEqual(effort.modelChange, { model: false, reasoningEffort: true, requestOptions: false });
+
+  // The same model and effort with other request options (a token limit, or
+  // OpenRouter's require_parameters) is flagged when both sides record them.
+  const withOptions = (requestOptions) => ({ model: 'gpt-6-luna', results, provenance: { product: { reasoningEffort: 'low', requestOptions } } });
+  const lowOptions = { max_completion_tokens: 16000, reasoning_effort: 'low' };
+  const request = compareReports(withOptions(lowOptions), withOptions({ ...lowOptions, max_completion_tokens: 4000 }), { resamples: 20 });
+  assert.deepEqual(request.modelChange, { model: false, reasoningEffort: false, requestOptions: true });
+  assert.match(renderComparisonConsole(request), /\n {2}request options: max_completion_tokens 16000, reasoning_effort low → max_completion_tokens 4000, reasoning_effort low/);
+  assert.doesNotMatch(renderComparisonConsole(request), /\n {2}model:/);
+  // Key order is no change, and a side that does not record them is none either.
+  assert.equal(compareReports(withOptions(lowOptions), withOptions({ reasoning_effort: 'low', max_completion_tokens: 16000 }), { resamples: 20 }).modelChange, null);
+  assert.equal(compareReports(withOptions(null), withOptions(lowOptions), { resamples: 20 }).modelChange, null);
 
   const printed = renderComparisonConsole(model);
   assert.match(printed, /\n {2}model: gpt-4o-mini → gpt-6-luna \(reasoning effort low\) \(the comparison measures the model change\)/);
@@ -487,4 +499,27 @@ test('report.md\'s comparison table shows both efforts and states a model change
   );
   assert.match(markdown, /\| Reasoning effort \| unset \| low \|/);
   assert.match(markdown, /\*\*Model change:\*\* the baseline ran gpt-4o-mini and the candidate gpt-6-luna \(reasoning effort low\)/);
+  assert.doesNotMatch(markdown, /\| Request options \|/, 'neither side records request options');
+
+  // A request-only change: both options in the table and a "Request change" line.
+  const options = (maxCompletionTokens) => ({ ...provenance, product: { ...provenance.product, requestOptions: { max_completion_tokens: maxCompletionTokens, reasoning_effort: 'low' } } });
+  const requestComparison = compareReports({ model: 'gpt-6-luna', results: caseRecords, provenance: options(16000) }, { model: 'gpt-6-luna', results: caseRecords, provenance: options(4000) }, { resamples: 20 });
+  const requestMarkdown = renderReportMarkdown(
+    buildReport({
+      mode: 'run',
+      generatedAt: '2026-10-07T10:00:00.000Z',
+      model: 'gpt-6-luna',
+      suite: { name: 'all', datasets: [], selectedCaseCount: 1, totalCaseCount: 1, filters: { split: 'all', caseIds: [], tags: [], intents: [] } },
+      oracle: { fixtures: [] },
+      runner: { repeat: 1 },
+      provenance: options(4000),
+      verification: { skipped: true },
+      caseRecords,
+      comparison: requestComparison,
+      statsOptions: { resamples: 20 },
+    })
+  );
+  assert.match(requestMarkdown, /\| Request options \| max_completion_tokens 16000, reasoning_effort low \| max_completion_tokens 4000, reasoning_effort low \|/);
+  assert.match(requestMarkdown, /\*\*Request change:\*\* the same model and effort ran with other request options/);
+  assert.doesNotMatch(requestMarkdown, /\*\*Model change:\*\*/);
 });

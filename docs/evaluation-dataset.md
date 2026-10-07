@@ -1519,7 +1519,12 @@ written `__`; `--no-baseline` turns that off) aligns cases by id. When the two
 reports ran another model or reasoning effort the comparison says so
 (`modelChange`; a "Model change" line in report.md, a `model:` line on the
 console, and a note when the baseline is loaded): the paired test then
-measures the model change. A case whose gold or
+measures the model change. Other request options with the same model and
+effort (`LLM_MAX_COMPLETION_TOKENS`, OpenRouter's `require_parameters`; the
+prompt version does not cover them) are flagged the same way when both
+reports record them (`modelChange.requestOptions`, a "Request options" row
+and a "Request change" line in report.md, a `request options:` console
+line). A case whose gold or
 scoring fingerprint changed is excluded and listed, as are cases one report
 did not count or whose majority outcome is a timeout; behaviour cases are not
 compared; new and removed cases are listed. Per paired case the verdict is the

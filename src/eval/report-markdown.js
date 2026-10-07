@@ -256,6 +256,15 @@ function reportModelLabel(report) {
   return modelLabel(report.model, report.provenance?.product?.reasoningEffort ?? null);
 }
 
+// Recorded request options as text ("temperature 0, max_completion_tokens 3200").
+function requestOptionsText(requestOptions, missing = 'n/a') {
+  return requestOptions
+    ? Object.entries(requestOptions)
+        .map(([key, value]) => `${key} ${typeof value === 'object' ? JSON.stringify(value) : value}`)
+        .join(', ')
+    : missing;
+}
+
 // The model settings rows of the provenance table; a report from before they
 // were recorded (no product.modelSource) has none.
 function modelSettingsRows(provenance) {
@@ -263,18 +272,18 @@ function modelSettingsRows(provenance) {
   if (!product || !('modelSource' in product)) {
     return [];
   }
-  const request = product.requestOptions
-    ? Object.entries(product.requestOptions)
-        .map(([key, value]) => `${key} ${typeof value === 'object' ? JSON.stringify(value) : value}`)
-        .join(', ')
-    : 'n/a';
   return [
     [
       'Model settings',
       `model from ${product.modelSource || 'n/a'}; reasoning effort ${describeReasoningEffort(product.reasoningEffort)} ` +
-        `(${product.reasoningEffortSource || 'n/a'}); request options: ${request}`,
+        `(${product.reasoningEffortSource || 'n/a'}); request options: ${requestOptionsText(product.requestOptions)}`,
     ],
   ];
+}
+
+// The model or the effort changed (not only the request options).
+function modelOrEffortChanged(comparison) {
+  return Boolean(comparison.modelChange?.model || comparison.modelChange?.reasoningEffort);
 }
 
 // Same behaviour: the same effective scope (and, for the retrieved scope, the
@@ -516,11 +525,14 @@ export function renderComparisonConsole(recorded, { revealHoldout = false, holdo
   if (holdout) {
     lines.push(`  holdout in aggregate (--holdout-summary): ${holdoutSummaryText(holdout)}`);
   }
-  if (comparison.modelChange) {
+  if (modelOrEffortChanged(comparison)) {
     lines.push(
       `  model: ${modelLabel(comparison.baseline?.model || 'n/a', comparison.baseline?.reasoningEffort ?? null)} → ` +
         `${modelLabel(comparison.candidate?.model || 'n/a', comparison.candidate?.reasoningEffort ?? null)} (the comparison measures the model change)`
     );
+  }
+  if (comparison.modelChange?.requestOptions) {
+    lines.push(`  request options: ${requestOptionsText(comparison.baseline?.requestOptions)} → ${requestOptionsText(comparison.candidate?.requestOptions)}`);
   }
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
@@ -875,6 +887,9 @@ function comparisonSection(comparison, holdoutSummary = null) {
         ['Report', base.label || 'n/a', cand.label || 'this run'],
         ['Model', base.model || 'n/a', cand.model || 'n/a'],
         ['Reasoning effort', comparisonEffortText(base), comparisonEffortText(cand)],
+        ...(base.requestOptions || cand.requestOptions
+          ? [['Request options', requestOptionsText(base.requestOptions, 'not recorded'), requestOptionsText(cand.requestOptions, 'not recorded')]]
+          : []),
         ['Generated', base.generatedAt || 'n/a', cand.generatedAt || 'n/a'],
         ['Git', `${short(base.gitSha, 10)}${base.gitDirty ? ' (dirty)' : ''}`, `${short(cand.gitSha, 10)}${cand.gitDirty ? ' (dirty)' : ''}`],
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
@@ -885,11 +900,17 @@ function comparisonSection(comparison, holdoutSummary = null) {
       ]
     )
   );
-  if (comparison.modelChange) {
+  if (modelOrEffortChanged(comparison)) {
     lines.push('');
     lines.push(
       `**Model change:** the baseline ran ${modelLabel(base.model || 'n/a', base.reasoningEffort ?? null)} and the candidate ` +
         `${modelLabel(cand.model || 'n/a', cand.reasoningEffort ?? null)}, so the paired comparison measures the model change, not only a product change.`
+    );
+  } else if (comparison.modelChange?.requestOptions) {
+    lines.push('');
+    lines.push(
+      `**Request change:** the same model and effort ran with other request options (${requestOptionsText(base.requestOptions)} → ` +
+        `${requestOptionsText(cand.requestOptions)}), so the paired comparison measures that change too.`
     );
   }
   const contingency = contingencyOf(comparison);
