@@ -307,16 +307,20 @@ function buildMonthRange(year, month) {
 // - a range or a list sharing a year, at either end ("January to March
 //   2026", "from March 2026 to the end of May 2026", "between November 2025
 //   and February 2026", "January and February 2026", "January, February,
-//   and March 2026");
+//   and March 2026", "January, February and/or March 2026", "January;
+//   February; and March 2026", "January vs February 2026"): every month of
+//   the list is left to the model, never the last one alone;
 // - a to-date or open-ended tail ("to date", "year to date", "YTD", "so
 //   far", "onwards", "and later").
 // A month with its own year next to another one ("March 2025 and March 2026")
 // and a ranking size before it ("top 10 March 2026 customers") still resolve.
 const MONTH_ALTERNATION = [...MONTH_TOKEN_TO_INFO.keys()].sort((left, right) => right.length - left.length).join('|');
 const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till|up to|up until)';
-// A list separator, with the optional serial (Oxford) comma before a
-// conjunction: "January, February, and March 2026".
-const LIST_CONNECTOR = '(?:,?\\s*(?:and|or|&)|,)';
+// A list separator: a comma or semicolon, or a conjunction ("and", "or",
+// "and/or", "nor", "plus", "as well as", "and also", "and then", "&", "vs")
+// with an optional serial (Oxford) comma or semicolon before it: "January,
+// February, and March 2026", "January; February; and March 2026".
+const LIST_CONNECTOR = '(?:[,;]?\\s*(?:and\\s*/\\s*or|and\\s+also|and\\s+then|as\\s+well\\s+as|and|or|nor|plus|&|vs\\.?|versus)|[,;])';
 const DAY_OF_MONTH = '\\d{1,2}(?:st|nd|rd|th)?';
 // "the end of", "the start of": a point inside the month, not all of it.
 const MONTH_POINT = '(?:(?:the\\s+)?(?:very\\s+)?(?:end|start|beginning|middle|close|half|first half|second half)\\s+of\\s+)';

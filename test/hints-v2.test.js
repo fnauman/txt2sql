@@ -94,6 +94,42 @@ test('v2 temporal: a shared-year month list with a serial (Oxford) comma resolve
   assert.deepEqual(extractTemporalReferences(ownYears, { hintsVersion: 2 }), extractTemporalReferences(ownYears, { hintsVersion: 1 }));
 });
 
+test('v2 temporal: a shared-year month list joined by any list connector resolves no month alone', () => {
+  // Third review: "and/or", "plus", "as well as", "and also" and semicolons
+  // matched neither the comma nor the conjunctions, so the last month of the
+  // list was resolved as a whole month on its own, as in version 1.
+  for (const question of [
+    'Net sales for January, February and/or March 2026.',
+    'Net sales for January, February, and/or March 2026.',
+    'Net sales for January, February, plus March 2026.',
+    'Net sales for January, February plus March 2026.',
+    'Net sales for January, February, as well as March 2026.',
+    'Net sales for January, February, and also March 2026.',
+    'Net sales for January, February, and then March 2026.',
+    'Net sales for neither January, February, nor March 2026.',
+    'Net sales for January; February; and March 2026.',
+    'Net sales for January; February; March 2026.',
+    'Compare January vs February 2026 net sales.',
+    'Compare January vs. February 2026 net sales.',
+    'Compare January versus February 2026 net sales.',
+  ]) {
+    assert.deepEqual(texts(question, 2), [], question);
+    assert.ok(texts(question, 1).length > 0, `version 1 resolved a whole month: ${question}`);
+    assert.match(questionContextOf(question, 2), /- No explicit temporal references were resolved\./, question);
+  }
+  // Months with their own years, and lists of other things, still resolve.
+  for (const [question, expected] of [
+    ['Compare net sales in March 2025 plus March 2026.', ['March 2025', 'March 2026']],
+    ['Compare net sales in March 2025 vs March 2026.', ['March 2025', 'March 2026']],
+    ['Compare net sales in March 2025; and March 2026.', ['March 2025', 'March 2026']],
+    ['Revenue plus units in March 2026.', ['March 2026']],
+    ['Revenue, gross, as well as units in March 2026.', ['March 2026']],
+  ]) {
+    assert.deepEqual(texts(question, 2), expected, question);
+    assert.deepEqual(extractTemporalReferences(question, { hintsVersion: 2 }), extractTemporalReferences(question, { hintsVersion: 1 }), question);
+  }
+});
+
 test('v2 temporal: a part of a month, a period ending in it, an open range or a to-date tail resolves nothing', () => {
   // Review finding: the first version still resolved these to the whole
   // month, and kept only the start month of "from <month> to the end of
