@@ -33,6 +33,8 @@
 //   provider: { require_parameters: true }, so it routes only to endpoints
 //   that support every parameter sent (response_format, reasoning_effort,
 //   max_completion_tokens); OPENROUTER_REQUIRE_PARAMETERS=0 turns it off.
+//   With OPENAI_API_KEY unset, OPENROUTER_API_KEY is the key there
+//   (resolveLlmApiKey).
 
 export const DEFAULT_MODEL = 'gpt-4o-mini';
 
@@ -173,6 +175,24 @@ export function resolveEndpoint(env = process.env) {
   } catch {
     return { baseUrlHost: null, isOpenRouter: false };
   }
+}
+
+/**
+ * The API key for the configured endpoint and the variable it came from:
+ * OPENAI_API_KEY, else (only when OPENAI_BASE_URL is on openrouter.ai)
+ * OPENROUTER_API_KEY; { apiKey: null, source: null } when neither applies.
+ * The key itself is never logged or recorded.
+ */
+export function resolveLlmApiKey(env = process.env) {
+  const openAiKey = nonBlank(env.OPENAI_API_KEY);
+  if (openAiKey) {
+    return { apiKey: openAiKey, source: 'OPENAI_API_KEY' };
+  }
+  const openRouterKey = nonBlank(env.OPENROUTER_API_KEY);
+  if (openRouterKey && resolveEndpoint(env).isOpenRouter) {
+    return { apiKey: openRouterKey, source: 'OPENROUTER_API_KEY' };
+  }
+  return { apiKey: null, source: null };
 }
 
 function readBooleanEnv(env, name, fallback) {

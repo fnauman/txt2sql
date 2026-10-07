@@ -8,7 +8,7 @@
 // startup error, and returns a deeply frozen object.
 
 import { resolveHintsVersion } from '../../../../src/hints-version.js';
-import { completionSettingsOf, DEFAULT_MODEL, describeReasoningEffort, resolveModelConfig } from '../../../../src/model-config.js';
+import { completionSettingsOf, DEFAULT_MODEL, describeReasoningEffort, resolveLlmApiKey, resolveModelConfig } from '../../../../src/model-config.js';
 import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
@@ -263,7 +263,8 @@ export function loadWebConfig(env = process.env) {
     shutdownTimeoutMs,
     runtimeRetireGraceMs,
     openAi: {
-      configured: Boolean(env.OPENAI_API_KEY),
+      // OPENAI_API_KEY, or OPENROUTER_API_KEY for an openrouter.ai base URL.
+      configured: Boolean(resolveLlmApiKey(env).apiKey),
       timeoutMs: openAiTimeoutMs,
       maxRetries: openAiMaxRetries,
     },

@@ -1081,7 +1081,8 @@ function createLiveClient(options) {
   } catch (error) {
     throw new HarnessError(
       error.code === 'OPENAI_NOT_CONFIGURED'
-        ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell). Use --offline or --rescore <report.json> to evaluate without LLM calls.'
+        ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell; OPENROUTER_API_KEY also works with an https://openrouter.ai OPENAI_BASE_URL). ' +
+          'Use --offline or --rescore <report.json> to evaluate without LLM calls.'
         : `Cannot create the OpenAI client: ${error.message}`,
       { code: error.code || 'OPENAI_NOT_CONFIGURED', cause: error }
     );

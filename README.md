@@ -165,7 +165,7 @@ Loading behavior:
 
 Required environment variables:
 
-- `OPENAI_API_KEY` (for anything that calls the model)
+- `OPENAI_API_KEY` (for anything that calls the model; with an OpenRouter `OPENAI_BASE_URL`, `OPENROUTER_API_KEY` works too, see [Models](#models))
 - `DB_NAME`
 - `DB_PASSWORD` (the query user's password; `DB_USER` defaults to `demo_readonly`)
 - `DB_ADMIN_PASSWORD` or `MARIADB_ROOT_PASSWORD` (only for `bootstrap-db` and `seed-demo`; `DB_ADMIN_USER` defaults to `root`)
@@ -541,6 +541,34 @@ plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
 does not list, stops every entry point before anything starts, with the
 allowed values in the message. (An effort set in an env file can be cleared
 for one run with an empty `REASONING_EFFORT=` in the shell.)
+
+### OpenRouter
+
+Any OpenAI-compatible endpoint works through `OPENAI_BASE_URL`. For
+[OpenRouter](https://openrouter.ai), use its vendor-prefixed model ids:
+
+```bash
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=sk-or-...        # used when OPENAI_API_KEY is unset and the host is openrouter.ai
+MODEL_NAME=openai/gpt-6-luna
+REASONING_EFFORT=low
+npm run eval -- --dataset core-public --budget-usd 0.5
+```
+
+The capability map and the price list strip the vendor prefix, so
+`openai/gpt-6-luna` gets the `gpt-6-luna` request options and price. On
+OpenRouter every request also carries `provider: { "require_parameters": true }`:
+OpenRouter then routes only to endpoints that support every parameter sent
+(`response_format`, `reasoning_effort`, `max_completion_tokens`, ...) instead of
+silently dropping one. How strictly a provider enforces a strict
+`json_schema` response format still varies; set
+`OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. A model
+without a price row gets the cost OpenRouter reports for each call
+(`usage.cost`), but `--budget-usd` still needs a price up front: add one with
+`MODEL_PRICING_OVERRIDES` (see [LLM Cost Tracking](#llm-cost-tracking)). The
+eval header and the web startup line name the endpoint host
+(`endpoint openrouter.ai (OpenRouter, require_parameters on)`), and reports
+record it (host only, never a key).
 
 ## LLM Cost Tracking
 

@@ -10,7 +10,7 @@ import {
   NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
-import { buildCompletionOptions } from './model-config.js';
+import { buildCompletionOptions, resolveLlmApiKey } from './model-config.js';
 import { calculateCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { normalizeHintsVersion } from './hints-version.js';
@@ -3492,16 +3492,19 @@ export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env =
 
 // `fetch` (optional) replaces the SDK's fetch: tests route an
 // https://openrouter.ai base URL to a local stand-in with it.
+// The key is OPENAI_API_KEY, else OPENROUTER_API_KEY for an openrouter.ai
+// OPENAI_BASE_URL (resolveLlmApiKey).
 export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env, fetch = undefined } = {}) {
-  if (!env.OPENAI_API_KEY) {
-    const error = new Error('OPENAI_API_KEY is required.');
+  const { apiKey } = resolveLlmApiKey(env);
+  if (!apiKey) {
+    const error = new Error('OPENAI_API_KEY is required (or OPENROUTER_API_KEY with an https://openrouter.ai OPENAI_BASE_URL).');
     error.code = 'OPENAI_NOT_CONFIGURED';
     throw error;
   }
 
   const options = resolveOpenAiClientOptions({ timeoutMs, maxRetries }, env);
   return new OpenAI({
-    apiKey: env.OPENAI_API_KEY,
+    apiKey,
     ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),
     timeout: options.timeoutMs,
     maxRetries: options.maxRetries,

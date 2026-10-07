@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import test, { after, before } from 'node:test';
 
-import { resolveCompletionSettings } from '../src/model-config.js';
+import { resolveCompletionSettings, resolveLlmApiKey } from '../src/model-config.js';
 import { createOpenAiClient, generateBasicSql, generateOptimizedResponse } from '../src/pipeline.js';
+import { loadWebConfig } from '../apps/web/src/server/config.js';
 
 // The exact HTTP request bodies each model gets, through the real OpenAI SDK
 // against a local OpenAI-compatible stand-in (no network, no key). The
@@ -236,4 +237,25 @@ test('a reasoning model\'s usage with completion_tokens_details.reasoning_tokens
   } finally {
     await new Promise((resolve) => usageServer.close(resolve));
   }
+});
+
+test('OpenRouter: with OPENAI_API_KEY unset, OPENROUTER_API_KEY is the key (only for an openrouter.ai base URL)', async () => {
+  const openRouterKey = 'fake-openrouter-key-for-a-local-stub';
+  const client = openRouterClient({ OPENAI_API_KEY: '', OPENROUTER_API_KEY: openRouterKey });
+  await lastBodyOf(() => generateOptimizedResponse({ client, model: 'openai/gpt-6-luna', prompt, modelConfig: { reasoningEffort: 'low', isOpenRouter: true } }));
+  assert.equal(received.at(-1).authorization, `Bearer ${openRouterKey}`);
+  // OPENAI_API_KEY still wins when it is set.
+  await lastBodyOf(() => generateOptimizedResponse({ client: openRouterClient({ OPENROUTER_API_KEY: openRouterKey }), model: 'openai/gpt-6-luna', prompt }));
+  assert.equal(received.at(-1).authorization, `Bearer ${FAKE_KEY}`);
+
+  assert.deepEqual(resolveLlmApiKey({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }), { apiKey: 'k', source: 'OPENROUTER_API_KEY' });
+  assert.deepEqual(resolveLlmApiKey({ OPENAI_API_KEY: 'o', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }), { apiKey: 'o', source: 'OPENAI_API_KEY' });
+  // Another endpoint never receives the OpenRouter key.
+  assert.deepEqual(resolveLlmApiKey({ OPENROUTER_API_KEY: 'k' }), { apiKey: null, source: null });
+  assert.deepEqual(resolveLlmApiKey({ OPENAI_BASE_URL: baseUrl, OPENROUTER_API_KEY: 'k' }), { apiKey: null, source: null });
+  assert.throws(() => createOpenAiClient({ env: { OPENAI_BASE_URL: baseUrl, OPENROUTER_API_KEY: 'k' } }), (error) =>
+    error.code === 'OPENAI_NOT_CONFIGURED' && /OPENROUTER_API_KEY with an https:\/\/openrouter\.ai OPENAI_BASE_URL/.test(error.message)
+  );
+  assert.equal(loadWebConfig({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }).openAi.configured, true);
+  assert.equal(loadWebConfig({ OPENROUTER_API_KEY: 'k' }).openAi.configured, false);
 });
