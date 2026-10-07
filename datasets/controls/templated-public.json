@@ -1077,6 +1077,12 @@
         "type": "shape",
         "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
         "note": "the two window columns swapped"
+      },
+      {
+        "id": "n7",
+        "type": "group_by",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2025_net_amount, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS q1_2026_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE ((d.DocumentDate >= '2025-01-01' AND d.DocumentDate < '2025-04-01') OR (d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-04-01')) GROUP BY c.CustomerId, c.CustomerName, d.IsCanceled ORDER BY c.CustomerName ASC",
+        "note": "cancel filter moved into the CASE and IsCanceled added to GROUP BY: a second 0/0 row for a customer with a canceled document"
       }
     ],
     "positive": []

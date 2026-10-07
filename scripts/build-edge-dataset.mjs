@@ -79,7 +79,7 @@ const PUBLIC_EDGE_CASES = [
       "fuzzy"
     ],
     "failure_class": "campaign_join_path",
-    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign.",
+    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign. Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -122,7 +122,7 @@ const PUBLIC_EDGE_CASES = [
       "product",
       "master_data"
     ],
-    "failure_class": "master_data_resolution",
+    "failure_class": "grain_confusion",
     "expected_sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName",
     "expected_tables": [
       "SalesDocumentLine",
@@ -363,7 +363,7 @@ const PUBLIC_EDGE_CASES = [
       "net_sales"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Two readings are accepted: the gold lists the customers with non-canceled January or February 2026 sales, and alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0/0 where it had none, the other reading of \"by customer\". A customer set that depends on other months (customers with any document, or any 2026 document) is neither reading and fails. comparison.column_order keeps the January column before the February column unless the columns are named like the gold columns, because values alone cannot tell the two months apart; comparison.null_as_zero accepts NULL for a month without sales (SUM(CASE ... END) without ELSE 0).",
+    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Two readings are accepted: the gold lists the customers with non-canceled January or February 2026 sales, and alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0/0 where it had none, the other reading of \"by customer\". Scoring relaxation (comparison.ignore_all_zero_rows): a customer set that also lists customers with 0/0 (for example every customer with any document, or with any 2026 document) is accepted, because the extra rows are all zero; before the relaxation it was neither reading and failed. comparison.column_order keeps the January column before the February column unless the columns are named like the gold columns, because values alone cannot tell the two months apart; comparison.null_as_zero accepts NULL for a month without sales (SUM(CASE ... END) without ELSE 0).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
     "alternative_expected_sql": [
       "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
@@ -392,7 +392,8 @@ const PUBLIC_EDGE_CASES = [
       "null_as_zero": [
         "jan_net_amount",
         "feb_net_amount"
-      ]
+      ],
+      "ignore_all_zero_rows": true
     },
     "signal_checks": {
       "min_row_count": 3,

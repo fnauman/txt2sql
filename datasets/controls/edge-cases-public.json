@@ -687,16 +687,16 @@
         "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE c.IsActive = 1 AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
       },
       {
-        "id": "r3",
-        "type": "scope",
-        "note": "review: customers with any 2026 document, 0/0 where none in Jan/Feb (N36)",
-        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.IsCanceled = 0 AND YEAR(d.DocumentDate) = 2026 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+        "id": "r5",
+        "type": "group_by",
+        "note": "review: also grouped by YEAR(DocumentDate) without the Jan/Feb 2026 window: a second 0/0 row for a customer next to its real one (must fail under ignore_all_zero_rows)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName, YEAR(d.DocumentDate) ORDER BY c.CustomerName"
       },
       {
-        "id": "r4",
-        "type": "scope",
-        "note": "review: customers with any non-canceled document at any date, 0/0 where none in Jan/Feb (formerly accepted as an alternative reading; the set depends on unrelated months)",
-        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
+        "id": "r6",
+        "type": "group_by",
+        "note": "review: cancel filter moved into the CASE and IsCanceled added to GROUP BY: a second 0/0 row for a customer with a canceled document (must fail under ignore_all_zero_rows)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName, d.IsCanceled ORDER BY c.CustomerName"
       }
     ],
     "positive": [
@@ -744,6 +744,16 @@
         "id": "rp6",
         "note": "review: CASE on MONTH() with WHERE range, Jan/Feb columns named jan/feb, NULL-safe (P38)",
         "sql": "SELECT c.CustomerName AS customer, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN d.NetAmount ELSE 0 END), 2) AS jan_2026, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN d.NetAmount ELSE 0 END), 2) AS feb_2026 FROM SalesDocument d JOIN Customer c ON c.CustomerId = d.CustomerId WHERE d.IsCanceled = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName"
+      },
+      {
+        "id": "rp7",
+        "note": "formerly negative control r3 (review N36): customers with any 2026 document, 0/0 where none in Jan/Feb; accepted since the ignore_all_zero_rows scoring relaxation (the extra rows are all zero)",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 1 THEN d.NetAmount ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN MONTH(d.DocumentDate) = 2 THEN d.NetAmount ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE d.IsCanceled = 0 AND YEAR(d.DocumentDate) = 2026 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName"
+      },
+      {
+        "id": "rp8",
+        "note": "formerly negative control r4: customers with any non-canceled document at any date, 0/0 where none in Jan/Feb (the error-analysis answer); accepted since the ignore_all_zero_rows scoring relaxation",
+        "sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS january_net_sales, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS february_net_sales FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
       }
     ]
   }

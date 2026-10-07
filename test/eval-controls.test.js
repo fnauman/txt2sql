@@ -191,13 +191,21 @@ test('the edge suite carries the ported mutation workstream (108 design + 28 hel
   // SUM(DISTINCT), invented IsActive filters, hedged columns, ...), added as
   // design controls once the fixtures covered them.
   const review = negatives.filter((control) => /^r\d+$/.test(control.id));
+  // 44 review negatives, less edge_public_008's r3 and r4: the
+  // ignore_all_zero_rows scoring relaxation accepts them (positives rp7, rp8);
+  // plus its r5 and r6, the pivots grouped one level too fine (a second 0/0
+  // row for a listed customer) that the relaxation must still reject.
   assert.equal(review.length, 44);
+  assert.deepEqual(
+    review.filter((control) => /ignore_all_zero_rows/.test(control.note)).map((control) => control.id),
+    ['r5', 'r6']
+  );
   assert.ok(review.every((control) => !control.heldout && control.note.startsWith('review: ')));
   assert.equal(negatives.length, audit.length + review.length);
   for (const type of ['date_filter', 'sum_distinct', 'filter', 'hedge']) {
     assert.ok(review.filter((control) => control.type === type).length >= 6, `review ${type} controls`);
   }
-  assert.equal(resolved.flatMap((entry) => entry.positive).length, 71);
+  assert.equal(resolved.flatMap((entry) => entry.positive).length, 73);
   // Model output never contains comments (the validator rejects them), so no
   // positive control may either.
   for (const control of resolved.flatMap((entry) => entry.positive)) {

@@ -1,7 +1,7 @@
 // Evaluation suite: which cases one run evaluates.
 //
-// The default suite is every dataset in datasets/ (the controls directory is
-// not a dataset), de-duplicated:
+// The default suite is every dataset in datasets/ (the controls directory and
+// the holdout manifest are not datasets), de-duplicated:
 // - by case id: the edge suite reuses the 9 core cases verbatim, so each is
 //   evaluated once (the first dataset in name order keeps it);
 // - by identical (question, normalized gold SQL), when the case is also
@@ -48,7 +48,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { DEFAULT_DATASETS_DIR, loadBenchmarkDataset } from '../benchmark.js';
+import { DEFAULT_DATASETS_DIR, isDatasetFileName, loadBenchmarkDataset } from '../benchmark.js';
 import { goldFingerprint, normalizeSqlText } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { sha256Hex, stableStringify } from './provenance.js';
@@ -183,11 +183,11 @@ function describeDifferences(differs) {
   return differs.length <= 2 ? differs.join(' and ') : `${differs.slice(0, -1).join(', ')} and ${differs[differs.length - 1]}`;
 }
 
-/** Dataset names (files *.json) in a datasets directory, sorted. */
+/** Dataset names (files *.json, not the holdout manifest) in a datasets directory, sorted. */
 export async function listDatasetNames(datasetsDir = DEFAULT_DATASETS_DIR) {
   const entries = await fs.readdir(datasetsDir, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .filter((entry) => entry.isFile() && isDatasetFileName(entry.name))
     .map((entry) => path.basename(entry.name, '.json'))
     .sort();
 }

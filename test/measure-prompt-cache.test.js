@@ -75,10 +75,22 @@ test('--schema-scope retrieved does not inherit widen-on-demand from the default
 
 test('--suite honours --split, --intent, --dataset and --dataset-file like npm run eval', async () => {
   const datasetsDir = path.join(REPO_ROOT, 'datasets');
-  const holdout = await loadCases(['--suite', '--datasets-dir', datasetsDir, '--split', 'holdout']);
-  assert.ok(holdout.cases.length > 0 && holdout.cases.length < cases.length);
-  assert.ok(holdout.cases.every((testCase) => testCase.split === 'holdout'));
-  assert.deepEqual(holdout.dataset.filters, { split: 'holdout', caseIds: [], tags: [], intents: [] });
+  // Pick a split that is a proper, non-empty part of the suite (the suite may
+  // briefly hold a single split, e.g. while a holdout is being replaced).
+  const splitOf = (testCase) => testCase.split || 'dev';
+  const partial = ['holdout', 'dev'].find((split) => {
+    const count = cases.filter((testCase) => splitOf(testCase) === split).length;
+    return count > 0 && count < cases.length;
+  });
+  if (partial) {
+    const bySplit = await loadCases(['--suite', '--datasets-dir', datasetsDir, '--split', partial]);
+    assert.ok(bySplit.cases.length > 0 && bySplit.cases.length < cases.length);
+    assert.ok(bySplit.cases.every((testCase) => splitOf(testCase) === partial));
+    assert.deepEqual(bySplit.dataset.filters, { split: partial, caseIds: [], tags: [], intents: [] });
+  } else {
+    const absent = cases.every((testCase) => splitOf(testCase) === 'dev') ? 'holdout' : 'dev';
+    await assert.rejects(loadCases(['--suite', '--datasets-dir', datasetsDir, '--split', absent]), /No cases matched/);
+  }
   await assert.rejects(loadCases(['--suite', '--datasets-dir', datasetsDir, '--split', 'test']), /--split must be one of dev, holdout, all/);
 
   const intent = cases.find((testCase) => testCase.intentId)?.intentId;

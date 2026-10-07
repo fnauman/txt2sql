@@ -22,6 +22,7 @@
 import { isLlmUnavailableCode } from '../query-service.js';
 import { OUTCOME_BUCKETS } from './attribution.js';
 import { goldFingerprint } from './controls.js';
+import { caseSplit } from './suite.js';
 import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, mcnemarExact, mean, pairedBootstrapDeltaInterval, round } from './stats.js';
 
 const LEGACY_EXCLUDED = new Set(['infra_error', 'expected_sql_error', 'evaluation_error', 'skipped_budget', 'cancelled']);
@@ -76,6 +77,7 @@ export function caseOutcomesFromReport(report) {
       intentId: result.intentId || null,
       goldFingerprint: fingerprint,
       scoringFingerprint: result.scoring_fingerprint || null,
+      split: caseSplit(result),
       ...entry,
     });
   }
@@ -101,7 +103,7 @@ function describeReport(report, label) {
  * Compares a candidate report with a baseline report. Returns
  * { baseline, candidate, baselineCases, candidateCases, paired,
  *   excluded: { goldChanged, notCounted },
- *   newCases, removedCases, flips: { regressions, improvements },
+ *   newCases, removedCases, holdoutCases, flips: { regressions, improvements },
  *   rateChanges, accuracy: { baseline, candidate, delta, deltaCi95 },
  *   majority: { baselinePasses, candidatePasses },
  *   contingency: { bothPass, regressions, improvements, bothFail },
@@ -145,6 +147,7 @@ export function compareReports(baselineReport, candidateReport, {
       id,
       question: cand.question,
       intentId: cand.intentId,
+      split: cand.split,
       baseline: { passRate: base.passRate, majorityPass: base.majorityPass, outcome: base.outcome },
       candidate: { passRate: cand.passRate, majorityPass: cand.majorityPass, outcome: cand.outcome },
     });
@@ -173,7 +176,7 @@ export function compareReports(baselineReport, candidateReport, {
     verdict = 'better';
   }
 
-  const pick = (entry) => ({ id: entry.id, question: entry.question, baseline: entry.baseline, candidate: entry.candidate });
+  const pick = (entry) => ({ id: entry.id, question: entry.question, split: entry.split, baseline: entry.baseline, candidate: entry.candidate });
   return {
     baseline: describeReport(baselineReport, baselineLabel),
     candidate: describeReport(candidateReport, candidateLabel),
@@ -187,6 +190,12 @@ export function compareReports(baselineReport, candidateReport, {
     excluded: { goldChanged, notCounted },
     newCases: [...candidate.keys()].filter((id) => !baseline.has(id)).sort(),
     removedCases: [...baseline.keys()].filter((id) => !candidate.has(id)).sort(),
+    // Holdout cases (today's split; the baseline's for a case only it has):
+    // report.md and the console list them only with --reveal-holdout.
+    holdoutCases: [
+      ...[...candidate.values()].filter((entry) => entry.split === 'holdout').map((entry) => entry.id),
+      ...[...baseline.values()].filter((entry) => !candidate.has(entry.id) && entry.split === 'holdout').map((entry) => entry.id),
+    ].sort(),
     flips: { regressions: regressions.map(pick), improvements: improvements.map(pick) },
     rateChanges: rateChanges.map(pick),
     majority: {

@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { isDatasetFileName } from '../src/benchmark.js';
 import { FEW_SHOT_EXAMPLES } from '../src/constants.js';
 import { validateReadOnlySql } from '../src/pipeline.js';
 import { tokenizeSql } from '../src/sql-tokenizer.js';
@@ -20,7 +21,7 @@ const JACCARD_LIMIT = 0.8;
 function loadDatasetCases() {
   return fs
     .readdirSync(DATASETS_DIR)
-    .filter((name) => name.endsWith('.json'))
+    .filter(isDatasetFileName)
     .sort()
     .flatMap((name) => {
       const raw = JSON.parse(fs.readFileSync(path.join(DATASETS_DIR, name), 'utf8'));

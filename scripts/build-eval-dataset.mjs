@@ -28,16 +28,15 @@
 // validator accepts its gold). Retrieval misses are no such gap any more: the
 // default schema scope (SCHEMA_SCOPE=auto, full at this schema size) allows
 // every in-scope table, and under SCHEMA_SCOPE=retrieved verify-dataset notes
-// them instead. A holdout intent's
-// phrasings must not contain any multi-word synonym of the semantic layer
-// (metadata/semantic-layer.json): the layer and the prompt rules were tuned on
-// the dev wording, so the holdout measures unseen vocabulary as well as unseen
-// intents. The build fails when a holdout phrasing breaks that rule (the
-// output itself never depends on the layer).
+// them instead.
 //
-// Splits: an intent is holdout when the first 32 bits of sha256(intentId),
-// mod 100, are below HOLDOUT_PERCENT; all phrasings of an intent share its
-// split. The same rule (splitForIntent) assigns the hand-written hard cases.
+// Splits: every templated case is dev. Until the measurement-hygiene change a
+// hash rule (wasHoldoutIntent: the first 32 bits of sha256(intentId), mod 100,
+// below FORMER_HOLDOUT_PERCENT) put about 42% of the intents in the holdout.
+// Those intents were inspected during the Experiment 1 error analysis, so they
+// are dev now and tagged `formerly_holdout`; the holdout is authored blind,
+// outside this generator, and frozen by datasets/holdout-manifest.json (see
+// docs/evaluation-dataset.md).
 //
 // Case ids are `tpl_<intentId>_<first 6 hex of sha256(question)>`, so editing
 // a question yields a new id: an id is never reused for a different question
@@ -74,19 +73,27 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATASET_NAME = 'templated-public';
 export const DATASET_PATH = path.join(ROOT, 'datasets', `${DATASET_NAME}.json`);
 export const CONTROLS_PATH = path.join(ROOT, 'datasets', 'controls', `${DATASET_NAME}.json`);
-export const SEMANTIC_LAYER_PATH = path.join(ROOT, 'metadata', 'semantic-layer.json');
 
 // --- splits -------------------------------------------------------------------
 
-export const HOLDOUT_PERCENT = 42;
+// The split of every templated case (see the file comment).
+export const TEMPLATED_SPLIT = 'dev';
+
+// The retired holdout rule, kept to tag the intents it used to hold out.
+export const FORMER_HOLDOUT_PERCENT = 42;
+export const FORMERLY_HOLDOUT_TAG = 'formerly_holdout';
 
 function sha256Hex(text) {
   return crypto.createHash('sha256').update(String(text)).digest('hex');
 }
 
-/** 'holdout' for about HOLDOUT_PERCENT% of intent ids (stable hash), else 'dev'. */
-export function splitForIntent(intentId) {
-  return Number.parseInt(sha256Hex(intentId).slice(0, 8), 16) % 100 < HOLDOUT_PERCENT ? 'holdout' : 'dev';
+/**
+ * True for the intents the retired hash rule put in the holdout (about
+ * FORMER_HOLDOUT_PERCENT% of intent ids). The hand-written hard cases used the
+ * same rule, unless they rephrase an existing intent.
+ */
+export function wasHoldoutIntent(intentId) {
+  return Number.parseInt(sha256Hex(intentId).slice(0, 8), 16) % 100 < FORMER_HOLDOUT_PERCENT;
 }
 
 export function caseIdFor(intentId, question) {
@@ -96,60 +103,6 @@ export function caseIdFor(intentId, question) {
 /** Same rule as controls.goldFingerprint (whitespace-normalized sha256, 16 hex). */
 function goldFingerprint(sql) {
   return sha256Hex(String(sql || '').replace(/\s+/g, ' ').trim()).slice(0, 16);
-}
-
-/**
- * Every multi-word synonym of the semantic layer (entities, metrics, filter
- * hints, value aliases and their canonical values, clarification triggers),
- * lower-cased. Holdout questions must contain none of them.
- */
-export function semanticLayerPhrases(layer) {
-  const phrases = new Set();
-  const add = (value) => {
-    const text = String(value || '').toLowerCase().trim();
-    if (text.split(/\s+/).length > 1) {
-      phrases.add(text);
-    }
-  };
-  for (const entity of layer.entities || []) {
-    (entity.synonyms || []).forEach(add);
-  }
-  for (const metric of layer.metrics || []) {
-    (metric.synonyms || []).forEach(add);
-    (metric.advisory_synonyms || []).forEach(add);
-    (metric.count_advisory_synonyms || []).forEach(add);
-  }
-  for (const hint of layer.filter_hints || []) {
-    (hint.synonyms || []).forEach(add);
-  }
-  for (const alias of layer.value_aliases || []) {
-    add(alias.canonical_value);
-    (alias.aliases || []).forEach(add);
-  }
-  for (const rule of layer.clarification_rules || []) {
-    add(rule.trigger);
-  }
-  return [...phrases].sort();
-}
-
-/** Lower-case words joined by single spaces, punctuation dropped (Unicode letters kept). */
-export function normalizeWords(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-/**
- * The semantic-layer phrases that occur in `question` as whole words, a plural
- * ending included ("credit memos" contains "credit memo").
- */
-export function semanticLayerPhrasesIn(question, phrases) {
-  const words = ` ${normalizeWords(question)} `;
-  return phrases.filter((phrase) => {
-    const needle = normalizeWords(phrase);
-    return [' ', 's ', 'es '].some((ending) => words.includes(` ${needle}${ending}`));
-  });
 }
 
 // --- time windows ---------------------------------------------------------------
@@ -454,8 +407,13 @@ function pivotQuery(spec, m = {}) {
   const dateColumn = `d.${m.dateColumn || 'DocumentDate'}`;
   const inWindow = (window) => windowPredicates(window, dateColumn, { boundary: m.boundary }).join(' AND ');
   const column = m.metricColumn || metric.column;
+  // groupByCancel (mutant): the cancel filter moved into each CASE and
+  // IsCanceled added to GROUP BY, so a customer with a canceled document gets
+  // a second, all-zero row next to its real one.
+  const caseCancel = m.groupByCancel ? `${CANCEL} AND ` : '';
   const pieces = (m.swapColumns ? [second, first] : [first, second]).map(
-    (window, index) => `ROUND(SUM(CASE WHEN ${inWindow(window)} THEN COALESCE(${column}, 0) ELSE 0 END), 2) AS ${spec.columns[index]}`
+    (window, index) =>
+      `ROUND(SUM(CASE WHEN ${caseCancel}${inWindow(window)} THEN COALESCE(${column}, 0) ELSE 0 END), 2) AS ${spec.columns[index]}`
   );
   const contiguous = first.end === second.start;
   const range = contiguous
@@ -476,8 +434,8 @@ function pivotQuery(spec, m = {}) {
     select: [...(dim ? [dim.name] : []), ...pieces],
     from: 'SalesDocument d',
     joins: dim ? dim.joins : [],
-    where: [...(m.dropCancel ? [] : [CANCEL]), ...range],
-    groupBy: dim ? [dim.key, dim.name] : [],
+    where: [...(m.dropCancel || m.groupByCancel ? [] : [CANCEL]), ...range],
+    groupBy: dim ? [dim.key, dim.name, ...(m.groupByCancel ? ['d.IsCanceled'] : [])] : [],
     orderBy: dim ? [`${dim.name} ASC`] : [],
     limit: null,
   });
@@ -1256,7 +1214,9 @@ const INTENTS = [
   },
   {
     intentId: 'outstanding_balance_due_apr_2026', template: 'fact', metric: 'balance', window: '2026-04', shape: 'scalar', dateColumn: 'DueDate',
-    failure_class: 'wrong_date_column',
+    // The error analysis (Experiment 1) found the trap is the amount ("open
+    // amount", "unpaid balance": BalanceAmount), not the due date.
+    failure_class: 'metric_column_confusion',
     phrasings: [
       'How much unpaid balance falls due in April 2026?',
       'Total open amount on documents with a due date in April 2026.',
@@ -1293,6 +1253,9 @@ const INTENTS = [
   },
   {
     intentId: 'account_debit_credit_posted_apr_2026', template: 'ledger', measures: ['debit', 'credit'], window: '2026-04', dateMode: 'posting',
+    // The trap the error analysis found: an inner join to SalesDocument drops
+    // the April manual journals (the posting date itself is not ambiguous).
+    failure_class: 'wrong_join_path',
     phrasings: [
       'List each account by name with its debits and credits for postings dated April 2026.',
       'Using the posting date, what were the total debits and credits on each account in April 2026? Show the account names.',
@@ -1336,6 +1299,8 @@ const INTENTS = [
   // ---- other shapes ----
   {
     intentId: 'active_customers_without_sales_q1_2026', template: 'active_customers_without_sales', window: 'q1-2026', shape: 'breakdown', boundary: 'end',
+    // The cancel filter inside the anti-join (a canceled Q1 sale is no sale).
+    failure_class: 'default_filter',
     comparison: { mode: 'rowset', compare_columns: ['CustomerName'] },
     mutants: ['cancel', 'date_col', 'date_boundary', 'date_boundary_other', 'active'],
     difficulty: 'hard', tags: ['anti_join'],
@@ -1346,6 +1311,8 @@ const INTENTS = [
   },
   {
     intentId: 'customers_bought_feb_not_mar_2026', template: 'customers_lost_between', windows: ['2026-02', '2026-03'], shape: 'scalar',
+    // "How many": one count, not the list of customers.
+    failure_class: 'aggregation_shape',
     comparison: { mode: 'scalar' },
     mutants: ['cancel', 'cancel_first', 'cancel_second', 'count_docs', 'date_col', 'date_boundary', 'date_boundary_other'],
     notEmitted: {
@@ -1504,7 +1471,7 @@ function notesFor(intent) {
   }
   if (intent.template === 'pivot' && intent.dim === 'customer') {
     notes.push(
-      'Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales.'
+      'Two readings are accepted: the gold lists the customers with a non-canceled document in either window; alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0 where it had none. column_order keeps the earlier window first unless the columns are named like the gold columns; null_as_zero accepts NULL for a window without sales. Scoring relaxation ignore_all_zero_rows: any other listing that adds customers with 0 (or NULL) in both windows, such as every customer that bought at any time, is the same answer.'
     );
   } else if (intent.template === 'pivot') {
     notes.push('column_order keeps the earlier window first unless the columns are named like the gold columns.');
@@ -1534,6 +1501,23 @@ function notesFor(intent) {
       'Two readings are accepted: the customers with at least one non-canceled document (the gold) and every customer, with no date for one that never bought (alternative_expected_sql, LEFT JOIN from Customer). Every document type counts as a purchase, Credit Memos included (the suite-wide convention).'
     );
   }
+  const campaignScoped = [...(intent.dims || []), ...(intent.filters || []).map((filter) => filter.dim)].includes('campaign');
+  if (campaignScoped) {
+    notes.push(
+      'Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId, on line amounts), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.'
+    );
+  }
+  if (intent.metric === 'aov') {
+    notes.push(
+      'Average order value (gold convention): the average header NetAmount per non-canceled document, net of tax like every sales amount in the suite; the billed total (BillTotalAmount) is not accepted.'
+    );
+  }
+  if (intent.shape === 'rank') {
+    notes.push('A ranking without a number lists every member (no LIMIT); only "top N" keeps N (gold convention).');
+  }
+  if (comparisonFor(intent).empty_as_zero) {
+    notes.push('Scoring relaxation empty_as_zero: where the window has no rows, an empty result (for example a total grouped by the filtered member) equals the NULL / 0 total.');
+  }
   return notes.join(' ');
 }
 
@@ -1556,6 +1540,10 @@ function comparisonFor(intent) {
       decimals: 2,
       column_order: [...intent.columns],
       null_as_zero: [...intent.columns],
+      // Scoring relaxation: a customer listed with 0 in both windows is the
+      // same answer (the error analysis found models listing every customer
+      // with activity at any time).
+      ...(intent.dim === 'customer' ? { ignore_all_zero_rows: true } : {}),
     };
   }
   if (intent.template === 'ledger') {
@@ -1564,7 +1552,8 @@ function comparisonFor(intent) {
       return { mode: 'rowset', decimals: 2 };
     }
     if (intent.accountCode || intent.manualOnly) {
-      return { mode: 'scalar', decimals: 2, null_as_zero: aliases };
+      // Scoring relaxation: no rows is the same answer as a NULL / 0 total.
+      return { mode: 'scalar', decimals: 2, null_as_zero: aliases, empty_as_zero: true };
     }
     return { mode: 'rowset', compare_columns: ['AccountName', ...aliases], decimals: 2 };
   }
@@ -1578,8 +1567,9 @@ function comparisonFor(intent) {
     case 'breakdown':
       return base('rowset');
     case 'scalar':
-      // SUM over an empty window is NULL; 0 is the same answer.
-      return { ...base('scalar'), ...(metric.agg === 'sum' ? { null_as_zero: [metric.alias] } : {}) };
+      // SUM over an empty window is NULL; 0, and (a scoring relaxation) no
+      // rows at all, are the same answer.
+      return { ...base('scalar'), ...(metric.agg === 'sum' ? { null_as_zero: [metric.alias], empty_as_zero: true } : {}) };
     default:
       throw new Error(`${intent.intentId}: unknown shape ${intent.shape}`);
   }
@@ -1611,7 +1601,13 @@ function failureClassFor(intent) {
     return 'aggregation_shape';
   }
   if (intent.template === 'ledger') {
-    return intent.dateMode === 'posting' ? 'wrong_date_column' : null;
+    // By the sales document's date: the postings of non-canceled documents
+    // only (the cancel filter through the SalesDocument join).
+    return intent.dateMode === 'posting' ? 'wrong_date_column' : 'default_filter';
+  }
+  // Units are product units: the delivery-fee lines must be left out.
+  if (unitsNeedProductJoinOnly(intent)) {
+    return 'default_filter';
   }
   const dims = intent.dims || [];
   if (['gross', 'balance', 'paid'].includes(intent.metric)) {
@@ -1697,6 +1693,9 @@ function tagsFor(intent) {
     tags.push('posting_date');
   }
   tags.push(...(intent.tags || []));
+  if (wasHoldoutIntent(intent.intentId)) {
+    tags.push(FORMERLY_HOLDOUT_TAG);
+  }
   return [...new Set(tags)];
 }
 
@@ -1846,6 +1845,11 @@ function mutationsFor(intent) {
     add('date_boundary', 'the day after each window included', { boundary: 'end' });
     add('metric', 'gross instead of net', { metricColumn: 'd.GrossAmount' });
     add('shape', 'the two window columns swapped', { swapColumns: true });
+    if (intent.dim === 'customer') {
+      // ignore_all_zero_rows is set on these pivots: a second, all-zero row for
+      // a customer the answer already lists must still fail.
+      add('group_by', 'cancel filter moved into the CASE and IsCanceled added to GROUP BY: a second 0/0 row for a customer with a canceled document', { groupByCancel: true });
+    }
   } else if (intent.template === 'ledger') {
     const documentMode = intent.dateMode === 'document';
     if (intent.manualOnly) {
@@ -2013,12 +2017,10 @@ async function readJsonIfExists(file) {
 /**
  * Builds the dataset and its controls in memory. `previousCases` (the
  * committed dataset) supplies the expected_row_counts of cases whose id and
- * gold SQL are unchanged. `layer` is the parsed semantic layer, used only to
- * reject holdout phrasings that contain its vocabulary.
+ * gold SQL are unchanged.
  */
-export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
+export function buildEvalDataset({ previousCases = [] } = {}) {
   const previous = new Map((previousCases || []).map((testCase) => [testCase.id, testCase]));
-  const phrases = layer ? semanticLayerPhrases(layer) : null;
   const cases = [];
   const controls = {};
   const problems = [];
@@ -2030,7 +2032,7 @@ export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
       problems.push(`duplicate intent ${intent.intentId}`);
     }
     seenIntents.add(intent.intentId);
-    const split = splitForIntent(intent.intentId);
+    const split = TEMPLATED_SPLIT;
     const expectedSql = buildQuery(intent);
     const alternatives = alternativesFor(intent);
     const comparison = comparisonFor(intent);
@@ -2046,12 +2048,6 @@ export function buildEvalDataset({ previousCases = [], layer = null } = {}) {
     for (const phrasing of intent.phrasings) {
       const question = typeof phrasing === 'string' ? phrasing : phrasing.q;
       const knownRejection = typeof phrasing === 'string' ? null : phrasing.knownRejection || null;
-      if (split === 'holdout' && phrases) {
-        const found = semanticLayerPhrasesIn(question, phrases);
-        if (found.length > 0) {
-          problems.push(`${intent.intentId} is holdout but "${question}" contains semantic-layer vocabulary: ${found.join(', ')}`);
-        }
-      }
       const id = caseIdFor(intent.intentId, question);
       if (seenIds.has(id)) {
         problems.push(`duplicate case id ${id}`);
@@ -2112,9 +2108,8 @@ export function serialize(value) {
 
 async function main(argv = process.argv.slice(2)) {
   const check = argv.includes('--check');
-  const layer = JSON.parse(await fs.readFile(SEMANTIC_LAYER_PATH, 'utf8'));
   const previousCases = (await readJsonIfExists(DATASET_PATH)) || [];
-  const { cases, controls, problems } = buildEvalDataset({ previousCases, layer });
+  const { cases, controls, problems } = buildEvalDataset({ previousCases });
   if (problems.length > 0) {
     console.error(`build-eval-dataset: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
     return 1;
@@ -2122,10 +2117,10 @@ async function main(argv = process.argv.slice(2)) {
   const datasetText = serialize(cases);
   const controlsText = serialize(controls);
   const intents = new Set(cases.map((testCase) => testCase.intentId));
-  const holdout = new Set(cases.filter((testCase) => testCase.split === 'holdout').map((testCase) => testCase.intentId));
+  const formerlyHoldout = new Set(cases.filter((testCase) => testCase.tags.includes(FORMERLY_HOLDOUT_TAG)).map((testCase) => testCase.intentId));
   const negatives = Object.values(controls).reduce((sum, entry) => sum + entry.negative.length, 0);
   const positives = Object.values(controls).reduce((sum, entry) => sum + entry.positive.length, 0);
-  const summary = `${cases.length} cases, ${intents.size} intents (${holdout.size} holdout), ${negatives} negative and ${positives} positive controls`;
+  const summary = `${cases.length} cases, ${intents.size} intents (${formerlyHoldout.size} formerly holdout, all dev), ${negatives} negative and ${positives} positive controls`;
   if (check) {
     const [currentDataset, currentControls] = await Promise.all([
       fs.readFile(DATASET_PATH, 'utf8').catch(() => ''),

@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ENV_USAGE, getOptionValue, hasOptionFlag, loadEnvironment } from '../src/env.js';
-import { CASE_SPLITS, DEFAULT_DATASETS_DIR, findInvalidSplits, loadBenchmarkDataset } from '../src/benchmark.js';
+import { CASE_SPLITS, DEFAULT_DATASETS_DIR, findInvalidSplits, isDatasetFileName, loadBenchmarkDataset } from '../src/benchmark.js';
 import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js';
 import { checkFixtureContent } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
@@ -75,7 +75,7 @@ async function resolveDatasetTargets(argv) {
   }
   const entries = await fs.readdir(datasetsDir);
   return entries
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => isDatasetFileName(name))
     .sort()
     .map((name) => ({ datasetName: path.basename(name, '.json'), datasetsDir }));
 }

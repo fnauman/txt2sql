@@ -13,7 +13,7 @@ import { loadControlsIndex } from '../src/eval/controls.js';
 import { FACT_TABLES, MASTER_TABLES } from '../src/eval/fixture-data.js';
 import { checkFixtureContent, checkFixtureMeta, hashFixtureDatabase, readFixtureTables, seedFixture } from '../src/eval/fixture-seeder.js';
 import { FIXTURES, describeFixtureContent } from '../src/eval/fixtures.js';
-import { closeFixtureConnections, createGoldCache, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
+import { closeFixtureConnections, createGoldCache, executeGoldSql, openFixtureConnections, scoreAgainstGold } from '../src/eval/oracle.js';
 import { createValidatorProbe, summarizeControls, verifyCase } from '../src/eval/verify.js';
 import { createMariaDbConnection } from '../src/pipeline.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -203,13 +203,26 @@ test('verify logic: every gold is healthy on every fixture and the controls hold
   const goldCache = createGoldCache();
   const validate = createValidatorProbe({ schema, connection: connections[0].connection });
   try {
-    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public']) {
+    for (const datasetName of ['core-public', 'paraphrase-public', 'edge-cases-public', 'templated-public', 'hard-cases-public', 'holdout-public']) {
       const { cases } = await loadBenchmarkDataset({ datasetName });
       const results = [];
       for (const testCase of cases) {
         const result = await verifyCase(testCase, { connections, goldCache, validate, controlsIndex });
         assert.deepEqual(result.problems, [], `${datasetName}/${testCase.id}`);
         results.push(result);
+      }
+      if (datasetName === 'holdout-public') {
+        // No fresh-holdout gold is degenerate: on some fixture it returns a
+        // row with a value that is neither NULL nor 0 (an empty or all-zero
+        // gold everywhere cannot tell wrong SQL apart).
+        for (const testCase of cases.filter((entry) => entry.expected_behavior === 'answer')) {
+          let informative = false;
+          for (const fixtureConnection of connections) {
+            const rows = await executeGoldSql(fixtureConnection, testCase.expected_sql, { goldCache, label: 'expected_sql' });
+            informative ||= rows.some((row) => Object.values(row).some((value) => value !== null && !(Number.isFinite(Number(value)) && Number(value) === 0)));
+          }
+          assert.ok(informative, `${testCase.id}: empty or all NULL / 0 on every fixture`);
+        }
       }
       const summary = summarizeControls(results, { fixtureNames: FIXTURES.map((fixture) => fixture.name) });
       assert.ok(summary.design.rate >= 0.95, `${datasetName} design kill rate ${summary.design.rate}`);
@@ -296,6 +309,39 @@ test('ties at the cut-off: a gold cut by its LIMIT without a tie still checks th
       assert.equal(score.match, false, caseId);
       assert.equal(score.reason, 'values', caseId);
       assert.deepEqual(score.killedOn, killedOn, caseId);
+    }
+  } finally {
+    await closeFixtureConnections(connections);
+  }
+});
+
+test('ignore_all_zero_rows: a second 0/0 row for a listed customer fails; extra customers with 0/0 still pass', { skip }, async () => {
+  // The relaxed customer pivots ignore surplus all-zero rows only for
+  // customers absent from the gold. A pivot grouped one level too fine (by
+  // YEAR without the window, or by IsCanceled) lists a customer's real row and
+  // a 0/0 row next to it: a wrong answer. The negative controls below pin it
+  // (the kill-rate gate's 95% floor would let one survive unnoticed); the
+  // positive controls rp7 / rp8 (extra customers with 0/0) must still pass.
+  const readControls = async (name) => JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'datasets', 'controls', `${name}.json`), 'utf8'));
+  const edge = await readControls('edge-cases-public');
+  const templated = await readControls('templated-public');
+  const control = (controls, caseId, kind, id) => controls[caseId][kind].find((entry) => entry.id === id).sql;
+  const edgeCase = 'edge_public_008_customer_month_columns_jan_feb_2026';
+  const tplCase = 'tpl_customer_net_sales_q1_2025_vs_q1_2026_1479d7';
+  const checks = [
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'negative', 'r5'), match: false },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'negative', 'r6'), match: false },
+    { datasetName: 'templated-public', caseId: tplCase, sql: control(templated, tplCase, 'negative', 'n7'), match: false },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'positive', 'rp7'), match: true },
+    { datasetName: 'edge-cases-public', caseId: edgeCase, sql: control(edge, edgeCase, 'positive', 'rp8'), match: true },
+  ];
+  const connections = await openFixtureConnections({ env });
+  try {
+    for (const { datasetName, caseId, sql, match } of checks) {
+      const [testCase] = (await loadBenchmarkDataset({ datasetName, caseId })).cases;
+      assert.equal(testCase.comparison.ignore_all_zero_rows, true, caseId);
+      const score = await scoreAgainstGold({ testCase, predictedSql: sql, connections });
+      assert.equal(score.match, match, `${caseId}: ${sql}`);
     }
   } finally {
     await closeFixtureConnections(connections);

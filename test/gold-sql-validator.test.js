@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { isDatasetFileName } from '../src/benchmark.js';
 import { buildOptimizedPrompt, buildSemanticPlan, validateReadOnlySql } from '../src/pipeline.js';
 import { DEFAULT_INCLUDED_TABLES } from '../src/constants.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
@@ -37,7 +38,7 @@ const ALL_TABLES = schema.tables.map((table) => table.tableName);
 
 function loadGoldPairs() {
   const pairs = new Map();
-  for (const fileName of fs.readdirSync(DATASETS_DIR).filter((name) => name.endsWith('.json')).sort()) {
+  for (const fileName of fs.readdirSync(DATASETS_DIR).filter(isDatasetFileName).sort()) {
     const raw = JSON.parse(fs.readFileSync(path.join(DATASETS_DIR, fileName), 'utf8'));
     const cases = Array.isArray(raw) ? raw : raw.cases || [];
     for (const testCase of cases) {
@@ -54,10 +55,19 @@ function loadGoldPairs() {
 }
 
 const GOLD = loadGoldPairs();
+// The fresh holdout (datasets/holdout-public.json) is counted on its own, so
+// the numbers pinned for the hash-split suite (and the schema-scope experiment
+// below) stay what they were measured on.
+const FRESH_HOLDOUT_FILE = 'holdout-public.json';
+const isFreshHoldout = (testCase) => testCase.dataset === FRESH_HOLDOUT_FILE;
 
-test('the gold corpus has the expected size (245 unique question/SQL pairs, 1 known validator rejection)', () => {
-  assert.equal(GOLD.length, 245);
-  assert.equal(GOLD.filter((testCase) => testCase.known_validator_rejection).length, 1);
+test('the gold corpus has the expected size (245 + 147 unique question/SQL pairs, 1 + 4 known validator rejections)', () => {
+  const suite = GOLD.filter((testCase) => !isFreshHoldout(testCase));
+  const fresh = GOLD.filter(isFreshHoldout);
+  assert.equal(suite.length, 245);
+  assert.equal(suite.filter((testCase) => testCase.known_validator_rejection).length, 1);
+  assert.equal(fresh.length, 147);
+  assert.equal(fresh.filter((testCase) => testCase.known_validator_rejection).length, 4);
 });
 
 for (const testCase of GOLD.filter((entry) => entry.known_validator_rejection)) {
@@ -120,7 +130,9 @@ for (const testCase of GOLD.filter((entry) => Array.isArray(entry.alternative_ex
 // The schema-scope experiment's premise, pinned: under the retrieved scope 33
 // golds (every one the dataset used to flag TABLE_SCOPE) are rejected only
 // because retrieval did not pick an in-scope table they need; nothing else
-// changes. The default scope admits them (the tests above).
+// changes. The default scope admits them (the tests above). The fresh holdout
+// is held to the same rule (only TABLE_SCOPE for an in-scope table) without a
+// pinned count: nothing may be tuned on how retrieval does on it.
 test('under the retrieved schema scope exactly 33 golds are rejected, each with TABLE_SCOPE for an in-scope table', () => {
   const rejected = new Set();
   for (const testCase of GOLD) {
@@ -137,7 +149,9 @@ test('under the retrieved schema scope exactly 33 golds are rejected, each with 
         assert.equal(error.code, 'TABLE_SCOPE', `${testCase.id}: ${error.code} ${error.message}`);
         assert.ok(ALL_TABLES.includes(error.details.table), `${testCase.id}: ${error.details.table} is in scope`);
         assert.ok(!allowedTables.includes(error.details.table));
-        rejected.add(testCase.id);
+        if (!isFreshHoldout(testCase)) {
+          rejected.add(testCase.id);
+        }
       }
     }
   }

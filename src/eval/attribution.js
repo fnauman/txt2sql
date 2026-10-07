@@ -22,6 +22,18 @@
 //   ... + tag retrieval_miss    system  (a model-bucket failure where an
 //                                        expected table was not retrieved:
 //                                        the retrieved set is the allow-list)
+//   ... + tag known_validator_rejection
+//                               system  (a guardrail or safety rejection of a
+//                                        case flagged known_validator_rejection
+//                                        whose final attempt was rejected with
+//                                        the flagged code: the production
+//                                        validator rejects every correct answer
+//                                        to it today, so that rejection is the
+//                                        gap the flag documents. Any other
+//                                        failure of a flagged case (a wrong
+//                                        result, an execution error, a
+//                                        rejection with a different code) is
+//                                        judged like any other case's)
 //   timeout / aborted           infra   (case deadline; counted as a failure)
 //   infra_error                 infra   (excluded from accuracy; also a gold
 //                                        query that failed because the
@@ -184,6 +196,28 @@ export function classifyBehaviorRepetition(repetition, testCase) {
   return { outcome, bucket: OUTCOME_BUCKETS[outcome], counted: false, behavior_counted: true, outcome_tags: tags };
 }
 
+// Validator rejections (guardrail or safety layer) a known_validator_rejection
+// flag can explain.
+const VALIDATOR_REJECTIONS = new Set(['guardrail_true_rejection', 'safety_rejection']);
+
+/**
+ * True when a model-bucket failure of a case flagged known_validator_rejection
+ * IS the flagged rejection: the repetition ended with its final attempt
+ * rejected by the validator with the flagged code. A flag describes the
+ * validator rejecting the case's correct gold, so any other failure (a wrong
+ * result, an execution error, an LLM error, a rejection with another code)
+ * stays the model's.
+ */
+export function isKnownValidatorRejection(repetition, outcome, testCase) {
+  const flag = testCase?.known_validator_rejection ? String(testCase.known_validator_rejection).trim() : '';
+  if (!flag || !VALIDATOR_REJECTIONS.has(outcome)) {
+    return false;
+  }
+  const final = finalAttempt(repetition);
+  const code = final ? final.validation?.code : repetition?.error_code;
+  return code === flag;
+}
+
 /**
  * Attribution of one repetition (an evaluateQuestion result, possibly with
  * attempts annotated by checkGuardrailRejections). Returns
@@ -283,6 +317,15 @@ export function classifyRepetition(repetition, testCase = {}) {
       bucket = 'system';
     }
   }
+  if (isKnownValidatorRejection(repetition, outcome, testCase)) {
+    // The dataset documents that the validator rejects every correct answer
+    // to this question with this code (verify-dataset keeps the flag
+    // current): the rejection is the product gap the flag measures, not the
+    // model's error. Only that rejection: the flag says nothing about a
+    // wrong result or a rejection for another reason.
+    tags.push('known_validator_rejection');
+    bucket = 'system';
+  }
   if (repetition.rescore?.replayTruncated) {
     tags.push('replay_truncated');
   }
@@ -310,6 +353,25 @@ function pickMajority(outcomes) {
   return best;
 }
 
+// Ties between buckets go to the system: a case whose repetitions split
+// evenly between a model error and a system error is not charged to the model.
+const CASE_BUCKET_TIE_ORDER = Object.freeze(['system', ...BUCKET_ORDER.filter((bucket) => bucket !== 'system')]);
+
+function pickMajorityBucket(buckets) {
+  const counts = new Map();
+  for (const bucket of buckets) {
+    counts.set(bucket, (counts.get(bucket) || 0) + 1);
+  }
+  let best = null;
+  for (const bucket of CASE_BUCKET_TIE_ORDER) {
+    const count = counts.get(bucket) || 0;
+    if (count > 0 && (best === null || count > counts.get(best))) {
+      best = bucket;
+    }
+  }
+  return best;
+}
+
 /**
  * Per-case summary over attributed repetitions: pass rate over the counted
  * repetitions, majority pass (more than half passed), and the case's
@@ -323,6 +385,8 @@ function pickMajority(outcomes) {
  *   repetitions, 'declined' when most of them declined, else their most
  *   frequent other outcome (so it agrees with behavior.majorityHandled);
  *   otherwise the most frequent outcome of all repetitions (same ties).
+ * The case's bucket is the most frequent bucket among the repetitions with
+ * that outcome (ties: system first), and its tags are theirs.
  */
 export function summarizeCaseRepetitions(repetitions) {
   const list = repetitions || [];
@@ -343,8 +407,15 @@ export function summarizeCaseRepetitions(repetitions) {
     pool = list;
   }
   const outcome = pickMajority(pool.map((repetition) => repetition.outcome));
-  const representative = pool.find((repetition) => repetition.outcome === outcome) || null;
-  const tags = [...new Set(pool.filter((repetition) => repetition.outcome === outcome).flatMap((repetition) => repetition.outcome_tags || []))].sort();
+  // Repetitions with the same outcome can sit in different buckets (a
+  // retrieval miss or a known validator rejection moves one to the system):
+  // the case takes the most frequent bucket among them, never the first
+  // one's, so it does not depend on repetition order, and its tags come only
+  // from the repetitions in that bucket, so they never contradict it.
+  const sameOutcome = pool.filter((repetition) => repetition.outcome === outcome);
+  const bucket = pickMajorityBucket(sameOutcome.map((repetition) => repetition.bucket)) || (outcome ? OUTCOME_BUCKETS[outcome] : null);
+  const inBucket = sameOutcome.filter((repetition) => repetition.bucket === bucket);
+  const tags = [...new Set(inBucket.flatMap((repetition) => repetition.outcome_tags || []))].sort();
   return {
     repetitions: list.length,
     counted: counted.length,
@@ -352,7 +423,7 @@ export function summarizeCaseRepetitions(repetitions) {
     passRate: counted.length ? Number((passes / counted.length).toFixed(4)) : null,
     majorityPass,
     outcome,
-    bucket: representative?.bucket || (outcome ? OUTCOME_BUCKETS[outcome] : null),
+    bucket,
     tags,
     outcomes: Object.fromEntries(OUTCOME_ORDER.filter((name) => list.some((repetition) => repetition.outcome === name)).map((name) => [name, list.filter((repetition) => repetition.outcome === name).length])),
     ...(behavior ? { behavior } : {}),
@@ -609,6 +680,9 @@ export function summarizeAttribution(caseRecords) {
     system: {
       guardrailFalseRejections: failed.filter((repetition) => repetition.outcome === 'guardrail_false_rejection').length,
       retrievalMisses: failed.filter((repetition) => (repetition.outcome_tags || []).includes('retrieval_miss')).length,
+      // Rejections of cases flagged known_validator_rejection with the
+      // flagged code (a repetition can also be a retrieval miss).
+      knownValidatorRejections: failed.filter((repetition) => (repetition.outcome_tags || []).includes('known_validator_rejection')).length,
       // False rejections in repetitions that ended in another non-pass outcome
       // (an outage or timeout on the retry): reported, not in the counts above.
       guardrailFalseRejectionsElsewhere: repetitions.filter((repetition) => (repetition.outcome_tags || []).includes('guardrail_false_rejection')).length,

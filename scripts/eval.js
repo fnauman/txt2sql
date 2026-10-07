@@ -44,6 +44,7 @@ import { DEFAULT_CONTROLS_DIR, loadControlsIndex } from '../src/eval/controls.js
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { compareReports } from '../src/eval/compare.js';
 import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures.js';
+import { isHoldoutCase } from '../src/eval/holdout.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
 import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
@@ -115,6 +116,8 @@ No LLM calls:
   --rescore <report.json>     re-validate, re-execute and re-score a recorded report
   --offline                   preflight + fixtures + verify, then rescore the default baseline if present
 Output:
+  --reveal-holdout            list holdout cases one by one in report.md and the console (by default
+                              holdout results are shown in aggregate only: accuracy by split)
   --output-dir <dir>          default generated/runs
   --results-file <path>       report.json path (report.md is written next to it)
   --trace-file <path>  --trace-dir <dir>  --trace (JSONL trace on stdout)
@@ -179,6 +182,7 @@ const BOOLEAN_FLAGS = new Set([
   '--write-baseline',
   '--offline',
   '--use-home-env',
+  '--reveal-holdout',
 ]);
 
 function editDistance(left, right) {
@@ -346,6 +350,7 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     resultsFile: getOptionValue(argv, '--results-file') ? path.resolve(getOptionValue(argv, '--results-file')) : null,
     traceFile: getOptionValue(argv, '--trace-file') ? path.resolve(getOptionValue(argv, '--trace-file')) : null,
     traceToStdout: hasOptionFlag(argv, '--trace'),
+    revealHoldout: hasOptionFlag(argv, '--reveal-holdout'),
     failOnAnyFailure: benchmark,
     argv: [...argv],
   };
@@ -569,7 +574,7 @@ export function minAccuracyRefusal({ gate = false, minAccuracy = null } = {}, te
  * any failed case in a single-repetition run: an answer case that did not
  * pass, or an abstain / clarify case the model answered); else 0.
  */
-export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false } = {}) {
+export function computeExitCode(report, { gate = false, minAccuracy = null, failOnAnyFailure = false, revealHoldout = false } = {}) {
   // A rescore keeps outcomes it could not re-check (a recorded outage or a
   // run cut short); only what happened today counts as a harness failure.
   const repetitions = (report.results || []).flatMap((record) => record.repetitions || []);
@@ -641,17 +646,30 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
     // / clarify case (never counted in accuracy) when a repetition scored for
     // its behaviour did not decline: the model answered, or (outcome
     // llm_error) its call failed without SQL and without a decline code.
-    const records = report.results || [];
-    const answerFailed = records.filter((record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted).length;
-    const behaviorFailedRecords = records.filter((record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted);
+    //
+    // The reason is printed: unless revealHoldout it counts the dev cases
+    // only (holdout display policy), since counts over every case minus the
+    // listed dev rows would give hidden holdout outcomes away. A failed
+    // holdout case still fails the run.
+    const all = report.results || [];
+    const answerFailedOf = (record) => record.summary.counted > 0 && record.summary.passes < record.summary.counted;
+    const behaviorFailedOf = (record) => record.summary.behavior?.counted > 0 && record.summary.behavior.handled < record.summary.behavior.counted;
+    const hiddenRecords = revealHoldout ? [] : all.filter(isHoldoutCase);
+    const records = revealHoldout ? all : all.filter((record) => !isHoldoutCase(record));
+    const answerFailed = records.filter(answerFailedOf).length;
+    const behaviorFailedRecords = records.filter(behaviorFailedOf);
     const behaviorFailed = behaviorFailedRecords.length;
-    if (answerFailed + behaviorFailed > 0) {
+    const holdoutNote = 'holdout results are read in aggregate only, --reveal-holdout counts them';
+    if (answerFailed + behaviorFailed === 0 && hiddenRecords.some((record) => answerFailedOf(record) || behaviorFailedOf(record))) {
+      failures.push(`holdout case(s) failed (benchmark profile, single run; not itemized: ${holdoutNote})`);
+    } else if (answerFailed + behaviorFailed > 0) {
       const answered = behaviorFailedRecords.filter((record) =>
         (record.repetitions || []).some((repetition) => repetition.behavior_counted && String(repetition.outcome).startsWith('answered_instead_of_'))
       ).length;
       const parts = [answered > 0 ? `${answered} answered` : '', behaviorFailed - answered > 0 ? `${behaviorFailed - answered} errored` : ''].filter(Boolean);
       const behavior = behaviorFailed > 0 ? `; ${behaviorFailed} abstain/clarify case(s) not declined: ${parts.join(', ')}` : '';
-      failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior})`);
+      const hidden = hiddenRecords.length > 0 ? `; holdout cases are not counted here: ${holdoutNote}` : '';
+      failures.push(`${answerFailed + behaviorFailed} case(s) failed (benchmark profile, single run${behavior}${hidden})`);
     }
   }
   return failures.length > 0 ? { code: 1, reasons: failures } : { code: 0, reasons: [] };
@@ -723,9 +741,17 @@ function isGithubActions(env = process.env) {
   return env.GITHUB_ACTIONS === 'true';
 }
 
-/** One console progress line for a finished repetition (exported for tests). */
-export function formatProgress({ testCase, repetition, result, completed, total, repeat }) {
+/**
+ * One console progress line for a finished repetition (exported for tests).
+ * A holdout case shows neither its id nor its verdict unless revealHoldout
+ * (holdout results are read in aggregate only).
+ */
+export function formatProgress({ testCase, repetition, result, completed, total, repeat, revealHoldout = false }) {
   const width = String(total).length;
+  if (!revealHoldout && isHoldoutCase(testCase)) {
+    const rep = repeat > 1 ? ` rep ${repetition}/${repeat}` : '';
+    return `[${String(completed).padStart(width)}/${total}] done a holdout case${rep} (result hidden: aggregate only)`;
+  }
   let status =
     result.status === 'aborted' && result.timed_out
       ? `timeout${result.late_status ? ` (finished late: ${result.late_status})` : ''}`
@@ -803,12 +829,12 @@ export function verificationRefusal(verification) {
   return `Verification failed (${parts.join('; ')}); no LLM call was made. Fix the dataset, controls or fixtures, or pass --skip-verify to run anyway.`;
 }
 
-async function writeReport(report, { reportPath, cli }) {
+async function writeReport(report, { reportPath, cli, revealHoldout = false }) {
   const markdownPath = markdownPathFor(reportPath);
   await writeJsonFile(reportPath, report);
-  await fs.writeFile(markdownPath, renderReportMarkdown(report), 'utf8');
+  await fs.writeFile(markdownPath, renderReportMarkdown(report, { revealHoldout }), 'utf8');
   cli.log('');
-  cli.log(renderHeadline(report));
+  cli.log(renderHeadline(report, { revealHoldout }));
   cli.log('');
   cli.log(`Report: ${markdownPath}`);
   cli.log(`JSON:   ${reportPath}`);
@@ -1064,7 +1090,7 @@ async function runLive({ options, cli, schema, schemaScope, selection, connectio
           schemaScope,
         }),
       onResult: async (info) => {
-        cli.log(formatProgress({ ...info, repeat: options.repeat }));
+        cli.log(formatProgress({ ...info, repeat: options.repeat, revealHoldout: options.revealHoldout }));
         // A rejected key, a wrong endpoint or an unknown model fails every
         // call the same way: stop instead of attempting every case.
         const rejection = providerConfigRejection(info.result);
@@ -1115,7 +1141,7 @@ async function runLive({ options, cli, schema, schemaScope, selection, connectio
       comparison: comparison ? { verdict: comparison.verdict, mcnemar: comparison.mcnemar, delta: comparison.accuracy.delta } : null,
       reportPath,
     });
-    await writeReport(report, { reportPath, cli });
+    await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout });
     const exit = stop.interruptedBy
       ? { code: 130, reasons: [`interrupted by ${stop.interruptedBy}; ${run.stopped ? 'the report is partial' : 'the run had finished, the report is complete'}`] }
       : computeExitCode(report, options);
@@ -1216,13 +1242,21 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
     rescored.map((entry) => ({ entry: entry.entry, repetitions: entry.repetitions, extra: { case_source: entry.caseSource } })),
     { connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS }
   );
+  let hiddenHoldout = 0;
   for (const record of caseRecords) {
+    if (!options.revealHoldout && isHoldoutCase(record)) {
+      hiddenHoldout += 1;
+      continue;
+    }
     const before = source.results.find((entry) => entry.id === record.id);
     // Behaviour cases count declined repetitions, not passes (as in report.md).
     const behavior = isBehaviorCase(record);
     const passText = (summary) => (behavior ? behaviorPassText(summary) : `${summary.passes}/${summary.counted}`);
     const was = before?.summary ? passText(before.summary) : before?.status;
     cli.log(`  ${record.id}: ${passText(record.summary)} ${record.summary.outcome} (recorded: ${was})`);
+  }
+  if (hiddenHoldout > 0) {
+    cli.log(`  ${hiddenHoldout} holdout case(s) rescored; results shown in aggregate only (--reveal-holdout lists them).`);
   }
 
   const sourceSuite = source.suite || {
@@ -1295,7 +1329,7 @@ async function runRescore({ options, cli, schema, schemaScope, selection, connec
     },
     traceFile: null,
   });
-  await writeReport(report, { reportPath, cli });
+  await writeReport(report, { reportPath, cli, revealHoldout: options.revealHoldout });
   return finish(computeExitCode(report, options), options, cli);
 }
 

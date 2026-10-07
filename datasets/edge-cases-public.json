@@ -64,6 +64,7 @@
       "temporal",
       "quantity"
     ],
+    "notes": "\"Top\" without a number (gold convention): the product's own LIMIT 10 rule, which binds on v3 (12 products sell in March 2026); a full ranking or another N fails.",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.Quantity, 0)), 3) AS total_qty FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.Quantity, 0)) DESC, p.ProductName ASC LIMIT 10",
     "expected_tables": [
       "SalesDocumentLine",
@@ -164,6 +165,7 @@
       "comparison",
       "anti_join"
     ],
+    "failure_class": "aggregation_shape",
     "expected_sql": "WITH feb AS (SELECT DISTINCT l.ProductId FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' AND l.ProductId IS NOT NULL), mar AS (SELECT DISTINCT l.ProductId FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' AND l.ProductId IS NOT NULL) SELECT COUNT(*) AS product_count FROM feb LEFT JOIN mar ON mar.ProductId = feb.ProductId WHERE mar.ProductId IS NULL",
     "expected_tables": [
       "SalesDocumentLine",
@@ -201,7 +203,8 @@
       "ranking",
       "temporal"
     ],
-    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
+    "failure_class": "default_filter",
+    "notes": "A top-N ledger ranking that leaves out accounts whose debit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too. Ledger convention: postings selected through their sales document's date (SalesDocument.DocumentDate) leave canceled documents out, like every question that selects sales documents; only posting-date ledger questions also accept the postings of canceled documents.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.DebitAmount, 0)), 2) AS total_debit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.DebitAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.DebitAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
@@ -325,6 +328,7 @@
       "temporal",
       "net_sales"
     ],
+    "notes": "\"Top\" without a number (gold convention): the product's own LIMIT 10 rule, which binds on v3 (12 products sell in March 2026); a full ranking or another N fails.",
     "expected_sql": "SELECT p.ProductName, ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN Product p ON l.ProductId = p.ProductId JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY p.ProductId, p.ProductName ORDER BY SUM(COALESCE(l.NetAmount, 0)) DESC, p.ProductName ASC LIMIT 10",
     "expected_tables": [
       "SalesDocumentLine",
@@ -373,7 +377,8 @@
       "ranking",
       "temporal"
     ],
-    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too.",
+    "failure_class": "default_filter",
+    "notes": "A top-N ledger ranking that leaves out accounts whose credit total is zero is a defensible reading of the question (the gold keeps them with a 0 amount), so alternative_expected_sql accepts that answer too. Ledger convention: postings selected through their sales document's date (SalesDocument.DocumentDate) leave canceled documents out, like every question that selects sales documents; only posting-date ledger questions also accept the postings of canceled documents.",
     "expected_sql": "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10",
     "alternative_expected_sql": [
       "SELECT a.AccountCode, a.AccountName, ROUND(SUM(COALESCE(p.CreditAmount, 0)), 2) AS total_credit FROM AccountingPosting p JOIN LedgerAccount a ON p.LedgerAccountId = a.LedgerAccountId JOIN SalesDocument d ON p.SalesDocumentId = d.SalesDocumentId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' GROUP BY a.LedgerAccountId, a.AccountCode, a.AccountName HAVING SUM(COALESCE(p.CreditAmount, 0)) > 0 ORDER BY SUM(COALESCE(p.CreditAmount, 0)) DESC, a.AccountCode ASC LIMIT 10"
@@ -481,7 +486,7 @@
       "fuzzy"
     ],
     "failure_class": "campaign_join_path",
-    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign.",
+    "notes": "Campaign-filtered product sales should go SalesDocumentLine -> Product -> Campaign. Campaign attribution (gold convention): a sale belongs to the campaign of the product sold (Product.CampaignId), as the product prompt rules and semantic layer say; SalesDocument.CampaignId, the campaign a whole document was entered under, is not sales attribution here.",
     "expected_sql": "SELECT ROUND(SUM(COALESCE(l.NetAmount, 0)), 2) AS total_net_amount FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId JOIN Campaign c ON p.CampaignId = c.CampaignId WHERE c.CampaignName LIKE '%Urban Refresh%' AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'",
     "expected_tables": [
       "SalesDocumentLine",
@@ -524,7 +529,7 @@
       "product",
       "master_data"
     ],
-    "failure_class": "master_data_resolution",
+    "failure_class": "grain_confusion",
     "expected_sql": "SELECT DISTINCT p.ProductName FROM SalesDocumentLine l JOIN SalesDocument d ON l.SalesDocumentId = d.SalesDocumentId JOIN Product p ON l.ProductId = p.ProductId WHERE (p.ProductName LIKE '%sparkling water%' OR p.ProductTags LIKE '%seltzer%' OR p.ProductTags LIKE '%carbonated water%') AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01' ORDER BY p.ProductName",
     "expected_tables": [
       "SalesDocumentLine",
@@ -765,7 +770,7 @@
       "net_sales"
     ],
     "failure_class": "aggregation_shape",
-    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Two readings are accepted: the gold lists the customers with non-canceled January or February 2026 sales, and alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0/0 where it had none, the other reading of \"by customer\". A customer set that depends on other months (customers with any document, or any 2026 document) is neither reading and fails. comparison.column_order keeps the January column before the February column unless the columns are named like the gold columns, because values alone cannot tell the two months apart; comparison.null_as_zero accepts NULL for a month without sales (SUM(CASE ... END) without ELSE 0).",
+    "notes": "Comparison requests for separate months should render conditional aggregate columns rather than one long grouped month rowset. Two readings are accepted: the gold lists the customers with non-canceled January or February 2026 sales, and alternative_expected_sql lists every customer (LEFT JOIN from Customer) with 0/0 where it had none, the other reading of \"by customer\". Scoring relaxation (comparison.ignore_all_zero_rows): a customer set that also lists customers with 0/0 (for example every customer with any document, or with any 2026 document) is accepted, because the extra rows are all zero; before the relaxation it was neither reading and failed. comparison.column_order keeps the January column before the February column unless the columns are named like the gold columns, because values alone cannot tell the two months apart; comparison.null_as_zero accepts NULL for a month without sales (SUM(CASE ... END) without ELSE 0).",
     "expected_sql": "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM SalesDocument d JOIN Customer c ON d.CustomerId = c.CustomerId WHERE IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC",
     "alternative_expected_sql": [
       "SELECT c.CustomerName, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-02-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS jan_net_amount, ROUND(SUM(CASE WHEN d.DocumentDate >= '2026-02-01' AND d.DocumentDate < '2026-03-01' THEN COALESCE(d.NetAmount, 0) ELSE 0 END), 2) AS feb_net_amount FROM Customer c LEFT JOIN SalesDocument d ON d.CustomerId = c.CustomerId AND IFNULL(d.IsCanceled, 0) = 0 AND d.DocumentDate >= '2026-01-01' AND d.DocumentDate < '2026-03-01' GROUP BY c.CustomerId, c.CustomerName ORDER BY c.CustomerName ASC"
@@ -794,7 +799,8 @@
       "null_as_zero": [
         "jan_net_amount",
         "feb_net_amount"
-      ]
+      ],
+      "ignore_all_zero_rows": true
     },
     "signal_checks": {
       "min_row_count": 3,

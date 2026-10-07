@@ -64,9 +64,12 @@ For each arm (baseline and candidate):
   Provenance shows it (for the schema scope: requested and effective scope,
   the full-schema token estimate), model and endpoint, repetitions;
 - strict accuracy with its interval, majority-pass cases, intent-clustered
-  accuracy, accuracy by split (dev / holdout);
+  accuracy, accuracy by split (dev / holdout; the holdout in aggregate only:
+  design the experiment from dev failures, never from holdout cases, see
+  [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy));
 - attribution: pass / model / system / infra buckets, guardrail false
-  rejections, retrieval misses, the guardrail confusion matrix;
+  rejections, retrieval misses, known validator rejections, the guardrail
+  confusion matrix;
 - the paired table, McNemar p, the accuracy delta with its interval, and the
   regression and improvement case lists;
 - cost per question and per correct answer, prompt tokens and their cached
