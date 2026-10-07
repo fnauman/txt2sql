@@ -36,6 +36,13 @@
 // are the estimate's split and estimatedCost its sum. A merged total
 // (mergeCosts) keeps source 'provider' when every cost in it was reported,
 // and has source 'mixed' when only some were.
+//
+// With your own provider key on OpenRouter (BYOK, usage.is_byok true),
+// usage.cost is only OpenRouter's fee: the inference is billed to your key
+// and reported as usage.cost_details.upstream_inference_cost, so the charge
+// is their sum. A BYOK usage without that upstream cost says nothing
+// complete about the charge: a priced model then keeps its local estimate as
+// the cost (as with no reported cost), and a model with no price has none.
 const BASE_MODEL_PRICING = Object.freeze({
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
@@ -167,9 +174,32 @@ function reasoningTokensOf(usage) {
   return normalizeTokenCount(usage?.completion_tokens_details?.reasoning_tokens);
 }
 
-function providerCostOf(usage) {
-  const value = usage?.cost;
+function nonNegativeAmount(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+// usage.cost as reported (OpenRouter: what it took from your credits).
+function providerCostOf(usage) {
+  return nonNegativeAmount(usage?.cost);
+}
+
+// What the provider says the call was charged, in USD; null when it does not
+// say, or says only part of it. usage.cost, plus, with your own provider key
+// (BYOK: usage.is_byok true), the upstream provider's charge
+// (usage.cost_details.upstream_inference_cost), which usage.cost leaves out.
+// The upstream cost is counted unless the usage says it is not BYOK
+// (is_byok false): OpenRouter reports it only for BYOK calls (0 or null
+// otherwise). A BYOK usage without it has no complete charge.
+function providerChargeOf(usage) {
+  const cost = providerCostOf(usage);
+  if (cost === null) {
+    return null;
+  }
+  const upstream = nonNegativeAmount(usage?.cost_details?.upstream_inference_cost);
+  if (usage?.is_byok === true && upstream === null) {
+    return null;
+  }
+  return usage?.is_byok === false || upstream === null ? cost : cost + upstream;
 }
 
 function resolveModelPricing(model) {
@@ -223,7 +253,7 @@ export function calculateCost(model, usage) {
   const promptTokens = normalizeTokenCount(usage?.prompt_tokens);
   const completionTokens = normalizeTokenCount(usage?.completion_tokens);
   const reasoningTokens = reasoningTokensOf(usage);
-  const providerCost = providerCostOf(usage);
+  const providerCost = providerChargeOf(usage);
 
   if (promptTokens === null || completionTokens === null || (!pricing && providerCost === null)) {
     return null;

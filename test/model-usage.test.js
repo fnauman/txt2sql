@@ -191,6 +191,59 @@ test('a provider-reported cost above the estimate is what totals and the --budge
   assert.equal(result.llmCost.estimatedCost, 0.0097176);
 });
 
+test('with your own provider key (OpenRouter BYOK) the charge includes the upstream cost, so --budget-usd still stops the run', async () => {
+  // 100k input + 20k output tokens of gpt-5.4-mini: an estimate of
+  // 0.075 + 0.09 = $0.165. With BYOK, usage.cost is only OpenRouter's fee (5%
+  // here, or 0) and the provider's charge is cost_details.upstream_inference_cost.
+  const byokUsage = (extra = {}) => ({ prompt_tokens: 100_000, completion_tokens: 20_000, total_tokens: 120_000, is_byok: true, ...extra });
+  const feeAndUpstream = calculateCost('openai/gpt-5.4-mini', byokUsage({ cost: 0.00825, cost_details: { upstream_inference_cost: 0.165 } }));
+  assert.deepEqual(
+    [feeAndUpstream.source, feeAndUpstream.totalCost, feeAndUpstream.providerCost, feeAndUpstream.estimatedCost],
+    ['provider', 0.17325, 0.17325, 0.165]
+  );
+  // The review's probe: no fee, the whole charge upstream. It used to count $0.
+  const noFee = calculateCost('openai/gpt-5.4-mini', byokUsage({ cost: 0, cost_details: { upstream_inference_cost: 0.165 } }));
+  assert.deepEqual([noFee.source, noFee.totalCost, noFee.providerCost, noFee.estimatedCost], ['provider', 0.165, 0.165, 0.165]);
+  assert.equal(
+    formatUsageAndCost({ usage: byokUsage({ cost: 0.00825 }), cost: feeAndUpstream, model: 'openai/gpt-5.4-mini' }),
+    '$0.173250 (100000 input + 20000 output tokens, gpt-5.4-mini, cost reported by the provider (local estimate $0.165000))'
+  );
+  // An unpriced model's BYOK charge is the sum too.
+  assert.equal(calculateCost('acme/sql-1', byokUsage({ cost: 0.001, cost_details: { upstream_inference_cost: 0.02 } })).totalCost, 0.021);
+
+  // BYOK without the upstream cost: the fee alone is not the charge. A priced
+  // model keeps its estimate as the cost (as with no reported cost); a model
+  // with no price has no cost.
+  const partial = calculateCost('openai/gpt-5.4-mini', byokUsage({ cost: 0 }));
+  assert.equal(partial.totalCost, 0.165);
+  assert.equal('source' in partial, false);
+  assert.equal('providerCost' in partial, false);
+  assert.equal('estimatedCost' in partial, false);
+  assert.equal(calculateCost('openai/gpt-5.4-mini', byokUsage({ cost: 0.00825, cost_details: { upstream_inference_cost: null } })).totalCost, 0.165);
+  assert.equal(calculateCost('acme/sql-1', byokUsage({ cost: 0.001 })), null);
+
+  // Not BYOK: usage.cost is the whole charge, and an upstream cost is not added again.
+  const notByok = { prompt_tokens: 100_000, completion_tokens: 20_000, total_tokens: 120_000, is_byok: false };
+  assert.equal(calculateCost('openai/gpt-5.4-mini', { ...notByok, cost: 0.2, cost_details: { upstream_inference_cost: null } }).totalCost, 0.2);
+  assert.equal(calculateCost('openai/gpt-5.4-mini', { ...notByok, cost: 0.2, cost_details: { upstream_inference_cost: 0.19 } }).totalCost, 0.2);
+  // No is_byok at all (OpenRouter's documented example): an upstream cost is BYOK's, so it counts.
+  assert.equal(calculateCost('acme/sql-1', { prompt_tokens: 194, completion_tokens: 2, total_tokens: 196, cost: 0.95, cost_details: { upstream_inference_cost: 19 } }).totalCost, 19.95);
+  assert.equal(calculateCost('acme/sql-1', { prompt_tokens: 194, completion_tokens: 2, total_tokens: 196, cost: 0.95, cost_details: { upstream_inference_cost: 0 } }).totalCost, 0.95);
+
+  // The budget pool counts the whole charge: each case (one BYOK call) spends
+  // $0.165 of a $0.30 budget, so the second case starts (0.165 < 0.30) and
+  // the third does not (0.33). Counting only the fee ($0) ran all three.
+  const run = await runCaseRepetitions({
+    cases: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    concurrency: 1,
+    budgetUsd: 0.3,
+    runRepetition: async () => ({ status: 'pass', attempts: [], llm_cost: mergeCosts([noFee]) }),
+  });
+  assert.equal(costOfResult(run.repetitions[0][0]), 0.165);
+  assert.equal(run.spentUsd, 0.33);
+  assert.deepEqual(run.skippedCaseIds, ['c']);
+});
+
 test('the product loop keeps each call\'s reasoning tokens and sums them over retries (result, trace)', async () => {
   const first = reasoningUsage();
   const second = reasoningUsage({ completion_tokens: 500, total_tokens: 2500, completion_tokens_details: { reasoning_tokens: 300 } });

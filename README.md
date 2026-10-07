@@ -604,7 +604,12 @@ silently dropping one. How strictly a provider enforces a strict
 `OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. The
 cost OpenRouter reports for each call (`usage.cost`) is the call's cost, also
 for a model with a price row (the estimate is kept beside it), so totals and
-`--budget-usd` count what was charged; `--budget-usd` still needs a price up
+`--budget-usd` count what was charged. With your own provider key on
+OpenRouter (BYOK) `usage.cost` is only OpenRouter's fee, so the charge counted
+is that fee plus the upstream provider's cost
+(`usage.cost_details.upstream_inference_cost`); a BYOK call that does not
+report the upstream cost counts at the local estimate (no cost for a model
+without a price row). `--budget-usd` still needs a price up
 front: add one with `MODEL_PRICING_OVERRIDES` for a model without a row (see
 [LLM Cost Tracking](#llm-cost-tracking)). The
 eval header names the endpoint host and the `require_parameters` setting
@@ -641,7 +646,7 @@ LLM attempt 2: $0.001800 (1100 input + 210 output tokens, gpt-5.4-mini)
 Total LLM: $0.003450 (2100 input + 410 output tokens, gpt-5.4-mini)
 ```
 
-For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is the cost for priced models too (it is what the call was charged), so run totals and `--budget-usd` count it; the local estimate stays beside it (`estimatedCost`, shown as `cost reported by the provider (local estimate $0.004859)`), and the charge is also kept as `providerCost`. A question's or a run's total keeps the label when every call's cost was reported, and says `cost partly reported by the provider` (source `mixed`) when only some were. Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
+For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is the cost for priced models too (it is what the call was charged; with your own provider key on OpenRouter, BYOK, the fee in `usage.cost` plus `usage.cost_details.upstream_inference_cost`), so run totals and `--budget-usd` count it; the local estimate stays beside it (`estimatedCost`, shown as `cost reported by the provider (local estimate $0.004859)`), and the charge is also kept as `providerCost`. A question's or a run's total keeps the label when every call's cost was reported, and says `cost partly reported by the provider` (source `mixed`) when only some were. Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
 
 Quick test (no DB or API key needed):
 
