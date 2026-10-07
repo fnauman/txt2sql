@@ -541,9 +541,9 @@ family's default effort is sent and recorded like a set one (source
 `default`), so `gpt-6-luna` with no effort and with `REASONING_EFFORT=medium`
 is the same run with the same baseline file, and a provider changing its
 default cannot change a run unseen. At effort `none` the request keeps
-`temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`. An invalid effort, or one the model's family
-does not list, stops every entry point before anything starts, with the
-allowed values in the message. (An effort set in an env file can be cleared
+`temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`.
+An invalid effort, or one the model's family does not list, stops every entry
+point before anything starts, with the allowed values in the message. (An effort set in an env file can be cleared
 for one run with an empty `REASONING_EFFORT=` in the shell.) Without
 `temperature: 0` a reasoning model's repetitions vary more than gpt-4o-mini's,
 so measure it with `--repeat 3`; a completion cut off at the token limit is an
