@@ -324,7 +324,8 @@ function parseNumber(argv, name, fallback, { min = 0, max = Number.POSITIVE_INFI
  * The default baseline of a model at a reasoning effort:
  * eval/baselines/<model>[.<effort>].json, with `/` in the model id mapped to
  * `__` (modelFileLabel): eval/baselines/gpt-4o-mini.json,
- * eval/baselines/gpt-6-luna.low.json, eval/baselines/openai__gpt-6-luna.low.json.
+ * eval/baselines/gpt-6-luna.low.json, eval/baselines/openai__gpt-6-luna.low.json;
+ * an id that is not plain gets a hash of itself (openai__gpt-6-luna-free_<hash>.json).
  */
 export function defaultBaselinePath(model, reasoningEffort = null, baselinesDir = DEFAULT_BASELINES_DIR) {
   return path.resolve(baselinesDir, `${modelFileLabel(model, reasoningEffort)}.json`);

@@ -44,6 +44,8 @@
 //   With OPENAI_API_KEY unset, OPENROUTER_API_KEY is the key there
 //   (resolveLlmApiKey).
 
+import { createHash } from 'node:crypto';
+
 export const DEFAULT_MODEL = 'gpt-4o-mini';
 
 // Every reasoning effort any family accepts, in increasing order.
@@ -429,15 +431,42 @@ export function modelLabel(model, reasoningEffort = null) {
   return reasoningEffort ? `${model} (reasoning effort ${reasoningEffort})` : String(model);
 }
 
+// A model id written as is in a file label: lower-case letters and digits,
+// with single `.` or `-` between them, in parts separated by `/` (written
+// `__`). Such an id and its label map one to one: `_` never occurs in it, so
+// `__` can only be a `/`; nothing in it changes on a case-insensitive file
+// system or in the run directory's segment sanitizer (benchmark.js collapses
+// `--` and trims `-`).
+const PLAIN_MODEL_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[.-][a-z0-9]+)*)*$/;
+
+function sanitizeLabelPart(value) {
+  return String(value)
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 /**
- * A file or directory name for a model and effort: the model id with `/`
- * mapped to `__` (openai/gpt-6-luna -> openai__gpt-6-luna), then `.<effort>`
- * when an effort is set; other characters outside [A-Za-z0-9._-] become `-`.
- * gpt-4o-mini with no effort stays gpt-4o-mini, so its committed baseline
- * keeps its name.
+ * A file or directory name for a model and effort, distinct for distinct
+ * ids: `<id>[.<effort>]`.
+ * - A plain id (PLAIN_MODEL_ID, not ending in `.<effort>`) is written as is,
+ *   with `/` mapped to `__`: gpt-4o-mini -> gpt-4o-mini (so the committed
+ *   baseline keeps its name), gpt-6-luna at low -> gpt-6-luna.low,
+ *   openai/gpt-6-luna -> openai__gpt-6-luna.
+ * - Any other id is written sanitized (`/` -> `__`, other characters outside
+ *   [A-Za-z0-9._-] -> `-`) plus `_` and the first 8 hex digits of the
+ *   SHA-256 of the whole id, so ids that sanitize alike stay apart:
+ *   acme/sql-1:free -> acme__sql-1-free_<hash>, while acme/sql-1-free stays
+ *   acme__sql-1-free (a plain label never has a single `_`).
  */
 export function modelFileLabel(model, reasoningEffort = null) {
-  const id = String(model || '').trim().replace(/\//g, '__');
-  const label = reasoningEffort ? `${id}.${reasoningEffort}` : id;
-  return label.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+  const id = String(model ?? '').trim();
+  const effort = reasoningEffort ? `.${sanitizeLabelPart(String(reasoningEffort).toLowerCase())}` : '';
+  const endsInEffort = REASONING_EFFORTS.some((value) => id.endsWith(`.${value}`));
+  if (PLAIN_MODEL_ID.test(id) && !endsInEffort) {
+    return `${id.replace(/\//g, '__')}${effort}`;
+  }
+  const readable = id.split('/').map(sanitizeLabelPart).join('__') || 'model';
+  const hash = createHash('sha256').update(id).digest('hex').slice(0, 8);
+  return `${readable}_${hash}${effort}`;
 }

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test, { after, before } from 'node:test';
 
 import { completionSettingsOf, describeModelConfig, modelFileLabel, resolveCompletionSettings, resolveModelConfig } from '../src/model-config.js';
 import { compareReports } from '../src/eval/compare.js';
 import { collectProvenance, traceMetadataFromProvenance } from '../src/eval/provenance.js';
-import { normalizeBenchmarkCase } from '../src/benchmark.js';
+import { createBenchmarkRunPaths, normalizeBenchmarkCase } from '../src/benchmark.js';
 import { renderComparisonConsole, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { attributeCaseRuns, buildReport } from '../src/eval/runner.js';
 import { createBufferedTraceLogger, loadOptimizedQueryRuntime, resolveRunModelSettings, runOptimizedQuestion } from '../src/query-service.js';
@@ -394,11 +395,61 @@ test('a paid eval with --budget-usd refuses to start for a model without a price
   assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna-2026-10-01', '--budget-usd', '1'], { env: {} })), null);
 });
 
+test('distinct model ids never share a baseline file or a run directory', () => {
+  // The review's example: both used to become acme__sql-1-free.
+  assert.notEqual(modelFileLabel('acme/sql-1:free'), modelFileLabel('acme/sql-1-free'));
+  assert.equal(modelFileLabel('acme/sql-1-free'), 'acme__sql-1-free', 'a lossless id keeps its plain label');
+  assert.match(modelFileLabel('acme/sql-1:free'), /^acme__sql-1-free_[0-9a-f]{8}$/);
+  assert.equal(modelFileLabel('acme/sql-1:free'), modelFileLabel('acme/sql-1:free'), 'stable');
+  assert.match(modelFileLabel('acme/sql-1:free', 'low'), /^acme__sql-1-free_[0-9a-f]{8}\.low$/);
+  // The plain labels of the repository's models do not change.
+  assert.equal(modelFileLabel('gpt-4o-mini'), 'gpt-4o-mini');
+  assert.equal(modelFileLabel('gpt-6-luna', 'low'), 'gpt-6-luna.low');
+  assert.equal(modelFileLabel('openai/gpt-6-luna'), 'openai__gpt-6-luna');
+  assert.equal(modelFileLabel('gpt-5.4-mini-2026-03-05', 'high'), 'gpt-5.4-mini-2026-03-05.high');
+  assert.equal(modelFileLabel('meta-llama/llama-3.1-70b-instruct'), 'meta-llama__llama-3.1-70b-instruct');
+
+  // Every other way two ids could meet: `__` vs `/`, an id ending in an
+  // effort, a case-only difference (one file on a case-insensitive file
+  // system), and what the run directory's segment sanitizer collapses (`--`,
+  // a leading or trailing `-`).
+  const pairs = [
+    ['acme/sql-1:free', null],
+    ['acme/sql-1-free', null],
+    ['acme__sql-1-free', null],
+    ['acme_/sql-1-free', null],
+    ['acme/_sql-1-free', null],
+    ['gpt-6-luna.low', null],
+    ['gpt-6-luna', 'low'],
+    ['GPT-4o-mini', null],
+    ['gpt-4o-mini', null],
+    ['a--b', null],
+    ['a-b', null],
+    ['-a-b', null],
+    ['a b', null],
+    ['a/b', null],
+    ['a//b', null],
+    ['..', null],
+    ['', null],
+  ];
+  const labels = pairs.map(([model, effort]) => modelFileLabel(model, effort));
+  const folded = labels.map((label) => label.toLowerCase());
+  assert.equal(new Set(folded).size, labels.length, `labels collide: ${labels.join(', ')}`);
+  for (const label of labels) {
+    assert.match(label, /^[A-Za-z0-9._-]+$/);
+    assert.notEqual(label, '..');
+    // The run directory keeps the label as its segment.
+    const runPaths = createBenchmarkRunPaths({ datasetName: 'core', model: label, timestamp: 't', outputDir: '/runs' });
+    assert.equal(path.basename(runPaths.reportDir), label);
+  }
+});
+
 test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in the model id as __', async () => {
   assert.equal(modelFileLabel('gpt-4o-mini'), 'gpt-4o-mini');
   assert.equal(modelFileLabel('gpt-6-luna', 'low'), 'gpt-6-luna.low');
   assert.equal(modelFileLabel('openai/gpt-6-luna', 'medium'), 'openai__gpt-6-luna.medium');
-  assert.equal(modelFileLabel('openai/gpt-6-luna:free'), 'openai__gpt-6-luna-free');
+  // `:` cannot be written as is: the label is sanitized and carries a hash of the id.
+  assert.match(modelFileLabel('openai/gpt-6-luna:free'), /^openai__gpt-6-luna-free_[0-9a-f]{8}$/);
   assert.match(defaultBaselinePath('gpt-4o-mini'), /eval\/baselines\/gpt-4o-mini\.json$/);
   assert.match(defaultBaselinePath('gpt-4o-mini', null), /eval\/baselines\/gpt-4o-mini\.json$/);
   assert.match(defaultBaselinePath('gpt-6-luna', 'low'), /eval\/baselines\/gpt-6-luna\.low\.json$/);
