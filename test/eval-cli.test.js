@@ -118,6 +118,15 @@ test('exit codes: 2 for harness/infra, 1 for a failed gate, else 0', () => {
   const gated = computeExitCode(fakeReport({ comparison: worse }), { gate: true });
   assert.equal(gated.code, 1);
   assert.match(gated.reasons[0], /significantly worse than the baseline: 6 regression\(s\) vs 0 improvement\(s\), exact McNemar p = 0\.03125/);
+  // With holdout cases in the comparison the reason gives no counts unless
+  // revealHoldout (report.md shows the dev cases' counts; every case's
+  // counts minus those would be the holdout's flips).
+  const withHoldout = { ...worse, holdoutCases: ['ho_1'] };
+  const hidden = computeExitCode(fakeReport({ comparison: withHoldout }), { gate: true });
+  assert.equal(hidden.code, 1);
+  assert.match(hidden.reasons[0], /^significantly worse than the baseline \(exact McNemar test over every paired case, holdout included; its counts are not shown/);
+  assert.doesNotMatch(hidden.reasons[0], /\d/);
+  assert.match(computeExitCode(fakeReport({ comparison: withHoldout }), { gate: true, revealHoldout: true }).reasons[0], /6 regression\(s\) vs 0 improvement\(s\)/);
   assert.equal(computeExitCode(fakeReport({ comparison: { verdict: 'no_significant_difference', paired: 3, candidateCases: 3 } }), { gate: true }).code, 0);
   assert.equal(computeExitCode(fakeReport({ strict: 0.5 }), { gate: true, minAccuracy: 0.6 }).code, 1);
   assert.equal(computeExitCode(fakeReport({ strict: 0.6 }), { gate: true, minAccuracy: 0.6 }).code, 0);

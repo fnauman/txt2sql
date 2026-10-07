@@ -448,8 +448,9 @@ How it got here, each step a paired experiment against the previous baseline:
 68.8% → 72.8% on the earlier 255-case suite) and
 [Experiment 2](docs/experiments/02-hints-v2.md) (hints v2 — unambiguous
 business rules, safer date handling, a cleaned semantic layer: 62.2% → 73.6%
-on the 404-case suite, McNemar p < 0.001, and on the blind holdout alone
-41.3% → 49.2%, p = 0.035). The fresh holdout is 77 new intents written blind
+on the 404-case suite, McNemar p < 0.001 on the paired dev cases, and on the
+blind holdout alone 41.3% → 49.2%, p = 0.035 in the live run's paired
+holdout test). The fresh holdout is 77 new intents written blind
 and audited by two independent annotators; reports show it in aggregate only.
 The dev number is in-sample (experiments are designed from dev failures); the
 holdout number is the honest estimate for new kinds of questions — shares and
@@ -462,7 +463,9 @@ guardrail, behaviour and per-question cost figures are what `npm run eval --
 its split accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
-when committed) it adds a paired comparison with an exact McNemar test;
+when committed) it adds a paired comparison with an exact McNemar test (shown
+over the paired dev cases while the holdout is hidden; the gate tests every
+paired case);
 `--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,
 a run below X; with only abstain / clarify cases selected there is no accuracy,
 so `--min-accuracy` is refused with exit 2). Harness, database and

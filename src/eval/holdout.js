@@ -19,8 +19,11 @@
 //
 // Display: report.md and the console show holdout results in aggregate only
 // (accuracy by split) unless `--reveal-holdout` is passed: no per-case
-// holdout rows and no holdout flip lists, so error analysis and experiment
-// design look at dev failures only. report.json keeps every case (rescore,
+// holdout rows, and every other figure (the headline's intervals, the
+// comparison with a baseline, attribution, cost) covers the dev cases, so
+// error analysis and experiment design look at dev failures only and no
+// figure says more about holdout outcomes than the split accuracy
+// (src/eval/report-markdown.js). report.json keeps every case (rescore,
 // compare and the gate need them); reading it is revealing the holdout.
 
 import crypto from 'node:crypto';

@@ -102,6 +102,66 @@ function describeReport(report, label) {
 }
 
 /**
+ * The paired statistics of aligned cases (`pairs` = [{ id, question, split,
+ * baseline: { passRate, majorityPass, outcome }, candidate: { ... } }], sorted
+ * by id): the flips (regressions / improvements, as the pair entries), the
+ * pass-rate changes without a flip, the majority passes and the 2x2 table,
+ * the exact McNemar test, the accuracy change with its paired bootstrap CI
+ * and the verdict. compareReports uses it over every paired case; report.md
+ * and the console recompute it over the dev cases while the holdout is
+ * hidden.
+ */
+export function summarizePairs(pairs, { alpha = 0.05, resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
+  const paired = pairs || [];
+  const regressions = paired.filter((entry) => entry.baseline.majorityPass && !entry.candidate.majorityPass);
+  const improvements = paired.filter((entry) => !entry.baseline.majorityPass && entry.candidate.majorityPass);
+  const rateChanges = paired.filter(
+    (entry) => entry.baseline.majorityPass === entry.candidate.majorityPass && entry.baseline.passRate !== entry.candidate.passRate
+  );
+  const p = mcnemarExact(regressions.length, improvements.length);
+  const baselineAccuracy = mean(paired.map((entry) => entry.baseline.passRate));
+  const candidateAccuracy = mean(paired.map((entry) => entry.candidate.passRate));
+  const deltaCi95 = pairedBootstrapDeltaInterval(
+    paired.map((entry) => ({ baseline: entry.baseline.passRate, candidate: entry.candidate.passRate })),
+    { resamples, seed }
+  );
+
+  let verdict = 'no_significant_difference';
+  if (paired.length === 0) {
+    verdict = 'no_paired_cases';
+  } else if (p < alpha && regressions.length > improvements.length) {
+    verdict = 'worse';
+  } else if (p < alpha && improvements.length > regressions.length) {
+    verdict = 'better';
+  }
+
+  return {
+    paired: paired.length,
+    flips: { regressions, improvements },
+    rateChanges,
+    majority: {
+      baselinePasses: paired.filter((entry) => entry.baseline.majorityPass).length,
+      candidatePasses: paired.filter((entry) => entry.candidate.majorityPass).length,
+    },
+    // The paired 2x2 table of majority verdicts (McNemar uses the off-diagonal).
+    contingency: {
+      bothPass: paired.filter((entry) => entry.baseline.majorityPass && entry.candidate.majorityPass).length,
+      regressions: regressions.length,
+      improvements: improvements.length,
+      bothFail: paired.filter((entry) => !entry.baseline.majorityPass && !entry.candidate.majorityPass).length,
+    },
+    accuracy: {
+      baseline: round(baselineAccuracy),
+      candidate: round(candidateAccuracy),
+      delta: baselineAccuracy === null ? null : round(candidateAccuracy - baselineAccuracy),
+      deltaCi95: { method: 'paired case bootstrap (percentile)', ...deltaCi95 },
+    },
+    mcnemar: { regressions: regressions.length, improvements: improvements.length, p: round(p, 6), test: 'exact two-sided (binomial on discordant pairs)' },
+    verdict,
+  };
+}
+
+/**
  * Compares a candidate report with a baseline report. Returns
  * { baseline, candidate, baselineCases, candidateCases, paired,
  *   excluded: { goldChanged, notCounted },
@@ -148,37 +208,14 @@ export function compareReports(baselineReport, candidateReport, {
     paired.push({
       id,
       question: cand.question,
-      intentId: cand.intentId,
       split: cand.split,
       baseline: { passRate: base.passRate, majorityPass: base.majorityPass, outcome: base.outcome },
       candidate: { passRate: cand.passRate, majorityPass: cand.majorityPass, outcome: cand.outcome },
     });
   }
   paired.sort((left, right) => left.id.localeCompare(right.id));
+  const summary = summarizePairs(paired, { alpha, resamples, seed });
 
-  const regressions = paired.filter((entry) => entry.baseline.majorityPass && !entry.candidate.majorityPass);
-  const improvements = paired.filter((entry) => !entry.baseline.majorityPass && entry.candidate.majorityPass);
-  const rateChanges = paired.filter(
-    (entry) => entry.baseline.majorityPass === entry.candidate.majorityPass && entry.baseline.passRate !== entry.candidate.passRate
-  );
-  const p = mcnemarExact(regressions.length, improvements.length);
-  const baselineAccuracy = mean(paired.map((entry) => entry.baseline.passRate));
-  const candidateAccuracy = mean(paired.map((entry) => entry.candidate.passRate));
-  const deltaCi95 = pairedBootstrapDeltaInterval(
-    paired.map((entry) => ({ baseline: entry.baseline.passRate, candidate: entry.candidate.passRate })),
-    { resamples, seed }
-  );
-
-  let verdict = 'no_significant_difference';
-  if (paired.length === 0) {
-    verdict = 'no_paired_cases';
-  } else if (p < alpha && regressions.length > improvements.length) {
-    verdict = 'worse';
-  } else if (p < alpha && improvements.length > regressions.length) {
-    verdict = 'better';
-  }
-
-  const pick = (entry) => ({ id: entry.id, question: entry.question, split: entry.split, baseline: entry.baseline, candidate: entry.candidate });
   return {
     baseline: describeReport(baselineReport, baselineLabel),
     candidate: describeReport(candidateReport, candidateLabel),
@@ -187,8 +224,8 @@ export function compareReports(baselineReport, candidateReport, {
     // run the pairing covers.
     baselineCases: baseline.size,
     candidateCases: candidate.size,
-    paired: paired.length,
-    pairedCases: paired.map(pick),
+    paired: summary.paired,
+    pairedCases: paired,
     excluded: { goldChanged, notCounted },
     newCases: [...candidate.keys()].filter((id) => !baseline.has(id)).sort(),
     removedCases: [...baseline.keys()].filter((id) => !candidate.has(id)).sort(),
@@ -198,26 +235,12 @@ export function compareReports(baselineReport, candidateReport, {
       ...[...candidate.values()].filter((entry) => entry.split === 'holdout').map((entry) => entry.id),
       ...[...baseline.values()].filter((entry) => !candidate.has(entry.id) && entry.split === 'holdout').map((entry) => entry.id),
     ].sort(),
-    flips: { regressions: regressions.map(pick), improvements: improvements.map(pick) },
-    rateChanges: rateChanges.map(pick),
-    majority: {
-      baselinePasses: paired.filter((entry) => entry.baseline.majorityPass).length,
-      candidatePasses: paired.filter((entry) => entry.candidate.majorityPass).length,
-    },
-    // The paired 2x2 table of majority verdicts (McNemar uses the off-diagonal).
-    contingency: {
-      bothPass: paired.filter((entry) => entry.baseline.majorityPass && entry.candidate.majorityPass).length,
-      regressions: regressions.length,
-      improvements: improvements.length,
-      bothFail: paired.filter((entry) => !entry.baseline.majorityPass && !entry.candidate.majorityPass).length,
-    },
-    accuracy: {
-      baseline: round(baselineAccuracy),
-      candidate: round(candidateAccuracy),
-      delta: baselineAccuracy === null ? null : round(candidateAccuracy - baselineAccuracy),
-      deltaCi95: { method: 'paired case bootstrap (percentile)', ...deltaCi95 },
-    },
-    mcnemar: { regressions: regressions.length, improvements: improvements.length, p: round(p, 6), test: 'exact two-sided (binomial on discordant pairs)' },
-    verdict,
+    flips: summary.flips,
+    rateChanges: summary.rateChanges,
+    majority: summary.majority,
+    contingency: summary.contingency,
+    accuracy: summary.accuracy,
+    mcnemar: summary.mcnemar,
+    verdict: summary.verdict,
   };
 }

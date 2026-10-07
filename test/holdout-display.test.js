@@ -94,7 +94,13 @@ test('report.md shows the holdout in aggregate only by default, and every case w
   assert.match(markdown, /\| dev_flip \| Question dev_flip\? \|/);
   assert.match(markdown, /\n2 holdout case\(s\) not listed: holdout results are shown in aggregate only/);
   assert.match(markdown, /1 holdout behaviour case\(s\) not listed/);
-  assert.match(markdown, /Holdout cases in the comparison \(aggregate only, not listed below\): 1 regression\(s\)\./);
+  // The comparison covers the paired dev cases; its holdout cases are
+  // counted once (how many there are), never their flips.
+  assert.match(markdown, /\nvs baseline \(dev cases\): Δ −50\.0 pts \(95% CI [^)]+\) on 2 paired dev case\(s\); 1 regression\(s\), 0 improvement\(s\); exact McNemar p = 1\.000 → no significant difference from the baseline \(the comparison's 1 holdout case\(s\) are not shown; --gate tests every paired case\)\n/);
+  assert.match(markdown, /## Comparison with the baseline\n\nDev cases only: the comparison's 1 holdout case\(s\) are left out of these figures and lists/);
+  assert.match(markdown, /\| Majority passes \(paired dev cases\) \| 2\/2 \| 1\/2 \|/);
+  assert.match(markdown, /\| Baseline pass \| 1 \| 1 \(regressions\) \|/);
+  assert.doesNotMatch(markdown, /Holdout cases in the comparison|holdout case\(s\) \(not listed\)|2 regression|on 3 paired/);
   assert.match(markdown, /### Regressions \(baseline majority pass → candidate fail\)\n\n\| Case \| Question \| Baseline \| Candidate \|\n\| --- \| --- \| --- \| --- \|\n\| dev_flip \|[^\n]*\n\n/);
 
   const revealed = renderReportMarkdown(report, { revealHoldout: true });
@@ -106,20 +112,27 @@ test('report.md shows the holdout in aggregate only by default, and every case w
   assert.match(revealed, /\| tag \| holdout_only_tag \| 1 \|/);
   assert.doesNotMatch(revealed, /shown in aggregate only|not listed/);
   assert.equal((revealed.match(/\| secret_holdout_case \|/g) || []).length, 2, 'the cases table and the regressions table');
+  assert.match(revealed, /\nvs baseline: Δ −66\.7 pts \(95% CI [^)]+\) on 3 paired case\(s\); 2 regression\(s\), 0 improvement\(s\);/);
 });
 
-test('the console lists dev flips and counts holdout flips; revealHoldout lists them', async () => {
+test('the console shows the comparison over the paired dev cases; revealHoldout shows every case', async () => {
   const baseline = await reportWith(BASELINE_OUTCOMES);
   const report = await reportWith(CANDIDATE_OUTCOMES, { comparisonWith: baseline });
   const console = renderHeadline(report);
   assert.doesNotMatch(console, /secret_holdout/);
-  assert.match(console, /regressions: dev_flip \(pass → wrong_result\); 1 holdout case\(s\) \(not listed\)/);
+  assert.match(console, /\nPaired comparison with baseline\.json: 2 paired dev case\(s\) \(the comparison's 1 holdout case\(s\) are not shown; --gate tests every paired case, its verdict is the exit code\)\n/);
+  assert.match(console, /\n {2}baseline pass +1 +1\n/);
+  assert.match(console, /strict accuracy \(paired dev cases\) 100\.0% → 50\.0%: Δ −50\.0 pts/);
+  assert.match(console, /exact McNemar p = 1\.000 \(1 regression\(s\), 0 improvement\(s\)\)/);
+  assert.match(console, /regressions: dev_flip \(pass → wrong_result\)\n/);
   assert.match(console, /improvements: none/);
+  assert.doesNotMatch(console, /not listed|2 regression/);
   assert.match(console, /By split: dev 50\.0% \(2\) · holdout 0\.0% \(1\)/);
   assert.match(renderHeadline(report, { revealHoldout: true }), /regressions: dev_flip \(pass → wrong_result\), secret_holdout_case \(pass → wrong_result\)\n/);
-  // Only holdout flips: counted, never named.
-  const onlyHoldout = { ...report.comparison, flips: { regressions: report.comparison.flips.regressions.slice(1), improvements: [] } };
-  assert.match(renderComparisonConsole(onlyHoldout), /regressions: 1 holdout case\(s\) \(not listed\)\n/);
+  assert.match(renderHeadline(report, { revealHoldout: true }), /exact McNemar p = 0\.500 \(2 regression\(s\), 0 improvement\(s\)\)/);
+  // Only holdout flips: neither named nor counted.
+  const onlyHoldout = { ...report.comparison, pairedCases: report.comparison.pairedCases.filter((entry) => entry.id !== 'dev_flip') };
+  assert.match(renderComparisonConsole(onlyHoldout), /: 1 paired dev case\(s\) [^\n]*\n[\s\S]*regressions: none\n {2}improvements: none/);
 });
 
 test('without holdout cases nothing is hidden and the breakdowns are the run\'s own', async () => {
@@ -270,7 +283,7 @@ const outage = () => ({ ...providerRefusal(), error_code: 'HTTP_503' });
 const harnessFailure = () => ({ status: 'evaluation_error', warnings: [], attempts: [], attempt_count: 0, timings: { totalMs: 5 } });
 const infraFailure = () => ({ ...rep('infra_error'), error_code: 'ECONNRESET' });
 
-async function suiteReport(holdout, { baseline = null } = {}) {
+async function suiteReport(holdout, { baseline = null, dev = DEV_REPETITIONS } = {}) {
   const definitions = {
     dev_a1: testCase('dev_a1', { intentId: 'dev_a' }),
     dev_a2: testCase('dev_a2', { intentId: 'dev_a' }),
@@ -282,7 +295,7 @@ async function suiteReport(holdout, { baseline = null } = {}) {
     ho_abstain: normalizeBenchmarkCase({ id: 'ho_abstain', question: 'Weather?', split: 'holdout', expected_behavior: 'abstain' }),
   };
   const caseRecords = await attributeCaseRuns(
-    Object.entries({ ...DEV_REPETITIONS, ...holdout }).map(([id, statuses]) => ({
+    Object.entries({ ...dev, ...holdout }).map(([id, statuses]) => ({
       entry: { testCase: definitions[id], datasets: ['d'] },
       repetitions: statuses.map((status) => (typeof status === 'string' ? rep(status) : status())),
     })),
@@ -379,4 +392,41 @@ test('with the holdout hidden, report.md and the console are byte-identical for 
   assert.match(revealed, /\nMajority-pass cases 3\/6 \(Wilson 95% [^)]+\) · intent-clustered accuracy 58\.3% /);
   assert.match(revealed, /\| split \| holdout \| 3 \| 50\.0% \| 1\/3 \|/);
   assert.match(revealed, /\nPooled pass rate 52\.9% over 17 repetition\(s\)/);
+});
+
+test('with the holdout hidden, the comparison is byte-identical too for runs that differ only in holdout outcomes', async () => {
+  // One baseline; against it the variants flip different holdout cases (or
+  // leave one unpaired by a timeout majority), and dev_a2 regresses in all.
+  const baseline = await suiteReport(
+    { ho_x1: [P, P, P], ho_x2: [P, P, P], ho_y1: [F, F, F], ho_abstain: ['answered', 'answered', 'answered'] },
+    { dev: { ...DEV_REPETITIONS, dev_a2: [P, P, P] } }
+  );
+  const reports = {};
+  for (const [name, holdout] of Object.entries(HOLDOUT_VARIANTS)) {
+    reports[name] = await suiteReport(holdout, { baseline });
+  }
+  const all = Object.values(reports);
+  // Every case's comparison differs from run to run (report.json)...
+  assert.deepEqual(
+    all.map((report) => [report.comparison.paired, report.comparison.mcnemar.regressions, report.comparison.mcnemar.improvements, report.comparison.rateChanges.length]),
+    [[6, 2, 0, 1], [6, 3, 1, 0], [6, 3, 0, 1], [6, 2, 0, 1], [5, 2, 0, 0]]
+  );
+  assert.notEqual(reports.timeouts.comparison.accuracy.delta, reports.spread.comparison.accuracy.delta);
+  assert.deepEqual(reports.timeouts.comparison.excluded.notCounted.map((entry) => entry.id), ['ho_y1']);
+  const distinct = (values) => new Set(values).size;
+  assert.equal(distinct(all.map((report) => renderReportMarkdown(report, { revealHoldout: true }))), all.length);
+  assert.equal(distinct(all.map((report) => renderHeadline(report, { revealHoldout: true }))), all.length);
+
+  // ...but report.md and the console show the same paired dev cases.
+  const markdown = renderReportMarkdown(reports.spread);
+  const consoleText = renderHeadline(reports.spread);
+  for (const [name, report] of Object.entries(reports)) {
+    assert.equal(renderReportMarkdown(report), markdown, name);
+    assert.equal(renderHeadline(report), consoleText, name);
+  }
+  assert.match(markdown, /\nvs baseline \(dev cases\): Δ −33\.3 pts \(95% CI [^)]+\) on 3 paired dev case\(s\); 1 regression\(s\), 0 improvement\(s\); /);
+  assert.match(markdown, /### Regressions \(baseline majority pass → candidate fail\)\n\n\| Case \| Question \| Baseline \| Candidate \|\n\| --- \| --- \| --- \| --- \|\n\| dev_a2 \|[^\n]*\n\n/);
+  assert.match(consoleText, /\nPaired comparison with baseline\.json: 3 paired dev case\(s\) \(the comparison's 3 holdout case\(s\) are not shown;/);
+  assert.match(consoleText, /\n {2}regressions: dev_a2 \(pass → wrong_result\)\n {2}improvements: none$/);
+  assert.doesNotMatch(`${markdown}\n${consoleText}`, /ho_|not counted or timed out|Excluded from the paired test|on [56] paired|[23] regression\(s\)|1 improvement/);
 });

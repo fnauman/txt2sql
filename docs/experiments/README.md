@@ -75,7 +75,9 @@ For each arm (baseline and candidate):
   rejections, retrieval misses, known validator rejections, the guardrail
   confusion matrix;
 - the paired table, McNemar p, the accuracy delta with its interval, and the
-  regression and improvement case lists;
+  regression and improvement case lists (report.md gives them over the
+  paired dev cases while the holdout is hidden; the holdout's evidence there
+  is its accuracy by split in both arms);
 - cost per question and per correct answer, prompt tokens and their cached
   share, p50 / p95 latency, retry rate;
 - the offline numbers it was predicted from (ceiling, rescore, prompt size),

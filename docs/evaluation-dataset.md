@@ -171,20 +171,25 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   reads holdout questions, golds or per-case results to decide what to
   build or how to tune it.
 - The holdout is looked at **in aggregate**: report.md and the console show
-  holdout accuracy by split, never per case and never as a list of flipped
-  cases, unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
+  holdout accuracy by split, never per case and never as flipped cases or
+  flip counts (a comparison with a baseline covers the paired dev cases),
+  unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
   documented look, for example when retiring a holdout). `report.json` keeps
   every case for the rescore, the comparison and the gate; opening it is
   revealing the holdout.
 - While the holdout is hidden, these still cover every case, holdout
   included: the headline strict accuracy (a point estimate without an
   interval: the split accuracies weighted by their case counts), the budget
-  row's spend, and **the exit code with its reasons**. The headline's
-  intervals, the majority-pass cases, the intent-clustered accuracy, the
-  holdout split row's majority passes and the legacy pooled rate are dev
-  figures: two runs with the same holdout accuracy can differ in how its
-  pass rates spread over cases and intents, or in excluded and skipped
-  holdout repetitions, and those figures would show it. The exit code can give a hidden holdout outcome away in edge
+  row's spend, and **the exit code with its reasons** (a failed `--gate`
+  tests every paired case, but its reason gives no counts: every case's
+  counts minus the dev ones shown would be the holdout's flips). The
+  headline's intervals, the majority-pass cases, the intent-clustered
+  accuracy, the holdout split row's majority passes, the legacy pooled rate
+  and the comparison (its paired table, accuracy change and interval,
+  McNemar p, verdict and lists) are dev figures: two runs with the same
+  holdout accuracy can differ in how its pass rates spread over cases and
+  intents, in excluded and skipped holdout repetitions, or in which holdout
+  cases flipped, and those figures would show it. The exit code can give a hidden holdout outcome away in edge
   cases: in the benchmark profile a run whose dev cases all pass exits 1
   when a holdout case failed, a holdout abstain / clarify case included
   (whose outcome report.md does not show; the reason does not itemize
@@ -1256,7 +1261,8 @@ rule).
   accuracy, when a run has both, with what the holdout rule enforces: no
   multi-word semantic-layer phrase and not "revenue"); the **behaviour line** ("Behaviour cases:
   abstain/clarify — N cases, M handled correctly"); the comparison line when
-  there is a baseline. While the holdout is hidden, the first line gives
+  there is a baseline (over the paired dev cases while the holdout is
+  hidden). While the holdout is hidden, the first line gives
   every case's strict accuracy without an interval ("every split; no
   interval while the holdout is hidden") and the second line is the dev
   cases': their strict accuracy with its CI, majority-pass cases and
@@ -1299,10 +1305,11 @@ rule).
 - **Behaviour cases (abstain / clarify)**: per expected behaviour, cases
   handled, the majority outcomes, and a per-case table.
 - **Holdout in aggregate only** (by default): holdout cases appear in the
-  split line and rows only; the case tables, the behaviour-case table, the
-  comparison's flip and exclusion lists and the console's progress, rescore
-  and flip lines leave them out and count them ("N holdout case(s) not
-  listed"), and the failure-class, difficulty and tag breakdowns, the
+  split line and rows only; the case tables, the behaviour-case table and
+  the console's progress and rescore lines leave them out and count them
+  ("N holdout case(s) not listed"); the comparison (report.md and the
+  console) covers the paired dev cases and only says how many holdout cases
+  it left out; and the failure-class, difficulty and tag breakdowns, the
   attribution tables, the guardrail confusion matrix, the behaviour summary
   and the cost, latency, retry and token figures (report.md and the console)
   cover dev cases, so that subtracting
@@ -1422,7 +1429,11 @@ majority over repetitions: regressions and improvements feed an **exact
 two-sided McNemar test**, and a paired case bootstrap gives a 95% CI for the
 change in strict accuracy. The console prints the paired 2x2 table, the
 accuracy change, the McNemar p and the flipped case ids; report.md lists the
-flips with their questions.
+flips with their questions. While the holdout is hidden, both recompute all
+of it over the paired dev cases and leave the holdout cases out of every
+list, saying only how many there are ("Dev cases only: the comparison's N
+holdout case(s) are left out ..."); `--gate` still decides on every paired
+case, holdout included.
 
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`, when
@@ -1522,8 +1533,10 @@ How to read it:
   or tuned on; the fresh holdout (147 answer cases) is new intents written
   blind and audited by two independent annotators. Experiment 2 was designed
   from dev failures, so its dev gain (74.7% → 88.3%) is in-sample; its holdout
-  gain (41.3% → 49.2%, 17 improvements vs 6 regressions, exact McNemar
-  p = 0.035) is the out-of-sample evidence. The remaining 39-point gap is the
+  gain (41.3% → 49.2%; 17 improvements vs 6 regressions, exact McNemar
+  p = 0.035, as the live run's report.md counted the holdout's flips at the
+  time: report.md no longer shows holdout flip counts) is the out-of-sample
+  evidence. The remaining 39-point gap is the
   clearest measurement in this repository: the holdout leans on analytical
   shapes the dev set barely covers (shares and ratios, overdue and ageing
   balances, running totals, month-over-month change, weekday and value-band

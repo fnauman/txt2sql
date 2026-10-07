@@ -195,8 +195,8 @@ else fixed. This branch is rebased onto the measurement-hygiene branch
 (inspected holdout moved to dev, the fresh blind holdout, the re-made
 404-case baseline); arm A is that `eval/baselines/gpt-4o-mini.json` (a
 version-1 run, recorded as not recorded: it predates the switch).
-`HINTS_VERSION=1 npm run eval -- --offline` reproduces it with 0 flips over
-392 paired answer cases (below). Arm B is one paid `--repeat 3` run with
+`HINTS_VERSION=1 npm run eval -- --offline` reproduces it: the same split
+accuracies and 0 flips over the 245 paired dev cases (below). Arm B is one paid `--repeat 3` run with
 `HINTS_VERSION=2` (the default), paired automatically against arm A; the
 pairing covers the 392 answer cases both reports share. Holdout results are
 read in aggregate only. A same-day `HINTS_VERSION=1 --repeat 3` run is an
@@ -324,15 +324,16 @@ live run") explicitly; see Reproduce below.
 scope), allow-lists and semantic plans of all 404 suite questions under
 `HINTS_VERSION=1` equal the base commit's (sha256 per question).
 `HINTS_VERSION=1` rescoring of the version-1 baseline (`--rescore`, see Reproduce)
-reproduces it: 62.2% (dev 74.7%, holdout 41.3%), 392 paired answer cases, 0
-flips, 0 pass-rate changes.
+reproduces it: 62.2% (dev 74.7%, holdout 41.3%); over the 245 paired dev
+cases (the comparison's 147 holdout cases are not shown) 0 flips and 0
+pass-rate changes.
 
 **Rescore under version 2** (the same `--rescore`, default
 `HINTS_VERSION`; validator and semantic-plan effects only, as above):
 
 | | Baseline (= version-1 rescore) | Rescore, version 2 |
 |---|---|---|
-| Strict accuracy | 62.2% (dev 74.7%, holdout 41.3%) | 62.2% (dev 74.7%, holdout 41.3%); paired 392, Δ 0.0, 0 flips |
+| Strict accuracy | 62.2% (dev 74.7%, holdout 41.3%) | 62.2% (dev 74.7%, holdout 41.3%); 245 paired dev cases, Δ 0.0, 0 flips |
 | Repetitions, dev cases: pass / wrong result / guardrail true rejection | 549 / 176 / 10 | 549 / 164 / 22 |
 | Attribution, dev cases (repetitions) | model 186 · system 0 | model 186 · system 0 |
 | Guardrail confusion, dev attempts | TP 61, FP 0, FN 176 · precision 100%, recall 25.7% | TP 70, FP 0, FN 164 · precision 100%, recall 29.9% |
@@ -399,8 +400,8 @@ oracle and retry budget. Run cost: $0.63.
 | fresh holdout (147 answer cases) | 41.3% | **49.2%** |
 | Majority-pass cases, dev | 184/245 | 217/245 |
 | Intent-clustered accuracy, dev (130 intents) | 72.2% | 86.5% |
-| Paired: improvements / regressions, exact McNemar p | | 57 / 13, p < 0.001 |
-| Δ strict accuracy (paired bootstrap 95% CI) | | +11.5 pts (+7.6 to +15.3) |
+| Paired dev cases (245): improvements / regressions, exact McNemar p | | 40 / 7, p < 0.001 |
+| Δ strict accuracy, paired dev cases (paired bootstrap 95% CI) | | +13.6 pts (+8.7 to +18.6) |
 | Attribution, dev cases (repetitions) | pass 549 · model 186 · system 0 | pass 649 · model 86 · system 0 |
 | Guardrail precision / recall, dev attempts | 100% / 25.7% | 100% / 30.4% |
 | Abstain / clarify handled, dev cases | 0 / 10 | 0 / 10 |
@@ -409,7 +410,11 @@ oracle and retry budget. Run cost: $0.63.
 | Latency p50 / p95, retry rate, dev cases | 2.49 s / 5.32 s, 6.7% | 2.39 s / 4.40 s, 3.8% |
 
 **By split** (aggregate counts only; the holdout policy forbids per-case
-holdout analysis):
+holdout analysis). The holdout row was read from the live run's report.md,
+which at the time counted the holdout's flips in aggregate; report.md now
+shows the comparison over the paired dev cases only (the dev row) while the
+holdout is hidden, since flip counts say more about holdout outcomes than
+its accuracy by split. The holdout row stays as recorded:
 
 | Split | Paired cases | Improvements | Regressions | Exact McNemar p |
 |---|---|---|---|---|
@@ -434,7 +439,8 @@ holdout is read only as its accuracy by split.
 ## Decision
 
 **Adopt version 2 as the default.** It is the largest measured improvement in
-this repository so far (+11.5 pts strict accuracy, McNemar p < 0.001) and,
+this repository so far (62.2% → 73.6% strict accuracy; +13.6 pts on the
+paired dev cases, McNemar p < 0.001) and,
 crucially, it improves the blind holdout significantly (+7.9 pts, p = 0.035),
 at unchanged cost per correct answer and lower latency. `HINTS_VERSION=1`
 stays selectable and reproduces the previous prompts byte for byte. The

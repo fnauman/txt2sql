@@ -650,7 +650,17 @@ export function computeExitCode(report, { gate = false, minAccuracy = null, fail
   }
   const failures = [];
   if (gate) {
-    if (report.comparison?.verdict === 'worse') {
+    // The gate tests every paired case, holdout included. Unless
+    // revealHoldout, report.md and the console show the comparison over the
+    // dev cases only, so the reason gives no counts: every case's counts
+    // minus the dev ones would be the holdout's flips.
+    const holdoutHidden = !revealHoldout && (report.comparison?.holdoutCases?.length || 0) > 0;
+    if (report.comparison?.verdict === 'worse' && holdoutHidden) {
+      failures.push(
+        'significantly worse than the baseline (exact McNemar test over every paired case, holdout included; its counts are not shown while ' +
+          'the holdout is hidden: report.md shows the dev cases, --reveal-holdout every case)'
+      );
+    } else if (report.comparison?.verdict === 'worse') {
       failures.push(
         `significantly worse than the baseline: ${report.comparison.mcnemar.regressions} regression(s) vs ${report.comparison.mcnemar.improvements} improvement(s), exact McNemar p = ${report.comparison.mcnemar.p}`
       );

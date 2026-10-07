@@ -4,14 +4,16 @@
 import { describeHintsVersion, sameHintsVersion } from '../hints-version.js';
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
+import { summarizePairs } from './compare.js';
 import { hiddenHoldoutNote, holdoutRecordIds } from './holdout.js';
 import { legacySummary } from './runner.js';
 import { BOOTSTRAP_RESAMPLES, BOOTSTRAP_SEED, summarizeAccuracy, summarizeBreakdowns, summarizeRunUsage } from './stats.js';
 
 // Holdout display policy (src/eval/holdout.js): unless `revealHoldout` is
 // set, report.md and the console show holdout results in aggregate only (the
-// split breakdown): no per-case holdout rows, no holdout flip lists and no
-// holdout ids in the comparison's lists. report.json keeps everything.
+// split breakdown): no per-case holdout rows, and every other figure,
+// the comparison's included, covers the dev cases. report.json keeps
+// everything.
 
 // The ids report.md and the console must not list: the holdout cases of the
 // report and of its comparison (empty when they are revealed).
@@ -24,6 +26,44 @@ function hiddenIds(report, { revealHoldout = false } = {}) {
 
 function comparisonHiddenIds(comparison, { revealHoldout = false } = {}) {
   return revealHoldout ? new Set() : new Set(comparison?.holdoutCases || []);
+}
+
+// The comparison report.md and the console show. Its figures over every
+// paired case next to the listed dev flips would give the holdout's flips
+// away by subtraction (and its interval, McNemar p and verdict depend on
+// them), so with holdout cases hidden every figure is recomputed over the
+// paired dev cases (summarizePairs, with the comparison's alpha and
+// bootstrap settings) and the lists leave the holdout cases out, uncounted:
+// the number of holdout cases in the comparison (a property of the two case
+// sets, not of an outcome) is all that is said about them. --gate still tests
+// every paired case; its verdict is the exit code. `hiddenCases` is that
+// number (0 when nothing is hidden).
+function displayedComparison(comparison, { revealHoldout = false } = {}) {
+  const hidden = comparisonHiddenIds(comparison, { revealHoldout });
+  if (hidden.size === 0) {
+    return { ...comparison, hiddenCases: 0 };
+  }
+  const visible = (entries) => (entries || []).filter((entry) => !hidden.has(typeof entry === 'string' ? entry : entry.id));
+  const pairs = visible(comparison.pairedCases);
+  const ci = comparison.accuracy?.deltaCi95 || {};
+  return {
+    ...comparison,
+    ...summarizePairs(pairs, { alpha: comparison.alpha ?? 0.05, resamples: ci.resamples ?? BOOTSTRAP_RESAMPLES, seed: ci.seed ?? BOOTSTRAP_SEED }),
+    pairedCases: pairs,
+    excluded: { goldChanged: visible(comparison.excluded?.goldChanged), notCounted: visible(comparison.excluded?.notCounted) },
+    newCases: visible(comparison.newCases),
+    removedCases: visible(comparison.removedCases),
+    hiddenCases: hidden.size,
+  };
+}
+
+// The holdout note of a displayed comparison, or null when nothing is hidden.
+function hiddenComparisonNote(comparison) {
+  return comparison.hiddenCases > 0
+    ? `Dev cases only: the comparison's ${comparison.hiddenCases} holdout case(s) are left out of these figures and lists (the holdout is ` +
+        'read as its accuracy by split). `--gate` still tests every paired case, holdout included; its verdict is the exit code. ' +
+        '`--reveal-holdout` shows them.'
+    : null;
 }
 
 const isBehaviorRecord = (record) => Boolean(record.expected_behavior && record.expected_behavior !== 'answer');
@@ -207,7 +247,7 @@ function devAccuracyText(accuracy) {
   );
 }
 
-function headline(report, hidden = new Set(), shown = displayedSummaries(report, hidden)) {
+function headline(report, hidden = new Set(), shown = displayedSummaries(report, hidden), comparison = report.comparison) {
   const stats = report.stats;
   const strict = stats.strictAccuracy;
   const date = report.generatedAt ? report.generatedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'n/a';
@@ -285,9 +325,9 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
         `sha256 ${short(report.rescoredFrom.sha256)}); cost and latency are the original run's.`
     );
   }
-  if (report.comparison) {
+  if (comparison) {
     lines.push('');
-    lines.push(comparisonLine(report.comparison));
+    lines.push(comparisonLine(comparison));
   }
   return lines.join('\n');
 }
@@ -299,11 +339,14 @@ const VERDICT_TEXT = {
   no_paired_cases: 'no case could be paired with the baseline',
 };
 
+/** The comparison's one-line summary (of a displayed comparison: dev cases only while the holdout is hidden). */
 export function comparisonLine(comparison) {
+  const dev = comparison.hiddenCases > 0;
   return (
-    `vs baseline: Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)}) on ` +
-    `${comparison.paired} paired case(s); ${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s); ` +
-    `exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} → ${VERDICT_TEXT[comparison.verdict] || comparison.verdict}`
+    `vs baseline${dev ? ' (dev cases)' : ''}: Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)}) on ` +
+    `${comparison.paired} paired ${dev ? 'dev ' : ''}case(s); ${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s); ` +
+    `exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} → ${VERDICT_TEXT[comparison.verdict] || comparison.verdict}` +
+    (dev ? ` (the comparison's ${comparison.hiddenCases} holdout case(s) are not shown; --gate tests every paired case)` : '')
   );
 }
 
@@ -318,42 +361,38 @@ function contingencyOf(comparison) {
   return { bothPass, regressions, improvements, bothFail: comparison.paired - bothPass - regressions - improvements };
 }
 
-function flipList(entries, hidden = new Set()) {
-  const listed = entries.filter((entry) => !hidden.has(entry.id));
-  const holdout = entries.length - listed.length;
-  const holdoutText = holdout > 0 ? `${holdout} holdout case(s) (not listed)` : '';
-  if (listed.length === 0) {
-    return holdoutText || 'none';
+function flipList(entries) {
+  if (entries.length === 0) {
+    return 'none';
   }
-  const shown = listed.slice(0, 12).map((entry) => `${entry.id} (${entry.baseline.outcome} → ${entry.candidate.outcome})`);
-  return (
-    `${shown.join(', ')}${listed.length > shown.length ? `, … ${listed.length - shown.length} more (report.md)` : ''}` +
-    (holdoutText ? `; ${holdoutText}` : '')
-  );
+  const shown = entries.slice(0, 12).map((entry) => `${entry.id} (${entry.baseline.outcome} → ${entry.candidate.outcome})`);
+  return `${shown.join(', ')}${entries.length > shown.length ? `, … ${entries.length - shown.length} more (report.md)` : ''}`;
 }
 
 /**
  * The comparison as a few plain-text lines for the console: the paired 2x2
  * table of majority verdicts, the accuracy change, the exact McNemar p and
- * the flipped cases by id (holdout flips only counted, unless revealHoldout).
+ * the flipped cases by id (over the paired dev cases, unless revealHoldout).
  */
-export function renderComparisonConsole(comparison, { revealHoldout = false } = {}) {
-  const hidden = comparisonHiddenIds(comparison, { revealHoldout });
+export function renderComparisonConsole(recorded, { revealHoldout = false } = {}) {
+  const comparison = displayedComparison(recorded, { revealHoldout });
+  const dev = comparison.hiddenCases > 0;
   const contingency = contingencyOf(comparison);
   const width = Math.max(4, ...[contingency.bothPass, contingency.regressions, contingency.improvements, contingency.bothFail].map((value) => String(value).length));
   const row = (label, left, right) => `  ${label.padEnd(15)}${String(left).padStart(14 + width - 4)}${String(right).padStart(16 + width - 4)}`;
   const excluded = comparison.excluded || { goldChanged: [], notCounted: [] };
   const lines = [
-    `Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${comparison.paired} paired case(s)`,
+    `Paired comparison with ${comparison.baseline.label || 'the baseline'}: ${comparison.paired} paired ${dev ? 'dev ' : ''}case(s)` +
+      (dev ? ` (the comparison's ${comparison.hiddenCases} holdout case(s) are not shown; --gate tests every paired case, its verdict is the exit code)` : ''),
     `  ${''.padEnd(15)}${'candidate pass'.padStart(14 + width - 4)}${'candidate fail'.padStart(16 + width - 4)}`,
     row('baseline pass', contingency.bothPass, contingency.regressions),
     row('baseline fail', contingency.improvements, contingency.bothFail),
-    `  strict accuracy (paired cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
+    `  strict accuracy (paired ${dev ? 'dev ' : ''}cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
       `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
     `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
       `${VERDICT_TEXT[comparison.verdict] || comparison.verdict}`,
-    `  regressions: ${flipList(comparison.flips.regressions, hidden)}`,
-    `  improvements: ${flipList(comparison.flips.improvements, hidden)}`,
+    `  regressions: ${flipList(comparison.flips.regressions)}`,
+    `  improvements: ${flipList(comparison.flips.improvements)}`,
   ];
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
@@ -684,11 +723,16 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
   ].join('\n');
 }
 
-function comparisonSection(comparison, { revealHoldout = false } = {}) {
-  const hidden = comparisonHiddenIds(comparison, { revealHoldout });
-  const visible = (entries) => entries.filter((entry) => !hidden.has(entry.id));
-  const visibleIds = (ids) => ids.filter((id) => !hidden.has(id));
+// The comparison section of a displayed comparison (displayedComparison:
+// the paired dev cases while the holdout is hidden).
+function comparisonSection(comparison) {
+  const dev = comparison.hiddenCases > 0 ? 'dev ' : '';
   const lines = ['## Comparison with the baseline', ''];
+  const note = hiddenComparisonNote(comparison);
+  if (note) {
+    lines.push(note);
+    lines.push('');
+  }
   const base = comparison.baseline;
   const cand = comparison.candidate;
   lines.push(
@@ -702,8 +746,8 @@ function comparisonSection(comparison, { revealHoldout = false } = {}) {
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
         ['Schema scope', schemaScopeText(base.schemaScope), schemaScopeText(cand.schemaScope)],
         ['Hints version', describeHintsVersion(base.hintsVersion), describeHintsVersion(cand.hintsVersion)],
-        ['Strict accuracy (paired cases)', formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
-        ['Majority passes (paired cases)', `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
+        [`Strict accuracy (paired ${dev}cases)`, formatPercent(comparison.accuracy.baseline), formatPercent(comparison.accuracy.candidate)],
+        [`Majority passes (paired ${dev}cases)`, `${comparison.majority.baselinePasses}/${comparison.paired}`, `${comparison.majority.candidatePasses}/${comparison.paired}`],
       ]
     )
   );
@@ -722,26 +766,11 @@ function comparisonSection(comparison, { revealHoldout = false } = {}) {
   );
   lines.push('');
   lines.push(comparisonLine(comparison));
-  const holdoutFlips = [
-    ['regression(s)', comparison.flips.regressions],
-    ['improvement(s)', comparison.flips.improvements],
-    ['pass-rate change(s) without a flip', comparison.rateChanges],
-  ]
-    .map(([label, entries]) => [label, entries.length - visible(entries).length])
-    .filter(([, count]) => count > 0);
-  if (holdoutFlips.length > 0) {
-    lines.push('');
-    lines.push(
-      `Holdout cases in the comparison (aggregate only, not listed below): ${holdoutFlips.map(([label, count]) => `${count} ${label}`).join(', ')}. ` +
-        '`--reveal-holdout` lists them.'
-    );
-  }
-  for (const [title, all] of [
+  for (const [title, entries] of [
     ['Regressions (baseline majority pass → candidate fail)', comparison.flips.regressions],
     ['Improvements (baseline fail → candidate majority pass)', comparison.flips.improvements],
     ['Pass-rate changes without a flip', comparison.rateChanges],
   ]) {
-    const entries = visible(all);
     if (entries.length === 0) {
       continue;
     }
@@ -761,27 +790,23 @@ function comparisonSection(comparison, { revealHoldout = false } = {}) {
     );
   }
   const notes = [];
-  // Lists with their holdout ids counted, not named.
-  const named = (count, ids) => (count > ids.length ? `${ids.length ? `${ids.join(', ')}, and ` : ''}${count - ids.length} holdout case(s)` : ids.join(', '));
-  const goldChanged = visible(comparison.excluded.goldChanged);
   if (comparison.excluded.goldChanged.length) {
-    notes.push(`Excluded, gold changed: ${named(comparison.excluded.goldChanged.length, goldChanged.map((entry) => `${entry.id} (${entry.reason})`))}.`);
+    notes.push(`Excluded, gold changed: ${comparison.excluded.goldChanged.map((entry) => `${entry.id} (${entry.reason})`).join(', ')}.`);
   }
-  const notCounted = visible(comparison.excluded.notCounted);
   if (comparison.excluded.notCounted.length) {
     notes.push(
-      `Excluded from the paired test (not counted, or a timeout/infrastructure majority, in one report): ${named(comparison.excluded.notCounted.length, notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`))}.`
+      `Excluded from the paired test (not counted, or a timeout/infrastructure majority, in one report): ${comparison.excluded.notCounted.map((entry) => `${entry.id} (baseline ${entry.baseline}, candidate ${entry.candidate})`).join(', ')}.`
     );
   }
   if (comparison.newCases.length) {
-    notes.push(`New cases (not in the baseline): ${named(comparison.newCases.length, visibleIds(comparison.newCases))}.`);
+    notes.push(`New cases (not in the baseline): ${comparison.newCases.join(', ')}.`);
   }
   if (comparison.removedCases.length) {
-    notes.push(`Baseline cases not in this run: ${comparison.removedCases.length} (${truncate(named(comparison.removedCases.length, visibleIds(comparison.removedCases)), 300)}).`);
+    notes.push(`Baseline cases not in this run: ${comparison.removedCases.length} (${truncate(comparison.removedCases.join(', '), 300)}).`);
   }
   if (notes.length) {
     lines.push('');
-    lines.push(...notes.flatMap((note) => [note, '']).slice(0, -1));
+    lines.push(...notes.flatMap((line) => [line, '']).slice(0, -1));
   }
   return lines.join('\n');
 }
@@ -915,13 +940,14 @@ function legacySection(report, shown = displayedSummaries(report)) {
 export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
   const hidden = hiddenIds(report, { revealHoldout });
   const shown = displayedSummaries(report, hidden);
+  const comparison = report.comparison ? displayedComparison(report.comparison, { revealHoldout }) : null;
   const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${report.model}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
   const sections = [
     title,
-    headline(report, hidden, shown),
+    headline(report, hidden, shown, comparison),
     attributionSection(report, shown),
     confusionSection(report, shown),
-    report.comparison ? comparisonSection(report.comparison, { revealHoldout }) : '',
+    comparison ? comparisonSection(comparison) : '',
     behaviorSection(report, hidden, shown),
     casesSection(report, hidden),
     breakdownSection(report, hidden),
