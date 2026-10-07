@@ -739,6 +739,38 @@ test('v2 METRIC_COLUMN: a qualified derived-table or CTE column counts only thro
   }
 });
 
+test('v2 METRIC_COLUMN: a difference read as a condition by SIGN() and the like, or with its decimals dropped, computes no balance', () => {
+  // Fourth review: SUM(SIGN(a - b) * a) sums NetPayableAmount over the open
+  // documents like the IF() condition does, and FLOOR(), DIV or FORMAT(x, 0)
+  // drop the decimals like an integer cast does; all of them passed.
+  const april = aprilDueDocuments;
+  for (const sql of [
+    `SELECT SUM(SIGN(d.NetPayableAmount - d.PaidAmount) * d.NetPayableAmount) AS open_amount ${april}`,
+    `SELECT SUM(ELT(d.NetPayableAmount - d.PaidAmount, d.NetPayableAmount)) AS open_amount ${april}`,
+    `SELECT SUM(FIELD(d.NetPayableAmount - d.PaidAmount, 0) * d.NetPayableAmount) AS open_amount ${april}`,
+    `SELECT FLOOR(SUM(d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT CEIL(SUM(d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT SUM(d.NetPayableAmount * MOD(d.NetPayableAmount - d.PaidAmount, 1)) AS open_amount ${april}`,
+    `SELECT SUM(d.NetPayableAmount - d.PaidAmount) DIV 1 AS open_amount ${april}`,
+    `SELECT SUM(d.NetPayableAmount - d.PaidAmount) MOD 100 AS open_amount ${april}`,
+    `SELECT SUM(d.NetPayableAmount - d.PaidAmount) % 100 AS open_amount ${april}`,
+    `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 0) AS open_amount ${april}`,
+    `SELECT SUM(FLOOR(t.bal)) AS open_amount FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
+  }
+  // The value itself, or another column's sign, still counts.
+  for (const sql of [
+    `SELECT SUM(ABS(d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT SUM(SIGN(d.NetPayableAmount) * (d.NetPayableAmount - d.PaidAmount)) AS open_amount ${april}`,
+    `SELECT FORMAT(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,
+    `SELECT ROUND(SUM(d.NetPayableAmount - d.PaidAmount), 2) AS open_amount ${april}`,
+    `SELECT SUM(d.NetPayableAmount - d.PaidAmount) / COUNT(*) AS average_open_amount ${april}`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), null, sql);
+  }
+});
+
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
   // Review finding: "gross" anywhere in the question made an explicit
   // "revenue" / "average order value" advisory, so "Show revenue and gross

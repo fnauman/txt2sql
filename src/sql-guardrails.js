@@ -1130,6 +1130,12 @@ const DIFFERENCE_ROUNDING_FUNCTIONS = new Set(['ROUND']);
 const DIFFERENCE_CAST_FUNCTIONS = new Set(['CAST', 'CONVERT']);
 const DIFFERENCE_DECIMAL_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED']);
 const DIFFERENCE_FLOAT_CAST_TYPES = new Set(['DOUBLE', 'FLOAT', 'REAL']);
+// Functions that read the difference only as a condition (SIGN keeps its
+// sign, FIELD and INTERVAL compare every argument, ELT reads its first as an
+// index), and functions or operators that drop its decimals (FLOOR, CEIL, a
+// remainder, an integer division; FORMAT(x, 0) too).
+const DIFFERENCE_CONDITION_FUNCTIONS = new Set(['SIGN', 'FIELD', 'INTERVAL']);
+const DIFFERENCE_DECIMAL_DROPPING_FUNCTIONS = new Set(['FLOOR', 'CEIL', 'CEILING', 'MOD']);
 // Operators binding tighter than binary minus: next to an operand they take
 // it away from the difference ("a - b * 2", "2 * a - b").
 const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
@@ -1666,9 +1672,10 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
  * results, scalar subqueries, and derived-table and CTE columns that the
  * query reading them uses as values (derivedColumnReachesValue), without
  * being an operand of a comparison or logical operator, the condition of an
- * IF(), an argument NULLIF() compares, inside a cast that drops the decimals
- * (CAST(... AS SIGNED)), or in a WHERE, HAVING, ON, GROUP BY, ORDER BY or
- * CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
+ * IF(), an argument NULLIF() compares, read as a condition by SIGN(),
+ * FIELD(), INTERVAL() or ELT(), inside a cast or a function or operator that
+ * drops the decimals (CAST(... AS SIGNED), FLOOR(), DIV), or in a WHERE,
+ * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
  * 0" computes no value. `passedName` is the column name a `*` select item
  * passes on when that `*` is the expression (see derivedColumnReachesValue);
  * `budget` bounds the references followed (past it the answer is no).
@@ -1681,8 +1688,11 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
   // Set when the previous step left a subquery's select list: the item's
   // position and output column name.
   let selectItem = null;
+  // An integer division or a remainder next to the expression drops its
+  // decimals ("SUM(a - b) DIV 1").
+  const dropsDecimals = (token) => isOperatorToken(token, '%') || (token?.type === 'word' && !token.afterDot && (token.upper === 'DIV' || token.upper === 'MOD'));
   for (let guard = 0; guard <= tokens.length; guard += 1) {
-    if (continuesIntoPredicate(tokens, end, parens)) {
+    if (continuesIntoPredicate(tokens, end, parens) || dropsDecimals(tokens[start - 1]) || dropsDecimals(tokens[end + 1])) {
       return false;
     }
     let sameExpression = true;
@@ -1709,6 +1719,20 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
         }
         if (DIFFERENCE_CAST_FUNCTIONS.has(functionName) && !valueKeepingCastOperand(tokens, at, parens)) {
           return false;
+        }
+        // SIGN(), FIELD(), INTERVAL() and ELT(<index>, ...) read it as a
+        // condition; FLOOR(), CEIL(), MOD() and FORMAT(x, 0) drop the
+        // decimals. (MOD and INTERVAL are keywords too, so the word before
+        // the parenthesis is read as written.)
+        const callee = tokens[at - 1]?.type === 'word' && !tokens[at - 1].afterDot ? tokens[at - 1].upper : null;
+        if (DIFFERENCE_CONDITION_FUNCTIONS.has(callee) || DIFFERENCE_DECIMAL_DROPPING_FUNCTIONS.has(callee) || (callee === 'ELT' && sameExpression)) {
+          return false;
+        }
+        if (callee === 'FORMAT' && sameExpression) {
+          const places = splitTopLevelArguments(tokens, at + 1, close - 1, parens)[1];
+          if (places && isIntegerLiteral(tokens, places[0], places[1]) && Number(tokens[places[1]].value) === 0) {
+            return false;
+          }
         }
         next = [groupOperandStart(tokens, at), close];
       } else if (isPunctToken(token, ',')) {
@@ -1814,8 +1838,9 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
  * difference must be a computed value (expressionIsComputedValue): in a
  * SELECT list, directly or through a derived-table or CTE column the query
  * reads as a value, not in a filter, join, grouping, ordering, CASE WHEN or
- * IF() condition ("WHERE a - b > 0" does not count) nor inside a cast that
- * drops the decimals. A difference of aliases of the two columns ("np - pa")
+ * IF() condition ("WHERE a - b > 0" does not count), not read as a condition
+ * by SIGN() and the like, nor inside a cast, function or operator that drops
+ * the decimals. A difference of aliases of the two columns ("np - pa")
  * does not count, and neither do the sum forms "a + (-b)" and "-b + a" (the
  * rejection names the difference, so a retry writes it plainly).
  */
