@@ -2,13 +2,14 @@
 //
 // Freeze: datasets/holdout-manifest.json lists every holdout case of every
 // dataset (split 'holdout') with the fingerprints of what it asks and how it
-// is scored and reported: the question, the gold SQL
+// is scored, verified and reported: the question, the gold SQL
 // (controls.goldFingerprint), the scoring fingerprint (gold + alternatives +
-// comparison spec, suite.js; what a comparison pairs cases on) and the
+// comparison spec, suite.js; what a comparison pairs cases on), the
 // measurement fingerprint (the case-definition fields that move a failure
 // between attribution buckets or report breakdowns: split, expected
 // behaviour, known_validator_rejection, expected tables, failure class,
-// difficulty and tags), with its intent and datasets. A
+// difficulty and tags) and the definition fingerprint (the whole case
+// definition, below), with its intent and datasets. A
 // hygiene test (test/holdout-manifest.test.js) fails when a holdout case is
 // added, removed or changed without the manifest being rewritten, and the
 // manifest must carry a dated note for its current state (`history`), so a
@@ -33,9 +34,12 @@ import path from 'node:path';
 import { DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE } from '../benchmark.js';
 import { goldFingerprint, normalizeSqlText } from './controls.js';
 import { sha256Hex, stableStringify } from './provenance.js';
-import { caseSplit, scoringFingerprint } from './suite.js';
+import { caseDefinitionFingerprint, caseSplit, scoringFingerprint } from './suite.js';
 
-export const MANIFEST_VERSION = 1;
+// The fingerprint scheme. 1: question, gold, scoring and measurement
+// fingerprints; 2: plus the definition fingerprint. A manifest of another
+// version fails the check until it is rewritten (with a note).
+export const MANIFEST_VERSION = 2;
 export const DEFAULT_HOLDOUT_MANIFEST_PATH = path.join(DEFAULT_DATASETS_DIR, HOLDOUT_MANIFEST_FILE);
 
 export const HOLDOUT_POLICY =
@@ -74,6 +78,40 @@ export function measurementFingerprint(testCase) {
   ).slice(0, 16);
 }
 
+// The case fields the definition fingerprint covers, and the ones it leaves
+// out. It is the suite's own notion of one case definition
+// (caseDefinitionFingerprint in suite.js: two definitions of an id that
+// differ in any of these are a dataset conflict), so the freeze and the
+// suite agree on what "the same case" is: every field anything runs,
+// verifies, scores, selects or reports on, the row-count pins, signal checks
+// and disallowed columns that verification and the warnings read included.
+// Whitespace in the question and SQL and the order of the top-level lists are
+// not changes, as in the other fingerprints. Free-text `notes` is editorial:
+// nothing reads it (test/holdout-manifest.test.js checks that every field a
+// dataset case carries is in one of these lists, so a new field is never
+// silently left out of the freeze).
+export const DEFINITION_FIELDS = Object.freeze([
+  'question',
+  'canonicalQuestion',
+  'expected_sql',
+  'alternative_expected_sql',
+  'comparison',
+  'expected_behavior',
+  'split',
+  'known_validator_rejection',
+  'expected_row_counts',
+  'expected_row_count',
+  'signal_checks',
+  'intentId',
+  'tags',
+  'expected_tables',
+  'expected_columns',
+  'disallowed_columns',
+  'difficulty',
+  'failure_class',
+]);
+export const EDITORIAL_FIELDS = Object.freeze(['notes']);
+
 /** The manifest entry of one holdout case. */
 export function holdoutManifestEntry(testCase, datasetNames = []) {
   return {
@@ -84,6 +122,9 @@ export function holdoutManifestEntry(testCase, datasetNames = []) {
     gold_fingerprint: goldFingerprint(testCase.expected_sql),
     scoring_fingerprint: scoringFingerprint(testCase),
     measurement_fingerprint: measurementFingerprint(testCase),
+    // The complete definition (DEFINITION_FIELDS); the fingerprints above say
+    // which part of it changed.
+    definition_fingerprint: caseDefinitionFingerprint(testCase),
   };
 }
 
@@ -110,7 +151,7 @@ export function computeHoldoutEntries(datasets) {
 // all of them, so any change the check reports changes the fingerprint too
 // and needs a note (a field compared but not hashed could be rewritten
 // silently by --write, and could never get its note).
-const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'measurement_fingerprint', 'intentId', 'datasets'];
+const COMPARED_FIELDS = ['question_fingerprint', 'gold_fingerprint', 'scoring_fingerprint', 'measurement_fingerprint', 'definition_fingerprint', 'intentId', 'datasets'];
 
 /** Fingerprint of a set of entries (what the history notes are written for): every compared field. */
 export function holdoutEntriesFingerprint(entries) {
@@ -140,7 +181,12 @@ export function compareHoldoutManifest(manifest, entries) {
     }
   }
   const problems = [];
-  if (!manifest || manifest.manifestVersion !== MANIFEST_VERSION || !Array.isArray(manifest.entries) || !Array.isArray(manifest.history)) {
+  if (manifest && Number.isInteger(manifest.manifestVersion) && manifest.manifestVersion !== MANIFEST_VERSION) {
+    problems.push(
+      `the manifest uses fingerprint scheme ${manifest.manifestVersion}, this checkout ${MANIFEST_VERSION}: rewrite it ` +
+        '(npm run holdout-manifest -- --write --note "...") after checking that no holdout case changed'
+    );
+  } else if (!manifest || manifest.manifestVersion !== MANIFEST_VERSION || !Array.isArray(manifest.entries) || !Array.isArray(manifest.history)) {
     problems.push(`the manifest is missing or not a version ${MANIFEST_VERSION} holdout manifest`);
   } else {
     if (manifest.fingerprint !== holdoutEntriesFingerprint(manifest.entries)) {

@@ -149,13 +149,21 @@ other words).
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
 case of every dataset with the fingerprints of its question, its gold
 (`gold_fingerprint`), its scoring (`scoring_fingerprint`: gold,
-alternatives and comparison spec; what a comparison pairs cases on) and its
+alternatives and comparison spec; what a comparison pairs cases on), its
 measurement (`measurement_fingerprint`: split, expected behaviour,
 `known_validator_rejection`, expected tables, failure class, difficulty and
 tags, the fields that move a failure between attribution buckets or report
-breakdowns), its intent and datasets, and a dated `history` of notes. The
+breakdowns) and its whole definition (`definition_fingerprint`: the suite's
+own notion of one case definition, `caseDefinitionFingerprint`, which also
+covers the row-count pins, signal checks, expected and disallowed columns and
+the canonical question; only the free-text `notes` is left out, since nothing
+reads it, and a hygiene test fails on a dataset field that is in neither
+list), its intent and datasets, and a dated `history` of notes. The
 manifest `fingerprint` covers every one of those fields, so every change the
-check reports needs a note. `test/holdout-manifest.test.js` fails when a
+check reports needs a note. `manifestVersion` is the fingerprint scheme (2
+since the definition fingerprint was added on 2026-10-07, a change recorded
+with a note and no case changed); a manifest of another scheme fails the
+check until it is rewritten with a note. `test/holdout-manifest.test.js` fails when a
 holdout case is added, removed (or moved to dev) or changed without the
 manifest being rewritten, when the manifest is edited by hand, and when its
 current state has no note:

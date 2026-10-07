@@ -1,7 +1,7 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
   "policy": "Error analysis and experiment design use dev failures only; holdout results are read in aggregate (report.md and the console show them by split, never per case, unless --reveal-holdout). Any change to the holdout (a case added, removed or changed) requires rewriting this manifest with a dated note (npm run holdout-manifest -- --write --note \"...\").",
-  "fingerprint": "fd12776dcad2f3a1",
+  "fingerprint": "969e94ee0429eec4",
   "entries": [
     {
       "id": "ho2_agreed_vs_charged_price_2026_dba74e",
@@ -12,7 +12,8 @@
       "question_fingerprint": "dba74e0a16e9e368",
       "gold_fingerprint": "2ce54d6e5fd7f598",
       "scoring_fingerprint": "a3064d54eb2280b2",
-      "measurement_fingerprint": "bac3a098b2ee131a"
+      "measurement_fingerprint": "bac3a098b2ee131a",
+      "definition_fingerprint": "e989b8e227ebcace"
     },
     {
       "id": "ho2_agreed_vs_charged_price_2026_f25d85",
@@ -23,7 +24,8 @@
       "question_fingerprint": "f25d85ae07fca678",
       "gold_fingerprint": "2ce54d6e5fd7f598",
       "scoring_fingerprint": "a3064d54eb2280b2",
-      "measurement_fingerprint": "bac3a098b2ee131a"
+      "measurement_fingerprint": "bac3a098b2ee131a",
+      "definition_fingerprint": "efa208d70594bb74"
     },
     {
       "id": "ho2_agreements_in_force_2026_01_15_24f9fb",
@@ -34,7 +36,8 @@
       "question_fingerprint": "24f9fbe30b9163b0",
       "gold_fingerprint": "b958cc30f19cbb76",
       "scoring_fingerprint": "5e4426a072b1c7a0",
-      "measurement_fingerprint": "af9d9d685610e890"
+      "measurement_fingerprint": "af9d9d685610e890",
+      "definition_fingerprint": "a89e8984e8962b09"
     },
     {
       "id": "ho2_agreements_in_force_2026_01_15_c733f6",
@@ -45,7 +48,8 @@
       "question_fingerprint": "c733f646043d8354",
       "gold_fingerprint": "b958cc30f19cbb76",
       "scoring_fingerprint": "5e4426a072b1c7a0",
-      "measurement_fingerprint": "af9d9d685610e890"
+      "measurement_fingerprint": "af9d9d685610e890",
+      "definition_fingerprint": "2bafe5a2ce5c257e"
     },
     {
       "id": "ho2_ar_ageing_asof_2026_05_31_22f54c",
@@ -56,7 +60,8 @@
       "question_fingerprint": "22f54cd7f6a29eb0",
       "gold_fingerprint": "6cc4460228ec3f38",
       "scoring_fingerprint": "71ea99df57900583",
-      "measurement_fingerprint": "74901352bc01eb7a"
+      "measurement_fingerprint": "74901352bc01eb7a",
+      "definition_fingerprint": "5f25c04a335ba188"
     },
     {
       "id": "ho2_ar_ageing_asof_2026_05_31_47ffd1",
@@ -67,7 +72,8 @@
       "question_fingerprint": "47ffd1452382f978",
       "gold_fingerprint": "6cc4460228ec3f38",
       "scoring_fingerprint": "71ea99df57900583",
-      "measurement_fingerprint": "74901352bc01eb7a"
+      "measurement_fingerprint": "74901352bc01eb7a",
+      "definition_fingerprint": "396a361c4c2cd2b1"
     },
     {
       "id": "ho2_average_basket_apr_2026_5fa07e",
@@ -78,7 +84,8 @@
       "question_fingerprint": "5fa07ed4df029288",
       "gold_fingerprint": "d63065804222f646",
       "scoring_fingerprint": "368ceb1de01e9eaa",
-      "measurement_fingerprint": "25b35919db84fea4"
+      "measurement_fingerprint": "25b35919db84fea4",
+      "definition_fingerprint": "038b03b97862810e"
     },
     {
       "id": "ho2_avg_unit_price_by_product_q1_2026_7cef03",
@@ -89,7 +96,8 @@
       "question_fingerprint": "7cef03c4d91bb382",
       "gold_fingerprint": "faf7582c5bcae06b",
       "scoring_fingerprint": "f551bc98a29f962f",
-      "measurement_fingerprint": "094ad5c1ece41f94"
+      "measurement_fingerprint": "094ad5c1ece41f94",
+      "definition_fingerprint": "f996449341a32b43"
     },
     {
       "id": "ho2_avg_unit_price_by_product_q1_2026_db8b15",
@@ -100,7 +108,8 @@
       "question_fingerprint": "db8b1573ecc3185b",
       "gold_fingerprint": "faf7582c5bcae06b",
       "scoring_fingerprint": "f551bc98a29f962f",
-      "measurement_fingerprint": "094ad5c1ece41f94"
+      "measurement_fingerprint": "094ad5c1ece41f94",
+      "definition_fingerprint": "6e5d9262f7de4e02"
     },
     {
       "id": "ho2_best_month_2025_894b10",
@@ -111,7 +120,8 @@
       "question_fingerprint": "894b10bbe84e54b5",
       "gold_fingerprint": "2122ceb003fa83b9",
       "scoring_fingerprint": "4460a6d666fc3650",
-      "measurement_fingerprint": "b880c7f1157213c5"
+      "measurement_fingerprint": "b880c7f1157213c5",
+      "definition_fingerprint": "f1cba39b02182036"
     },
     {
       "id": "ho2_best_month_2025_90de0a",
@@ -122,7 +132,8 @@
       "question_fingerprint": "90de0a4d6e042278",
       "gold_fingerprint": "2122ceb003fa83b9",
       "scoring_fingerprint": "4460a6d666fc3650",
-      "measurement_fingerprint": "b880c7f1157213c5"
+      "measurement_fingerprint": "b880c7f1157213c5",
+      "definition_fingerprint": "64741b16f5875aa8"
     },
     {
       "id": "ho2_best_seller_per_category_mar_2026_a3d10c",
@@ -133,7 +144,8 @@
       "question_fingerprint": "a3d10c457564a7ac",
       "gold_fingerprint": "2cc02936e618bd4e",
       "scoring_fingerprint": "d2cccbda8f277a87",
-      "measurement_fingerprint": "ac0225ec94e4c9fa"
+      "measurement_fingerprint": "ac0225ec94e4c9fa",
+      "definition_fingerprint": "45b0eac2e0933dd8"
     },
     {
       "id": "ho2_best_seller_per_category_mar_2026_a6eb25",
@@ -144,7 +156,8 @@
       "question_fingerprint": "a6eb25b7bb4f4a90",
       "gold_fingerprint": "2cc02936e618bd4e",
       "scoring_fingerprint": "d2cccbda8f277a87",
-      "measurement_fingerprint": "ac0225ec94e4c9fa"
+      "measurement_fingerprint": "ac0225ec94e4c9fa",
+      "definition_fingerprint": "0400a4dc2f277127"
     },
     {
       "id": "ho2_brands_per_customer_q1_2026_843907",
@@ -155,7 +168,8 @@
       "question_fingerprint": "843907575b84036d",
       "gold_fingerprint": "ecbf1f0a5b58b8cc",
       "scoring_fingerprint": "6ac316ec0ad8ac8e",
-      "measurement_fingerprint": "be7f6cc8be2b511f"
+      "measurement_fingerprint": "be7f6cc8be2b511f",
+      "definition_fingerprint": "414f0833d42609d4"
     },
     {
       "id": "ho2_brands_per_customer_q1_2026_a2a504",
@@ -166,7 +180,8 @@
       "question_fingerprint": "a2a50420319ace75",
       "gold_fingerprint": "ecbf1f0a5b58b8cc",
       "scoring_fingerprint": "6ac316ec0ad8ac8e",
-      "measurement_fingerprint": "5cfc8d220aebbbe8"
+      "measurement_fingerprint": "5cfc8d220aebbbe8",
+      "definition_fingerprint": "f99e3798dbb5d2f8"
     },
     {
       "id": "ho2_busiest_day_mar_2026_1407da",
@@ -177,7 +192,8 @@
       "question_fingerprint": "1407daed3094cd9e",
       "gold_fingerprint": "5d2fd76b85ef22b4",
       "scoring_fingerprint": "4a727bfd7f690990",
-      "measurement_fingerprint": "0555f6ebb4adb761"
+      "measurement_fingerprint": "0555f6ebb4adb761",
+      "definition_fingerprint": "e769e2d8b2036f1d"
     },
     {
       "id": "ho2_busiest_day_mar_2026_fb11b8",
@@ -188,7 +204,8 @@
       "question_fingerprint": "fb11b86066e4d015",
       "gold_fingerprint": "5d2fd76b85ef22b4",
       "scoring_fingerprint": "4a727bfd7f690990",
-      "measurement_fingerprint": "0555f6ebb4adb761"
+      "measurement_fingerprint": "0555f6ebb4adb761",
+      "definition_fingerprint": "f3974d3802b41b74"
     },
     {
       "id": "ho2_campaign_units_by_store_q1_2026_076675",
@@ -199,7 +216,8 @@
       "question_fingerprint": "076675158a070eb4",
       "gold_fingerprint": "2e0f5c6533119ec0",
       "scoring_fingerprint": "8433f5d0c510cee9",
-      "measurement_fingerprint": "a194b1331ecac45c"
+      "measurement_fingerprint": "a194b1331ecac45c",
+      "definition_fingerprint": "a09bd50bcd2cc715"
     },
     {
       "id": "ho2_campaign_units_by_store_q1_2026_12ee7a",
@@ -210,7 +228,8 @@
       "question_fingerprint": "12ee7a0e4b72516d",
       "gold_fingerprint": "2e0f5c6533119ec0",
       "scoring_fingerprint": "8433f5d0c510cee9",
-      "measurement_fingerprint": "a194b1331ecac45c"
+      "measurement_fingerprint": "a194b1331ecac45c",
+      "definition_fingerprint": "73b3305f1a3d7ae4"
     },
     {
       "id": "ho2_category_h1_vs_h2_2025_460db9",
@@ -221,7 +240,8 @@
       "question_fingerprint": "460db9f93343bb91",
       "gold_fingerprint": "5c31feaa8e87d931",
       "scoring_fingerprint": "2ae9e2f16fe765d1",
-      "measurement_fingerprint": "c6e509bb8498d00e"
+      "measurement_fingerprint": "c6e509bb8498d00e",
+      "definition_fingerprint": "1ee449a3989617c8"
     },
     {
       "id": "ho2_category_h1_vs_h2_2025_cd86f7",
@@ -232,7 +252,8 @@
       "question_fingerprint": "cd86f703bed9ad4f",
       "gold_fingerprint": "5c31feaa8e87d931",
       "scoring_fingerprint": "2ae9e2f16fe765d1",
-      "measurement_fingerprint": "c6e509bb8498d00e"
+      "measurement_fingerprint": "c6e509bb8498d00e",
+      "definition_fingerprint": "13d38af6c7f67b7b"
     },
     {
       "id": "ho2_category_unit_mix_feb_2026_25cd12",
@@ -243,7 +264,8 @@
       "question_fingerprint": "25cd12fb8a4d5e1d",
       "gold_fingerprint": "b1181234cf0f723e",
       "scoring_fingerprint": "63806824cd4efee3",
-      "measurement_fingerprint": "f870f2d9fbb64b81"
+      "measurement_fingerprint": "f870f2d9fbb64b81",
+      "definition_fingerprint": "d31fe9da5399f26a"
     },
     {
       "id": "ho2_category_unit_mix_feb_2026_359805",
@@ -254,7 +276,8 @@
       "question_fingerprint": "359805db640c6de6",
       "gold_fingerprint": "b1181234cf0f723e",
       "scoring_fingerprint": "63806824cd4efee3",
-      "measurement_fingerprint": "f870f2d9fbb64b81"
+      "measurement_fingerprint": "f870f2d9fbb64b81",
+      "definition_fingerprint": "39f7264bf8c12d0e"
     },
     {
       "id": "ho2_collection_rate_mar_2026_02cbc4",
@@ -265,7 +288,8 @@
       "question_fingerprint": "02cbc459852e3bfc",
       "gold_fingerprint": "7df0bf882767efe8",
       "scoring_fingerprint": "bfdfc21286272d79",
-      "measurement_fingerprint": "7c21d1b086ea1e34"
+      "measurement_fingerprint": "7c21d1b086ea1e34",
+      "definition_fingerprint": "fa97d9d2cf048f18"
     },
     {
       "id": "ho2_collection_rate_mar_2026_612fa8",
@@ -276,7 +300,8 @@
       "question_fingerprint": "612fa8552dd93d2b",
       "gold_fingerprint": "7df0bf882767efe8",
       "scoring_fingerprint": "bfdfc21286272d79",
-      "measurement_fingerprint": "7c21d1b086ea1e34"
+      "measurement_fingerprint": "7c21d1b086ea1e34",
+      "definition_fingerprint": "9f35294f70a37ddc"
     },
     {
       "id": "ho2_credit_note_value_monthly_2026_404c34",
@@ -287,7 +312,8 @@
       "question_fingerprint": "404c3467ad18dba7",
       "gold_fingerprint": "7c82451e3ff73fce",
       "scoring_fingerprint": "91607a1541abd8b1",
-      "measurement_fingerprint": "278c05492fcb5fd5"
+      "measurement_fingerprint": "278c05492fcb5fd5",
+      "definition_fingerprint": "689322e5242db480"
     },
     {
       "id": "ho2_credit_note_value_monthly_2026_7dfcd3",
@@ -298,7 +324,8 @@
       "question_fingerprint": "7dfcd3d9acf336d7",
       "gold_fingerprint": "7c82451e3ff73fce",
       "scoring_fingerprint": "91607a1541abd8b1",
-      "measurement_fingerprint": "278c05492fcb5fd5"
+      "measurement_fingerprint": "278c05492fcb5fd5",
+      "definition_fingerprint": "0a22524169c4b9bd"
     },
     {
       "id": "ho2_cumulative_turnover_2026_94041d",
@@ -309,7 +336,8 @@
       "question_fingerprint": "94041d1d659df00c",
       "gold_fingerprint": "305e82364cdf3ce8",
       "scoring_fingerprint": "718b7e204f59e050",
-      "measurement_fingerprint": "f21fea347ff6e3f5"
+      "measurement_fingerprint": "f21fea347ff6e3f5",
+      "definition_fingerprint": "052a6d0e92be2979"
     },
     {
       "id": "ho2_cumulative_turnover_2026_be4d09",
@@ -320,7 +348,8 @@
       "question_fingerprint": "be4d0903ff99c0cd",
       "gold_fingerprint": "305e82364cdf3ce8",
       "scoring_fingerprint": "718b7e204f59e050",
-      "measurement_fingerprint": "fd6e1ddd68fb5649"
+      "measurement_fingerprint": "fd6e1ddd68fb5649",
+      "definition_fingerprint": "e9ceabe33828a590"
     },
     {
       "id": "ho2_customer_c004_gross_jan_2026_4ab958",
@@ -331,7 +360,8 @@
       "question_fingerprint": "4ab9588892e9ceae",
       "gold_fingerprint": "1ab40cd50cc398bb",
       "scoring_fingerprint": "4297d705698cedb0",
-      "measurement_fingerprint": "575dd5eb1772ec0e"
+      "measurement_fingerprint": "575dd5eb1772ec0e",
+      "definition_fingerprint": "b012eff7bfe11ebb"
     },
     {
       "id": "ho2_customer_c004_gross_jan_2026_b12982",
@@ -342,7 +372,8 @@
       "question_fingerprint": "b129827f8cd0a511",
       "gold_fingerprint": "1ab40cd50cc398bb",
       "scoring_fingerprint": "4297d705698cedb0",
-      "measurement_fingerprint": "575dd5eb1772ec0e"
+      "measurement_fingerprint": "575dd5eb1772ec0e",
+      "definition_fingerprint": "e3215d84ba38f0e2"
     },
     {
       "id": "ho2_customer_paid_vs_open_q1_2026_d12b6e",
@@ -353,7 +384,8 @@
       "question_fingerprint": "d12b6ebaaeb6b9e7",
       "gold_fingerprint": "d0c031d9653741cd",
       "scoring_fingerprint": "b112ef2a92397aaf",
-      "measurement_fingerprint": "27c8dc9fb3df572f"
+      "measurement_fingerprint": "27c8dc9fb3df572f",
+      "definition_fingerprint": "de75e3f02a3ed6a1"
     },
     {
       "id": "ho2_customer_paid_vs_open_q1_2026_dc0ac1",
@@ -364,7 +396,8 @@
       "question_fingerprint": "dc0ac130c93b4f84",
       "gold_fingerprint": "d0c031d9653741cd",
       "scoring_fingerprint": "b112ef2a92397aaf",
-      "measurement_fingerprint": "27c8dc9fb3df572f"
+      "measurement_fingerprint": "27c8dc9fb3df572f",
+      "definition_fingerprint": "b55e2afac01ee8a6"
     },
     {
       "id": "ho2_customers_every_month_q1_2026_ca3086",
@@ -375,7 +408,8 @@
       "question_fingerprint": "ca3086b0740e006a",
       "gold_fingerprint": "ec6c6797f9530b5c",
       "scoring_fingerprint": "46b157b26a3d8477",
-      "measurement_fingerprint": "fac62b634e8c21f6"
+      "measurement_fingerprint": "fac62b634e8c21f6",
+      "definition_fingerprint": "17e1ad032bbde771"
     },
     {
       "id": "ho2_customers_every_month_q1_2026_df90d5",
@@ -386,7 +420,8 @@
       "question_fingerprint": "df90d5e39b3bec97",
       "gold_fingerprint": "ec6c6797f9530b5c",
       "scoring_fingerprint": "46b157b26a3d8477",
-      "measurement_fingerprint": "fac62b634e8c21f6"
+      "measurement_fingerprint": "fac62b634e8c21f6",
+      "definition_fingerprint": "4068da116980c8b9"
     },
     {
       "id": "ho2_customers_multi_store_q1_2026_437ba9",
@@ -397,7 +432,8 @@
       "question_fingerprint": "437ba97838ca7cca",
       "gold_fingerprint": "321437315631dce1",
       "scoring_fingerprint": "e6c3d6af967b4b9e",
-      "measurement_fingerprint": "1c4e020dbfad9239"
+      "measurement_fingerprint": "1c4e020dbfad9239",
+      "definition_fingerprint": "f7551264c2e64eec"
     },
     {
       "id": "ho2_customers_multi_store_q1_2026_cd72d4",
@@ -408,7 +444,8 @@
       "question_fingerprint": "cd72d41243c3b9d1",
       "gold_fingerprint": "321437315631dce1",
       "scoring_fingerprint": "e6c3d6af967b4b9e",
-      "measurement_fingerprint": "1c4e020dbfad9239"
+      "measurement_fingerprint": "1c4e020dbfad9239",
+      "definition_fingerprint": "b6e9a97852363568"
     },
     {
       "id": "ho2_customers_over_2600_mar_2026_0f5690",
@@ -419,7 +456,8 @@
       "question_fingerprint": "0f56909dc31636b3",
       "gold_fingerprint": "d0332b9208c7f2f8",
       "scoring_fingerprint": "3f92aeb1110ac81c",
-      "measurement_fingerprint": "844c4b9ceb2a9411"
+      "measurement_fingerprint": "844c4b9ceb2a9411",
+      "definition_fingerprint": "91995e98b1024388"
     },
     {
       "id": "ho2_customers_over_2600_mar_2026_e2b3b8",
@@ -430,7 +468,8 @@
       "question_fingerprint": "e2b3b86a4c8ab593",
       "gold_fingerprint": "d0332b9208c7f2f8",
       "scoring_fingerprint": "3f92aeb1110ac81c",
-      "measurement_fingerprint": "844c4b9ceb2a9411"
+      "measurement_fingerprint": "844c4b9ceb2a9411",
+      "definition_fingerprint": "454da80f0c6de864"
     },
     {
       "id": "ho2_customers_two_brands_mar_2026_3c5b39",
@@ -441,7 +480,8 @@
       "question_fingerprint": "3c5b393e33ecb02a",
       "gold_fingerprint": "11356715c00c4842",
       "scoring_fingerprint": "59e9a1824583fcaa",
-      "measurement_fingerprint": "3c971003b508fe4b"
+      "measurement_fingerprint": "3c971003b508fe4b",
+      "definition_fingerprint": "306812b110731dc6"
     },
     {
       "id": "ho2_customers_two_brands_mar_2026_f854a0",
@@ -452,7 +492,8 @@
       "question_fingerprint": "f854a00feaf04498",
       "gold_fingerprint": "11356715c00c4842",
       "scoring_fingerprint": "59e9a1824583fcaa",
-      "measurement_fingerprint": "3c971003b508fe4b"
+      "measurement_fingerprint": "3c971003b508fe4b",
+      "definition_fingerprint": "f2a6df8d53584452"
     },
     {
       "id": "ho2_customers_up_q1_2026_vs_q4_2025_0df28b",
@@ -463,7 +504,8 @@
       "question_fingerprint": "0df28b2b87c29dc2",
       "gold_fingerprint": "d72b286e8be0fb01",
       "scoring_fingerprint": "6430395084ec4b3e",
-      "measurement_fingerprint": "b2cd465e81fdf5d1"
+      "measurement_fingerprint": "b2cd465e81fdf5d1",
+      "definition_fingerprint": "9b5ec57e1775f16e"
     },
     {
       "id": "ho2_customers_up_q1_2026_vs_q4_2025_ae0efa",
@@ -474,7 +516,8 @@
       "question_fingerprint": "ae0efa547b608f1f",
       "gold_fingerprint": "d72b286e8be0fb01",
       "scoring_fingerprint": "6430395084ec4b3e",
-      "measurement_fingerprint": "b2cd465e81fdf5d1"
+      "measurement_fingerprint": "b2cd465e81fdf5d1",
+      "definition_fingerprint": "5e9af9794436ea4c"
     },
     {
       "id": "ho2_delisted_products_sold_2026_3b7294",
@@ -485,7 +528,8 @@
       "question_fingerprint": "3b7294d5c56d18ca",
       "gold_fingerprint": "0f7ac968612e8fba",
       "scoring_fingerprint": "9c732c6f897d8bb7",
-      "measurement_fingerprint": "bb54790a07f12c4f"
+      "measurement_fingerprint": "bb54790a07f12c4f",
+      "definition_fingerprint": "67c530302520fe17"
     },
     {
       "id": "ho2_delisted_products_sold_2026_97aa6b",
@@ -496,7 +540,8 @@
       "question_fingerprint": "97aa6b0443d6d753",
       "gold_fingerprint": "0f7ac968612e8fba",
       "scoring_fingerprint": "9c732c6f897d8bb7",
-      "measurement_fingerprint": "bb54790a07f12c4f"
+      "measurement_fingerprint": "bb54790a07f12c4f",
+      "definition_fingerprint": "05e97192e14a85a7"
     },
     {
       "id": "ho2_distinct_products_per_document_q1_2026_899d6c",
@@ -507,7 +552,8 @@
       "question_fingerprint": "899d6c04c87c87be",
       "gold_fingerprint": "7e2916cf729984c9",
       "scoring_fingerprint": "da018e2c9152e74e",
-      "measurement_fingerprint": "0132f327d7263758"
+      "measurement_fingerprint": "0132f327d7263758",
+      "definition_fingerprint": "dbc9b9a963c8633b"
     },
     {
       "id": "ho2_distinct_products_per_document_q1_2026_9f6f22",
@@ -518,7 +564,8 @@
       "question_fingerprint": "9f6f22edc03083a1",
       "gold_fingerprint": "7e2916cf729984c9",
       "scoring_fingerprint": "da018e2c9152e74e",
-      "measurement_fingerprint": "0132f327d7263758"
+      "measurement_fingerprint": "0132f327d7263758",
+      "definition_fingerprint": "ff1ae09a109269e3"
     },
     {
       "id": "ho2_documents_last_7_days_asof_2026_04_07_3a74f2",
@@ -529,7 +576,8 @@
       "question_fingerprint": "3a74f2f956972f5f",
       "gold_fingerprint": "f0f3dead892e7ec9",
       "scoring_fingerprint": "231b155ce214049f",
-      "measurement_fingerprint": "56247b4de35b4c58"
+      "measurement_fingerprint": "56247b4de35b4c58",
+      "definition_fingerprint": "4256d1a018e528ba"
     },
     {
       "id": "ho2_documents_last_7_days_asof_2026_04_07_8ca4d2",
@@ -540,7 +588,8 @@
       "question_fingerprint": "8ca4d2775c1b736a",
       "gold_fingerprint": "f0f3dead892e7ec9",
       "scoring_fingerprint": "231b155ce214049f",
-      "measurement_fingerprint": "56247b4de35b4c58"
+      "measurement_fingerprint": "56247b4de35b4c58",
+      "definition_fingerprint": "e50606a850a30ac8"
     },
     {
       "id": "ho2_dormant_account_monthly_2026_969da9",
@@ -551,7 +600,8 @@
       "question_fingerprint": "969da939c98a2d18",
       "gold_fingerprint": "7fd4487177430f4a",
       "scoring_fingerprint": "9c7f5752070be0b0",
-      "measurement_fingerprint": "b723b724c8cd1086"
+      "measurement_fingerprint": "b723b724c8cd1086",
+      "definition_fingerprint": "34bad4b1d9bb06a3"
     },
     {
       "id": "ho2_dormant_account_monthly_2026_a445b3",
@@ -562,7 +612,8 @@
       "question_fingerprint": "a445b3a239d47d00",
       "gold_fingerprint": "7fd4487177430f4a",
       "scoring_fingerprint": "9c7f5752070be0b0",
-      "measurement_fingerprint": "b723b724c8cd1086"
+      "measurement_fingerprint": "b723b724c8cd1086",
+      "definition_fingerprint": "2c346a76783b3041"
     },
     {
       "id": "ho2_due_rest_of_month_asof_2026_05_10_6ce3d9",
@@ -573,7 +624,8 @@
       "question_fingerprint": "6ce3d92e14edd75c",
       "gold_fingerprint": "fdcec611d7ebcfe1",
       "scoring_fingerprint": "d61f54c035cfa499",
-      "measurement_fingerprint": "979aa30f21e4587a"
+      "measurement_fingerprint": "979aa30f21e4587a",
+      "definition_fingerprint": "3640a8c6f7b3bf10"
     },
     {
       "id": "ho2_due_rest_of_month_asof_2026_05_10_e5a04c",
@@ -584,7 +636,8 @@
       "question_fingerprint": "e5a04c134abb35dd",
       "gold_fingerprint": "fdcec611d7ebcfe1",
       "scoring_fingerprint": "d61f54c035cfa499",
-      "measurement_fingerprint": "979aa30f21e4587a"
+      "measurement_fingerprint": "979aa30f21e4587a",
+      "definition_fingerprint": "04a7f47bfbc58f64"
     },
     {
       "id": "ho2_fee_lines_q1_2026_7c63a9",
@@ -595,7 +648,8 @@
       "question_fingerprint": "7c63a9be38626199",
       "gold_fingerprint": "2286aa1dc9e85421",
       "scoring_fingerprint": "f0ba38db31ebc595",
-      "measurement_fingerprint": "4c115f11fa35e904"
+      "measurement_fingerprint": "4c115f11fa35e904",
+      "definition_fingerprint": "9b739dd6d2e8c786"
     },
     {
       "id": "ho2_fee_lines_q1_2026_e78578",
@@ -606,7 +660,8 @@
       "question_fingerprint": "e78578d62a074d69",
       "gold_fingerprint": "2286aa1dc9e85421",
       "scoring_fingerprint": "f0ba38db31ebc595",
-      "measurement_fingerprint": "4c115f11fa35e904"
+      "measurement_fingerprint": "4c115f11fa35e904",
+      "definition_fingerprint": "7e98aab98f295a7c"
     },
     {
       "id": "ho2_gross_net_gap_by_kind_q1_2026_2ca3e6",
@@ -617,7 +672,8 @@
       "question_fingerprint": "2ca3e66beb9ae5d7",
       "gold_fingerprint": "3683698f5f9b6b43",
       "scoring_fingerprint": "b6e81f400c9f8738",
-      "measurement_fingerprint": "b3127e0efb2fbfee"
+      "measurement_fingerprint": "b3127e0efb2fbfee",
+      "definition_fingerprint": "7c2e8e2816536d88"
     },
     {
       "id": "ho2_gross_net_gap_by_kind_q1_2026_cfa4af",
@@ -628,7 +684,8 @@
       "question_fingerprint": "cfa4af8bd8babc96",
       "gold_fingerprint": "3683698f5f9b6b43",
       "scoring_fingerprint": "b6e81f400c9f8738",
-      "measurement_fingerprint": "b3127e0efb2fbfee"
+      "measurement_fingerprint": "b3127e0efb2fbfee",
+      "definition_fingerprint": "a37203c7d7d33fb9"
     },
     {
       "id": "ho2_herbal_tea_buyers_q1_2026_512abb",
@@ -639,7 +696,8 @@
       "question_fingerprint": "512abb54fce29a70",
       "gold_fingerprint": "d630eba103dc64ad",
       "scoring_fingerprint": "63a2cefc87ff6f00",
-      "measurement_fingerprint": "20786dcf7b4ceff0"
+      "measurement_fingerprint": "20786dcf7b4ceff0",
+      "definition_fingerprint": "1cd16d34269c1664"
     },
     {
       "id": "ho2_herbal_tea_buyers_q1_2026_98d9b5",
@@ -650,7 +708,8 @@
       "question_fingerprint": "98d9b57b5ef19574",
       "gold_fingerprint": "d630eba103dc64ad",
       "scoring_fingerprint": "63a2cefc87ff6f00",
-      "measurement_fingerprint": "20786dcf7b4ceff0"
+      "measurement_fingerprint": "20786dcf7b4ceff0",
+      "definition_fingerprint": "53f8b568eeb5e5e8"
     },
     {
       "id": "ho2_homebase_units_monthly_2025_088a65",
@@ -661,7 +720,8 @@
       "question_fingerprint": "088a654f6be9659a",
       "gold_fingerprint": "b9c33803917fb9f6",
       "scoring_fingerprint": "80b9fb22e2fb97fa",
-      "measurement_fingerprint": "6d80b7206b8220b5"
+      "measurement_fingerprint": "6d80b7206b8220b5",
+      "definition_fingerprint": "f17268ee700bc6e2"
     },
     {
       "id": "ho2_homebase_units_monthly_2025_53feda",
@@ -672,7 +732,8 @@
       "question_fingerprint": "53feda5fdc3fd910",
       "gold_fingerprint": "b9c33803917fb9f6",
       "scoring_fingerprint": "80b9fb22e2fb97fa",
-      "measurement_fingerprint": "6d80b7206b8220b5"
+      "measurement_fingerprint": "6d80b7206b8220b5",
+      "definition_fingerprint": "dd6035b131536ae8"
     },
     {
       "id": "ho2_invoice_vs_receipt_avg_q1_2026_f969d1",
@@ -683,7 +744,8 @@
       "question_fingerprint": "f969d1485359c56e",
       "gold_fingerprint": "d6e0a21b521797ab",
       "scoring_fingerprint": "c2a726586224fac8",
-      "measurement_fingerprint": "a9931093ce8afb41"
+      "measurement_fingerprint": "a9931093ce8afb41",
+      "definition_fingerprint": "00a2eb5f8b1d5a41"
     },
     {
       "id": "ho2_invoice_vs_receipt_avg_q1_2026_fbbb9b",
@@ -694,7 +756,8 @@
       "question_fingerprint": "fbbb9b5689ca74ff",
       "gold_fingerprint": "d6e0a21b521797ab",
       "scoring_fingerprint": "c2a726586224fac8",
-      "measurement_fingerprint": "a9931093ce8afb41"
+      "measurement_fingerprint": "a9931093ce8afb41",
+      "definition_fingerprint": "462b4196ac317f69"
     },
     {
       "id": "ho2_lakeside_days_between_purchases_q1_2026_01c52b",
@@ -705,7 +768,8 @@
       "question_fingerprint": "01c52bd635aa5965",
       "gold_fingerprint": "278233503b6da7f7",
       "scoring_fingerprint": "317f6a60289a5ec3",
-      "measurement_fingerprint": "91079508a1b087a7"
+      "measurement_fingerprint": "91079508a1b087a7",
+      "definition_fingerprint": "2006bd954628e28e"
     },
     {
       "id": "ho2_lakeside_days_between_purchases_q1_2026_f7e88c",
@@ -716,7 +780,8 @@
       "question_fingerprint": "f7e88c5acbf8c3bf",
       "gold_fingerprint": "278233503b6da7f7",
       "scoring_fingerprint": "317f6a60289a5ec3",
-      "measurement_fingerprint": "91079508a1b087a7"
+      "measurement_fingerprint": "91079508a1b087a7",
+      "definition_fingerprint": "eea9a0cfdb9ebba4"
     },
     {
       "id": "ho2_lapsed_customers_asof_2026_05_31_134601",
@@ -727,7 +792,8 @@
       "question_fingerprint": "134601f79ca747b9",
       "gold_fingerprint": "dd27956b5463366e",
       "scoring_fingerprint": "2718c7107edcc519",
-      "measurement_fingerprint": "7810d88f5c851b49"
+      "measurement_fingerprint": "7810d88f5c851b49",
+      "definition_fingerprint": "5ef7e254c2a219af"
     },
     {
       "id": "ho2_lapsed_customers_asof_2026_05_31_592714",
@@ -738,7 +804,8 @@
       "question_fingerprint": "59271469a1f572aa",
       "gold_fingerprint": "dd27956b5463366e",
       "scoring_fingerprint": "2718c7107edcc519",
-      "measurement_fingerprint": "7810d88f5c851b49"
+      "measurement_fingerprint": "7810d88f5c851b49",
+      "definition_fingerprint": "0154e61beeb7ea7a"
     },
     {
       "id": "ho2_largest_line_mar_2026_238eec",
@@ -749,7 +816,8 @@
       "question_fingerprint": "238eecd769a8ab4a",
       "gold_fingerprint": "1b958febe448e9b1",
       "scoring_fingerprint": "41e93f6b894c9d22",
-      "measurement_fingerprint": "9be2bce1c31a989c"
+      "measurement_fingerprint": "9be2bce1c31a989c",
+      "definition_fingerprint": "90f582b444575582"
     },
     {
       "id": "ho2_largest_line_mar_2026_d30152",
@@ -760,7 +828,8 @@
       "question_fingerprint": "d3015263acffd42d",
       "gold_fingerprint": "1b958febe448e9b1",
       "scoring_fingerprint": "41e93f6b894c9d22",
-      "measurement_fingerprint": "9be2bce1c31a989c"
+      "measurement_fingerprint": "9be2bce1c31a989c",
+      "definition_fingerprint": "caaf971ee7cf44f8"
     },
     {
       "id": "ho2_largest_open_items_top5_599841",
@@ -771,7 +840,8 @@
       "question_fingerprint": "59984158f88227d0",
       "gold_fingerprint": "f42df6b4b419b01f",
       "scoring_fingerprint": "2ba61d0e69c7f97b",
-      "measurement_fingerprint": "4483afa1c2b678a3"
+      "measurement_fingerprint": "4483afa1c2b678a3",
+      "definition_fingerprint": "fb7cecdea2451cb6"
     },
     {
       "id": "ho2_largest_open_items_top5_8c29c5",
@@ -782,7 +852,8 @@
       "question_fingerprint": "8c29c5286ede3e0a",
       "gold_fingerprint": "f42df6b4b419b01f",
       "scoring_fingerprint": "2ba61d0e69c7f97b",
-      "measurement_fingerprint": "62def8b68a179192"
+      "measurement_fingerprint": "62def8b68a179192",
+      "definition_fingerprint": "dc3fa09155f2331e"
     },
     {
       "id": "ho2_last_week_asof_2026_04_08_0da5f7",
@@ -793,7 +864,8 @@
       "question_fingerprint": "0da5f7d9e35d5839",
       "gold_fingerprint": "586e749d07df742c",
       "scoring_fingerprint": "d88352596a20239b",
-      "measurement_fingerprint": "329e2faa6c9790ca"
+      "measurement_fingerprint": "329e2faa6c9790ca",
+      "definition_fingerprint": "4e919287f96d4d68"
     },
     {
       "id": "ho2_last_week_asof_2026_04_08_cf8a38",
@@ -804,7 +876,8 @@
       "question_fingerprint": "cf8a384c87e99a89",
       "gold_fingerprint": "586e749d07df742c",
       "scoring_fingerprint": "d88352596a20239b",
-      "measurement_fingerprint": "329e2faa6c9790ca"
+      "measurement_fingerprint": "329e2faa6c9790ca",
+      "definition_fingerprint": "1f62d2c349d1d14a"
     },
     {
       "id": "ho2_ledger_gross_margin_q1_2026_50b797",
@@ -815,7 +888,8 @@
       "question_fingerprint": "50b7973fd9fbe2cd",
       "gold_fingerprint": "710386a5c9acdc70",
       "scoring_fingerprint": "0701b6773731efc8",
-      "measurement_fingerprint": "451674f99e62858a"
+      "measurement_fingerprint": "451674f99e62858a",
+      "definition_fingerprint": "9ec5efdd08d0be65"
     },
     {
       "id": "ho2_ledger_gross_margin_q1_2026_63b552",
@@ -826,7 +900,8 @@
       "question_fingerprint": "63b5526cb15a1c3b",
       "gold_fingerprint": "710386a5c9acdc70",
       "scoring_fingerprint": "0701b6773731efc8",
-      "measurement_fingerprint": "451674f99e62858a"
+      "measurement_fingerprint": "451674f99e62858a",
+      "definition_fingerprint": "48371c4dbae3e63a"
     },
     {
       "id": "ho2_lime_seltzer_units_by_store_2026_79793c",
@@ -837,7 +912,8 @@
       "question_fingerprint": "79793c4fcac88a8b",
       "gold_fingerprint": "eeb68ce2515e20cb",
       "scoring_fingerprint": "42192085851be8fa",
-      "measurement_fingerprint": "95d0700517864d1a"
+      "measurement_fingerprint": "95d0700517864d1a",
+      "definition_fingerprint": "5ddcb2e361dfded4"
     },
     {
       "id": "ho2_lime_seltzer_units_by_store_2026_d9881b",
@@ -848,7 +924,8 @@
       "question_fingerprint": "d9881b56a91c41b1",
       "gold_fingerprint": "eeb68ce2515e20cb",
       "scoring_fingerprint": "42192085851be8fa",
-      "measurement_fingerprint": "95d0700517864d1a"
+      "measurement_fingerprint": "95d0700517864d1a",
+      "definition_fingerprint": "239ae4a629813532"
     },
     {
       "id": "ho2_lines_per_document_by_kind_2026_479e5d",
@@ -859,7 +936,8 @@
       "question_fingerprint": "479e5de97c738b7a",
       "gold_fingerprint": "e4fa402fb310f7a1",
       "scoring_fingerprint": "28343e52033f2764",
-      "measurement_fingerprint": "95f86f6403acc0df"
+      "measurement_fingerprint": "95f86f6403acc0df",
+      "definition_fingerprint": "4ec20c531da05ac0"
     },
     {
       "id": "ho2_lines_per_document_by_kind_2026_787513",
@@ -870,7 +948,8 @@
       "question_fingerprint": "7875132c9f880643",
       "gold_fingerprint": "e4fa402fb310f7a1",
       "scoring_fingerprint": "28343e52033f2764",
-      "measurement_fingerprint": "95f86f6403acc0df"
+      "measurement_fingerprint": "95f86f6403acc0df",
+      "definition_fingerprint": "3eb1c5467585a13a"
     },
     {
       "id": "ho2_manual_entries_by_account_2026_587d39",
@@ -881,7 +960,8 @@
       "question_fingerprint": "587d390f3f40b711",
       "gold_fingerprint": "297ba73afeb1f3a4",
       "scoring_fingerprint": "b248ac847f475785",
-      "measurement_fingerprint": "c829efe0097f24bb"
+      "measurement_fingerprint": "c829efe0097f24bb",
+      "definition_fingerprint": "57da89ba11c98758"
     },
     {
       "id": "ho2_manual_entries_by_account_2026_7c5a13",
@@ -892,7 +972,8 @@
       "question_fingerprint": "7c5a136d171f1869",
       "gold_fingerprint": "297ba73afeb1f3a4",
       "scoring_fingerprint": "b248ac847f475785",
-      "measurement_fingerprint": "c829efe0097f24bb"
+      "measurement_fingerprint": "c829efe0097f24bb",
+      "definition_fingerprint": "bc6da2fd92e33d47"
     },
     {
       "id": "ho2_march_docs_booked_april_or_later_275ffc",
@@ -903,7 +984,8 @@
       "question_fingerprint": "275ffc087b3ebc99",
       "gold_fingerprint": "3c3af298d0b45d89",
       "scoring_fingerprint": "f9e1e0ba95279982",
-      "measurement_fingerprint": "ebb36d1c16340b85"
+      "measurement_fingerprint": "ebb36d1c16340b85",
+      "definition_fingerprint": "d61a070eb788e805"
     },
     {
       "id": "ho2_march_docs_booked_april_or_later_c6e096",
@@ -914,7 +996,8 @@
       "question_fingerprint": "c6e096a1c5c15656",
       "gold_fingerprint": "3c3af298d0b45d89",
       "scoring_fingerprint": "f9e1e0ba95279982",
-      "measurement_fingerprint": "ebb36d1c16340b85"
+      "measurement_fingerprint": "ebb36d1c16340b85",
+      "definition_fingerprint": "7e5d51b9701bd464"
     },
     {
       "id": "ho2_metro_online_documents_by_kind_q1_2026_a3ff40",
@@ -925,7 +1008,8 @@
       "question_fingerprint": "a3ff40a43a3dc1d2",
       "gold_fingerprint": "9dbbc705bc53b547",
       "scoring_fingerprint": "4ca4223237eee025",
-      "measurement_fingerprint": "c8a22d0c776e4ef7"
+      "measurement_fingerprint": "c8a22d0c776e4ef7",
+      "definition_fingerprint": "ebffec5574edb622"
     },
     {
       "id": "ho2_metro_online_documents_by_kind_q1_2026_a48faf",
@@ -936,7 +1020,8 @@
       "question_fingerprint": "a48faf19b65d6963",
       "gold_fingerprint": "9dbbc705bc53b547",
       "scoring_fingerprint": "4ca4223237eee025",
-      "measurement_fingerprint": "c8a22d0c776e4ef7"
+      "measurement_fingerprint": "c8a22d0c776e4ef7",
+      "definition_fingerprint": "cefecec994cc1ee0"
     },
     {
       "id": "ho2_min_max_document_by_store_mar_2026_80605f",
@@ -947,7 +1032,8 @@
       "question_fingerprint": "80605f80d7024399",
       "gold_fingerprint": "40c4a4008c093c67",
       "scoring_fingerprint": "58b08b2355a1e525",
-      "measurement_fingerprint": "085af3699f834dac"
+      "measurement_fingerprint": "085af3699f834dac",
+      "definition_fingerprint": "32c2bcf3e42d82cb"
     },
     {
       "id": "ho2_min_max_document_by_store_mar_2026_9d4782",
@@ -958,7 +1044,8 @@
       "question_fingerprint": "9d4782952021c5f9",
       "gold_fingerprint": "40c4a4008c093c67",
       "scoring_fingerprint": "58b08b2355a1e525",
-      "measurement_fingerprint": "085af3699f834dac"
+      "measurement_fingerprint": "085af3699f834dac",
+      "definition_fingerprint": "2b92101fe94a2fd9"
     },
     {
       "id": "ho2_mom_change_dec_2025_apr_2026_10583d",
@@ -969,7 +1056,8 @@
       "question_fingerprint": "10583dde62e8a70e",
       "gold_fingerprint": "de3b44b69c99ad66",
       "scoring_fingerprint": "23db3e10c0babccc",
-      "measurement_fingerprint": "62213316a94573f7"
+      "measurement_fingerprint": "62213316a94573f7",
+      "definition_fingerprint": "361bc3bf7556450e"
     },
     {
       "id": "ho2_mom_change_dec_2025_apr_2026_6eaa1b",
@@ -980,7 +1068,8 @@
       "question_fingerprint": "6eaa1ba15eec1e93",
       "gold_fingerprint": "de3b44b69c99ad66",
       "scoring_fingerprint": "23db3e10c0babccc",
-      "measurement_fingerprint": "62213316a94573f7"
+      "measurement_fingerprint": "62213316a94573f7",
+      "definition_fingerprint": "08c1b9a3873c60ae"
     },
     {
       "id": "ho2_new_customers_by_month_2026_0901f1",
@@ -991,7 +1080,8 @@
       "question_fingerprint": "0901f1de817e2a59",
       "gold_fingerprint": "08f0cea9bb12ffe2",
       "scoring_fingerprint": "623a7dafc8dc1d10",
-      "measurement_fingerprint": "3b0d7d512935cb5d"
+      "measurement_fingerprint": "3b0d7d512935cb5d",
+      "definition_fingerprint": "db4d7b64b9a76c92"
     },
     {
       "id": "ho2_new_customers_by_month_2026_edf301",
@@ -1002,7 +1092,8 @@
       "question_fingerprint": "edf301475c354e50",
       "gold_fingerprint": "08f0cea9bb12ffe2",
       "scoring_fingerprint": "623a7dafc8dc1d10",
-      "measurement_fingerprint": "3b0d7d512935cb5d"
+      "measurement_fingerprint": "3b0d7d512935cb5d",
+      "definition_fingerprint": "a700890d2e5cc50b"
     },
     {
       "id": "ho2_northstar_by_category_mar_2026_9a4ede",
@@ -1013,7 +1104,8 @@
       "question_fingerprint": "9a4ede4fd636a368",
       "gold_fingerprint": "59e83c1df9bd6024",
       "scoring_fingerprint": "e6127e71db5a0aab",
-      "measurement_fingerprint": "392fed0b726fa241"
+      "measurement_fingerprint": "392fed0b726fa241",
+      "definition_fingerprint": "8369885bf2e21a24"
     },
     {
       "id": "ho2_northstar_by_category_mar_2026_c09f06",
@@ -1024,7 +1116,8 @@
       "question_fingerprint": "c09f06c5f6f5a7ac",
       "gold_fingerprint": "59e83c1df9bd6024",
       "scoring_fingerprint": "e6127e71db5a0aab",
-      "measurement_fingerprint": "392fed0b726fa241"
+      "measurement_fingerprint": "392fed0b726fa241",
+      "definition_fingerprint": "9e57fc893e8d0bad"
     },
     {
       "id": "ho2_overdue_balance_asof_2026_04_15_29d5de",
@@ -1035,7 +1128,8 @@
       "question_fingerprint": "29d5de05d7c5e4a7",
       "gold_fingerprint": "5926f598c28e55a0",
       "scoring_fingerprint": "6ba2231d2ec79774",
-      "measurement_fingerprint": "ad57f1fbaa59ac9e"
+      "measurement_fingerprint": "ad57f1fbaa59ac9e",
+      "definition_fingerprint": "e0bd39e28e764f85"
     },
     {
       "id": "ho2_overdue_balance_asof_2026_04_15_dd9200",
@@ -1046,7 +1140,8 @@
       "question_fingerprint": "dd920065bc3e7d0e",
       "gold_fingerprint": "5926f598c28e55a0",
       "scoring_fingerprint": "6ba2231d2ec79774",
-      "measurement_fingerprint": "979aa30f21e4587a"
+      "measurement_fingerprint": "979aa30f21e4587a",
+      "definition_fingerprint": "84da0fc002219811"
     },
     {
       "id": "ho2_overdue_by_customer_asof_2026_04_30_9a7944",
@@ -1057,7 +1152,8 @@
       "question_fingerprint": "9a7944d62cbcf441",
       "gold_fingerprint": "d216068d59698d6d",
       "scoring_fingerprint": "dc4e5f0580013711",
-      "measurement_fingerprint": "6be88c3275d17580"
+      "measurement_fingerprint": "6be88c3275d17580",
+      "definition_fingerprint": "207233c6543cbe0e"
     },
     {
       "id": "ho2_overdue_by_customer_asof_2026_04_30_ae2559",
@@ -1068,7 +1164,8 @@
       "question_fingerprint": "ae25591ea707f3da",
       "gold_fingerprint": "d216068d59698d6d",
       "scoring_fingerprint": "dc4e5f0580013711",
-      "measurement_fingerprint": "cb50f679b6e5d488"
+      "measurement_fingerprint": "cb50f679b6e5d488",
+      "definition_fingerprint": "c2d31d30269a811d"
     },
     {
       "id": "ho2_payment_terms_by_segment_2026_6cbb95",
@@ -1079,7 +1176,8 @@
       "question_fingerprint": "6cbb95fc120514d9",
       "gold_fingerprint": "232a384332f582af",
       "scoring_fingerprint": "339838d374e274e6",
-      "measurement_fingerprint": "46dc6d35d961087a"
+      "measurement_fingerprint": "46dc6d35d961087a",
+      "definition_fingerprint": "7f850c956fef8420"
     },
     {
       "id": "ho2_payment_terms_by_segment_2026_c20a29",
@@ -1090,7 +1188,8 @@
       "question_fingerprint": "c20a29a5ee160efa",
       "gold_fingerprint": "232a384332f582af",
       "scoring_fingerprint": "339838d374e274e6",
-      "measurement_fingerprint": "46dc6d35d961087a"
+      "measurement_fingerprint": "46dc6d35d961087a",
+      "definition_fingerprint": "3f01721d2963d5b2"
     },
     {
       "id": "ho2_posting_lag_by_store_q1_2026_4e4dbb",
@@ -1101,7 +1200,8 @@
       "question_fingerprint": "4e4dbbdbda691428",
       "gold_fingerprint": "76437d8bf68c1590",
       "scoring_fingerprint": "3d3e420cc22bb874",
-      "measurement_fingerprint": "f5dba4bb00d8ddd9"
+      "measurement_fingerprint": "f5dba4bb00d8ddd9",
+      "definition_fingerprint": "e81de987b205b303"
     },
     {
       "id": "ho2_posting_lag_by_store_q1_2026_7e20fb",
@@ -1112,7 +1212,8 @@
       "question_fingerprint": "7e20fb88c06ea8b7",
       "gold_fingerprint": "76437d8bf68c1590",
       "scoring_fingerprint": "3d3e420cc22bb874",
-      "measurement_fingerprint": "05e4702c0d228487"
+      "measurement_fingerprint": "05e4702c0d228487",
+      "definition_fingerprint": "d7e51591e5616267"
     },
     {
       "id": "ho2_products_up_apr_vs_mar_2026_628f0a",
@@ -1123,7 +1224,8 @@
       "question_fingerprint": "628f0a563206a9c3",
       "gold_fingerprint": "d4b4757b80998c95",
       "scoring_fingerprint": "8ab71c4d3b2f82fd",
-      "measurement_fingerprint": "85aef1e7afbb0e1c"
+      "measurement_fingerprint": "85aef1e7afbb0e1c",
+      "definition_fingerprint": "a50d67f8a560cc47"
     },
     {
       "id": "ho2_receivable_net_change_monthly_2026_437536",
@@ -1134,7 +1236,8 @@
       "question_fingerprint": "4375360833c75cc7",
       "gold_fingerprint": "b437227d5b4e6049",
       "scoring_fingerprint": "871c661c5b69c1f3",
-      "measurement_fingerprint": "08528282602880e9"
+      "measurement_fingerprint": "08528282602880e9",
+      "definition_fingerprint": "84c68d183589301b"
     },
     {
       "id": "ho2_receivable_net_change_monthly_2026_c6ab70",
@@ -1145,7 +1248,8 @@
       "question_fingerprint": "c6ab701c9ecd7198",
       "gold_fingerprint": "b437227d5b4e6049",
       "scoring_fingerprint": "871c661c5b69c1f3",
-      "measurement_fingerprint": "08528282602880e9"
+      "measurement_fingerprint": "08528282602880e9",
+      "definition_fingerprint": "ac155a23cd3efa76"
     },
     {
       "id": "ho2_repeat_customers_mar_2026_1655c7",
@@ -1156,7 +1260,8 @@
       "question_fingerprint": "1655c7336470486e",
       "gold_fingerprint": "4239430b09370612",
       "scoring_fingerprint": "fac16d8212cfb064",
-      "measurement_fingerprint": "2e2226b74b6c452a"
+      "measurement_fingerprint": "2e2226b74b6c452a",
+      "definition_fingerprint": "0f925b5200cd085f"
     },
     {
       "id": "ho2_repeat_customers_mar_2026_98a6e6",
@@ -1167,7 +1272,8 @@
       "question_fingerprint": "98a6e6246b2e7e3b",
       "gold_fingerprint": "4239430b09370612",
       "scoring_fingerprint": "fac16d8212cfb064",
-      "measurement_fingerprint": "1843f3706e96ea1c"
+      "measurement_fingerprint": "1843f3706e96ea1c",
+      "definition_fingerprint": "6403980f2253bc5c"
     },
     {
       "id": "ho2_repeat_customers_mar_2026_e0aea3",
@@ -1178,7 +1284,8 @@
       "question_fingerprint": "e0aea3083af336eb",
       "gold_fingerprint": "4239430b09370612",
       "scoring_fingerprint": "fac16d8212cfb064",
-      "measurement_fingerprint": "aa5c408969f96710"
+      "measurement_fingerprint": "aa5c408969f96710",
+      "definition_fingerprint": "d81c27ca0f894352"
     },
     {
       "id": "ho2_rice_price_range_2026_677815",
@@ -1189,7 +1296,8 @@
       "question_fingerprint": "67781515602b22f2",
       "gold_fingerprint": "cb0d0effe5df3bc3",
       "scoring_fingerprint": "78f04e38fca52640",
-      "measurement_fingerprint": "ee54be379f6ae040"
+      "measurement_fingerprint": "ee54be379f6ae040",
+      "definition_fingerprint": "8b0e7ec14a0f4945"
     },
     {
       "id": "ho2_rice_price_range_2026_c195fd",
@@ -1200,7 +1308,8 @@
       "question_fingerprint": "c195fdd8eda2cfb8",
       "gold_fingerprint": "cb0d0effe5df3bc3",
       "scoring_fingerprint": "78f04e38fca52640",
-      "measurement_fingerprint": "ee54be379f6ae040"
+      "measurement_fingerprint": "ee54be379f6ae040",
+      "definition_fingerprint": "eb9385b1595aeb04"
     },
     {
       "id": "ho2_sales_revenue_debits_2026_5e92ec",
@@ -1211,7 +1320,8 @@
       "question_fingerprint": "5e92ec7c80f8cdee",
       "gold_fingerprint": "f07929759644402f",
       "scoring_fingerprint": "15a08588ca58c4b7",
-      "measurement_fingerprint": "82a969a8d5dc5d9e"
+      "measurement_fingerprint": "82a969a8d5dc5d9e",
+      "definition_fingerprint": "b1690423e75b077a"
     },
     {
       "id": "ho2_sales_revenue_debits_2026_a549e9",
@@ -1222,7 +1332,8 @@
       "question_fingerprint": "a549e9e0351cabb1",
       "gold_fingerprint": "f07929759644402f",
       "scoring_fingerprint": "15a08588ca58c4b7",
-      "measurement_fingerprint": "82a969a8d5dc5d9e"
+      "measurement_fingerprint": "82a969a8d5dc5d9e",
+      "definition_fingerprint": "9c54050bc553f455"
     },
     {
       "id": "ho2_sales_tax_booked_mar_2026_39fbe2",
@@ -1233,7 +1344,8 @@
       "question_fingerprint": "39fbe224d9fb1976",
       "gold_fingerprint": "e70e93ef982aa0f8",
       "scoring_fingerprint": "3bce2ffcdbd8dc3c",
-      "measurement_fingerprint": "e0683225102acd7d"
+      "measurement_fingerprint": "e0683225102acd7d",
+      "definition_fingerprint": "67824da4af8cf766"
     },
     {
       "id": "ho2_sales_tax_booked_mar_2026_9eaf55",
@@ -1244,7 +1356,8 @@
       "question_fingerprint": "9eaf55673bb97912",
       "gold_fingerprint": "e70e93ef982aa0f8",
       "scoring_fingerprint": "3bce2ffcdbd8dc3c",
-      "measurement_fingerprint": "15e35f44c4150f62"
+      "measurement_fingerprint": "15e35f44c4150f62",
+      "definition_fingerprint": "551814bea2be20fa"
     },
     {
       "id": "ho2_salesperson_top_closer_mar_2026_d332f9",
@@ -1255,7 +1368,8 @@
       "question_fingerprint": "d332f9b6bed1c330",
       "gold_fingerprint": "e3b0c44298fc1c14",
       "scoring_fingerprint": "af5c6d7c1c9e6913",
-      "measurement_fingerprint": "50d61a4ab88943cc"
+      "measurement_fingerprint": "50d61a4ab88943cc",
+      "definition_fingerprint": "923b590e81af669c"
     },
     {
       "id": "ho2_second_store_feb_2026_aa0152",
@@ -1266,7 +1380,8 @@
       "question_fingerprint": "aa01522ec095c61d",
       "gold_fingerprint": "3fd370eb570fefd3",
       "scoring_fingerprint": "e5f2c8f3b5ce97b9",
-      "measurement_fingerprint": "b6e534710ecb8204"
+      "measurement_fingerprint": "b6e534710ecb8204",
+      "definition_fingerprint": "b78deb51d0a5698a"
     },
     {
       "id": "ho2_second_store_feb_2026_dd6b8a",
@@ -1277,7 +1392,8 @@
       "question_fingerprint": "dd6b8aa966ba9d77",
       "gold_fingerprint": "3fd370eb570fefd3",
       "scoring_fingerprint": "e5f2c8f3b5ce97b9",
-      "measurement_fingerprint": "b6e534710ecb8204"
+      "measurement_fingerprint": "b6e534710ecb8204",
+      "definition_fingerprint": "c5895f6eddd2f608"
     },
     {
       "id": "ho2_segment_turnover_q1_2026_aa4604",
@@ -1288,7 +1404,8 @@
       "question_fingerprint": "aa46041df136952f",
       "gold_fingerprint": "b1f1a48dd5eaa999",
       "scoring_fingerprint": "831ccad293f0ed20",
-      "measurement_fingerprint": "202db3550e25c3c2"
+      "measurement_fingerprint": "202db3550e25c3c2",
+      "definition_fingerprint": "dbe74ca78afa20fe"
     },
     {
       "id": "ho2_segment_turnover_q1_2026_b6ae19",
@@ -1299,7 +1416,8 @@
       "question_fingerprint": "b6ae19005a1c2019",
       "gold_fingerprint": "b1f1a48dd5eaa999",
       "scoring_fingerprint": "831ccad293f0ed20",
-      "measurement_fingerprint": "cc1a607a88cb5d04"
+      "measurement_fingerprint": "cc1a607a88cb5d04",
+      "definition_fingerprint": "7079debebcf6d8d2"
     },
     {
       "id": "ho2_segment_turnover_q1_2026_c30fa4",
@@ -1310,7 +1428,8 @@
       "question_fingerprint": "c30fa41e8ad1213f",
       "gold_fingerprint": "b1f1a48dd5eaa999",
       "scoring_fingerprint": "831ccad293f0ed20",
-      "measurement_fingerprint": "638d8649d4783dcf"
+      "measurement_fingerprint": "638d8649d4783dcf",
+      "definition_fingerprint": "94838aa8f1a15b5f"
     },
     {
       "id": "ho2_south_store_receipt_avg_2026_06d53d",
@@ -1321,7 +1440,8 @@
       "question_fingerprint": "06d53d611a8585e9",
       "gold_fingerprint": "602c4920316e3c66",
       "scoring_fingerprint": "4deb76c8964bc392",
-      "measurement_fingerprint": "3e8e6e8ae555aa00"
+      "measurement_fingerprint": "3e8e6e8ae555aa00",
+      "definition_fingerprint": "227a2b1f152729dd"
     },
     {
       "id": "ho2_south_store_receipt_avg_2026_e1dca7",
@@ -1332,7 +1452,8 @@
       "question_fingerprint": "e1dca744d510bdd8",
       "gold_fingerprint": "602c4920316e3c66",
       "scoring_fingerprint": "4deb76c8964bc392",
-      "measurement_fingerprint": "3e8e6e8ae555aa00"
+      "measurement_fingerprint": "3e8e6e8ae555aa00",
+      "definition_fingerprint": "147d5b66fc2627ab"
     },
     {
       "id": "ho2_spring_essentials_buyers_2026_d4642e",
@@ -1343,7 +1464,8 @@
       "question_fingerprint": "d4642e04794e1dc4",
       "gold_fingerprint": "6611b00e1d471033",
       "scoring_fingerprint": "b86de855ae3efe0c",
-      "measurement_fingerprint": "c24d87d0c060e891"
+      "measurement_fingerprint": "c24d87d0c060e891",
+      "definition_fingerprint": "772e04e431cd82dc"
     },
     {
       "id": "ho2_spring_essentials_buyers_2026_dec209",
@@ -1354,7 +1476,8 @@
       "question_fingerprint": "dec2099af5ed00fd",
       "gold_fingerprint": "6611b00e1d471033",
       "scoring_fingerprint": "b86de855ae3efe0c",
-      "measurement_fingerprint": "c24d87d0c060e891"
+      "measurement_fingerprint": "c24d87d0c060e891",
+      "definition_fingerprint": "6b39160bc8895526"
     },
     {
       "id": "ho2_stock_on_hand_cane_sugar_89df52",
@@ -1365,7 +1488,8 @@
       "question_fingerprint": "89df52a19a443bd5",
       "gold_fingerprint": "e3b0c44298fc1c14",
       "scoring_fingerprint": "af5c6d7c1c9e6913",
-      "measurement_fingerprint": "50d61a4ab88943cc"
+      "measurement_fingerprint": "50d61a4ab88943cc",
+      "definition_fingerprint": "a4c95588f3149e1d"
     },
     {
       "id": "ho2_store_distinct_products_mar_2026_7c8561",
@@ -1376,7 +1500,8 @@
       "question_fingerprint": "7c856131ab16cb26",
       "gold_fingerprint": "057ecd896967aa6a",
       "scoring_fingerprint": "dc55cc6ebf508011",
-      "measurement_fingerprint": "e370c77cb8b41873"
+      "measurement_fingerprint": "e370c77cb8b41873",
+      "definition_fingerprint": "49f4e1c1f9f57d3d"
     },
     {
       "id": "ho2_store_distinct_products_mar_2026_87e7a1",
@@ -1387,7 +1512,8 @@
       "question_fingerprint": "87e7a18722b4205d",
       "gold_fingerprint": "057ecd896967aa6a",
       "scoring_fingerprint": "dc55cc6ebf508011",
-      "measurement_fingerprint": "e370c77cb8b41873"
+      "measurement_fingerprint": "e370c77cb8b41873",
+      "definition_fingerprint": "5b9b1d803d900e56"
     },
     {
       "id": "ho2_store_mar_vs_apr_2026_2e0676",
@@ -1398,7 +1524,8 @@
       "question_fingerprint": "2e0676ee70104cbc",
       "gold_fingerprint": "da74f694c56d97a6",
       "scoring_fingerprint": "d058bad18e732187",
-      "measurement_fingerprint": "b4bb1b8b088f96e1"
+      "measurement_fingerprint": "b4bb1b8b088f96e1",
+      "definition_fingerprint": "6f28600ef9351796"
     },
     {
       "id": "ho2_store_mar_vs_apr_2026_f92aaa",
@@ -1409,7 +1536,8 @@
       "question_fingerprint": "f92aaa556f0ad843",
       "gold_fingerprint": "da74f694c56d97a6",
       "scoring_fingerprint": "d058bad18e732187",
-      "measurement_fingerprint": "e0276a99eee051d2"
+      "measurement_fingerprint": "e0276a99eee051d2",
+      "definition_fingerprint": "c00010571d2e7b0f"
     },
     {
       "id": "ho2_store_quarterly_turnover_q1_2025_q1_2026_c762a6",
@@ -1420,7 +1548,8 @@
       "question_fingerprint": "c762a6de8659a9bd",
       "gold_fingerprint": "b239d700bd0cde04",
       "scoring_fingerprint": "e2785e76ee1b29d8",
-      "measurement_fingerprint": "5bcfe81bfedc8c39"
+      "measurement_fingerprint": "5bcfe81bfedc8c39",
+      "definition_fingerprint": "2e03d1c130c40aaf"
     },
     {
       "id": "ho2_store_share_q1_2026_23b3de",
@@ -1431,7 +1560,8 @@
       "question_fingerprint": "23b3de539431e1e4",
       "gold_fingerprint": "1b0cdacd5f39efd0",
       "scoring_fingerprint": "5306b6b324e04847",
-      "measurement_fingerprint": "9495f1d88fc46fe1"
+      "measurement_fingerprint": "9495f1d88fc46fe1",
+      "definition_fingerprint": "8ab9e78dfe63fbdb"
     },
     {
       "id": "ho2_store_share_q1_2026_897d42",
@@ -1442,7 +1572,8 @@
       "question_fingerprint": "897d425f4b97b9e5",
       "gold_fingerprint": "1b0cdacd5f39efd0",
       "scoring_fingerprint": "5306b6b324e04847",
-      "measurement_fingerprint": "143f94cfe7782bdc"
+      "measurement_fingerprint": "143f94cfe7782bdc",
+      "definition_fingerprint": "c63534f876e77b84"
     },
     {
       "id": "ho2_top_customer_per_store_q1_2026_402099",
@@ -1453,7 +1584,8 @@
       "question_fingerprint": "40209912ecf20c3f",
       "gold_fingerprint": "42d3612a7bdf1cc2",
       "scoring_fingerprint": "a330bee4db3114bd",
-      "measurement_fingerprint": "5530a71257db1763"
+      "measurement_fingerprint": "5530a71257db1763",
+      "definition_fingerprint": "be3480726d1268de"
     },
     {
       "id": "ho2_top_customer_per_store_q1_2026_9cc320",
@@ -1464,7 +1596,8 @@
       "question_fingerprint": "9cc3205ed15529bd",
       "gold_fingerprint": "42d3612a7bdf1cc2",
       "scoring_fingerprint": "a330bee4db3114bd",
-      "measurement_fingerprint": "5530a71257db1763"
+      "measurement_fingerprint": "5530a71257db1763",
+      "definition_fingerprint": "9ce4ee47e70ffaad"
     },
     {
       "id": "ho2_trial_balance_asof_2026_03_31_53742a",
@@ -1475,7 +1608,8 @@
       "question_fingerprint": "53742a3972c1e937",
       "gold_fingerprint": "f6aa871fc4f2133a",
       "scoring_fingerprint": "b23df398ec525a8e",
-      "measurement_fingerprint": "86b793f0391f1528"
+      "measurement_fingerprint": "86b793f0391f1528",
+      "definition_fingerprint": "14fbf5a2c5f0810d"
     },
     {
       "id": "ho2_units_per_document_by_store_feb_2026_7672f4",
@@ -1486,7 +1620,8 @@
       "question_fingerprint": "7672f4c3c3a2708e",
       "gold_fingerprint": "08e3e6228f068978",
       "scoring_fingerprint": "209213182950c00c",
-      "measurement_fingerprint": "3b14fd7d4e0d1a5a"
+      "measurement_fingerprint": "3b14fd7d4e0d1a5a",
+      "definition_fingerprint": "9fc1ca583b082364"
     },
     {
       "id": "ho2_units_per_document_by_store_feb_2026_d41296",
@@ -1497,7 +1632,8 @@
       "question_fingerprint": "d41296e862de3dd3",
       "gold_fingerprint": "08e3e6228f068978",
       "scoring_fingerprint": "209213182950c00c",
-      "measurement_fingerprint": "3b14fd7d4e0d1a5a"
+      "measurement_fingerprint": "3b14fd7d4e0d1a5a",
+      "definition_fingerprint": "39c084001865a6ed"
     },
     {
       "id": "ho2_valley_corner_how_many_products_q1_2026_4856ff",
@@ -1508,7 +1644,8 @@
       "question_fingerprint": "4856ff7ff55c5a06",
       "gold_fingerprint": "ae44e1cc2a2dbde2",
       "scoring_fingerprint": "5fb79d45c316baf8",
-      "measurement_fingerprint": "bafdb4359d7ca1cd"
+      "measurement_fingerprint": "bafdb4359d7ca1cd",
+      "definition_fingerprint": "4b7f38189af3f06d"
     },
     {
       "id": "ho2_valley_corner_how_many_products_q1_2026_6fec87",
@@ -1519,7 +1656,8 @@
       "question_fingerprint": "6fec87f476c7d33d",
       "gold_fingerprint": "ae44e1cc2a2dbde2",
       "scoring_fingerprint": "5fb79d45c316baf8",
-      "measurement_fingerprint": "bafdb4359d7ca1cd"
+      "measurement_fingerprint": "bafdb4359d7ca1cd",
+      "definition_fingerprint": "74bbff72b8f18e69"
     },
     {
       "id": "ho2_valley_corner_units_by_product_q1_2026_3983b9",
@@ -1530,7 +1668,8 @@
       "question_fingerprint": "3983b957675cb36c",
       "gold_fingerprint": "fff23932a590b239",
       "scoring_fingerprint": "36943a27e003f999",
-      "measurement_fingerprint": "042221a1ca2f5108"
+      "measurement_fingerprint": "042221a1ca2f5108",
+      "definition_fingerprint": "2a9500f56c37fe9d"
     },
     {
       "id": "ho2_valley_corner_units_by_product_q1_2026_7fe326",
@@ -1541,7 +1680,8 @@
       "question_fingerprint": "7fe326d7bb7b4606",
       "gold_fingerprint": "fff23932a590b239",
       "scoring_fingerprint": "36943a27e003f999",
-      "measurement_fingerprint": "042221a1ca2f5108"
+      "measurement_fingerprint": "042221a1ca2f5108",
+      "definition_fingerprint": "abefbdc1f7f22910"
     },
     {
       "id": "ho2_value_bands_mar_2026_0bfcaf",
@@ -1552,7 +1692,8 @@
       "question_fingerprint": "0bfcafaa2fd6c585",
       "gold_fingerprint": "15892067043367fb",
       "scoring_fingerprint": "d6611b33568cfa75",
-      "measurement_fingerprint": "341d6c946b95e5d4"
+      "measurement_fingerprint": "341d6c946b95e5d4",
+      "definition_fingerprint": "9b72f84220bd7729"
     },
     {
       "id": "ho2_void_rate_by_store_q1_2026_76dc80",
@@ -1563,7 +1704,8 @@
       "question_fingerprint": "76dc8004ce175315",
       "gold_fingerprint": "773dcf7aa939c8ae",
       "scoring_fingerprint": "65a3cc05c9f18d44",
-      "measurement_fingerprint": "0d39592841361d6c"
+      "measurement_fingerprint": "0d39592841361d6c",
+      "definition_fingerprint": "44168183811eb181"
     },
     {
       "id": "ho2_void_rate_by_store_q1_2026_9c8313",
@@ -1574,7 +1716,8 @@
       "question_fingerprint": "9c8313d963b136c9",
       "gold_fingerprint": "773dcf7aa939c8ae",
       "scoring_fingerprint": "65a3cc05c9f18d44",
-      "measurement_fingerprint": "552db5a3774ebbb9"
+      "measurement_fingerprint": "552db5a3774ebbb9",
+      "definition_fingerprint": "55ff22fb478feba7"
     },
     {
       "id": "ho2_weekday_turnover_q1_2026_b77ab8",
@@ -1585,7 +1728,8 @@
       "question_fingerprint": "b77ab864ed7ff566",
       "gold_fingerprint": "cc43b8c200be0e16",
       "scoring_fingerprint": "ed92d35132bda782",
-      "measurement_fingerprint": "b6a4730b8a5ebcd1"
+      "measurement_fingerprint": "b6a4730b8a5ebcd1",
+      "definition_fingerprint": "ac0fc37533dd9203"
     },
     {
       "id": "ho2_weekday_turnover_q1_2026_fbfc7f",
@@ -1596,7 +1740,8 @@
       "question_fingerprint": "fbfc7fdb3f8c4531",
       "gold_fingerprint": "cc43b8c200be0e16",
       "scoring_fingerprint": "ed92d35132bda782",
-      "measurement_fingerprint": "5703b22dc4d704c2"
+      "measurement_fingerprint": "5703b22dc4d704c2",
+      "definition_fingerprint": "81b9ddb980b09753"
     },
     {
       "id": "ho2_wholesale_share_mar_2026_870321",
@@ -1607,7 +1752,8 @@
       "question_fingerprint": "8703211129cdf973",
       "gold_fingerprint": "2160e79c0344f7ba",
       "scoring_fingerprint": "3f61ef0f6bed31fb",
-      "measurement_fingerprint": "5b188114506d538c"
+      "measurement_fingerprint": "5b188114506d538c",
+      "definition_fingerprint": "0ba845dfdb491606"
     },
     {
       "id": "ho2_wholesale_share_mar_2026_de64b7",
@@ -1618,7 +1764,8 @@
       "question_fingerprint": "de64b7ffd803d062",
       "gold_fingerprint": "2160e79c0344f7ba",
       "scoring_fingerprint": "3f61ef0f6bed31fb",
-      "measurement_fingerprint": "5b188114506d538c"
+      "measurement_fingerprint": "5b188114506d538c",
+      "definition_fingerprint": "f3423c69f0a4471a"
     },
     {
       "id": "ho2_ytd_vs_prior_ytd_asof_2026_03_15_28af16",
@@ -1629,7 +1776,8 @@
       "question_fingerprint": "28af16c8889e4024",
       "gold_fingerprint": "3fcf0e00117b1273",
       "scoring_fingerprint": "61f0001ba8340d7f",
-      "measurement_fingerprint": "38e8099cfff8db50"
+      "measurement_fingerprint": "38e8099cfff8db50",
+      "definition_fingerprint": "4316dd2e28db3394"
     },
     {
       "id": "ho2_ytd_vs_prior_ytd_asof_2026_03_15_94c08a",
@@ -1640,7 +1788,8 @@
       "question_fingerprint": "94c08a4f4b3b4b8f",
       "gold_fingerprint": "3fcf0e00117b1273",
       "scoring_fingerprint": "61f0001ba8340d7f",
-      "measurement_fingerprint": "38e8099cfff8db50"
+      "measurement_fingerprint": "38e8099cfff8db50",
+      "definition_fingerprint": "bc14f24370ab5ebc"
     }
   ],
   "history": [
@@ -1673,6 +1822,12 @@
       "fingerprint": "fd12776dcad2f3a1",
       "cases": 149,
       "note": "2026-10-06: fingerprint scheme change, no holdout case changed. Each entry gains measurement_fingerprint (split, expected_behavior, known_validator_rejection, expected_tables, failure_class, difficulty, tags), which the check compares and the manifest fingerprint covers, so a change that moves failures between attribution buckets or report breakdowns (for example a known_validator_rejection flag) needs a dated note. The scoring fingerprint, which comparisons pair cases on, is unchanged."
+    },
+    {
+      "date": "2026-10-07",
+      "fingerprint": "969e94ee0429eec4",
+      "cases": 149,
+      "note": "2026-10-07: fingerprint scheme extended; no case definition changed. Manifest version 2: each entry gains definition_fingerprint, the fingerprint of the whole case definition as the suite compares definitions (caseDefinitionFingerprint: question, canonical question, gold, alternatives, comparison spec, expected behaviour, split, known_validator_rejection, expected_row_counts, signal_checks, intentId, tags, expected tables and columns, disallowed_columns, difficulty, failure class; free-text notes are editorial and left out). The check compares it and the manifest fingerprint covers it, so editing a holdout case's expected_row_counts, signal_checks or disallowed_columns now needs a dated note too. Every other fingerprint is as before, and the holdout case definitions are byte-identical to those of e8403d0 (test/holdout-manifest.test.js checks both)."
     }
   ]
 }

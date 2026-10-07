@@ -1,6 +1,6 @@
 // The holdout freeze: datasets/holdout-manifest.json lists every holdout case
-// of every dataset with its question, gold, scoring and measurement
-// fingerprints (src/eval/holdout.js). test/holdout-manifest.test.js fails when the holdout
+// of every dataset with its question, gold, scoring, measurement and
+// definition (the whole case definition) fingerprints (src/eval/holdout.js). test/holdout-manifest.test.js fails when the holdout
 // and the manifest differ, so every change to the holdout is an explicit,
 // reviewable manifest diff with a dated note.
 //
@@ -24,10 +24,12 @@ const __filename = fileURLToPath(import.meta.url);
 export const USAGE = `Usage: npm run holdout-manifest -- [--write --note "<what changed and why>"] [--datasets-dir <dir>] [--manifest <path>]
 
 Checks (default) or rewrites datasets/holdout-manifest.json, the frozen list of
-holdout cases with their question, gold, scoring and measurement (attribution
+holdout cases with their question, gold, scoring, measurement (attribution
 and report labels: known_validator_rejection, expected tables, split, expected
-behaviour, failure class, difficulty, tags) fingerprints. A change to
-the holdout needs --note, recorded with the date in the manifest history.
+behaviour, failure class, difficulty, tags) and definition (every field of the
+case but its free-text notes: row-count pins, signal checks, disallowed
+columns included) fingerprints. A change to the holdout needs --note,
+recorded with the date in the manifest history.
 Exit codes: 0 up to date (or written); 1 the holdout and the manifest differ; 2 bad usage.`;
 
 export async function main(argv = process.argv.slice(2), { output = console, date } = {}) {
