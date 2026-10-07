@@ -282,8 +282,12 @@ const skipped = () => ({ status: 'skipped_budget', warnings: [], attempts: [], a
 const outage = () => ({ ...providerRefusal(), error_code: 'HTTP_503' });
 const harnessFailure = () => ({ status: 'evaluation_error', warnings: [], attempts: [], attempt_count: 0, timings: { totalMs: 5 } });
 const infraFailure = () => ({ ...rep('infra_error'), error_code: 'ECONNRESET' });
+// A repetition a stopped run did not finish (src/eval/pool.js).
+const cancelled = () => ({ status: 'cancelled', warnings: [], error: 'Not finished: SIGINT received.', error_code: 'RUN_CANCELLED', attempts: [], attempt_count: 0 });
 
-async function suiteReport(holdout, { baseline = null, dev = DEV_REPETITIONS } = {}) {
+// `stopped`: the reason of a run stopped early; its cancelled cases are the
+// cases with a cancelled repetition, as the pool records them.
+async function suiteReport(holdout, { baseline = null, dev = DEV_REPETITIONS, stopped = null } = {}) {
   const definitions = {
     dev_a1: testCase('dev_a1', { intentId: 'dev_a' }),
     dev_a2: testCase('dev_a2', { intentId: 'dev_a' }),
@@ -314,6 +318,15 @@ async function suiteReport(holdout, { baseline = null, dev = DEV_REPETITIONS } =
     provenance: {},
     verification: null,
     budget: null,
+    stopped: stopped
+      ? {
+          reason: stopped,
+          signal: 'SIGINT',
+          cancelledCases: Object.entries({ ...dev, ...holdout })
+            .filter(([, statuses]) => statuses.includes(cancelled))
+            .map(([id]) => id),
+        }
+      : null,
     caseRecords,
     comparison: baseline ? compareReports(baseline, { results: caseRecords, model: 'm', generatedAt, mode: 'run' }, { baselineLabel: 'baseline.json', resamples: 200 }) : null,
     traceFile: null,
@@ -429,4 +442,65 @@ test('with the holdout hidden, the comparison is byte-identical too for runs tha
   assert.match(consoleText, /\nPaired comparison with baseline\.json: 3 paired dev case\(s\) \(the comparison's 3 holdout case\(s\) are not shown;/);
   assert.match(consoleText, /\n {2}regressions: dev_a2 \(pass → wrong_result\)\n {2}improvements: none$/);
   assert.doesNotMatch(`${markdown}\n${consoleText}`, /ho_|not counted or timed out|Excluded from the paired test|on [56] paired|[23] regression\(s\)|1 improvement/);
+});
+
+test('with the holdout hidden, a stopped run counts the dev cases that did not finish, never the holdout ones', async () => {
+  // The same holdout accuracy (50.0% over 3 cases) with no, one or every
+  // holdout case cut off by the stop (cancelled repetitions are excluded, so
+  // a case cut off after passing keeps its pass rate).
+  const dev = { ...DEV_REPETITIONS, dev_b1: [P, P, cancelled] };
+  const variants = {
+    none: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, skipped], ho_abstain: ['answered', 'answered', 'answered'] },
+    one: { ho_x1: [P, P, P], ho_x2: [F, F, F], ho_y1: [P, F, cancelled], ho_abstain: ['answered', 'answered', 'answered'] },
+    every: { ho_x1: [P, P, cancelled], ho_x2: [F, cancelled, F], ho_y1: [cancelled, P, F], ho_abstain: [cancelled, 'answered', 'answered'] },
+  };
+  const reports = {};
+  for (const [name, holdout] of Object.entries(variants)) {
+    reports[name] = await suiteReport(holdout, { dev, stopped: 'SIGINT received' });
+  }
+  const all = Object.values(reports);
+  for (const report of all) {
+    assert.deepEqual(
+      report.stats.bySplit.map((entry) => [entry.key, entry.cases, entry.accuracy]),
+      [['dev', 3, 0.5556], ['holdout', 3, 0.5]]
+    );
+  }
+  assert.deepEqual(all.map((report) => report.stopped.cancelledCases.length), [1, 2, 5]);
+  const distinct = (values) => new Set(values).size;
+  assert.equal(distinct(all.map((report) => renderReportMarkdown(report, { revealHoldout: true }))), all.length);
+  assert.equal(distinct(all.map((report) => renderHeadline(report, { revealHoldout: true }))), all.length);
+
+  const markdown = renderReportMarkdown(reports.none);
+  const consoleText = renderHeadline(reports.none);
+  for (const [name, report] of Object.entries(reports)) {
+    assert.equal(renderReportMarkdown(report), markdown, name);
+    assert.equal(renderHeadline(report), consoleText, name);
+  }
+  assert.match(
+    markdown,
+    /\n\*\*The run was stopped early\*\*: SIGINT received\. 1 dev case\(s\) did not finish \(outcome `cancelled`, excluded; holdout cases are not counted here\); the numbers cover only what finished\.\n/
+  );
+  assert.match(consoleText, /\nStopped early: SIGINT received; 1 dev case\(s\) did not finish \(holdout cases not counted; partial report\)\.$/);
+  // --reveal-holdout counts every case, as before.
+  assert.match(renderReportMarkdown(reports.every, { revealHoldout: true }), /stopped early\*\*: SIGINT received\. 5 case\(s\) did not finish \(outcome `cancelled`, excluded\); the numbers/);
+  assert.match(renderHeadline(reports.every, { revealHoldout: true }), /\nStopped early: SIGINT received; 5 case\(s\) did not finish \(partial report\)\.$/);
+});
+
+test('with the holdout hidden and only holdout cases paired, the verdict does not claim that no case was paired', async () => {
+  const baseline = await suiteReport(
+    { ho_x1: [P, P, P], ho_x2: [P, P, P], ho_y1: [F, F, F], ho_abstain: ['answered', 'answered', 'answered'] },
+    { dev: {} }
+  );
+  const report = await suiteReport(HOLDOUT_VARIANTS.spread, { baseline });
+  assert.equal(report.comparison.paired, 3, 'report.json pairs the holdout cases (--gate decides on them)');
+  const markdown = renderReportMarkdown(report);
+  const consoleText = renderHeadline(report);
+  for (const text of [markdown, consoleText]) {
+    assert.match(text, /on 0 paired dev case\(s\)|: 0 paired dev case\(s\)/);
+    assert.match(text, /→ no dev case is paired with the baseline \(its holdout cases are not shown\)/);
+    assert.doesNotMatch(text, /no case could be paired/);
+  }
+  // A comparison that really paired nothing keeps its wording.
+  const unpaired = await suiteReport(HOLDOUT_VARIANTS.spread, { baseline: { ...baseline, results: [] } });
+  assert.match(renderHeadline(unpaired, { revealHoldout: true }), /→ no case could be paired with the baseline/);
 });

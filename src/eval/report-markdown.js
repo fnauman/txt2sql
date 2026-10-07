@@ -247,6 +247,15 @@ function devAccuracyText(accuracy) {
   );
 }
 
+// "N case(s) did not finish" of a stopped run. While the holdout is hidden it
+// counts the listed (dev) cases: which holdout repetitions a stop cut off is
+// a holdout outcome the split accuracy does not show (a case cut off after
+// passing repetitions keeps its pass rate).
+function cancelledText(report, hidden, shown) {
+  const cancelled = (report.stopped?.cancelledCases || []).filter((id) => !hidden.has(id));
+  return `${cancelled.length} ${shown.hidden ? 'dev ' : ''}case(s) did not finish`;
+}
+
 function headline(report, hidden = new Set(), shown = displayedSummaries(report, hidden), comparison = report.comparison) {
   const stats = report.stats;
   const strict = stats.strictAccuracy;
@@ -314,8 +323,8 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
   if (report.stopped) {
     lines.push('');
     lines.push(
-      `**The run was stopped early**: ${report.stopped.reason}. ${report.stopped.cancelledCases?.length || 0} case(s) did not finish ` +
-        '(outcome `cancelled`, excluded); the numbers cover only what finished.'
+      `**The run was stopped early**: ${report.stopped.reason}. ${cancelledText(report, hidden, shown)} ` +
+        `(outcome \`cancelled\`, excluded${shown.hidden ? '; holdout cases are not counted here' : ''}); the numbers cover only what finished.`
     );
   }
   if (report.mode === 'rescore' && report.rescoredFrom) {
@@ -339,13 +348,23 @@ const VERDICT_TEXT = {
   no_paired_cases: 'no case could be paired with the baseline',
 };
 
+// The verdict of a displayed comparison. With the holdout hidden and no dev
+// case paired, "no case could be paired" would be wrong whenever holdout
+// cases were (--gate decides on them); the wording does not say whether any was.
+function verdictText(comparison) {
+  if (comparison.verdict === 'no_paired_cases' && comparison.hiddenCases > 0) {
+    return 'no dev case is paired with the baseline (its holdout cases are not shown)';
+  }
+  return VERDICT_TEXT[comparison.verdict] || comparison.verdict;
+}
+
 /** The comparison's one-line summary (of a displayed comparison: dev cases only while the holdout is hidden). */
 export function comparisonLine(comparison) {
   const dev = comparison.hiddenCases > 0;
   return (
     `vs baseline${dev ? ' (dev cases)' : ''}: Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)}) on ` +
     `${comparison.paired} paired ${dev ? 'dev ' : ''}case(s); ${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s); ` +
-    `exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} → ${VERDICT_TEXT[comparison.verdict] || comparison.verdict}` +
+    `exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} → ${verdictText(comparison)}` +
     (dev ? ` (the comparison's ${comparison.hiddenCases} holdout case(s) are not shown; --gate tests every paired case)` : '')
   );
 }
@@ -390,7 +409,7 @@ export function renderComparisonConsole(recorded, { revealHoldout = false } = {}
     `  strict accuracy (paired ${dev ? 'dev ' : ''}cases) ${formatPercent(comparison.accuracy.baseline)} → ${formatPercent(comparison.accuracy.candidate)}: ` +
       `Δ ${formatPoints(comparison.accuracy.delta)} (95% CI ${formatSignedInterval(comparison.accuracy.deltaCi95)})`,
     `  exact McNemar p = ${comparison.mcnemar.p.toFixed(3)} (${comparison.mcnemar.regressions} regression(s), ${comparison.mcnemar.improvements} improvement(s)) → ` +
-      `${VERDICT_TEXT[comparison.verdict] || comparison.verdict}`,
+      `${verdictText(comparison)}`,
     `  regressions: ${flipList(comparison.flips.regressions)}`,
     `  improvements: ${flipList(comparison.flips.improvements)}`,
   ];
@@ -959,12 +978,17 @@ export function renderReportMarkdown(report, { revealHoldout = false } = {}) {
   return `${sections.join('\n\n')}\n`;
 }
 
-/** Short console headline (a few lines); holdout flips only counted unless `revealHoldout`. */
+/**
+ * Short console headline (a few lines). Unless `revealHoldout`, the holdout
+ * is its accuracy by split, as in report.md: every other figure, the
+ * comparison's included, covers the dev cases.
+ */
 export function renderHeadline(report, { revealHoldout = false } = {}) {
   const stats = report.stats;
   // As in report.md: with holdout cases hidden, attribution and behaviour
   // cover the listed (dev) cases, so nothing hidden can be subtracted out.
-  const shown = displayedSummaries(report, hiddenIds(report, { revealHoldout }));
+  const hidden = hiddenIds(report, { revealHoldout });
+  const shown = displayedSummaries(report, hidden);
   const attribution = shown.attribution;
   const usage = shown.usage;
   const buckets = attribution.repetitions.byBucket;
@@ -1001,7 +1025,9 @@ export function renderHeadline(report, { revealHoldout = false } = {}) {
         `latency p50 ${formatMs(usage.latency.questionWallMs.p50)} p95 ${formatMs(usage.latency.questionWallMs.p95)} · retry rate ${formatPercent(usage.retries.rate)}`,
   ];
   if (report.stopped) {
-    lines.push(`Stopped early: ${report.stopped.reason}; ${report.stopped.cancelledCases?.length || 0} case(s) did not finish (partial report).`);
+    lines.push(
+      `Stopped early: ${report.stopped.reason}; ${cancelledText(report, hidden, shown)} (${shown.hidden ? 'holdout cases not counted; ' : ''}partial report).`
+    );
   }
   if (report.comparison) {
     lines.push(renderComparisonConsole(report.comparison, { revealHoldout }));

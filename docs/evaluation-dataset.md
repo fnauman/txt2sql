@@ -192,12 +192,13 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   tests every paired case, but its reason gives no counts: every case's
   counts minus the dev ones shown would be the holdout's flips). The
   headline's intervals, the majority-pass cases, the intent-clustered
-  accuracy, the holdout split row's majority passes, the legacy pooled rate
-  and the comparison (its paired table, accuracy change and interval,
-  McNemar p, verdict and lists) are dev figures: two runs with the same
-  holdout accuracy can differ in how its pass rates spread over cases and
-  intents, in excluded and skipped holdout repetitions, or in which holdout
-  cases flipped, and those figures would show it. The exit code can give a hidden holdout outcome away in edge
+  accuracy, the holdout split row's majority passes, the legacy pooled rate,
+  the count of cases a run stopped early did not finish, and the comparison
+  (its paired table, accuracy change and interval, McNemar p, verdict and
+  lists) are dev figures: two runs with the same holdout accuracy can differ
+  in how its pass rates spread over cases and intents, in excluded, skipped
+  and cancelled holdout repetitions, or in which holdout cases flipped, and
+  those figures would show it. The exit code can give a hidden holdout outcome away in edge
   cases: in the benchmark profile a run whose dev cases all pass exits 1
   when a holdout case failed, a holdout abstain / clarify case included
   (whose outcome report.md does not show; the reason does not itemize
