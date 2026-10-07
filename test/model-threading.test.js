@@ -224,6 +224,13 @@ test('eval options: --model and --reasoning-effort with their sources; a flag th
   assert.deepEqual(flags.modelConfig.notices, ['--model gpt-6-luna overrides MODEL_NAME=gpt-4o-mini.', '--reasoning-effort low overrides REASONING_EFFORT=medium.']);
   // The same value is no override.
   assert.deepEqual(parseEvalArgs(['--model', 'gpt-6-luna'], { env: { MODEL_NAME: 'gpt-6-luna' } }).modelConfig.notices, []);
+  // Both keys set for OpenRouter: OPENAI_API_KEY is the one sent there, and the header says so.
+  const openRouter = { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' };
+  assert.deepEqual(parseEvalArgs([], { env: { ...openRouter, OPENAI_API_KEY: 'o' } }).modelConfig.notices, [
+    'OPENAI_API_KEY and OPENROUTER_API_KEY are both set: OPENAI_API_KEY is the key sent to openrouter.ai (unset OPENAI_API_KEY to use OPENROUTER_API_KEY).',
+  ]);
+  assert.deepEqual(parseEvalArgs([], { env: { ...openRouter, OPENAI_API_KEY: '' } }).modelConfig.notices, []);
+  assert.deepEqual(parseEvalArgs([], { env: { OPENAI_API_KEY: 'o', OPENROUTER_API_KEY: 'k' } }).modelConfig.notices, [], 'not an OpenRouter endpoint');
 
   // runner.flags records the model and effort with their sources, not the resolved object.
   const recorded = describeRunnerFlags(flags);

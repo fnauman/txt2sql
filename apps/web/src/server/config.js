@@ -273,6 +273,8 @@ export function loadWebConfig(env = process.env) {
     reasoningEffort: modelConfig.reasoningEffort,
     reasoningEffortSource: modelConfig.reasoningEffortSource,
     completionSettings: completionSettingsOf(modelConfig),
+    // Printed at startup (e.g. an OPENAI_API_KEY that goes to OpenRouter).
+    modelNotices: [...modelConfig.notices],
     schemaScope: { ...schemaScope },
     hintsVersion,
     database: {

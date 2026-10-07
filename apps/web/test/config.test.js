@@ -235,6 +235,12 @@ test('loadWebConfig reads the model, its reasoning effort and the endpoint with 
   const openRouter = loadWebConfig({ MODEL_NAME: 'openai/gpt-6-luna', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_REQUIRE_PARAMETERS: '0' });
   assert.equal(openRouter.completionSettings.isOpenRouter, true);
   assert.match(describeWebConfig(openRouter), / endpoint=openrouter\.ai\(openrouter,requireParameters=off\) /);
+  assert.deepEqual([...openRouter.modelNotices], []);
+  // Startup notes: an OPENAI_API_KEY that, next to OPENROUTER_API_KEY, goes to OpenRouter.
+  const bothKeys = loadWebConfig({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENAI_API_KEY: 'o', OPENROUTER_API_KEY: 'k' });
+  assert.deepEqual([...bothKeys.modelNotices], [
+    'OPENAI_API_KEY and OPENROUTER_API_KEY are both set: OPENAI_API_KEY is the key sent to openrouter.ai (unset OPENAI_API_KEY to use OPENROUTER_API_KEY).',
+  ]);
 
   // A bad effort is one more startup problem, reported with the rest.
   assert.throws(

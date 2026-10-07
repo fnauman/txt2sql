@@ -556,15 +556,38 @@ model change).
 ### OpenRouter
 
 Any OpenAI-compatible endpoint works through `OPENAI_BASE_URL`. For
-[OpenRouter](https://openrouter.ai), use its vendor-prefixed model ids:
+[OpenRouter](https://openrouter.ai), use its vendor-prefixed model ids. Put
+these lines in `.env` (or the env file you pass with `--dotenv`):
 
-```bash
+```text
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_API_KEY=sk-or-...        # used when OPENAI_API_KEY is unset and the host is openrouter.ai
+OPENROUTER_API_KEY=sk-or-...
 MODEL_NAME=openai/gpt-6-luna
 REASONING_EFFORT=low
+```
+
+then run as usual:
+
+```bash
 npm run eval -- --dataset core-public --budget-usd 0.5
 ```
+
+For a single run from the shell, put the variables on the command line
+instead (`NAME=value` lines on their own are not exported, so the eval would
+not see them and would run `gpt-4o-mini` on api.openai.com):
+
+```bash
+OPENAI_BASE_URL=https://openrouter.ai/api/v1 MODEL_NAME=openai/gpt-6-luna REASONING_EFFORT=low \
+  npm run eval -- --dataset core-public --budget-usd 0.5
+```
+
+`OPENROUTER_API_KEY` is used only when `OPENAI_API_KEY` is unset and the
+host is openrouter.ai. `OPENAI_API_KEY` wins whenever it is set, on OpenRouter
+too: remove it from the env file (or set it to your OpenRouter key, or clear
+it for one run with an empty `OPENAI_API_KEY=` on the command line) when
+`OPENAI_BASE_URL` points at OpenRouter, or your OpenAI key is sent to
+openrouter.ai and the calls fail authentication. The eval header and the web
+startup log print a note when both keys are set for OpenRouter.
 
 The capability map and the price list strip the vendor prefix, so
 `openai/gpt-6-luna` gets the `gpt-6-luna` request options and price. On
@@ -577,9 +600,10 @@ silently dropping one. How strictly a provider enforces a strict
 without a price row gets the cost OpenRouter reports for each call
 (`usage.cost`), but `--budget-usd` still needs a price up front: add one with
 `MODEL_PRICING_OVERRIDES` (see [LLM Cost Tracking](#llm-cost-tracking)). The
-eval header and the web startup line name the endpoint host
-(`endpoint openrouter.ai (OpenRouter, require_parameters on)`), and reports
-record it (host only, never a key).
+eval header names the endpoint host and the `require_parameters` setting
+(`endpoint openrouter.ai (OpenRouter, require_parameters on)`), so does the web
+startup line (`endpoint=openrouter.ai(openrouter,requireParameters=on)`), and
+reports record the host (never a key).
 
 ## LLM Cost Tracking
 

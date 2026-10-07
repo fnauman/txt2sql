@@ -41,6 +41,9 @@ async function main() {
 
   console.log(`Text-to-SQL API listening on ${formatListenUrl(lifecycle.address)}`);
   console.log(`[config] ${describeWebConfig(config)}`);
+  for (const notice of config.modelNotices || []) {
+    console.warn(`[config] note: ${notice}`);
+  }
   console.log(`[config] env file: ${envInfo.loaded ? envInfo.path : `none (looked for ${envInfo.candidate})`}`);
 
   if (!config.loopback) {

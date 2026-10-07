@@ -339,7 +339,8 @@ function sourceLabel(source, file, name) {
  *   modelSourceFile / reasoningEffortSourceFile (the env file a variable came
  *   from, when `envFile` = { path, vars } says so; else null),
  *   baseUrlHost, isOpenRouter, requireParameters, maxCompletionTokens,
- *   capability, notices (a flag that overrides a different env value) }.
+ *   capability, notices (a flag that overrides a different env value; an
+ *   OPENAI_API_KEY that, set next to OPENROUTER_API_KEY, goes to OpenRouter) }.
  * Throws INVALID_CONFIG on an invalid effort or endpoint setting.
  */
 export function resolveModelConfig({ env = process.env, flags = {}, envFile = null } = {}) {
@@ -363,6 +364,15 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
       `--reasoning-effort ${reasoningEffort} overrides REASONING_EFFORT=${envEffort}${fromFile('REASONING_EFFORT') ? ` (from ${fromFile('REASONING_EFFORT')})` : ''}.`
     );
   }
+  const completionSettings = resolveCompletionSettings(env);
+  // OPENAI_API_KEY wins over OPENROUTER_API_KEY (resolveLlmApiKey), also on
+  // OpenRouter: say so, so an OpenAI key is never sent there unnoticed.
+  if (completionSettings.isOpenRouter && nonBlank(env.OPENAI_API_KEY) && nonBlank(env.OPENROUTER_API_KEY)) {
+    notices.push(
+      `OPENAI_API_KEY and OPENROUTER_API_KEY are both set: OPENAI_API_KEY is the key sent to ${completionSettings.baseUrlHost} ` +
+        '(unset OPENAI_API_KEY to use OPENROUTER_API_KEY).'
+    );
+  }
   return {
     model,
     modelSource,
@@ -370,7 +380,7 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
     reasoningEffort,
     reasoningEffortSource,
     reasoningEffortSourceFile: reasoningEffortSource === 'REASONING_EFFORT' ? fromFile('REASONING_EFFORT') : null,
-    ...resolveCompletionSettings(env),
+    ...completionSettings,
     capability: modelCapabilities(model),
     notices,
   };
