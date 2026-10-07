@@ -836,12 +836,17 @@ export function collectBenchmarkWarnings({ rowsMatch, signalWarnings = [], disal
 //
 // - scalar/rowset: a bijection of compared row tuples must exist (order-blind).
 // - ranked: that bijection must exist AND the model's primary value column must
-//   be monotonic in `order` (catches "didn't sort / sorted wrong" while
+//   be monotonic in `order` up to ties (catches "didn't sort / sorted wrong" while
 //   tolerating tie reordering by label, which the gold's tiebreak fixes but the
-//   model's may not). Ranking values compare as cells match (rounded to
-//   `decimals`, or within twice the tolerance), so values that match the same
-//   gold value are a tie. The default ranking column is the first truly numeric
-//   gold column (JS numbers, not numeric-looking code strings like '4000').
+//   model's may not). Without a tolerance ranking values compare as cells
+//   match, rounded to `decimals`, so values that match the same gold value are
+//   a tie. With a tolerance they compare unrounded, and a column out of its
+//   own order still passes when the row matching makes it a tie: the gold
+//   rows the prediction's rows pair with come in the gold's ranking order, so
+//   two rows tie only when they pair with equal gold values (not when their
+//   values are merely within twice the tolerance). The default ranking column
+//   is the first truly numeric gold column (JS numbers, not numeric-looking
+//   code strings like '4000').
 // - ties at the cut-off (ranked only, and only when the caller passes
 //   `goldTies`: the rows the gold's own LIMIT left out, see isCutByLimit):
 //   the gold rows whose ranking values (every value column) equal its last
@@ -1125,13 +1130,31 @@ function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples
     const actualAtBoundary = actualTuples.filter((tuple) => rankKey(tuple) === boundaryKey).map(tupleKey).sort();
     return sameList(goldAbove, actualAbove) && containsSortedKeys(pool, actualAtBoundary);
   }
+  return toleranceMatchingExists(matchingLeft(goldTuples, isBoundary, tieTuples), actualTuples, tieTuples.length, tolerance);
+}
+
+// The left side of a tolerance matching: every gold row, plus the ties at a
+// cut-off (see matchRowsAcrossBoundary); `inPool` marks the rows a stand-in
+// may absorb (the gold's boundary rows and the ties).
+function matchingLeft(goldTuples, isBoundary, tieTuples) {
+  return [
+    ...goldTuples.map((tuple, index) => ({ tuple, inPool: Boolean(isBoundary?.[index]) })),
+    ...tieTuples.map((tuple) => ({ tuple, inPool: true })),
+  ];
+}
+
+// Is there a perfect matching (Hopcroft-Karp) between `left` and the
+// prediction rows plus `standInCount` stand-ins? A left row pairs with a
+// prediction row whose tuple is within the tolerance of its own and for which
+// `allowed(leftIndex, actualIndex)` holds, and a pool row also with any
+// stand-in.
+function toleranceMatchingExists(left, actualTuples, standInCount, tolerance, allowed = () => true) {
   const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-  const standIns = tieTuples.map((_tuple, index) => actualTuples.length + index);
-  const left = [...goldTuples.map((tuple, index) => ({ tuple, inPool: isBoundary[index] })), ...tieTuples.map((tuple) => ({ tuple, inPool: true }))];
-  const adjacency = left.map(({ tuple, inPool }) => {
+  const standIns = Array.from({ length: standInCount }, (_value, index) => actualTuples.length + index);
+  const adjacency = left.map(({ tuple, inPool }, i) => {
     const neighbours = [];
     actualTuples.forEach((actual, j) => {
-      if (tuplesEqual(tuple, actual)) {
+      if (tuplesEqual(tuple, actual) && allowed(i, j)) {
         neighbours.push(j);
       }
     });
@@ -1140,7 +1163,7 @@ function matchRowsAcrossBoundary(goldTuples, actualTuples, isBoundary, tieTuples
   if (adjacency.some((neighbours) => neighbours.length === 0)) {
     return false;
   }
-  return hasPerfectMatching(adjacency, actualTuples.length + standIns.length);
+  return hasPerfectMatching(adjacency, actualTuples.length + standInCount);
 }
 
 // Order-insensitive: is there a bijection (gold rows <-> actual rows) where every
@@ -1157,20 +1180,7 @@ function matchRowsUnordered(goldTuples, actualTuples, tolerance) {
   if (tolerance <= 0) {
     return sameList(goldTuples.map(tupleKey).sort(), actualTuples.map(tupleKey).sort());
   }
-  const tuplesEqual = (gold, actual) => gold.every((cell, index) => cellsEqual(cell, actual[index], tolerance));
-  const adjacency = goldTuples.map((gold) => {
-    const neighbours = [];
-    actualTuples.forEach((actual, j) => {
-      if (tuplesEqual(gold, actual)) {
-        neighbours.push(j);
-      }
-    });
-    return neighbours;
-  });
-  if (adjacency.some((neighbours) => neighbours.length === 0)) {
-    return false;
-  }
-  return hasPerfectMatching(adjacency, actualTuples.length);
+  return toleranceMatchingExists(matchingLeft(goldTuples, null, []), actualTuples, 0, tolerance);
 }
 
 // Hopcroft-Karp: does the bipartite graph (left i -> adjacency[i], right
@@ -1341,23 +1351,26 @@ function rankValueOf(value) {
   return temporal === null ? null : Date.parse(temporal.replace(' ', 'T'));
 }
 
-// `nullAsZero`: the ranking column's gold column is listed in null_as_zero,
-// so a NULL is ranked as the 0 it was matched as. Values compare as cells
-// match, so two values that both match the same gold value are a tie: rounded
-// to `decimals` (NULL and 0.004 for a gold 0 at two decimals), or, when a
-// tolerance is set, within twice it (each cell is within the tolerance of the
-// gold, cellsEqual, so 9.992 and 10.008 both match a gold 10 at 0.01).
-function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullAsZero = false, decimals = DEFAULT_DECIMALS } = {}) {
+// Is the prediction's own ranking column monotonic in `order`? (`nullAsZero`:
+// the ranking column's gold column is listed in null_as_zero, so a NULL is
+// ranked as the 0 it was matched as.) Without a tolerance values compare as
+// cells match, rounded to `decimals`, so two values that match the same gold
+// value are a tie (NULL and 0.004 for a gold 0 at two decimals); cell
+// equality is then exact, so this is the same as the matched gold rows
+// appearing in the gold's ranking order. With a tolerance the caller passes
+// `decimals: null`: the values compare unrounded (a rounding would hide an
+// inversion across two distinct gold ranks, 10.0054 before 10.0051), and
+// rankedMatchingHolds decides when they are not in order.
+function rankingHolds(actualRows, primaryActualColumn, order, { nullAsZero = false, decimals = DEFAULT_DECIMALS } = {}) {
   if (!primaryActualColumn) {
     return true;
   }
-  const slack = tolerance > 0 ? 2 * (tolerance + 1e-9) : 1e-6;
   let previous = null;
   for (const row of actualRows) {
     const raw = row?.[primaryActualColumn];
     const cell = nullAsZero && (raw === null || raw === undefined) ? 0 : raw;
     const ranked = rankValueOf(cell);
-    const value = ranked !== null && tolerance <= 0 && toComparableNumber(cell) !== null ? roundTo(ranked, decimals) : ranked;
+    const value = ranked !== null && decimals !== null && toComparableNumber(cell) !== null ? roundTo(ranked, decimals) : ranked;
     if (value === null) {
       // Skip NULL metric rows WITHOUT resetting the running bound: a correct
       // ORDER BY puts NULLs at the end, and a NULL must never license a jump
@@ -1365,16 +1378,62 @@ function rankingHolds(actualRows, primaryActualColumn, order, tolerance, { nullA
       continue;
     }
     if (previous !== null) {
-      if (order === 'asc' && value < previous - slack) {
+      if (order === 'asc' && value < previous - 1e-6) {
         return false;
       }
-      if (order !== 'asc' && value > previous + slack) {
+      if (order !== 'asc' && value > previous + 1e-6) {
         return false;
       }
     }
     previous = value;
   }
   return true;
+}
+
+// Ranking value of a described cell (null for NULL and text).
+function cellRank(cell) {
+  if (cell.kind === 'num') {
+    return cell.num;
+  }
+  return cell.kind === 'time' ? Date.parse(cell.key.slice(2).replace(' ', 'T')) : null;
+}
+
+// With a tolerance cell equality is not transitive, so two prediction values
+// out of order by less than twice the tolerance may each match a different
+// gold value, across two distinct gold ranks; distance alone does not make
+// them a tie. A prediction whose own ranking column is out of order
+// (rankingHolds, unrounded) passes only by the row matching: is there a
+// matching (as matchRowsUnordered / matchRowsAcrossBoundary) in which the
+// gold rows paired with the prediction's rows, read in the prediction's
+// order, have ranking values (`primaryIndex`) in `order`? Two prediction rows
+// are then a tie only when they pair with equal gold values. The gold rows
+// every such matching pairs have a fixed multiset of ranking values, so the
+// k-th prediction row with a ranking value must pair with a gold row holding
+// the k-th of them in `order`, and the question is one perfect matching
+// under that extra constraint. NULL (and text) ranking values never constrain
+// the order (a prediction NULL pairs with a gold NULL; read as 0 under
+// null_as_zero they rank as 0). At a cut-off (`isBoundary`), the gold's
+// boundary rows and its ties all equal the last row's ranking values (that is
+// what makes them the boundary) and rank as one tie: whichever of them the
+// prediction lists, they fill the boundary's places in any order.
+function rankedMatchingHolds(goldTuples, actualTuples, primaryIndex, order, tolerance, { isBoundary = null, tieTuples = [] } = {}) {
+  const left = matchingLeft(goldTuples, isBoundary, tieTuples);
+  const boundaryRank = cellRank(goldTuples[goldTuples.length - 1][primaryIndex]);
+  const leftRanks = left.map(({ tuple, inPool }) => (inPool ? boundaryRank : cellRank(tuple[primaryIndex])));
+  const required = leftRanks
+    .slice(0, goldTuples.length)
+    .filter((rank) => rank !== null)
+    .sort((a, b) => (order === 'asc' ? a - b : b - a));
+  const place = [];
+  let ranked = 0;
+  for (const tuple of actualTuples) {
+    place.push(cellRank(tuple[primaryIndex]) === null ? -1 : ranked++);
+  }
+  if (ranked !== required.length) {
+    return false;
+  }
+  const allowed = (i, j) => place[j] === -1 || (leftRanks[i] !== null && Math.abs(leftRanks[i] - required[place[j]]) <= 1e-9);
+  return toleranceMatchingExists(left, actualTuples, tieTuples.length, tolerance, allowed);
 }
 
 // column_order (see the comparison spec above): a listed gold column must not
@@ -1551,12 +1610,21 @@ function prepareResultSetMatch(expected, actual, comparison, { goldTies = null }
     if (scalarSingleValue && !scalarRuleHolds(goldColumns[0], assignment[0], actual[0], actualColumns)) {
       return 'scalar_column';
     }
-    if (
-      mode === 'ranked' &&
-      primaryValueIndex !== -1 &&
-      !rankingHolds(actual, assignment[primaryValueIndex], order, tolerance, { nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]), decimals })
-    ) {
-      return 'ranking';
+    if (mode === 'ranked' && primaryValueIndex !== -1) {
+      // With a tolerance, a prediction sorted by its own values passes (noise
+      // within the tolerance may flip a near-tie of two distinct gold values:
+      // per-line ROUND sums differ by a cent); one out of its own order passes
+      // only when the row matching makes the inversion a tie.
+      const ownOrder = rankingHolds(actual, assignment[primaryValueIndex], order, {
+        nullAsZero: nullAsZero.has(goldColumns[primaryValueIndex]),
+        decimals: tolerance > 0 ? null : decimals,
+      });
+      const ranked =
+        ownOrder ||
+        (tolerance > 0 && rankedMatchingHolds(goldTuples, actualTuples, primaryValueIndex, order, tolerance, { isBoundary, tieTuples }));
+      if (!ranked) {
+        return 'ranking';
+      }
     }
     return null;
   };

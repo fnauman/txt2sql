@@ -211,6 +211,23 @@ test('with a tolerance, tied items and boundary rows pair within it', () => {
   assert.equal(compareResults(twoTied, [gold[0], { name: 'X', v: 50 }, { name: 'X', v: 50.001 }], spec, tied), false);
 });
 
+test('with a tolerance, a row above the boundary still ranks above a tied item within twice the tolerance of it', () => {
+  const spec = { mode: 'ranked', order: 'desc', tolerance: 0.01, value_columns: ['v'] };
+  const gold = [
+    { name: 'A', v: 50.015 },
+    { name: 'B', v: 50 },
+  ];
+  const tied = ties({ name: 'X', v: 50.004 });
+  assert.equal(compareResultsDetailed(gold, [gold[0], { name: 'X', v: 50.004 }], spec, tied).reason, 'match');
+  assert.equal(compareResultsDetailed(gold, [{ name: 'X', v: 50.004 }, gold[0]], spec, tied).reason, 'ranking');
+  assert.equal(compareResultsDetailed(gold, [gold[1], gold[0]], spec, tied).reason, 'ranking');
+  // The boundary rows and the ties are one group of equal ranking values:
+  // they reorder freely among themselves.
+  const twoTied = [{ name: 'A', v: 100 }, { name: 'B', v: 50.005 }, { name: 'C', v: 50 }];
+  assert.equal(compareResultsDetailed(twoTied, [twoTied[0], { name: 'X', v: 50.004 }, twoTied[1]], spec, tied).reason, 'match');
+  assert.equal(compareResultsDetailed(twoTied, [twoTied[0], twoTied[2], twoTied[1]], spec, tied).reason, 'match');
+});
+
 test('scalar and rowset comparisons ignore the cut-off', () => {
   const rows = [
     { name: 'A', v: 10 },
