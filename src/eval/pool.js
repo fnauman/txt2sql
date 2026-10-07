@@ -94,6 +94,8 @@ export async function runPool(items, worker, { concurrency = DEFAULT_CONCURRENCY
   return results;
 }
 
+// What a result spent: its llm_cost.totalCost, the provider-reported charge
+// whenever the provider reported one (pricing.js), as the run totals count it.
 export function costOfResult(result) {
   const total = result?.llm_cost?.totalCost;
   return Number.isFinite(total) ? total : 0;

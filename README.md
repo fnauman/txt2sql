@@ -596,10 +596,12 @@ OpenRouter then routes only to endpoints that support every parameter sent
 (`response_format`, `reasoning_effort`, `max_completion_tokens`, ...) instead of
 silently dropping one. How strictly a provider enforces a strict
 `json_schema` response format still varies; set
-`OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. A model
-without a price row gets the cost OpenRouter reports for each call
-(`usage.cost`), but `--budget-usd` still needs a price up front: add one with
-`MODEL_PRICING_OVERRIDES` (see [LLM Cost Tracking](#llm-cost-tracking)). The
+`OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. The
+cost OpenRouter reports for each call (`usage.cost`) is the call's cost, also
+for a model with a price row (the estimate is kept beside it), so totals and
+`--budget-usd` count what was charged; `--budget-usd` still needs a price up
+front: add one with `MODEL_PRICING_OVERRIDES` for a model without a row (see
+[LLM Cost Tracking](#llm-cost-tracking)). The
 eval header names the endpoint host and the `require_parameters` setting
 (`endpoint openrouter.ai (OpenRouter, require_parameters on)`), so does the web
 startup line (`endpoint=openrouter.ai(openrouter,requireParameters=on)`), and
@@ -634,7 +636,7 @@ LLM attempt 2: $0.001800 (1100 input + 210 output tokens, gpt-5.4-mini)
 Total LLM: $0.003450 (2100 input + 410 output tokens, gpt-5.4-mini)
 ```
 
-For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is also kept next to the estimate for priced models (`providerCost`). Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
+For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is the cost for priced models too (it is what the call was charged), so run totals and `--budget-usd` count it; the local estimate stays beside it (`estimatedCost`, shown as `cost reported by the provider (local estimate $0.004859)`), and the charge is also kept as `providerCost`. Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
 
 Quick test (no DB or API key needed):
 

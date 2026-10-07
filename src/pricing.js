@@ -29,8 +29,11 @@
 // Reasoning tokens (usage.completion_tokens_details.reasoning_tokens) are
 // part of completion_tokens and billed as output; they are summed and shown
 // separately. A cost the provider reports itself (usage.cost, as OpenRouter
-// does) is kept as providerCost next to the estimate, and is the cost when
-// the model has no price here.
+// does) is what the call was charged, so it is the cost (totalCost, source
+// 'provider', also kept as providerCost) whether or not the model has a price
+// here: run totals and the --budget-usd pool (src/eval/pool.js) count it. For
+// a priced model the local estimate stays beside it: inputCost / outputCost
+// are the estimate's split and estimatedCost its sum.
 const BASE_MODEL_PRICING = Object.freeze({
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
@@ -254,6 +257,29 @@ export function calculateCost(model, usage) {
       (cachedPromptTokens / 1_000_000) * (pricing.cachedInputPerMillion ?? pricing.inputPerMillion)
   );
   const outputCost = roundCurrency((completionTokens / 1_000_000) * pricing.outputPerMillion);
+  const estimatedCost = roundCurrency(inputCost + outputCost);
+
+  if (providerCost !== null) {
+    // Priced here, but the provider said what it charged: that is the cost
+    // (what totals and --budget-usd count); inputCost / outputCost stay the
+    // local estimate's split, and estimatedCost its sum.
+    return {
+      model: pricing.model,
+      currency: pricing.currency || 'USD',
+      source: 'provider',
+      promptTokens,
+      cachedPromptTokens,
+      uncachedPromptTokens,
+      completionTokens,
+      ...(reasoningTokens !== null ? { reasoningTokens } : {}),
+      totalTokens,
+      inputCost,
+      outputCost,
+      totalCost: roundCurrency(providerCost),
+      providerCost: roundCurrency(providerCost),
+      estimatedCost,
+    };
+  }
 
   return {
     model: pricing.model,
@@ -266,9 +292,18 @@ export function calculateCost(model, usage) {
     totalTokens,
     inputCost,
     outputCost,
-    totalCost: roundCurrency(inputCost + outputCost),
-    ...(providerCost !== null ? { providerCost: roundCurrency(providerCost) } : {}),
+    totalCost: estimatedCost,
   };
+}
+
+// The local estimate of a cost: its estimatedCost when the provider's charge
+// replaced it, the total of one with no source (an estimate), else unknown
+// (null: a provider-reported cost of a model with no price here).
+function estimateOf(cost) {
+  if (typeof cost.estimatedCost === 'number' && Number.isFinite(cost.estimatedCost)) {
+    return cost.estimatedCost;
+  }
+  return cost.source === undefined || cost.source === null ? cost.totalCost || 0 : null;
 }
 
 export function mergeUsage(usages = []) {
@@ -358,6 +393,11 @@ export function mergeCosts(costs = []) {
   let reasoningTokens = 0;
   let hasProviderCost = false;
   let providerCost = 0;
+  // The sum of the local estimates, kept when some cost is not its own
+  // estimate (the provider's charge replaced it) and every cost has one.
+  let hasReplacedEstimate = false;
+  let estimateKnown = true;
+  let estimatedCost = 0;
 
   for (const cost of costs) {
     if (!cost) {
@@ -397,6 +437,15 @@ export function mergeCosts(costs = []) {
       hasProviderCost = true;
       providerCost = roundCurrency(providerCost + cost.providerCost);
     }
+    const estimate = estimateOf(cost);
+    if (estimate === null) {
+      estimateKnown = false;
+    } else {
+      estimatedCost = roundCurrency(estimatedCost + estimate);
+    }
+    if ((cost.source !== undefined && cost.source !== null) || typeof cost.estimatedCost === 'number') {
+      hasReplacedEstimate = true;
+    }
   }
 
   if (!hasCost) {
@@ -417,6 +466,9 @@ export function mergeCosts(costs = []) {
   if (hasProviderCost) {
     totals.providerCost = providerCost;
   }
+  if (hasReplacedEstimate && estimateKnown) {
+    totals.estimatedCost = estimatedCost;
+  }
 
   return totals;
 }
@@ -433,7 +485,8 @@ export function formatUsageAndCost({ usage = null, cost = null, model = null } =
       ? `, ${formatTokenCount(cachedPromptTokens)} cached input (${((cachedPromptTokens / promptTokens) * 100).toFixed(1)}%)`
       : '';
   const reasoningText = reasoningTokens !== null && reasoningTokens > 0 ? ` incl. ${formatTokenCount(reasoningTokens)} reasoning` : '';
-  const sourceText = cost?.source === 'provider' ? ', cost reported by the provider' : '';
+  const estimateText = Number.isFinite(cost?.estimatedCost) ? ` (local estimate $${cost.estimatedCost.toFixed(6)})` : '';
+  const sourceText = cost?.source === 'provider' ? `, cost reported by the provider${estimateText}` : '';
 
   if (cost) {
     return `$${cost.totalCost.toFixed(6)} (${formatTokenCount(promptTokens)} input${cachedText} + ${formatTokenCount(completionTokens)} output tokens${reasoningText}, ${resolvedModel}${sourceText})`;

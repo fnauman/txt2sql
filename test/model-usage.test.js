@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { compactReport } from '../src/eval/compact-report.js';
+import { costOfResult, runCaseRepetitions } from '../src/eval/pool.js';
 import { summarizeRunUsage } from '../src/eval/stats.js';
 import { generateOptimizedResponse } from '../src/pipeline.js';
 import { calculateCost, formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
@@ -27,11 +28,17 @@ test('calculateCost records the reasoning tokens (billed as output) and a provid
   // Output is all 900 completion tokens, reasoning included: 900 / 1e6 * 4.5.
   assert.equal(cost.outputCost, 0.00405);
   assert.equal(cost.providerCost, 0.0042);
-  assert.equal(cost.source, undefined, 'priced here: the estimate is the cost');
-  // A usage without the breakdowns has neither field.
+  // Priced here too, but the provider said what it charged: that is the cost,
+  // and the local estimate is kept beside it.
+  assert.equal(cost.source, 'provider');
+  assert.equal(cost.totalCost, 0.0042);
+  assert.equal(cost.estimatedCost, 0.0048588);
+  // A usage without the breakdowns has neither field, and the estimate is the cost.
   const plain = calculateCost('gpt-5.4-mini', { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
   assert.equal('reasoningTokens' in plain, false);
   assert.equal('providerCost' in plain, false);
+  assert.equal('source' in plain, false);
+  assert.equal('estimatedCost' in plain, false);
 
   // No price here: the provider's reported cost is the cost; without one there is none.
   const provider = calculateCost('anthropic/claude-sonnet-4.5', reasoningUsage({ cost: 0.0123 }));
@@ -59,6 +66,9 @@ test('mergeUsage and mergeCosts sum the reasoning tokens and the provider cost a
   const costs = mergeCosts([calculateCost('gpt-5.4-mini', reasoningUsage({ cost: 0.001 })), calculateCost('gpt-5.4-mini', reasoningUsage())]);
   assert.equal(costs.reasoningTokens, 1280);
   assert.equal(costs.providerCost, 0.001);
+  // The reported call counts at what the provider charged, the other at the estimate.
+  assert.equal(costs.totalCost, 0.0058588);
+  assert.equal(costs.estimatedCost, 0.0097176);
 });
 
 test('the CLI cost line names the reasoning tokens and a provider-reported cost', () => {
@@ -71,6 +81,11 @@ test('the CLI cost line names the reasoning tokens and a provider-reported cost'
   assert.match(
     formatUsageAndCost({ usage: provider, cost: calculateCost('acme/sql-1', provider), model: 'acme/sql-1' }),
     /^\$0\.012300 \(2000 input.* \+ 900 output tokens incl\. 640 reasoning, acme\/sql-1, cost reported by the provider\)$/
+  );
+  // Priced here too: the charge is the cost, the local estimate is named beside it.
+  assert.equal(
+    formatUsageAndCost({ usage: provider, cost: calculateCost('gpt-5.4-mini', provider), model: 'gpt-5.4-mini' }),
+    '$0.012300 (2000 input, 1024 cached input (51.2%) + 900 output tokens incl. 640 reasoning, gpt-5.4-mini, cost reported by the provider (local estimate $0.004859))'
   );
   assert.equal(formatUsageAndCost({ usage: { prompt_tokens: 10, completion_tokens: 5 }, cost: null, model: 'x' }), 'cost unavailable (10 input + 5 output tokens, x)');
 });
@@ -109,6 +124,43 @@ const schema = {
     },
   ],
 };
+
+test('a provider-reported cost above the estimate is what totals and the --budget-usd pool count', async () => {
+  // OpenRouter billed $0.02 for a call the price list estimates at $0.0048588.
+  const call = calculateCost('openai/gpt-5.4-mini', reasoningUsage({ cost: 0.02 }));
+  assert.equal(call.totalCost, 0.02);
+  assert.deepEqual([call.inputCost, call.outputCost, call.estimatedCost], [0.0008088, 0.00405, 0.0048588]);
+  const question = mergeCosts([call, call]);
+  assert.deepEqual([question.totalCost, question.providerCost, question.estimatedCost], [0.04, 0.04, 0.0097176]);
+
+  // A case (two calls) is charged $0.04: under a $0.05 budget the second
+  // case still starts (0.04 < 0.05) and the third does not (0.08).
+  const run = await runCaseRepetitions({
+    cases: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    concurrency: 1,
+    budgetUsd: 0.05,
+    runRepetition: async () => ({ status: 'pass', attempts: [], llm_cost: mergeCosts([call, call]) }),
+  });
+  assert.equal(costOfResult(run.repetitions[0][0]), 0.04);
+  assert.equal(run.spentUsd, 0.08);
+  assert.deepEqual(run.skippedCaseIds, ['c']);
+
+  // The product loop sums each call's reported cost into the question's total.
+  const result = await runOptimizedQuestion({
+    client: reasoningClient([reasoningUsage({ cost: 0.02 }), reasoningUsage({ cost: 0.03 })]),
+    connection: { query: async () => [[{ CustomerName: 'Acme' }]] },
+    schema,
+    model: 'gpt-5.4-mini',
+    reasoningEffort: 'low',
+    question: 'List customer names',
+    maxRetries: 1,
+    statementTimeoutMs: 0,
+  });
+  assert.equal(result.success, true, result.error?.message);
+  assert.deepEqual(result.llmCalls.map((entry) => entry.cost.totalCost), [0.02, 0.03]);
+  assert.equal(result.llmCost.totalCost, 0.05);
+  assert.equal(result.llmCost.estimatedCost, 0.0097176);
+});
 
 test('the product loop keeps each call\'s reasoning tokens and sums them over retries (result, trace)', async () => {
   const first = reasoningUsage();
