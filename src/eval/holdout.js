@@ -26,7 +26,8 @@
 // error analysis and experiment design look at dev failures only and no
 // figure says more about holdout outcomes than the split accuracy
 // (src/eval/report-markdown.js). report.json keeps every case (rescore,
-// compare and the gate need them); reading it is revealing the holdout.
+// compare and the gate need them), and trace.jsonl (stdout with --trace) logs
+// every case's events; reading either is revealing the holdout.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';

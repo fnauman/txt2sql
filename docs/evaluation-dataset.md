@@ -191,7 +191,9 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   flip counts (a comparison with a baseline covers the paired dev cases),
   unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
   documented look, for example when retiring a holdout). `report.json` keeps
-  every case for the rescore, the comparison and the gate; opening it is
+  every case for the rescore, the comparison and the gate, and `trace.jsonl`
+  (printed on stdout with `--trace`) logs every case's events and the run's
+  all-case statistics; opening either, or running with `--trace`, is
   revealing the holdout.
 - While the holdout is hidden, these still cover every case, holdout
   included: the headline strict accuracy (a point estimate without an
@@ -1529,7 +1531,8 @@ seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
 255, fresh holdout 149), compact file 2.07 MB. The rows below are what the
 offline rescore (`npm run eval -- --offline`) prints by default: every row
-after the first two covers the dev cases, and the holdout is read only as
+after the first two covers the dev cases, except the whole-run spend that
+opens the Cost row (report.md's Budget row), and the holdout is read only as
 its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
 `--reveal-holdout` prints every case).
 
@@ -1543,7 +1546,7 @@ its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
 | Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
 | Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
-| Cost | $0.6347 for the whole run (the budget row; $0.00052 per question) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
+| Cost | $0.6347 for the whole run (the Budget row; divided by its 1,212 repetitions about $0.00052 per question, see [Cost](#cost)) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
 | Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
 
 How to read it:

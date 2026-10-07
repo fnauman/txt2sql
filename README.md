@@ -357,7 +357,9 @@ npm run benchmark -- --dataset core-public --repeat 10
 
 Every repetition of every case is kept. The headline is the **strict
 accuracy**: the mean over cases of each case's pass rate across repetitions,
-with a 95% confidence interval from a case bootstrap. The case is the unit
+with a 95% confidence interval from a case bootstrap (over the dev cases
+while the holdout is hidden: the whole-suite figure is then a point estimate,
+see [Evaluation](#evaluation)). The case is the unit
 because repetitions of one case are strongly correlated (failures at
 temperature 0 are systematic), so pooling them as independent trials overstates
 confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
@@ -429,7 +431,8 @@ contains:
   abstain / clarify cases handled, a per-case table and cost / latency /
   retries / tokens; and the provenance (git sha, prompt, semantic-layer,
   fixture and dataset hashes);
-- `report.json` (everything, every repetition) and `trace.jsonl`.
+- `report.json` (everything, every repetition) and `trace.jsonl`; both cover
+  every case, holdout included, so reading them reveals the holdout.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
 whole 404-case suite, 3 repetitions, full-schema prompting and hints v2 — the

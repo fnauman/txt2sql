@@ -195,8 +195,10 @@ else fixed. This branch is rebased onto the measurement-hygiene branch
 (inspected holdout moved to dev, the fresh blind holdout, the re-made
 404-case baseline); arm A is that `eval/baselines/gpt-4o-mini.json` (a
 version-1 run, recorded as not recorded: it predates the switch).
-`HINTS_VERSION=1 npm run eval -- --offline` reproduces it: the same split
-accuracies and 0 flips over the 245 paired dev cases (below). Arm B is one paid `--repeat 3` run with
+Rescoring it under `HINTS_VERSION=1` (`--rescore <that file> --compare
+<that file>`, see Reproduce; plain `npm run eval -- --offline` did the same
+until the committed baseline was replaced by arm B) reproduces it: the same
+split accuracies and 0 flips over the 245 paired dev cases (below). Arm B is one paid `--repeat 3` run with
 `HINTS_VERSION=2` (the default), paired automatically against arm A; the
 pairing covers the 392 answer cases both reports share. Holdout results are
 read in aggregate only. A same-day `HINTS_VERSION=1 --repeat 3` run is an
