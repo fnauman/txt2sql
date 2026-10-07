@@ -433,10 +433,20 @@ test('distinct model ids never share a baseline file or a run directory', () => 
     ['a//b', null],
     ['..', null],
     ['', null],
+    // A hashed id ending in `_` met the plain id `<it>/<its hash>` at `__`
+    // (afcee01b: the first 8 hex digits of sha256('gpt-6-luna_')).
+    ['gpt-6-luna_', null],
+    ['gpt-6-luna/afcee01b', null],
+    ['a/', null],
+    ['a_', null],
+    ['/a', null],
   ];
   const labels = pairs.map(([model, effort]) => modelFileLabel(model, effort));
   const folded = labels.map((label) => label.toLowerCase());
   assert.equal(new Set(folded).size, labels.length, `labels collide: ${labels.join(', ')}`);
+  // The `_` of an id is written `-`, so the one before the hash stays single.
+  assert.equal(modelFileLabel('gpt-6-luna/afcee01b'), 'gpt-6-luna__afcee01b');
+  assert.equal(modelFileLabel('gpt-6-luna_'), 'gpt-6-luna_afcee01b');
   for (const label of labels) {
     assert.match(label, /^[A-Za-z0-9._-]+$/);
     assert.notEqual(label, '..');

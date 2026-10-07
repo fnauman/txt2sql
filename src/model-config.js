@@ -512,9 +512,12 @@ export function modelLabel(model, reasoningEffort = null) {
 // `--` and trims `-`).
 const PLAIN_MODEL_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[.-][a-z0-9]+)*)*$/;
 
+// A label part: any run of characters outside [A-Za-z0-9.-] (`_` included)
+// written `-`, so a part never contains `_` and every `_` of a label is the
+// separator of a `/` (`__`) or of the hash (`_`).
 function sanitizeLabelPart(value) {
   return String(value)
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/[^A-Za-z0-9.-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 }
@@ -526,11 +529,13 @@ function sanitizeLabelPart(value) {
  *   with `/` mapped to `__`: gpt-4o-mini -> gpt-4o-mini (so the committed
  *   baseline keeps its name), gpt-6-luna at low -> gpt-6-luna.low,
  *   openai/gpt-6-luna -> openai__gpt-6-luna.
- * - Any other id is written sanitized (`/` -> `__`, other characters outside
- *   [A-Za-z0-9._-] -> `-`) plus `_` and the first 8 hex digits of the
- *   SHA-256 of the whole id, so ids that sanitize alike stay apart:
- *   acme/sql-1:free -> acme__sql-1-free_<hash>, while acme/sql-1-free stays
- *   acme__sql-1-free (a plain label never has a single `_`).
+ * - Any other id is written sanitized (`/` -> `__`, any run of other
+ *   characters outside [A-Za-z0-9.-], `_` included, -> `-`) plus `_` and the
+ *   first 8 hex digits of the SHA-256 of the whole id, so ids that sanitize
+ *   alike stay apart: acme/sql-1:free -> acme__sql-1-free_<hash>, while
+ *   acme/sql-1-free stays acme__sql-1-free. The two kinds never meet: the
+ *   `_` before the hash is in a run of one `_` (or of three or more, after a
+ *   trailing `/`), while a plain label has `_` only in runs of two.
  */
 export function modelFileLabel(model, reasoningEffort = null) {
   const id = String(model ?? '').trim();
