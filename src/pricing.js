@@ -11,14 +11,20 @@
 //
 // A model id is looked up without its vendor prefix, so OpenRouter's
 // openai/gpt-6-luna resolves to the gpt-6-luna row (a variant such as
-// openai/gpt-6-luna:free does not: its price differs).
+// openai/gpt-6-luna:free does not: its price differs). A row prices its own
+// id and that id's dated snapshots (gpt-4o-mini-2024-07-18, or the
+// -YYYYMMDD form), nothing else: gpt-6-sol-pro or gpt-6-luna-mini is another
+// model at another price, so it has no price (and --budget-usd refuses it)
+// rather than the base row's.
 //
 // Override without editing code by setting MODEL_PRICING_OVERRIDES to a JSON map,
 // e.g. MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'.
 // An override for a listed model replaces the given fields; one for a model
 // that is not listed adds it when it has both inputPerMillion and
 // outputPerMillion (cachedInputPerMillion optional), so --budget-usd can track
-// any model.
+// any model. A key without a vendor prefix applies under any vendor, like the
+// rows; a key with one (openai/gpt-6-luna, acme/sql-1) only to model ids
+// under that vendor, and wins over a key without one.
 //
 // Reasoning tokens (usage.completion_tokens_details.reasoning_tokens) are
 // part of completion_tokens and billed as output; they are summed and shown
@@ -71,7 +77,7 @@ const BASE_MODEL_PRICING = Object.freeze({
 // missed. Memoizing on the raw value means it is parsed once in practice while
 // still picking up a changed env (e.g. between tests).
 let cachedOverridesRaw;
-let cachedOverrides = {};
+let cachedOverrides = [];
 
 function getPricingOverrides() {
   const raw = process.env.MODEL_PRICING_OVERRIDES || '';
@@ -81,23 +87,28 @@ function getPricingOverrides() {
 
   cachedOverridesRaw = raw;
   if (!raw) {
-    cachedOverrides = {};
+    cachedOverrides = [];
     return cachedOverrides;
   }
 
+  let parsed = {};
   try {
-    const parsed = JSON.parse(raw);
-    cachedOverrides = parsed && typeof parsed === 'object' ? parsed : {};
+    const value = JSON.parse(raw);
+    parsed = value && typeof value === 'object' ? value : {};
   } catch {
     // Ignore malformed overrides rather than break cost estimation.
-    cachedOverrides = {};
   }
+  // Split like the model ids they price: { vendor, id, pricing } per entry.
+  cachedOverrides = Object.entries(parsed)
+    .filter(([, pricing]) => pricing && typeof pricing === 'object')
+    .map(([name, pricing]) => ({ ...splitModelId(name), pricing }))
+    .filter((entry) => entry.id);
   return cachedOverrides;
 }
 
-const MODEL_PRICING_ENTRIES = Object.freeze(
-  Object.entries(BASE_MODEL_PRICING).sort(([left], [right]) => right.length - left.length)
-);
+// At most one row prices an id (its own id or a dated snapshot of it), so
+// the order does not matter.
+const MODEL_PRICING_ENTRIES = Object.freeze(Object.entries(BASE_MODEL_PRICING));
 
 function normalizeModelName(model) {
   return String(model || '')
@@ -106,10 +117,30 @@ function normalizeModelName(model) {
     .replace(/\s+/g, '-');
 }
 
-// The id a price is looked up by: without a vendor prefix (openai/...).
-function pricingModelId(model) {
+// A model id split into its vendor prefix (null without one) and the id a
+// price is looked up by: openai/gpt-6-luna -> { vendor: 'openai', id: 'gpt-6-luna' }.
+function splitModelId(model) {
   const normalized = normalizeModelName(model);
-  return normalized.slice(normalized.lastIndexOf('/') + 1);
+  const slash = normalized.lastIndexOf('/');
+  return { vendor: slash >= 0 ? normalized.slice(0, slash) : null, id: normalized.slice(slash + 1) };
+}
+
+// A dated snapshot suffix: -2024-07-18 (OpenAI) or -20240718.
+const SNAPSHOT_SUFFIX = /^-(?:\d{4}-\d{2}-\d{2}|\d{8})$/;
+
+// Whether `id` is the priced id `name` or one of its dated snapshots.
+function isSnapshotOf(id, name) {
+  return id === name || (id.startsWith(`${name}-`) && SNAPSHOT_SUFFIX.test(id.slice(name.length)));
+}
+
+// Whether an override entry applies under the model's vendor.
+function appliesToVendor(entry, vendor) {
+  return entry.vendor === null || entry.vendor === vendor;
+}
+
+// Vendor-specific entries last, so they win when merged.
+function byVendorSpecificity(left, right) {
+  return Number(left.vendor !== null) - Number(right.vendor !== null);
 }
 
 function isPrice(value) {
@@ -137,29 +168,26 @@ function providerCostOf(usage) {
 }
 
 function resolveModelPricing(model) {
-  const normalized = pricingModelId(model);
-  const overrides = getPricingOverrides();
-  const matches = (modelName) => normalized === modelName || normalized.startsWith(`${modelName}-`);
+  const { vendor, id } = splitModelId(model);
+  const overrides = getPricingOverrides().filter((entry) => appliesToVendor(entry, vendor));
 
   for (const [modelName, pricing] of MODEL_PRICING_ENTRIES) {
-    if (matches(modelName)) {
-      const override = overrides[modelName];
-      return {
-        model: modelName,
-        ...pricing,
-        ...(override && typeof override === 'object' ? override : {}),
-      };
+    if (isSnapshotOf(id, modelName)) {
+      const fields = overrides
+        .filter((entry) => entry.id === modelName)
+        .sort(byVendorSpecificity)
+        .map((entry) => entry.pricing);
+      return Object.assign({ model: modelName, ...pricing }, ...fields);
     }
   }
 
-  // A model that is not listed: a complete override entry prices it (the
-  // longest matching key wins, like the listed rows).
-  const added = Object.entries(overrides)
-    .map(([name, pricing]) => [pricingModelId(name), pricing])
-    .filter(([name, pricing]) => name && pricing && typeof pricing === 'object' && isPrice(pricing.inputPerMillion) && isPrice(pricing.outputPerMillion) && matches(name))
-    .sort(([left], [right]) => right.length - left.length);
+  // A model that is not listed: a complete override entry prices it (one
+  // keyed with the model's vendor wins over one without).
+  const added = overrides
+    .filter((entry) => isPrice(entry.pricing.inputPerMillion) && isPrice(entry.pricing.outputPerMillion) && isSnapshotOf(id, entry.id))
+    .sort(byVendorSpecificity);
   if (added.length > 0) {
-    const [name, pricing] = added[0];
+    const { id: name, pricing } = added.at(-1);
     return {
       model: name,
       inputPerMillion: pricing.inputPerMillion,

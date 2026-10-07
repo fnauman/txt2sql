@@ -343,6 +343,11 @@ test('a paid eval with --budget-usd refuses to start for a model without a price
     budgetPricingRefusal(parseEvalArgs(['--model', 'anthropic/claude-sonnet-4.5', '--budget-usd', '1'], { env: {} })),
     /^--budget-usd needs a price for model "anthropic\/claude-sonnet-4\.5" \(src\/pricing\.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion\); without it the budget cannot be enforced, so the run does not start\.$/
   );
+  // Another tier that shares a priced prefix has no price of its own: refused.
+  for (const model of ['gpt-6-sol-pro', 'gpt-6-luna-mini', 'gpt-5.4-pro']) {
+    assert.match(budgetPricingRefusal(parseEvalArgs(['--model', model, '--budget-usd', '1'], { env: {} })) || '', /^--budget-usd needs a price for model/, model);
+  }
+  assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna-2026-10-01', '--budget-usd', '1'], { env: {} })), null);
 });
 
 test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in the model id as __', async () => {

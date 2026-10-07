@@ -2546,6 +2546,14 @@ function assertCompleteChoice(choice, details) {
   }
 }
 
+// The cost of one call: priced by the model the provider reports (a dated
+// snapshot of the requested one, usually), else by the requested model, whose
+// price --budget-usd was checked against: an answer under an id the price
+// list does not know must still count against the budget.
+function callCost(responseModel, model, usage) {
+  return calculateCost(responseModel, usage) ?? (responseModel !== model ? calculateCost(model, usage) : null);
+}
+
 // `modelConfig` (optional): the reasoning effort and the endpoint settings
 // for buildCompletionOptions ({ reasoningEffort, isOpenRouter,
 // requireParameters, maxCompletionTokens }; a resolved model config fits).
@@ -2572,7 +2580,7 @@ export async function generateBasicSql({ client, model, prompt, modelConfig = nu
   assertCompleteChoice(response.choices[0], {
     rawText,
     usage,
-    cost: calculateCost(responseModel, usage),
+    cost: callCost(responseModel, model, usage),
     responseId: response.id || null,
     responseModel,
   });
@@ -2581,7 +2589,7 @@ export async function generateBasicSql({ client, model, prompt, modelConfig = nu
     sql: cleanModelOutput(rawText),
     rawText,
     usage,
-    cost: calculateCost(responseModel, usage),
+    cost: callCost(responseModel, model, usage),
     finishReason: response.choices[0]?.finish_reason || null,
     responseId: response.id || null,
     responseModel,
@@ -2679,7 +2687,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   assertCompleteChoice(response.choices[0], {
     rawText,
     usage,
-    cost: calculateCost(responseModel, usage),
+    cost: callCost(responseModel, model, usage),
     responseId: response.id || null,
     responseModel,
   });
@@ -2695,7 +2703,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
       rawText,
       usage,
-      cost: calculateCost(responseModel, usage),
+      cost: callCost(responseModel, model, usage),
       finishReason: response.choices[0]?.finish_reason || null,
       responseId: response.id || null,
       responseModel,
@@ -2709,7 +2717,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       assumptions: ['Response parsing failed; SQL was extracted from raw output.'],
       rawText,
       usage,
-      cost: calculateCost(responseModel, usage),
+      cost: callCost(responseModel, model, usage),
       finishReason: response.choices[0]?.finish_reason || null,
       responseId: response.id || null,
       responseModel,

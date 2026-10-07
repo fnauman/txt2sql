@@ -337,12 +337,70 @@ test('MODEL_PRICING_OVERRIDES can add a model that is not listed, only with both
   try {
     const cost = calculateCost('acme/sql-1', usage);
     assert.deepEqual([cost.model, cost.inputCost, cost.outputCost, cost.totalCost], ['sql-1', 1, 3, 4]);
-    // Keyed without the vendor prefix, like the listed rows.
-    assert.equal(calculateCost('other-vendor/sql-1-2026', usage).totalCost, 4);
+    // A key with a vendor prices that vendor's id and its dated snapshots only.
+    assert.equal(calculateCost('acme/sql-1-2026-01-15', usage).totalCost, 4);
+    assert.equal(hasModelPrice('other-vendor/sql-1'), false);
+    assert.equal(hasModelPrice('sql-1'), false);
+    assert.equal(hasModelPrice('acme/sql-1-turbo'), false);
     assert.equal(hasModelPrice('half-priced'), false);
     assert.equal(hasModelPrice('negative'), false);
   } finally {
     delete process.env.MODEL_PRICING_OVERRIDES;
   }
   assert.equal(hasModelPrice('acme/sql-1'), false);
+});
+
+test('a price row covers its own id and dated snapshots, never another model that shares its prefix', () => {
+  const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
+  for (const model of ['gpt-6-luna-2026-10-01', 'openai/gpt-6-luna', 'openai/gpt-6-luna-20261001', 'gpt-4o-mini-2024-07-18', 'gpt-5.4-mini-2026-03-05']) {
+    assert.equal(hasModelPrice(model), true, model);
+  }
+  // A pro / mini tier or a preview is another model at another price: no
+  // price, so a --budget-usd run refuses it instead of under-counting.
+  for (const model of ['gpt-6-sol-pro', 'gpt-6-luna-mini', 'gpt-5.4-pro', 'openai/gpt-6-luna-preview', 'gpt-4o-mini-search-preview', 'gpt-6-luna-2026']) {
+    assert.equal(hasModelPrice(model), false, model);
+    assert.equal(calculateCost(model, usage), null, model);
+  }
+});
+
+test('MODEL_PRICING_OVERRIDES keys with a vendor apply under that vendor only, and win over a key without one', () => {
+  const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({
+    'gpt-6-luna': { inputPerMillion: 5 },
+    'openai/gpt-6-luna': { inputPerMillion: 9, outputPerMillion: 9 },
+    'acme/x': { inputPerMillion: 1, outputPerMillion: 2 },
+  });
+  try {
+    // A listed row: the vendor's override (here openai/) on top of the bare one.
+    assert.deepEqual([calculateCost('openai/gpt-6-luna', usage).inputCost, calculateCost('openai/gpt-6-luna', usage).outputCost], [9, 9]);
+    assert.deepEqual([calculateCost('gpt-6-luna', usage).inputCost, calculateCost('gpt-6-luna', usage).outputCost], [5, 0.5]);
+    assert.deepEqual([calculateCost('azure/gpt-6-luna', usage).inputCost, calculateCost('azure/gpt-6-luna', usage).outputCost], [5, 0.5]);
+    // An added model: another vendor's id of the same name has no price.
+    assert.equal(calculateCost('acme/x', usage).totalCost, 3);
+    assert.equal(calculateCost('other/x', usage), null);
+    assert.equal(calculateCost('x', usage), null);
+  } finally {
+    delete process.env.MODEL_PRICING_OVERRIDES;
+  }
+});
+
+test('a call answered under an unpriced id is costed at the requested model\'s price', async () => {
+  const client = {
+    chat: {
+      completions: {
+        async create() {
+          return {
+            id: 'resp_1',
+            model: 'gpt-6-luna-routed-variant',
+            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+            choices: [{ finish_reason: 'stop', message: { content: 'SELECT 1;' } }],
+          };
+        },
+      },
+    },
+  };
+  const result = await generateBasicSql({ client, model: 'gpt-6-luna', prompt: { system: 's', user: 'u' } });
+  assert.equal(result.responseModel, 'gpt-6-luna-routed-variant');
+  assert.equal(result.cost?.model, 'gpt-6-luna');
+  assert.equal(result.cost?.totalCost, 0.0002);
 });
