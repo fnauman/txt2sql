@@ -1577,6 +1577,36 @@ function selectItemColumnName(tokens, from, to) {
 const MAX_DERIVED_COLUMN_DEPTH = 8;
 const MAX_DERIVED_COLUMN_REFERENCES = 256;
 
+// The lower-case name of the identifier token, or null.
+function lowerIdentifierName(token) {
+  const name = token?.type === 'word' || token?.type === 'quoted_identifier' ? identifierTokenName(token) : null;
+  return name === null ? null : String(name).toLowerCase();
+}
+
+// The alias of the derived table whose body closes at tokens[close]
+// ("(...) t", "(...) AS t"), lower-case, or null.
+function derivedTableAlias(tokens, close) {
+  const alias = isKeywordToken(tokens[close + 1], 'AS') ? tokens[close + 2] : tokens[close + 1];
+  return isPlainIdentifierToken(alias) ? lowerIdentifierName(alias) : null;
+}
+
+// The names that qualify a column of the CTE `cteName` in
+// tokens[scope[0]..scope[1]]: its own name and the aliases it is given there
+// ("FROM docs d", "JOIN docs AS x"), lower-case.
+function cteQualifiers(tokens, cteName, scope) {
+  const names = new Set([cteName]);
+  for (let at = scope[0]; at <= scope[1]; at += 1) {
+    if (lowerIdentifierName(tokens[at]) !== cteName || tokens[at].afterDot || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
+      continue;
+    }
+    const alias = isKeywordToken(tokens[at + 1], 'AS') ? tokens[at + 2] : tokens[at + 1];
+    if (isPlainIdentifierToken(alias)) {
+      names.add(lowerIdentifierName(alias));
+    }
+  }
+  return names;
+}
+
 /**
  * Whether the column `name` that a derived table or CTE body (the
  * parenthesized group tokens[body[0]..body[1]]) outputs reaches a computed
@@ -1585,10 +1615,14 @@ const MAX_DERIVED_COLUMN_REFERENCES = 256;
  * computed value (expressionIsComputedValue), or a `*` / `q.*` select item
  * that passes it on and is one (the only way to read an unnamed column,
  * `name` null). A column only used to filter, join, group or order rows
- * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)).
+ * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)). A qualified
+ * reference counts only with one of `qualifiers` (the derived table's alias,
+ * or the CTE's name and aliases; null when unknown), so a same-named column
+ * of another source ("SUM(o.bal)" next to "WHERE t.bal > 0") is not it.
  */
-function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, budget) {
+function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, budget, qualifiers = null) {
   const wanted = name === null ? null : String(name).toLowerCase();
+  const otherQualifier = (dot) => qualifiers !== null && !qualifiers.has(lowerIdentifierName(tokens[dot - 1]));
   for (let at = scope[0]; at <= scope[1]; at += 1) {
     if (at === body[0]) {
       at = body[1];
@@ -1600,6 +1634,7 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
       const before = tokens[start - 1];
       if (
         (isKeywordToken(before, 'SELECT', ...SELECT_OPTION_WORDS) || isPunctToken(before, ',')) &&
+        !(start < at && otherQualifier(at - 1)) &&
         expressionIsComputedValue(tokens, start, at, parens, depth + 1, name, budget)
       ) {
         return true;
@@ -1611,6 +1646,9 @@ function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, bud
       continue;
     }
     const qualified = isPunctToken(tokens[at - 1], '.');
+    if (qualified && otherQualifier(at - 1)) {
+      continue;
+    }
     // Not an alias of the same name ("SUM(x) AS bal", "FROM docs bal").
     if (!qualified && (isKeywordToken(tokens[at - 1], 'AS') || endsExpression(tokens[at - 1]))) {
       continue;
@@ -1721,7 +1759,8 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
           }
           const open = enclosingOpenParen(tokens, at, parens);
           const scope = open < 0 ? [0, tokens.length - 1] : [open + 1, (parens.closeOf.get(open) ?? tokens.length) - 1];
-          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, budget);
+          const alias = derivedTableAlias(tokens, end);
+          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, budget, alias === null ? null : new Set([alias]));
         } else if (word === 'AS') {
           // A CTE body ("name [(columns)] AS (SELECT ...)"), read by the rest
           // of its statement; any other AS names an alias.
@@ -1732,6 +1771,7 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
             return false;
           }
           let columnName = selectItem.name;
+          let cteNameIndex = at - 1;
           if (isPunctToken(tokens[at - 1], ')') && parens.openOf.get(at - 1) !== undefined) {
             // A column list names the CTE's columns by position.
             const columns = splitTopLevelArguments(tokens, parens.openOf.get(at - 1) + 1, at - 2, parens);
@@ -1740,10 +1780,13 @@ function expressionIsComputedValue(tokens, start, end, parens, depth = 0, passed
             if (!columnName) {
               return false;
             }
+            cteNameIndex = parens.openOf.get(at - 1) - 1;
           }
           const open = enclosingOpenParen(tokens, start, parens);
           const scopeEnd = open < 0 ? tokens.length - 1 : (parens.closeOf.get(open) ?? tokens.length) - 1;
-          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, budget);
+          const cteName = lowerIdentifierName(tokens[cteNameIndex]);
+          const qualifiers = cteName === null ? null : cteQualifiers(tokens, cteName, [end + 1, scopeEnd]);
+          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, budget, qualifiers);
         } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
           return false;
         } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {

@@ -713,6 +713,32 @@ test('v2 METRIC_COLUMN: a difference in a later UNION branch is named by the fir
   }
 });
 
+test('v2 METRIC_COLUMN: a qualified derived-table or CTE column counts only through the alias or name of that table', () => {
+  // Fourth review: the column was matched by name alone, so a same-named
+  // column of another source let a difference used only as a filter count:
+  // each of these sums NetPayableAmount over the open documents.
+  const april = aprilDueDocuments;
+  const others = 'FROM SalesDocument x';
+  for (const sql of [
+    `SELECT SUM(o.bal) AS open_amount FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t JOIN (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) o ON o.SalesDocumentId = t.SalesDocumentId WHERE t.bal > 0`,
+    `WITH t AS (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}), o AS (SELECT d.SalesDocumentId, d.NetPayableAmount AS bal ${april}) SELECT SUM(o.bal) AS open_amount FROM o JOIN t ON t.SalesDocumentId = o.SalesDocumentId WHERE t.bal > 0`,
+    `WITH docs AS (SELECT d.SalesDocumentId, d.NetPayableAmount - d.PaidAmount AS NetPayableAmount ${april}) SELECT SUM(s.NetPayableAmount) AS open_amount FROM SalesDocument s JOIN docs ON docs.SalesDocumentId = s.SalesDocumentId WHERE docs.NetPayableAmount > 0`,
+    `SELECT SUM(u.np) AS open_amount FROM (SELECT o.* FROM (SELECT x.SalesDocumentId, x.NetPayableAmount - x.PaidAmount AS bal ${others}) t JOIN (SELECT d.SalesDocumentId, d.NetPayableAmount AS np ${april}) o ON o.SalesDocumentId = t.SalesDocumentId WHERE t.bal > 0) u`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), 'METRIC_COLUMN', sql);
+  }
+  // Through the table's own alias, the CTE's name or an alias given to it.
+  for (const sql of [
+    `SELECT SUM(sub.open_amount) AS total FROM (SELECT d.NetPayableAmount - d.PaidAmount AS open_amount ${april}) AS sub`,
+    `WITH docs AS (SELECT d.CustomerId, d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT SUM(docs.bal) AS open_amount FROM docs`,
+    `WITH docs AS (SELECT d.CustomerId, d.NetPayableAmount - d.PaidAmount AS bal ${april}) SELECT x.CustomerId, SUM(x.bal) AS open_amount FROM docs AS x GROUP BY x.CustomerId`,
+    `WITH docs (cid, bal) AS (SELECT d.CustomerId, d.NetPayableAmount - d.PaidAmount ${april}) SELECT SUM(y.bal) AS open_amount FROM docs y`,
+    `SELECT SUM(u.bal) AS open_amount FROM (SELECT t.* FROM (SELECT d.NetPayableAmount - d.PaidAmount AS bal ${april}) t) u`,
+  ]) {
+    assert.equal(openAmountVerdict(sql), null, sql);
+  }
+});
+
 test('v2 layer: another amount demotes a metric only when it modifies the metric phrase, not when it is a separate measure', () => {
   // Review finding: "gross" anywhere in the question made an explicit
   // "revenue" / "average order value" advisory, so "Show revenue and gross
