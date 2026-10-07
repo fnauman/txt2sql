@@ -174,27 +174,31 @@ export function defaultReasoningEffort(model) {
  * or blank), else the lower-cased value. Throws INVALID_CONFIG for a value
  * that is not an effort, one the model's family does not accept, or any
  * effort for a known non-reasoning model. `source` names the setting in the
- * message (REASONING_EFFORT, --reasoning-effort, ...).
+ * message (REASONING_EFFORT, --reasoning-effort, ...); `file`, the env file
+ * it came from, when one did.
  */
-export function normalizeReasoningEffort(model, effort, { source = 'REASONING_EFFORT' } = {}) {
+export function normalizeReasoningEffort(model, effort, { source = 'REASONING_EFFORT', file = null } = {}) {
   const raw = nonBlank(effort);
   if (raw === null) {
     return null;
   }
+  const named = file ? `${source} (from ${file})` : source;
+  // An env file never overrides the shell, so an empty value there clears it.
+  const unset = file ? `Unset ${source} in ${file} (or override it with an empty ${source}= in the shell)` : `Unset ${source}`;
   const value = raw.toLowerCase();
   if (!REASONING_EFFORTS.includes(value)) {
-    throw configError(`${source} must be one of ${REASONING_EFFORTS.join(', ')}; got "${raw}".`);
+    throw configError(`${named} must be one of ${REASONING_EFFORTS.join(', ')}; got "${raw}".`);
   }
   const capability = modelCapabilities(model);
   if (capability.reasoning === false) {
     throw configError(
-      `${source} "${value}" does not apply to ${model}: the ${capability.family} family is not a reasoning model (allowed: unset). ` +
-        `Unset ${source}, or pick a reasoning model.`
+      `${named} "${value}" does not apply to ${model}: the ${capability.family} family is not a reasoning model (allowed: unset). ` +
+        `${unset}, or pick a reasoning model.`
     );
   }
   if (!capability.efforts.includes(value)) {
     const family = capability.family ? `the ${capability.family} family` : 'a model outside the capability map';
-    throw configError(`${source} "${value}" is not supported by ${model} (${family}); allowed: ${capability.efforts.join(', ')}.`);
+    throw configError(`${named} "${value}" is not supported by ${model} (${family}); allowed: ${capability.efforts.join(', ')}.`);
   }
   return value;
 }
@@ -347,6 +351,7 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
   const reasoningEffort =
     normalizeReasoningEffort(model, flagEffort ?? envEffort, {
       source: reasoningEffortSource === 'default' ? 'REASONING_EFFORT' : reasoningEffortSource,
+      file: reasoningEffortSource === 'REASONING_EFFORT' ? fromFile('REASONING_EFFORT') : null,
     }) ?? defaultReasoningEffort(model);
   const notices = [];
   const envModel = nonBlank(env.MODEL_NAME);

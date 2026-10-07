@@ -236,6 +236,14 @@ test('eval options: --model and --reasoning-effort with their sources; a flag th
     (error) => error.code === 'INVALID_CONFIG' && /--reasoning-effort "low" does not apply to gpt-4o-mini/.test(error.message)
   );
   assert.throws(() => parseEvalArgs(['--model', 'gpt-6-luna'], { env: { REASONING_EFFORT: 'turbo' } }), /REASONING_EFFORT must be one of none, low, medium, high, xhigh, max/);
+  // An effort pinned by an env file: the message names the file.
+  assert.throws(
+    () => parseEvalArgs(['--model', 'gpt-4o-mini'], { env: { REASONING_EFFORT: 'low' }, envFile: { path: '/home/you/.env', vars: ['REASONING_EFFORT'] } }),
+    (error) =>
+      error.code === 'INVALID_CONFIG' &&
+      /^REASONING_EFFORT \(from \/home\/you\/\.env\) "low" does not apply to gpt-4o-mini/.test(error.message) &&
+      /an empty REASONING_EFFORT= in the shell/.test(error.message)
+  );
   assert.throws(() => parseEvalArgs(['--reasoning-effort'], { env: {} }), /--reasoning-effort needs a value/);
 });
 

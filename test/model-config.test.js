@@ -161,6 +161,13 @@ test('normalizeReasoningEffort validates the effort per family and fails with th
   invalid('o3-mini', 'none', /allowed: low, medium, high\./);
   invalid('acme-sql-1', 'max', /a model outside the capability map\); allowed: none, low, medium, high\./);
   assert.equal(normalizeReasoningEffort('gpt-5.4-mini', 'xhigh'), 'xhigh');
+  // An effort from an env file names the file, and how to clear it for one run.
+  invalid(
+    'gpt-4o-mini',
+    'low',
+    /^REASONING_EFFORT \(from \/home\/you\/\.env\) "low" does not apply to gpt-4o-mini: .* Unset REASONING_EFFORT in \/home\/you\/\.env \(or override it with an empty REASONING_EFFORT= in the shell\), or pick a reasoning model\.$/,
+    { file: '/home/you/.env' }
+  );
 });
 
 test('with no effort set, a family whose provider default reasons runs at it explicitly; a none default keeps the base request', () => {
