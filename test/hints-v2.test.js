@@ -1109,6 +1109,48 @@ test('v2 layer: a negated or unrelated "net" leaves a modified metric a hint', (
   }
 });
 
+test('v2 layer: "net" coordinated with another amount before a noun that is no measure leaves a modified metric a hint', () => {
+  // Fifth review: in "gross revenue by net and gross margin category" the
+  // "and" after "net" made it a measure joined to the later "gross", although
+  // "net and gross" modify "margin category"; the metric stayed enforced and
+  // the SUM(GrossAmount) the question asks for was rejected. The coordinated
+  // amounts now count as a net measure only when what follows the last of
+  // them is the metric, an amount noun or a boundary, as for "net" alone.
+  for (const question of [
+    'Show gross revenue by net and gross margin category for March 2026.',
+    'Show gross revenue by net/gross margin category for March 2026.',
+    'Show gross revenue by net & gross margin band for March 2026.',
+    'Show gross revenue split by net and gross margin tier in March 2026.',
+    'Show gross revenue by net or gross margin bucket for March 2026.',
+    'Show gross revenue and net and gross margin by category for March 2026.',
+  ]) {
+    const metric = metricOf(v2Plan(question), 'net_sales');
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`), null, question);
+    // Version 1 enforces "revenue", as before.
+    assert.equal(metricOf(v1Plan(question), 'net_sales').enforcement, 'enforced', question);
+    assert.equal(metricVerdict(question, `SELECT ROUND(SUM(COALESCE(d.GrossAmount,0)),2) AS gross_revenue ${marchDocuments}`, 1), 'METRIC_COLUMN', question);
+  }
+  // The coordinated amounts before the metric, an amount noun, a boundary or
+  // "terms", or "net" set off as a list item, still ask for the net amount.
+  for (const question of [
+    'Show net and gross revenue for March 2026.',
+    'Show net vs gross revenue for March 2026.',
+    'Show both net and gross revenue by store for March 2026.',
+    'Revenue (gross and net) by store for March 2026.',
+    'Show net of tax and gross revenue for March 2026.',
+    'Show net and gross revenue by margin category for March 2026.',
+    'Show net/gross revenue by margin category for March 2026.',
+    'Show net and gross amounts of revenue for March 2026.',
+    'Show revenue in net and gross terms for March 2026.',
+    'Show revenue by net and gross for each store in March 2026.',
+    'Show gross revenue, net, and gross margin by category for March 2026.',
+  ]) {
+    assert.deepEqual([metricOf(v2Plan(question), 'net_sales').enforcement, metricOf(v2Plan(question), 'net_sales').enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricVerdict(question, `SELECT SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${marchDocuments}`), 'METRIC_COLUMN', question);
+  }
+});
+
 test('v2 layer: only an adding tail after an amount in parentheses makes it a second measure', () => {
   // Fourth review: any adding word or joining symbol after the amount inside
   // the parentheses enforced the metric, whatever followed, so "revenue
