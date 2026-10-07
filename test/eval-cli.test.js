@@ -29,7 +29,7 @@ test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline',
   assert.deepEqual([options.docker, options.seed, options.verify, options.checkControls], [true, true, true, true]);
   assert.deepEqual([options.datasetNames, options.datasetFiles, options.split], [[], [], 'all']);
   assert.deepEqual([options.repeat, options.concurrency, options.caseTimeoutMs, options.budgetUsd], [1, 4, 120000, null]);
-  assert.equal(options.model, 'gpt-4o-mini');
+  assert.deepEqual([options.model, options.reasoningEffort], ['gpt-6-luna', 'low']);
   assert.equal(options.minKillRate, 0.95);
   assert.equal(options.failOnAnyFailure, false);
   assert.equal(parseEvalArgs([], { env: { MODEL_NAME: 'gpt-5.4-mini' } }).model, 'gpt-5.4-mini');
@@ -589,14 +589,20 @@ test('--write-baseline never replaces the default baseline with a filtered or pa
     ['--split', 'holdout'],
     ['--fixtures', 'seed'],
   ]) {
-    assert.match(messageOf(['--write-baseline', ...argv]), /--write-baseline would replace eval\/baselines\/gpt-4o-mini\.json with a subset run .*--baseline-file <path>/, argv.join(' '));
+    assert.match(messageOf(['--write-baseline', ...argv]), /--write-baseline would replace eval\/baselines\/gpt-6-luna\.low\.json with a subset run .*--baseline-file <path>/, argv.join(' '));
   }
   // ...unless the subset baseline goes to a file of its own.
   const subset = parseEvalArgs(['--write-baseline', '--case-id', 'core_public_001', '--baseline-file', 'eval/subsets/subset.json'], { env: {} });
   assert.match(subset.baselineFile, /eval\/subsets\/subset\.json$/);
   assert.equal(writesDefaultBaseline(subset), false);
   // Naming the default file explicitly is the default file.
-  assert.match(messageOf(['--write-baseline', '--tag', 'count', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']), /would replace eval\/baselines\/gpt-4o-mini\.json/);
+  assert.match(messageOf(['--write-baseline', '--tag', 'count', '--baseline-file', 'eval/baselines/gpt-6-luna.low.json']), /would replace eval\/baselines\/gpt-6-luna\.low\.json/);
+  // The gpt-4o-mini reference baseline is another model's: a run of the
+  // default model never writes it.
+  assert.match(
+    messageOf(['--write-baseline', '--baseline-file', 'eval/baselines/gpt-4o-mini.json']),
+    /--baseline-file eval\/baselines\/gpt-4o-mini\.json is inside eval\/baselines, .*this run's model gpt-6-luna \(reasoning effort low\) writes eval\/baselines\/gpt-6-luna\.low\.json/
+  );
   // Every file in eval/baselines/ is a default baseline: another model's is never
   // overwritten (subset or not), and no file there is named after another model.
   assert.match(

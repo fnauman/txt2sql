@@ -175,7 +175,7 @@ Common variables:
 - `DB_HOST`, `DB_PORT`, `DB_SOCKET`
 - `DB_USER` (query user, default `demo_readonly`)
 - `DB_READONLY_USER` / `DB_READONLY_PASSWORD` (Docker Compose only: the query user the init script creates; they default to `demo_readonly` / `DB_PASSWORD`)
-- `MODEL_NAME` (default `gpt-4o-mini`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
+- `MODEL_NAME` (default `gpt-6-luna`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family; unset, `gpt-6-luna` runs at `low`), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
@@ -515,9 +515,13 @@ The API server (`apps/web/src/server/main.js`) loads the env file first, then va
 
 ## Models
 
-The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-4o-mini`
-(`DEFAULT_MODEL` in `src/model-config.js`). A reasoning model also takes
-`REASONING_EFFORT` (or `--reasoning-effort`). Every entry point prints both with
+The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-6-luna`
+at reasoning effort `low` (`DEFAULT_MODEL` and `DEFAULT_REASONING_EFFORT` in
+`src/model-config.js`): the product default, adopted by
+[Experiment 3](docs/experiments/03-models.md) over `gpt-4o-mini`. A reasoning
+model also takes `REASONING_EFFORT` (or `--reasoning-effort`). The default is
+the pair: `gpt-6-luna` with no effort set runs at `low` also when `MODEL_NAME`
+(or `--model`) names it. Every entry point prints both with
 where they came from: the eval header (`model gpt-6-luna (MODEL_NAME from
 /home/you/.env); reasoning effort low (--reasoning-effort); endpoint
 api.openai.com`), the web server's `[config]` startup line, and the CLIs'
@@ -531,8 +535,8 @@ capability map is keyed by the model id without a vendor prefix, so
 
 | Family | Reasoning | `REASONING_EFFORT` values | With no effort set |
 |---|---|---|---|
-| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the committed baseline's request, byte for byte |
-| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the request of the gpt-4o-mini reference baseline, byte for byte |
+| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `gpt-6-luna`, the default model: `low` (the product default); the others: `medium` (the provider default); sent and recorded |
 | `gpt-5.2*` and later (e.g. `gpt-5.4-mini`) | yes | `none`, `low`, `medium`, `high`, `xhigh` | the provider default is `none`: the `gpt-4o*` request |
 | `gpt-5.1*` | yes | `none`, `low`, `medium`, `high` | the provider default is `none`: the `gpt-4o*` request |
 | `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
@@ -549,23 +553,31 @@ supported, checked on 2026-10-07). The map files them under the `gpt-5*` and
 o-series rows (`codex-mini-latest` under "anything else"), so a run with one
 starts and its first request fails on api.openai.com: do not use them here.
 
-With reasoning on (any effort but `none`, set or the family's default) the
+With reasoning on (any effort but `none`, set or defaulted) the
 request drops `temperature` / `top_p`, sends `reasoning_effort` and raises
 `max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
 because reasoning tokens count against that limit and 3200 would truncate. A
-family's default effort is sent and recorded like a set one (source
-`default`), so `gpt-6-luna` with no effort and with `REASONING_EFFORT=medium`
-is the same run with the same baseline file, and a provider changing its
-default cannot change a run unseen. At effort `none` the request keeps
+default effort (the product default's for `gpt-6-luna`, the family's for
+another model) is sent and recorded like a set one (source `default`), so
+`gpt-6-luna` with no effort and with `REASONING_EFFORT=low` is the same run
+with the same baseline file (`eval/baselines/gpt-6-luna.low.json`), as are
+`gpt-6-sol` with no effort and with `REASONING_EFFORT=medium`, and a provider
+changing its default cannot change a run unseen. At effort `none` the request keeps
 `temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`.
 An invalid effort, or one the model's family does not list, stops every entry
 point before anything starts, with the allowed values in the message. (An effort set in an env file can be cleared
-for one run with an empty `REASONING_EFFORT=` in the shell.) Without
-`temperature: 0` a reasoning model's repetitions vary more than gpt-4o-mini's,
-so measure it with `--repeat 3`; a completion cut off at the token limit is an
-`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if the pilot
-shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`;
-to pair a new model with the committed gpt-4o-mini baseline, pass
+for one run with an empty `REASONING_EFFORT=` in the shell.)
+
+Reasoning models are not deterministic the way gpt-4o-mini at
+`temperature: 0` nearly is: they take no `temperature` at all, so the
+repetitions of one question vary (the same question can get a different
+query, and a different verdict, in the next repetition). A single run is a
+sample; every figure in this README is measured with `--repeat 3`, and so
+should any comparison be. A completion cut off at the token limit is an
+`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if a pilot
+shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`
+(the default pair against `eval/baselines/gpt-6-luna.low.json`); to pair a run
+with the gpt-4o-mini reference of experiments 1-3, pass
 `--compare eval/baselines/gpt-4o-mini.json` (the comparison then states the
 model change).
 
@@ -590,7 +602,7 @@ npm run eval -- --dataset core-public --budget-usd 0.5
 
 For a single run from the shell, put the variables on the command line
 instead (`NAME=value` lines on their own are not exported, so the eval would
-not see them and would run `gpt-4o-mini` on api.openai.com):
+not see them and would run the default `gpt-6-luna` on api.openai.com):
 
 ```bash
 OPENAI_BASE_URL=https://openrouter.ai/api/v1 MODEL_NAME=openai/gpt-6-luna REASONING_EFFORT=low \
@@ -633,7 +645,7 @@ reports record the host (never a key).
 
 Every LLM call automatically estimates token costs based on the model used. Costs are printed per-call and as a run total.
 
-Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset (`DEFAULT_MODEL` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
+Runtime default: `gpt-6-luna` at reasoning effort `low` when `MODEL_NAME` and `REASONING_EFFORT` are unset (`DEFAULT_MODEL` and `DEFAULT_REASONING_EFFORT` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
 Supported cost estimates: `gpt-4o-mini`, `gpt-6-luna` ($0.10 input, $0.01 cached input, $0.50 output per 1M tokens) and `gpt-6-sol` ($2, $0.20, $10; both OpenAI's published prices, verified 2026-10-07), `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4`. A row also prices its date-suffixed snapshots (`gpt-5.4-mini-2026-03-05`, or the `-YYYYMMDD` form), and nothing else: another model that shares its prefix (`gpt-6-sol-pro`, `gpt-6-luna-mini`) has no price rather than the base row's. A model id is looked up without its vendor prefix, so OpenRouter's `openai/gpt-6-luna` gets the `gpt-6-luna` price (a variant such as `openai/gpt-6-luna:free` does not). A call the provider answers under an id with no price (a gateway's alias) is costed at the requested model's price.
 

@@ -5,6 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '../src/model-config.js';
+
 // The basic and optimized CLIs print the model configuration's notices under
 // their `Model:` header line, as the eval header and the web startup log do.
 // The scripts run for real, offline: a preload swaps the database connection
@@ -51,7 +53,10 @@ for (const script of ['scripts/basic.js', 'scripts/optimized.js']) {
   test(`${script} prints the model notices beside its header`, () => {
     const both = runCli(script, { OPENAI_API_KEY: 'sk-test-not-a-key', OPENROUTER_API_KEY: 'sk-or-test-not-a-key' });
     const [model, note] = headerLines(both.stdout);
-    assert.equal(model, 'Model: model gpt-4o-mini (default); reasoning effort unset (default); endpoint openrouter.ai (OpenRouter, require_parameters on)');
+    assert.equal(
+      model,
+      `Model: model ${DEFAULT_MODEL} (default); reasoning effort ${DEFAULT_REASONING_EFFORT} (default); endpoint openrouter.ai (OpenRouter, require_parameters on)`
+    );
     assert.equal(note, BOTH_KEYS_NOTE);
     assert.match(both.stdout, /offline test client/, 'the question ran into the fake client');
 

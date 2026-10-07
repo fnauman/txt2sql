@@ -1240,8 +1240,8 @@ npm run eval -- --offline --reveal-holdout          # list holdout cases one by 
 npm run eval -- --repeat 3 --holdout-summary        # conclude a pre-registered experiment: + the paired holdout test, one line
 npm run eval -- --dataset hard-cases-public         # one dataset
 npm run eval -- --dataset edge-cases-public --tag join_path
-npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
-npm run eval -- --rescore generated/runs/<run>/all/gpt-4o-mini/report.json
+npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate  # pair with the gpt-4o-mini reference
+npm run eval -- --rescore generated/runs/<run>/all/gpt-6-luna.low/report.json
 npm run eval -- --offline                           # no LLM: setup, verify, rescore the baseline
 npm run eval -- --help                              # every flag
 ```
@@ -1523,8 +1523,9 @@ a recording of another model or effort, and `runner.flags` records them as
 ### Compare and gate
 
 `--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
-when present, with the effort when one is set or the model family has a
-reasoning default (`medium` for `gpt-6*`), and a `/` in the model id
+when present, with the effort when one is set or defaulted (`low` for the
+default model `gpt-6-luna`, the family's reasoning default for another model,
+e.g. `medium` for `gpt-6-sol`), and a `/` in the model id
 written `__`; an id that is not plain (plain: lower-case letters and digits
 with single `.` or `-` between them, in `/`-separated parts, not ending in
 `.<effort>`) is written sanitized plus `_` and the first 8 hex digits of its

@@ -9,6 +9,12 @@
 //   family ids and the price rows aside), so changing the default is a
 //   one-line change here, plus a baseline of the new default for the CI gate
 //   (the test pins the value until then).
+// - DEFAULT_REASONING_EFFORT is the effort of the product default: the model
+//   and the effort are one pair (gpt-6-luna at low, adopted by Experiment 3,
+//   docs/experiments/03-models.md), so the default model runs at it whenever
+//   no effort is set, whether the model was defaulted or named (MODEL_NAME or
+//   --model, also with a vendor prefix such as openai/gpt-6-luna). Any other
+//   model keeps its family's default effort (below).
 // - The capability map (MODEL_FAMILIES) is keyed by the model id with any
 //   vendor prefix stripped (openai/gpt-6-luna is gpt-6-luna, as OpenRouter
 //   names it): gpt-4o* and gpt-4.1* take temperature 0 and no reasoning
@@ -18,12 +24,12 @@
 //   reasoning model with the conservative effort list). The -pro models
 //   (gpt-5*-pro, o1-pro, o3-pro) are Responses-API-only: every entry point
 //   refuses them before anything starts (assertModelSupported).
-// - With no effort set, a family whose provider default reasons (gpt-6*,
-//   gpt-5 / -mini / -nano, the o-series: medium) runs at that default, sent
-//   and recorded explicitly, so a provider changing its default cannot change
-//   a run unseen and `medium` set or defaulted is the same run. A family whose
-//   default is `none` (gpt-5.1 and later) keeps the base request until an
-//   effort is set.
+// - With no effort set, a model other than the default whose family's
+//   provider default reasons (gpt-6*, gpt-5 / -mini / -nano, the o-series:
+//   medium) runs at that default, sent and recorded explicitly, so a provider
+//   changing its default cannot change a run unseen and `medium` set or
+//   defaulted is the same run. A family whose default is `none` (gpt-5.1 and
+//   later) keeps the base request until an effort is set.
 // - The reasoning effort (REASONING_EFFORT, or --reasoning-effort in npm run
 //   eval) is validated per family before anything is started: an unknown
 //   value, an effort the family does not list, or any effort for a known
@@ -38,7 +44,8 @@
 //   effort `none` the base options stay, with reasoning_effort: 'none'. With
 //   no effort and a non-reasoning or unknown model the base options are
 //   returned as they are: the gpt-4o-mini request is byte for byte the one of
-//   the committed baseline.
+//   its committed baseline (eval/baselines/gpt-4o-mini.json, the reference of
+//   experiments 1-3).
 // - OpenRouter (an OPENAI_BASE_URL on openrouter.ai) gets
 //   provider: { require_parameters: true }, so it routes only to endpoints
 //   that support every parameter sent (response_format, reasoning_effort,
@@ -48,7 +55,12 @@
 
 import { createHash } from 'node:crypto';
 
-export const DEFAULT_MODEL = 'gpt-4o-mini';
+export const DEFAULT_MODEL = 'gpt-6-luna';
+
+// The reasoning effort of the product default (see the file comment): what
+// DEFAULT_MODEL runs at when no effort is set. null would leave the default
+// model to its family's default, as for any other model.
+export const DEFAULT_REASONING_EFFORT = 'low';
 
 // Every reasoning effort any family accepts, in increasing order.
 export const REASONING_EFFORTS = Object.freeze(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
@@ -214,13 +226,26 @@ export function assertModelSupported(model, { source = 'model', file = null } = 
 }
 
 /**
- * The effort a run of `model` uses when none is set: its family's provider
- * default when that default reasons (medium for gpt-6*, gpt-5 / -mini /
- * -nano and the o-series), sent and recorded like a set one; null for a
- * family whose default is `none` (gpt-5.1 and later keep the base request),
- * a non-reasoning family and a model outside the map.
+ * Whether `model` is DEFAULT_MODEL, under any vendor prefix or variant suffix
+ * (baseModelId: openai/gpt-6-luna is the default model too).
+ */
+export function isDefaultModel(model) {
+  return baseModelId(model) === baseModelId(DEFAULT_MODEL);
+}
+
+/**
+ * The effort a run of `model` uses when none is set, sent and recorded like a
+ * set one (source `default`): DEFAULT_REASONING_EFFORT for the default model
+ * (low for gpt-6-luna, defaulted or named); else its family's provider
+ * default when that default reasons (medium for the other gpt-6* models,
+ * gpt-5 / -mini / -nano and the o-series); null for a family whose default
+ * is `none` (gpt-5.1 and later keep the base request), a non-reasoning family
+ * and a model outside the map.
  */
 export function defaultReasoningEffort(model) {
+  if (DEFAULT_REASONING_EFFORT && isDefaultModel(model)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
   const { reasoning, defaultEffort } = modelCapabilities(model);
   return reasoning === true && defaultEffort && defaultEffort !== 'none' ? defaultEffort : null;
 }
@@ -263,8 +288,9 @@ export function normalizeReasoningEffort(model, effort, { source = 'REASONING_EF
 
 /**
  * Whether a request for `model` at `reasoningEffort` reasons: any effort but
- * `none` (for an unknown model too); with no effort, the family's default
- * effort decides (defaultReasoningEffort).
+ * `none` (for an unknown model too); with no effort, the default effort
+ * decides (defaultReasoningEffort: the product default's for the default
+ * model, else the family's).
  */
 export function reasoningEnabled(model, reasoningEffort = null) {
   const effort = reasoningEffort || defaultReasoningEffort(model);
@@ -355,8 +381,9 @@ export function resolveCompletionSettings(env = process.env) {
  * the file comment). `settings`: { model, reasoningEffort, isOpenRouter,
  * requireParameters, maxCompletionTokens }; a resolved model config (or the
  * completion settings plus model and effort) fits. The effort is validated
- * for the model; with none set, the family's default effort applies
- * (defaultReasoningEffort). Unchanged base options are returned as the same
+ * for the model; with none set, the default effort applies
+ * (defaultReasoningEffort: DEFAULT_REASONING_EFFORT for the default model,
+ * else the family's). Unchanged base options are returned as the same
  * object.
  */
 export function buildCompletionOptions(base, settings = {}) {
@@ -393,8 +420,10 @@ function sourceLabel(source, file, name) {
  * flags ({ model: --model, reasoningEffort: --reasoning-effort }; null or
  * undefined when absent):
  * { model, modelSource ('--model' | 'MODEL_NAME' | 'default'),
- *   reasoningEffort (unset: the family's default effort, null when that is
- *   none or the model is not a known reasoning model), reasoningEffortSource
+ *   reasoningEffort (unset: defaultReasoningEffort, i.e.
+ *   DEFAULT_REASONING_EFFORT for the default model, else the family's default
+ *   effort, null when that is none or the model is not a known reasoning
+ *   model), reasoningEffortSource
  *   ('--reasoning-effort' | 'REASONING_EFFORT' | 'default'),
  *   modelSourceFile / reasoningEffortSourceFile (the env file a variable came
  *   from, when `envFile` = { path, vars } says so; else null),

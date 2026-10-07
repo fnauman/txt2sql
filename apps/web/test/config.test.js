@@ -215,21 +215,32 @@ test('loadWebConfig reads the schema scope with the shared resolver and reports 
 });
 
 test('loadWebConfig reads the model, its reasoning effort and the endpoint with the shared resolver; the startup line shows them', () => {
+  // The product default: gpt-6-luna at reasoning effort low, both from the
+  // defaults (src/model-config.js).
   const defaults = loadWebConfig({});
-  assert.deepEqual([defaults.model, defaults.modelSource, defaults.reasoningEffort, defaults.reasoningEffortSource], ['gpt-4o-mini', 'default', null, 'default']);
+  assert.deepEqual([defaults.model, defaults.modelSource, defaults.reasoningEffort, defaults.reasoningEffortSource], ['gpt-6-luna', 'default', 'low', 'default']);
   assert.deepEqual({ ...defaults.completionSettings }, { baseUrlHost: 'api.openai.com', isOpenRouter: false, requireParameters: true, maxCompletionTokens: 16000 });
-  assert.match(describeWebConfig(defaults), /^model=gpt-4o-mini\(default\) reasoningEffort=unset\(default\) endpoint=api\.openai\.com auth=off /);
+  assert.match(describeWebConfig(defaults), /^model=gpt-6-luna\(default\) reasoningEffort=low\(default\) endpoint=api\.openai\.com auth=off /);
+  // A non-reasoning model named in MODEL_NAME sends no effort.
+  const mini = loadWebConfig({ MODEL_NAME: 'gpt-4o-mini' });
+  assert.deepEqual([mini.model, mini.modelSource, mini.reasoningEffort, mini.reasoningEffortSource], ['gpt-4o-mini', 'MODEL_NAME', null, 'default']);
+  assert.match(describeWebConfig(mini), /^model=gpt-4o-mini\(MODEL_NAME\) reasoningEffort=unset\(default\) /);
 
   const luna = loadWebConfig({ MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'low', LLM_MAX_COMPLETION_TOKENS: '20000' });
   assert.deepEqual([luna.model, luna.modelSource, luna.reasoningEffort, luna.reasoningEffortSource], ['gpt-6-luna', 'MODEL_NAME', 'low', 'REASONING_EFFORT']);
   assert.equal(luna.completionSettings.maxCompletionTokens, 20000);
   assert.ok(Object.isFrozen(luna.completionSettings));
   assert.match(describeWebConfig(luna), /^model=gpt-6-luna\(MODEL_NAME\) reasoningEffort=low\(REASONING_EFFORT\) endpoint=api\.openai\.com /);
-  // No effort set: gpt-6's default effort (medium), recorded like a set one;
-  // gpt-5.1 and later default to none and keep the base request (unset).
+  // No effort set: the default model named in MODEL_NAME still runs at the
+  // product default's effort (low); another gpt-6 model at its family's
+  // default (medium), recorded like a set one; gpt-5.1 and later default to
+  // none and keep the base request (unset).
   const lunaDefault = loadWebConfig({ MODEL_NAME: 'gpt-6-luna' });
-  assert.deepEqual([lunaDefault.reasoningEffort, lunaDefault.reasoningEffortSource], ['medium', 'default']);
-  assert.match(describeWebConfig(lunaDefault), /reasoningEffort=medium\(default\)/);
+  assert.deepEqual([lunaDefault.reasoningEffort, lunaDefault.reasoningEffortSource], ['low', 'default']);
+  assert.match(describeWebConfig(lunaDefault), /^model=gpt-6-luna\(MODEL_NAME\) reasoningEffort=low\(default\)/);
+  const solDefault = loadWebConfig({ MODEL_NAME: 'gpt-6-sol' });
+  assert.deepEqual([solDefault.reasoningEffort, solDefault.reasoningEffortSource], ['medium', 'default']);
+  assert.match(describeWebConfig(solDefault), /reasoningEffort=medium\(default\)/);
   assert.match(describeWebConfig(loadWebConfig({ MODEL_NAME: 'gpt-5.4-mini' })), /reasoningEffort=unset\(default\)/);
 
   const openRouter = loadWebConfig({ MODEL_NAME: 'openai/gpt-6-luna', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_REQUIRE_PARAMETERS: '0' });

@@ -175,7 +175,11 @@ test('runOptimizedQuestion reads MODEL_NAME and REASONING_EFFORT when the caller
   });
   assert.equal(never.requests.length, 0);
 
-  assert.deepEqual(resolveRunModelSettings({}, {}), { model: 'gpt-4o-mini', reasoningEffort: null, completionSettings: resolveCompletionSettings({}) });
+  // Nothing set: the product default, gpt-6-luna at low; the default model
+  // named in MODEL_NAME with no effort set is the same pair.
+  assert.deepEqual(resolveRunModelSettings({}, {}), { model: 'gpt-6-luna', reasoningEffort: 'low', completionSettings: resolveCompletionSettings({}) });
+  assert.equal(resolveRunModelSettings({}, { MODEL_NAME: 'gpt-6-luna' }).reasoningEffort, 'low');
+  assert.equal(resolveRunModelSettings({}, { MODEL_NAME: 'gpt-4o-mini' }).reasoningEffort, null);
 });
 
 test('loadOptimizedQueryRuntime validates the effort before it creates a client or opens anything', async () => {
@@ -215,7 +219,10 @@ test('eval options: --model and --reasoning-effort with their sources; a flag th
   assert.match(USAGE, /--reasoning-effort <v> {6}none\|low\|medium\|high\|xhigh\|max, checked per model family/);
 
   const defaults = parseEvalArgs([], { env: {} });
-  assert.deepEqual([defaults.model, defaults.modelSource, defaults.reasoningEffort, defaults.reasoningEffortSource], ['gpt-4o-mini', 'default', null, 'default']);
+  assert.deepEqual([defaults.model, defaults.modelSource, defaults.reasoningEffort, defaults.reasoningEffortSource], ['gpt-6-luna', 'default', 'low', 'default']);
+  // An effort for the default model is a setting like any other.
+  const defaultModelMedium = parseEvalArgs(['--reasoning-effort', 'medium'], { env: {} });
+  assert.deepEqual([defaultModelMedium.model, defaultModelMedium.reasoningEffort, defaultModelMedium.reasoningEffortSource], ['gpt-6-luna', 'medium', '--reasoning-effort']);
 
   const fromEnv = parseEvalArgs([], { env: { MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'medium' } });
   assert.deepEqual([fromEnv.model, fromEnv.modelSource, fromEnv.reasoningEffort, fromEnv.reasoningEffortSource], ['gpt-6-luna', 'MODEL_NAME', 'medium', 'REASONING_EFFORT']);
@@ -241,7 +248,7 @@ test('eval options: --model and --reasoning-effort with their sources; a flag th
 
   // An invalid effort (flag or env) stops before anything starts, with the allowed values.
   assert.throws(
-    () => parseEvalArgs(['--reasoning-effort', 'low'], { env: {} }),
+    () => parseEvalArgs(['--reasoning-effort', 'low'], { env: { MODEL_NAME: 'gpt-4o-mini' } }),
     (error) => error.code === 'INVALID_CONFIG' && /--reasoning-effort "low" does not apply to gpt-4o-mini/.test(error.message)
   );
   assert.throws(() => parseEvalArgs(['--model', 'gpt-6-luna'], { env: { REASONING_EFFORT: 'turbo' } }), /REASONING_EFFORT must be one of none, low, medium, high, xhigh, max/);
@@ -273,36 +280,45 @@ test('the eval header names the model and the effort with their sources and the 
   );
   assert.equal(lines[1], '  note: --model openai/gpt-6-luna overrides MODEL_NAME=gpt-4o-mini (from /home/someone/.env).');
 
-  assert.equal(
-    describeModelConfig(resolveModelConfig({ env: {} })),
-    'model gpt-4o-mini (default); reasoning effort unset (default); endpoint api.openai.com'
-  );
+  assert.equal(describeModelConfig(resolveModelConfig({ env: {} })), 'model gpt-6-luna (default); reasoning effort low (default); endpoint api.openai.com');
   assert.equal(
     describeModelConfig(resolveModelConfig({ env: { MODEL_NAME: 'gpt-6-luna' }, envFile: { path: '/x/.env', vars: ['MODEL_NAME'] } })),
-    'model gpt-6-luna (MODEL_NAME from /x/.env); reasoning effort medium (default); endpoint api.openai.com'
+    'model gpt-6-luna (MODEL_NAME from /x/.env); reasoning effort low (default); endpoint api.openai.com'
+  );
+  assert.equal(
+    describeModelConfig(resolveModelConfig({ env: { MODEL_NAME: 'gpt-6-sol' } })),
+    'model gpt-6-sol (MODEL_NAME); reasoning effort medium (default); endpoint api.openai.com'
+  );
+  assert.equal(
+    describeModelConfig(resolveModelConfig({ env: { MODEL_NAME: 'gpt-4o-mini' } })),
+    'model gpt-4o-mini (MODEL_NAME); reasoning effort unset (default); endpoint api.openai.com'
   );
 });
 
 test('a rescore labels the configured model settings as such, notes a recording of another model, and records them as configured*', async () => {
   const lines = [];
   const cli = { log: (line) => lines.push(line), error: (line) => lines.push(line) };
-  const env = { MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'low' };
+  // An effort with no committed baseline (only the default pair's, low, and
+  // the gpt-4o-mini reference are committed).
+  const env = { MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'high' };
   // --gate without a baseline for the configured model stops right after the header.
   await assert.rejects(runEval(parseEvalArgs(['--offline', '--gate'], { env }), { cli, env }), { code: 'NO_BASELINE' });
-  assert.match(lines[0], /^txt2sql eval \(eval profile, no LLM calls\): configured model gpt-6-luna \(MODEL_NAME\); reasoning effort low \(REASONING_EFFORT\);/);
+  assert.match(lines[0], /^txt2sql eval \(eval profile, no LLM calls\): configured model gpt-6-luna \(MODEL_NAME\); reasoning effort high \(REASONING_EFFORT\);/);
 
   const configured = resolveModelConfig({ env });
-  assert.equal(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'low' }, configured), null);
+  assert.equal(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'high' }, configured), null);
   assert.equal(
     rescoreModelNote({ model: 'gpt-4o-mini', reasoningEffort: null }, configured),
-    '  note: the recording ran gpt-4o-mini, and a rescore keeps its model settings; the configured gpt-6-luna (reasoning effort low) is not used.'
+    '  note: the recording ran gpt-4o-mini, and a rescore keeps its model settings; the configured gpt-6-luna (reasoning effort high) is not used.'
   );
   assert.match(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'medium' }, configured), /recording ran gpt-6-luna \(reasoning effort medium\)/);
+  // The default pair's rescore of its own baseline: no note.
+  assert.equal(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'low' }, resolveModelConfig({ env: {} })), null);
 
   const flags = describeRunnerFlags(parseEvalArgs(['--offline'], { env }), { rescore: true });
   assert.deepEqual(
     [flags.configuredModel, flags.configuredModelSource, flags.configuredReasoningEffort, flags.configuredReasoningEffortSource],
-    ['gpt-6-luna', 'MODEL_NAME', 'low', 'REASONING_EFFORT']
+    ['gpt-6-luna', 'MODEL_NAME', 'high', 'REASONING_EFFORT']
   );
   for (const name of ['model', 'modelSource', 'reasoningEffort', 'reasoningEffortSource']) {
     assert.equal(name in flags, false, name);
@@ -333,12 +349,20 @@ test('provenance records the model, its source, the effort and the request optio
   );
   assert.equal(traceMetadataFromProvenance(live).reasoningEffort, 'low');
 
-  const mini = resolveModelConfig({ env: {} });
+  const mini = resolveModelConfig({ env: { MODEL_NAME: 'gpt-4o-mini' } });
   const baseline = await collectProvenance({ schema, gitState, env: {}, model: mini.model, modelConfig: { ...mini, completionSettings: completionSettingsOf(mini) } });
   assert.deepEqual(baseline.product.requestOptions, { temperature: 0, max_completion_tokens: 3200 });
   assert.equal(baseline.product.reasoningEffort, null);
   // The prompt version does not depend on the model: the comparison names the model change instead.
   assert.equal(live.promptVersion, baseline.promptVersion);
+  // The product default records the same request as the run at --reasoning-effort low, with source default.
+  const byDefault = resolveModelConfig({ env: {} });
+  const defaulted = await collectProvenance({ schema, gitState, env: {}, model: byDefault.model, modelConfig: { ...byDefault, completionSettings: completionSettingsOf(byDefault) } });
+  assert.deepEqual(
+    [defaulted.product.model, defaulted.product.modelSource, defaulted.product.reasoningEffort, defaulted.product.reasoningEffortSource],
+    ['gpt-6-luna', 'default', 'low', 'default']
+  );
+  assert.deepEqual(defaulted.product.requestOptions, live.product.requestOptions);
 
   const rescored = await collectProvenance({
     schema,
@@ -466,13 +490,22 @@ test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in 
   assert.match(defaultBaselinePath('gpt-4o-mini', null), /eval\/baselines\/gpt-4o-mini\.json$/);
   assert.match(defaultBaselinePath('gpt-6-luna', 'low'), /eval\/baselines\/gpt-6-luna\.low\.json$/);
   assert.match(defaultBaselinePath('openai/gpt-6-luna', 'medium'), /eval\/baselines\/openai__gpt-6-luna\.medium\.json$/);
-  assert.match(defaultBaselineForEnv({}), /eval\/baselines\/gpt-4o-mini\.json$/);
+  // The product default pairs with the committed gpt-6-luna.low.json.
+  assert.match(defaultBaselineForEnv({}), /eval\/baselines\/gpt-6-luna\.low\.json$/);
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-4o-mini' }), /eval\/baselines\/gpt-4o-mini\.json$/);
   assert.match(defaultBaselineForEnv({ MODEL_NAME: 'openai/gpt-6-luna', REASONING_EFFORT: 'low' }), /eval\/baselines\/openai__gpt-6-luna\.low\.json$/);
-  // No effort set: gpt-6's default effort names the file, like --reasoning-effort medium.
-  const defaulted = parseEvalArgs(['--model', 'gpt-6-luna'], { env: {} });
+  // No effort set: the default model's product default effort names the
+  // file, like --reasoning-effort low ...
+  const lunaDefaulted = parseEvalArgs(['--model', 'gpt-6-luna'], { env: {} });
+  assert.deepEqual([lunaDefaulted.reasoningEffort, lunaDefaulted.reasoningEffortSource], ['low', 'default']);
+  assert.equal(baselineTarget(lunaDefaulted), baselineTarget(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low'], { env: {} })));
+  assert.equal(baselineTarget(lunaDefaulted), baselineTarget(parseEvalArgs([], { env: {} })));
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-6-luna' }), /eval\/baselines\/gpt-6-luna\.low\.json$/);
+  // ... and another gpt-6 model's family default (medium), like --reasoning-effort medium.
+  const defaulted = parseEvalArgs(['--model', 'gpt-6-sol'], { env: {} });
   assert.deepEqual([defaulted.reasoningEffort, defaulted.reasoningEffortSource], ['medium', 'default']);
-  assert.equal(baselineTarget(defaulted), baselineTarget(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'medium'], { env: {} })));
-  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-6-luna' }), /eval\/baselines\/gpt-6-luna\.medium\.json$/);
+  assert.equal(baselineTarget(defaulted), baselineTarget(parseEvalArgs(['--model', 'gpt-6-sol', '--reasoning-effort', 'medium'], { env: {} })));
+  assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-6-sol' }), /eval\/baselines\/gpt-6-sol\.medium\.json$/);
   assert.match(defaultBaselineForEnv({ MODEL_NAME: 'gpt-5.4-mini' }), /eval\/baselines\/gpt-5\.4-mini\.json$/);
 
   // --write-baseline writes the model's and effort's own file, and refuses another model's.
@@ -483,12 +516,12 @@ test('the default baseline is eval/baselines/<model>[.<effort>].json, with / in 
     /this run's model gpt-6-luna \(reasoning effort low\) writes eval\/baselines\/gpt-6-luna\.low\.json/
   );
 
-  // --gate looks for the effort's baseline.
+  // --gate looks for the effort's baseline (only low's is committed for gpt-6-luna).
   const lines = [];
   const cli = { log: (line) => lines.push(line), error: (line) => lines.push(line) };
   await assert.rejects(
-    runEval(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'low', '--gate'], { env: {} }), { cli, env: {} }),
-    (error) => error.code === 'NO_BASELINE' && /there is none at eval\/baselines\/gpt-6-luna\.low\.json/.test(error.message)
+    runEval(parseEvalArgs(['--model', 'gpt-6-luna', '--reasoning-effort', 'medium', '--gate'], { env: {} }), { cli, env: {} }),
+    (error) => error.code === 'NO_BASELINE' && /there is none at eval\/baselines\/gpt-6-luna\.medium\.json/.test(error.message)
   );
 });
 

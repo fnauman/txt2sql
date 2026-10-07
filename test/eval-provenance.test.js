@@ -17,7 +17,9 @@ import {
   stableStringify,
   traceMetadataFromProvenance,
 } from '../src/eval/provenance.js';
+import { DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '../src/model-config.js';
 import { buildOptimizedPrompt } from '../src/pipeline.js';
+import { defaultBaselineForEnv } from '../scripts/eval.js';
 import { createBufferedTraceLogger } from '../src/query-service.js';
 import { compileSchemaFromModelsDir, filterSchema } from '../src/schema-compiler.js';
 
@@ -133,6 +135,13 @@ const PRE_SCOPE_PROMPT_VERSION = '0c314451d4b7a5f347f574d4cebc60e20b0f92a592a71b
 // the audited 404-case suite).
 const FULL_SCOPE_V1_PROMPT_VERSION = 'b264e57d8e15f50c44f0d6da0cd67983d49767197dbfbe5f6509142c3fee6f39';
 
+// Prompt version of the default prompt (full scope, hints version 2), which
+// the docs cite: recorded by the gpt-4o-mini reference baseline of
+// experiments 1-3 (the Experiment 2 live run) and by the committed default
+// baseline (gpt-6-luna at reasoning effort low, Experiment 3). The prompt does
+// not depend on the model.
+const HINTS_V2_PROMPT_VERSION = '4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e';
+
 test('provenance records the product configuration (schema scope) and the prompt version it implies', async () => {
   const base = { schema, gitState: { sha: 'f00', dirty: false, changedFiles: 0 }, env: {} };
   const byDefault = await collectProvenance(base);
@@ -163,16 +172,33 @@ test('provenance records the product configuration (schema scope) and the prompt
   // version-1 baseline on the 404-case suite (before HINTS_VERSION existed).
   const fullV1 = await collectProvenance({ ...base, hintsVersion: 1 });
   assert.equal(fullV1.promptVersion, FULL_SCOPE_V1_PROMPT_VERSION);
-  // The committed baseline was produced with the defaults: full scope and
-  // hints version 2 (the Experiment 2 live run).
-  const baseline = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  // The committed default baseline (eval/baselines/<default model>.<effort>.json)
+  // ran the defaults: the default model at the product default effort, both
+  // with source default or named for the default pair, full scope, hints
+  // version 2 and today's default prompt, from a clean tree.
+  assert.equal(byDefault.promptVersion, HINTS_V2_PROMPT_VERSION);
+  const baselinePath = defaultBaselineForEnv({});
+  assert.equal(path.relative(REPO_ROOT, baselinePath), 'eval/baselines/gpt-6-luna.low.json');
+  const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'));
   assert.equal(baseline.provenance.promptVersion, byDefault.promptVersion);
   assert.equal(baseline.provenance.product.schemaScope.requested, 'auto');
   assert.equal(baseline.provenance.product.schemaScope.effective, 'full');
   assert.equal(baseline.provenance.product.hintsVersion, 2);
+  assert.deepEqual([baseline.model, baseline.provenance.product.model, baseline.provenance.product.reasoningEffort], [DEFAULT_MODEL, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT]);
+  assert.deepEqual(baseline.provenance.product.requestOptions, { max_completion_tokens: 16000, reasoning_effort: DEFAULT_REASONING_EFFORT });
+  assert.equal(baseline.provenance.git.dirty, false);
+  assert.equal(baseline.runner.repeat, 3);
+  assert.equal(baseline.compact, true);
   assert.equal(traceMetadataFromProvenance(retrieved).schemaScopeEffective, 'retrieved');
   assert.equal(traceMetadataFromProvenance(retrieved).hintsVersion, 1);
   assert.equal(traceMetadataFromProvenance(baseline.provenance).hintsVersion, 2);
+  // The gpt-4o-mini reference of experiments 1-3 ran the same prompt (the
+  // Experiment 2 live run): Experiment 3 changed only the model and effort.
+  const reference = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  assert.equal(reference.provenance.promptVersion, HINTS_V2_PROMPT_VERSION);
+  assert.equal(reference.model, 'gpt-4o-mini');
+  assert.equal(reference.provenance.product.schemaScope.effective, 'full');
+  assert.equal(reference.provenance.product.hintsVersion, 2);
 });
 
 test('trace metadata keeps one type per key: the run-level scope never collides with the prompt events\' schemaScope object', async () => {

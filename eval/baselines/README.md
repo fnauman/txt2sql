@@ -3,22 +3,37 @@
 `npm run eval` compares every run with `eval/baselines/<model>[.<effort>].json`
 when that file exists (for example `gpt-4o-mini.json`; a reasoning model run at
 an effort pairs with its own file, e.g. `gpt-6-luna.low.json`, also at its
-family's default effort when none is set, e.g. `gpt-6-luna.medium.json`, and a
-`/` in the model id is written `__`, e.g. `openai__gpt-6-luna.low.json`. That
-is the whole rule for a plain id: lower-case letters and digits with single
-`.` or `-` between them, in `/`-separated parts, not ending in `.<effort>`. Any
+default effort when none is set: `low` for the default model `gpt-6-luna`, the
+family's default for the others, e.g. `gpt-6-sol.medium.json`, and a `/` in the
+model id is written `__`, e.g. `openai__gpt-6-luna.low.json`. That is the
+whole rule for a plain id: lower-case letters and digits with single `.` or
+`-` between them, in `/`-separated parts, not ending in `.<effort>`. Any
 other id is written sanitized (characters outside letters, digits, `.` and `-`
 as `-`) plus `_` and the first 8 hex digits of its SHA-256, e.g.
 `openai__gpt-6-luna-free_<hash>.json` for `openai/gpt-6-luna:free` (also
 `a--b`, `gpt-6-luna.low` as a model id, or an upper-case id), so ids that
 sanitize alike still get their own file), and
-`npm run eval -- --offline`
-(the CI `db` job) rescores it with no LLM calls. The committed baseline is
-`gpt-4o-mini.json` (gpt-4o-mini, the whole 404-case suite with the fresh
-holdout, 3 repetitions, full-schema prompting via the default
-`SCHEMA_SCOPE=auto` and hints v2 via the default `HINTS_VERSION=2`, prompt
-version `4358263bcf82`); its numbers are in
-[docs/evaluation-dataset.md](../../docs/evaluation-dataset.md#current-baseline).
+`npm run eval -- --offline` (the CI `db` job) rescores it with no LLM calls.
+Two baselines are committed:
+
+- `gpt-6-luna.low.json`, the **default baseline**: the product default
+  (`gpt-6-luna` at reasoning effort `low`, `DEFAULT_MODEL` and
+  `DEFAULT_REASONING_EFFORT` in `src/model-config.js`), what `npm run eval`,
+  `--offline` and the CI gate pair with. It is the low arm of
+  [Experiment 3](../../docs/experiments/03-models.md), written by
+  `--write-baseline` on 2026-10-07 at commit `a57fa44` (a clean tree): the
+  whole 404-case suite with the fresh holdout, 3 repetitions, full-schema
+  prompting via the default `SCHEMA_SCOPE=auto`, hints v2 via the default
+  `HINTS_VERSION=2`, prompt version `4358263bcf82`, api.openai.com. Its numbers
+  are in [docs/evaluation-dataset.md](../../docs/evaluation-dataset.md#current-baseline).
+- `gpt-4o-mini.json`, the **reference** of experiments 1-3: gpt-4o-mini on
+  the same suite, prompt and settings (the Experiment 2 live run, 2026-10-06,
+  commit `4ff6ecb`). It is kept unchanged so later model experiments can pair
+  with it (`--compare eval/baselines/gpt-4o-mini.json`), and a run with
+  `MODEL_NAME=gpt-4o-mini` pairs with it by default.
+
+The medium arm of Experiment 3 is not committed (it was not adopted); its
+numbers are in the write-up.
 
 A baseline is a **compact** `report.json` (report version 2, marked
 `compact: true`) of the **whole default suite** (every dataset in `datasets/`,
@@ -37,19 +52,19 @@ To make one:
 
 ```bash
 git status                                   # commit first: the report records the git sha and a dirty flag
-npm run eval -- --repeat 3 --write-baseline  # writes a compact copy of the run's report.json here as <model>.json
+npm run eval -- --repeat 3 --write-baseline  # writes a compact copy of the run's report.json here as <model>[.<effort>].json
 ```
 
 `--write-baseline` only writes after a clean, complete run (exit 0, no case
 skipped by the budget); otherwise it says why and leaves the existing file
-alone. It refuses, before the run starts, to replace `<model>.json` with a
+alone. It refuses, before the run starts, to replace `<model>[.<effort>].json` with a
 subset: filters (`--case-id`, `--tag`, `--intent`, `--split`), fewer
 `--fixtures`, or a suite (`--dataset`, `--dataset-file`, `--datasets-dir`)
 whose cases are not exactly the default suite's. A subset can be saved with
 `--baseline-file <path>` outside this directory and compared with
 `--compare <path>`; every file here is a model's default baseline, so
 `--baseline-file` refuses a path in here other than the run's own
-`<model>.json` (it would replace another model's baseline). It warns on a
+`<model>[.<effort>].json` (it would replace another model's baseline). It warns on a
 dirty working tree. Check the run's `report.md` before committing the file, and
 commit it in its own change with a note on what was measured (model, prompt
 version, repetitions).
