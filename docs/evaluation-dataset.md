@@ -1498,6 +1498,14 @@ report.md say when the recording ran another hints version;
 `HINTS_VERSION=1` re-judges a report from before the setting exactly as it
 ran.
 
+The model settings are the recording's, not today's (no LLM is called):
+report.md, `report.model` and `provenance.product` name the recorded model
+and effort (source `recorded`). The configured ones (`--model` /
+`MODEL_NAME`, `--reasoning-effort` / `REASONING_EFFORT`) only pick the default
+baseline to rescore, so the header calls them "configured", the console notes
+a recording of another model or effort, and `runner.flags` records them as
+`configuredModel`, `configuredReasoningEffort` and their sources.
+
 `--offline` runs the preflight, fixtures and verification, then rescores
 `eval/baselines/<model>[.<effort>].json` when it exists, or says there is none and exits 0
 (exit 2 with `--gate`).

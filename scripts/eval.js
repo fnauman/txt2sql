@@ -511,19 +511,29 @@ export function baselineSuiteRefusal(selection, defaultSelection) {
   return problems.length > 0 ? problems.join('; ') : null;
 }
 
+// A rescore runs the recording's model settings (provenance.product): the
+// configured ones only pick the default baseline to rescore, so its runner
+// block records them under names that do not read as the run's model.
+const RESCORE_MODEL_FLAG_NAMES = Object.freeze({
+  model: 'configuredModel',
+  modelSource: 'configuredModelSource',
+  reasoningEffort: 'configuredReasoningEffort',
+  reasoningEffortSource: 'configuredReasoningEffortSource',
+});
+
 /**
  * Every parsed option, as recorded in the report's runner block (none is a
  * secret; absolute paths are made repo-relative). The resolved model
  * configuration is left out: its model and effort (with their sources) are
  * options of their own, and the product block of the provenance records the
- * request options.
+ * request options. `rescore`: the model options are renamed configured*.
  */
-export function describeRunnerFlags(options) {
+export function describeRunnerFlags(options, { rescore = false } = {}) {
   const relative = (value) => (typeof value === 'string' && path.isAbsolute(value) ? repoRelative(value) : value);
   return Object.fromEntries(
     Object.entries(options)
       .filter(([key]) => key !== 'argv' && key !== 'modelConfig')
-      .map(([key, value]) => [key, Array.isArray(value) ? value.map(relative) : relative(value)])
+      .map(([key, value]) => [(rescore && RESCORE_MODEL_FLAG_NAMES[key]) || key, Array.isArray(value) ? value.map(relative) : relative(value)])
   );
 }
 
@@ -1325,7 +1335,22 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
   }
 }
 
-async function runRescore({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification }) {
+/**
+ * The console note of a rescore whose recording ran other model settings
+ * than the configured ones (a rescore keeps the recording's; the configured
+ * ones only picked the default baseline to rescore); null when they match.
+ */
+export function rescoreModelNote(recorded, configured) {
+  if (recorded.model === configured.model && (recorded.reasoningEffort ?? null) === (configured.reasoningEffort ?? null)) {
+    return null;
+  }
+  return (
+    `  note: the recording ran ${modelLabel(recorded.model, recorded.reasoningEffort ?? null)}, and a rescore keeps its model settings; ` +
+    `the configured ${modelLabel(configured.model, configured.reasoningEffort ?? null)} is not used.`
+  );
+}
+
+async function runRescore({ options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification }) {
   let sourcePath = options.rescore;
   if (!sourcePath) {
     const candidate = defaultBaselinePath(options.model, options.reasoningEffort);
@@ -1392,6 +1417,10 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
   const recordedScope = source.provenance?.product?.schemaScope || null;
   const recordedHintsVersion = source.provenance?.product?.hintsVersion ?? null;
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
+  const modelNote = rescoreModelNote(recordedModelConfig, modelConfig);
+  if (modelNote) {
+    cli.log(modelNote);
+  }
   const scopeNote = rescoreSchemaScopeNote(recordedScope, validate.schemaScope);
   if (scopeNote) {
     cli.log(scopeNote);
@@ -1448,7 +1477,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
     goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
     fixtures: connections.map((entry) => entry.name),
     verify: options.verify,
-    flags: describeRunnerFlags(options),
+    flags: describeRunnerFlags(options, { rescore: true }),
   };
   const provenance = await collectProvenance({
     schema,
@@ -1532,9 +1561,11 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
   const rescoreMode = Boolean(options.rescore || options.offline);
   const modelConfig = runModelConfig(options, env);
   // The model and the effort with where each came from, and the endpoint:
-  // a MODEL_NAME pinned by an env file is never used silently.
+  // a MODEL_NAME pinned by an env file is never used silently. A rescore
+  // runs the recording's model settings (it says so when they differ): the
+  // configured ones only pick the default baseline.
   cli.log(
-    `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): ${describeModelConfig(modelConfig)}; ` +
+    `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): ${rescoreMode ? 'configured ' : ''}${describeModelConfig(modelConfig)}; ` +
       `fixtures ${fixtures.map((fixture) => fixture.name).join(', ')}`
   );
   for (const notice of modelConfig.notices) {

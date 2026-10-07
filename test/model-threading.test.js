@@ -16,6 +16,7 @@ import {
   defaultBaselinePath,
   describeRunnerFlags,
   parseEvalArgs,
+  rescoreModelNote,
   runEval,
   USAGE,
   validateEvalArgv,
@@ -279,6 +280,32 @@ test('the eval header names the model and the effort with their sources and the 
     describeModelConfig(resolveModelConfig({ env: { MODEL_NAME: 'gpt-6-luna' }, envFile: { path: '/x/.env', vars: ['MODEL_NAME'] } })),
     'model gpt-6-luna (MODEL_NAME from /x/.env); reasoning effort medium (default); endpoint api.openai.com'
   );
+});
+
+test('a rescore labels the configured model settings as such, notes a recording of another model, and records them as configured*', async () => {
+  const lines = [];
+  const cli = { log: (line) => lines.push(line), error: (line) => lines.push(line) };
+  const env = { MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'low' };
+  // --gate without a baseline for the configured model stops right after the header.
+  await assert.rejects(runEval(parseEvalArgs(['--offline', '--gate'], { env }), { cli, env }), { code: 'NO_BASELINE' });
+  assert.match(lines[0], /^txt2sql eval \(eval profile, no LLM calls\): configured model gpt-6-luna \(MODEL_NAME\); reasoning effort low \(REASONING_EFFORT\);/);
+
+  const configured = resolveModelConfig({ env });
+  assert.equal(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'low' }, configured), null);
+  assert.equal(
+    rescoreModelNote({ model: 'gpt-4o-mini', reasoningEffort: null }, configured),
+    '  note: the recording ran gpt-4o-mini, and a rescore keeps its model settings; the configured gpt-6-luna (reasoning effort low) is not used.'
+  );
+  assert.match(rescoreModelNote({ model: 'gpt-6-luna', reasoningEffort: 'medium' }, configured), /recording ran gpt-6-luna \(reasoning effort medium\)/);
+
+  const flags = describeRunnerFlags(parseEvalArgs(['--offline'], { env }), { rescore: true });
+  assert.deepEqual(
+    [flags.configuredModel, flags.configuredModelSource, flags.configuredReasoningEffort, flags.configuredReasoningEffortSource],
+    ['gpt-6-luna', 'MODEL_NAME', 'low', 'REASONING_EFFORT']
+  );
+  for (const name of ['model', 'modelSource', 'reasoningEffort', 'reasoningEffortSource']) {
+    assert.equal(name in flags, false, name);
+  }
 });
 
 test('provenance records the model, its source, the effort and the request options; a rescore records the recording\'s', async () => {
