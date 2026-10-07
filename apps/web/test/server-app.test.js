@@ -756,6 +756,10 @@ test('the request deadline aborts the real pipeline and answers 504 REQUEST_TIME
 const DEADLINE_MS = 25;
 // Generous: the point is that the answer does not wait for the stalled step.
 const PROMPT_MS = 400;
+// For a test that must reach the provider before the deadline: the product
+// loop (master data, prompt building) has to fit in it even on a loaded
+// machine, while it stays far below the provider's 1 s retry-after.
+const PROVIDER_DEADLINE_MS = 150;
 
 async function timed(promise) {
   const startedAt = Date.now();
@@ -901,7 +905,7 @@ test('the request deadline bounds the OpenAI SDK retry backoff (429 with retry-a
       maxRetries: 1,
       env: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `http://127.0.0.1:${provider.address().port}/v1` },
     });
-    const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(DEADLINE_MS) });
+    const config = testConfig({ WEB_REQUEST_TIMEOUT_MS: String(PROVIDER_DEADLINE_MS) });
     await withApp({ config, runtimeFactory: async () => runtime }, async (app) => {
       const ask = (route) => timed(app.request({ method: 'POST', path: route, body: { question: 'How many active customers do we have?' } }));
       assertDeadlineJson(await ask('/api/query'));
