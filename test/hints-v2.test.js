@@ -614,6 +614,83 @@ test('v2 layer: another amount demotes a metric only when it modifies the metric
   assert.equal(metricOf(both, 'average_order_value').enforcement, 'advisory');
 });
 
+test('v2 layer: "net" asked for as its own measure, or an amount joined by a symbol or an adding word, leaves the metric enforced', () => {
+  // Review finding: "net and gross revenue" read "gross" as modifying
+  // "revenue" (the "net" exemption only looked at an explicit "net sales"),
+  // and "&", "+" and "/" were plain separators, so "revenue & gross" read
+  // like "revenue gross". Both demoted the metric and let SUM(GrossAmount)
+  // pass as the revenue, which version 1 rejects.
+  const rejects = (question, sql, hintsVersion = 2) => {
+    const prompt = buildOptimizedPrompt(schema, question, { hintsVersion });
+    try {
+      validateReadOnlySql(sql, prompt.tables.map((table) => table.tableName), { promptContext: prompt.context, response: { sql, tables_used: ['SalesDocument'] } });
+      return null;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const march = "FROM SalesDocument d WHERE IFNULL(d.IsCanceled,0)=0 AND d.DocumentDate >= '2026-03-01' AND d.DocumentDate < '2026-04-01'";
+  for (const [question, name] of [
+    // "net" coordinated with the amount, or standing as its own measure.
+    ['Show net and gross revenue for March 2026.', 'net_sales'],
+    ['Show net vs gross revenue for March 2026.', 'net_sales'],
+    ['Show net/gross revenue for March 2026.', 'net_sales'],
+    ['Show both net and gross revenue by store for March 2026.', 'net_sales'],
+    ['Revenue (gross and net) by store for March 2026.', 'net_sales'],
+    ['Net as a share of gross revenue in March 2026.', 'net_sales'],
+    ['Show the net and gross average order value in March 2026.', 'average_order_value'],
+    ['Show average order value (gross and net) in March 2026.', 'average_order_value'],
+    // A joining symbol between the metric and the amount.
+    ['Show revenue & gross in March 2026.', 'net_sales'],
+    ['Show revenue + gross in March 2026.', 'net_sales'],
+    ['Show revenue / gross in March 2026.', 'net_sales'],
+    ['What was the revenue/gross ratio in March 2026?', 'net_sales'],
+    ['Show revenue & tax included in March 2026.', 'net_sales'],
+    ['Show average order value & gross in March 2026.', 'average_order_value'],
+    // An adding word after the amount in parentheses.
+    ['Show revenue (gross too) in March 2026.', 'net_sales'],
+    ['Show revenue (gross as well) in March 2026.', 'net_sales'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['enforced', 'explicit_metric_phrase'], question);
+    assert.equal(metricOf(v1Plan(question), name)?.enforcement ?? 'enforced', 'enforced', question);
+  }
+  // SUM(GrossAmount) (or the bill total) as the net measure is rejected, as
+  // in version 1; the net column next to the gross one passes.
+  for (const [question, sql] of [
+    ['Show net and gross revenue for March 2026.', 'SUM(d.GrossAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue'],
+    ['Show net and gross revenue for March 2026.', 'SUM(d.BillTotalAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue'],
+    ['Revenue (gross and net) by store for March 2026.', 'SUM(d.GrossAmount) AS gross_revenue, SUM(d.BillTotalAmount) AS net_revenue'],
+    ['Show revenue & gross in March 2026.', 'SUM(d.GrossAmount) AS revenue'],
+    ['What was the revenue/gross ratio in March 2026?', 'SUM(d.BillTotalAmount) / SUM(d.GrossAmount) AS ratio'],
+  ]) {
+    assert.equal(rejects(question, `SELECT ${sql} ${march}`), 'METRIC_COLUMN', `${question} ${sql}`);
+    assert.equal(rejects(question, `SELECT ${sql} ${march}`, 1), 'METRIC_COLUMN', `version 1: ${question} ${sql}`);
+  }
+  assert.equal(rejects('Show net and gross revenue for March 2026.', `SELECT SUM(d.NetAmount) AS net_revenue, SUM(d.GrossAmount) AS gross_revenue ${march}`), null);
+  assert.equal(rejects('What was the revenue/gross ratio in March 2026?', `SELECT SUM(d.NetAmount) / SUM(d.GrossAmount) AS ratio ${march}`), null);
+  assert.doesNotMatch(buildOptimizedPrompt(schema, 'Show net and gross revenue for March 2026.').user, /use the amount it names/);
+
+  // Still modified, so still a hint: "net of ..." qualifies the amount, "net
+  // payable" is another amount, "gross amount of revenue" is gross revenue.
+  for (const [question, name] of [
+    ['Gross revenue net of returns in March 2026.', 'net_sales'],
+    ['Show gross revenue and the net payable amount in March 2026.', 'net_sales'],
+    ['Gross revenue by network in March 2026.', 'net_sales'],
+    ['Gross amount of revenue in March 2026.', 'net_sales'],
+    ['The gross value of revenue in March 2026.', 'net_sales'],
+    ['Revenue (gross) by store in March 2026.', 'net_sales'],
+    ['Average order value (gross), March 2026.', 'average_order_value'],
+  ]) {
+    const metric = metricOf(v2Plan(question), name);
+    assert.deepEqual([metric.enforcement, metric.enforcementReason], ['advisory', 'other_amount_named'], question);
+  }
+  assert.equal(rejects('Gross amount of revenue in March 2026.', `SELECT SUM(d.GrossAmount) AS gross_revenue ${march}`), null);
+  // Version 1 enforces "revenue" in every one of them, as before.
+  assert.equal(metricOf(v1Plan('Gross amount of revenue in March 2026.'), 'net_sales').enforcement, 'enforced');
+  assert.equal(rejects('Gross amount of revenue in March 2026.', `SELECT SUM(d.GrossAmount) AS gross_revenue ${march}`, 1), 'METRIC_COLUMN');
+});
+
 test('v2 layer: units count product lines only, "stopped selling" is no quantity synonym, "account" is no customer', () => {
   const units = metricOf(v2Plan('Which three customers bought the most units in Q1 2026?'), 'quantity_sold');
   assert.deepEqual([units.matchedSynonyms, units.enforcement], [['units'], 'advisory']);

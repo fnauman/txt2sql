@@ -625,29 +625,43 @@ const SEPARATE_MEASURE_WORDS = new Set([
   'number',
   'count',
 ]);
-// Words that may stand between a metric phrase and an amount word after it
-// without making that amount a separate measure: "revenue on a gross basis",
-// "revenue in gross terms", "revenue measured gross".
+// Symbols that join two measures like "and" does: "revenue & gross",
+// "revenue + gross", "revenue/gross ratio" (splitWords drops them, so they
+// are read from the separator text).
+const MEASURE_JOINING_SYMBOLS = /[&+/]/;
+// Words after an amount in parentheses that add it to the metric instead of
+// qualifying it: "revenue (gross too)", "revenue (gross and net)".
+const PARENTHETICAL_ADDING_WORDS = new Set(['too', 'also', 'and', 'or', 'nor', 'plus', 'versus', 'vs', 'besides', 'alongside']);
+// Nouns that, with "of", let an amount before the metric still qualify it:
+// "gross amount of revenue", "the gross value of revenue" (gross revenue).
+const AMOUNT_OF_NOUNS = new Set(['amount', 'amounts', 'value', 'values', 'total', 'totals', 'figure', 'figures']);
 // Words that may follow an appositive amount (", gross,") when it modifies
 // the metric before it: a period, grouping or filter phrase.
 const APPOSITIVE_FOLLOWING_WORDS = new Set(['in', 'for', 'during', 'over', 'across', 'from', 'since', 'between', 'by', 'per', 'at', 'on', 'of', 'this', 'last', 'each', 'until', 'through', 'to']);
+// Words that may stand between a metric phrase and an amount word after it
+// without making that amount a separate measure: "revenue on a gross basis",
+// "revenue in gross terms", "revenue measured gross".
 const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the', 'is', 'are', 'was', 'were', 'measured', 'reported', 'stated', 'calculated', 'counted', 'taken', 'expressed', 'shown']);
 
 /**
  * Whether one of `otherSpans` (an `advisory_when_mentioned` amount) modifies
  * one of `metricSpans` (the metric's matched phrases), as word spans of
  * `questionWords`:
- * - right before it, at most two plain words apart, with no comma or
- *   measure/conjunction word between: "gross revenue", "gross monthly
- *   revenue", "tax inclusive revenue";
- * - right after it, at most three glue words apart, when it is a tax phrase
- *   ("revenue including tax", "average order value, tax included": a tax
- *   phrase qualifies an amount and never names one), in parentheses
- *   ("revenue (gross)"), as one word set off by commas or ending the clause
- *   ("revenue, gross, in March"), or with no comma between and no measure
- *   word after it ("revenue on a gross basis").
+ * - right before it, at most two plain words apart, with no comma, joining
+ *   symbol (& + /) or measure/conjunction word between: "gross revenue",
+ *   "gross monthly revenue", "tax inclusive revenue"; or through "<amount
+ *   noun> of": "gross amount of revenue";
+ * - right after it, at most three glue words apart and no joining symbol
+ *   between, when it is a tax phrase ("revenue including tax", "average
+ *   order value, tax included": a tax phrase qualifies an amount and never
+ *   names one), in parentheses unless an adding word or symbol follows it
+ *   ("revenue (gross)", but not "revenue (gross too)" or "revenue (gross and
+ *   net)"), as one word set off by commas or ending the clause ("revenue,
+ *   gross, in March"), or with no comma between and no measure word after it
+ *   ("revenue on a gross basis").
  * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
- * and the bill total") is a separate measure.
+ * and the bill total", "revenue & gross", "revenue/gross ratio") is a
+ * separate measure.
  */
 function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
   const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
@@ -666,10 +680,12 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
     return metricSpans.some((metric) => {
       if (other.end <= metric.start) {
         const gap = between(other.end, metric.start);
+        const amountOf = gap.length === 2 && AMOUNT_OF_NOUNS.has(gap[0]) && gap[1] === 'of';
         return (
           gap.length <= 2 &&
-          gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word)) &&
-          !/[,;:]/.test(separatorsBetween(other.end, metric.start))
+          (amountOf || gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word))) &&
+          !/[,;:]/.test(separatorsBetween(other.end, metric.start)) &&
+          !MEASURE_JOINING_SYMBOLS.test(separatorsBetween(other.end, metric.start))
         );
       }
       if (metric.end <= other.start) {
@@ -677,14 +693,28 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
         if (gap.length > 3 || !gap.every((word) => POSTPOSITIVE_GLUE_WORDS.has(word))) {
           return false;
         }
+        const separators = separatorsBetween(metric.end, other.start);
+        if (MEASURE_JOINING_SYMBOLS.test(separators)) {
+          return false;
+        }
         if (isTaxPhrase) {
           return true;
         }
-        const separators = separatorsBetween(metric.end, other.start);
-        if (separators.includes('(')) {
-          return true;
-        }
         const nextWord = questionWords[other.end]?.word;
+        if (separators.includes('(')) {
+          // Inside the parentheses, an adding word or a joining symbol after
+          // the amount makes it a second measure: "(gross too)", "(gross as
+          // well)", "(gross and net)", "(gross & net)".
+          const after = separatorAt(other.end);
+          if (after.includes(')') || !nextWord) {
+            return true;
+          }
+          const adds =
+            MEASURE_JOINING_SYMBOLS.test(after) ||
+            PARENTHETICAL_ADDING_WORDS.has(nextWord) ||
+            (nextWord === 'as' && questionWords[other.end + 1]?.word === 'well');
+          return !adds;
+        }
         // An appositive single word, set off by commas and followed by a
         // period or grouping phrase, or ending the sentence: "average order
         // value, gross, in March", "revenue, gross?" (but not a list:
@@ -711,6 +741,22 @@ function everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) {
       )
   );
   return phrases.length > 0 && phrases.every((phrase) => otherAmountModifiesMetric(otherSpans, [phrase], questionWords));
+}
+
+// Whether the question asks for the net amount as a measure of its own: the
+// word "net" anywhere outside another amount's span ("net payable"), so "net
+// and gross revenue", "net vs gross revenue", "revenue (gross and net)" and
+// "net as a share of gross revenue" ask for the metric's own (net) column next
+// to the gross one. "net of ..." ("gross revenue net of returns") qualifies
+// an amount, and "net (amount) payable" names another one; neither counts.
+function asksForNetMeasure(otherSpans, questionWords) {
+  return questionWords.some((questionWord, index) => {
+    if (questionWord.word !== 'net' || otherSpans.some((span) => span.start <= index && index < span.end)) {
+      return false;
+    }
+    const following = questionWords.slice(index + 1, index + 3).map((word) => word.word);
+    return following[0] !== 'of' && !following.includes('payable');
+  });
 }
 
 /**
@@ -743,14 +789,18 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
   // metric enforced. Only the explicit phrases count, and every one of them
   // must be modified: a modified generic word ("revenue and gross sales") or
   // a second, modified mention ("revenue and gross revenue") leaves an
-  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales")
-  // still enforces.
+  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales"), or
+  // "net" asked for as its own measure ("net and gross revenue", "revenue
+  // (gross and net)"), still enforces: both metrics that carry the list
+  // measure the net amount.
   const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
+  const otherSpans = otherAmounts.length > 0 && questionWords ? findSynonymSpans(otherAmounts, questionWords) : [];
   if (
     otherAmounts.length > 0 &&
     questionWords &&
-    everyExplicitSpanModified(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(explicitMatches, questionWords), questionWords) &&
-    !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
+    everyExplicitSpanModified(otherSpans, findSynonymSpans(explicitMatches, questionWords), questionWords) &&
+    !explicitMatches.some((synonym) => splitWords(synonym).includes('net')) &&
+    !asksForNetMeasure(otherSpans, questionWords)
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }
