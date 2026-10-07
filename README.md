@@ -88,6 +88,11 @@ DB_ADMIN_USER=root
 MARIADB_ROOT_PASSWORD=<root password>   # or DB_ADMIN_PASSWORD
 ```
 
+Leave `MODEL_NAME` and `REASONING_EFFORT` unset (or commented out) in `.env`
+to run the default, `gpt-6-luna` at reasoning effort `low` (see
+[Models](#models)). Every entry point prints the model and the effort with
+their source, so a `MODEL_NAME` that `.env` sets shows up there.
+
 Why two users: least privilege is the real security boundary. The SQL validator is defense in depth, but a query that gets past it still runs as a user that can only `SELECT` from the demo databases, so it cannot write, read server files, or read other databases on the same MariaDB instance.
 
 4. Start MariaDB 10.6:
@@ -179,7 +184,7 @@ Common variables:
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
-- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved` on its own reproduces the product loop of the previous (retrieved-scope) baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baseline ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
+- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved HINTS_VERSION=1 MODEL_NAME=gpt-4o-mini` reproduces the product loop of the retrieved-scope baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baselines ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
 - `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions from before hints v2 (the version-1 baselines') byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
 
 See [.env.example](.env.example) for a starting point.
@@ -361,9 +366,10 @@ with a 95% confidence interval from a case bootstrap (over the dev cases
 while the holdout is hidden: the whole-suite figure is then a point estimate,
 see [Evaluation](#evaluation)). The case is the unit
 because repetitions of one case are strongly correlated (most failures are
-systematic: nearly all at temperature 0, and most for the default reasoning
-model too, whose repetitions vary more), so pooling them as independent trials overstates
-confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
+systematic: nearly all for gpt-4o-mini at temperature 0, and most for the
+default reasoning model too, whose recorded run split more dev cases across
+its 3 repetitions, 11 of 245 against 6), so pooling them as independent
+trials overstates confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
 still written for older consumers, labelled as such. A repeated run is a
 measurement and does not fail the process on run-to-run variance.
 
@@ -537,7 +543,12 @@ at reasoning effort `low` (`DEFAULT_MODEL` and `DEFAULT_REASONING_EFFORT` in
 [Experiment 3](docs/experiments/03-models.md) over `gpt-4o-mini`. A reasoning
 model also takes `REASONING_EFFORT` (or `--reasoning-effort`). The default is
 the pair: `gpt-6-luna` with no effort set runs at `low` also when `MODEL_NAME`
-(or `--model`) names it. Every entry point prints both with
+(or `--model`) names it, and pairs with the same baseline file. OpenRouter's
+`openai/gpt-6-luna` and a dated snapshot such as `gpt-6-luna-2026-09-30` run
+at `low` too, but each looks up its own baseline file
+(`openai__gpt-6-luna.low.json`, `gpt-6-luna-2026-09-30.low.json`, not
+committed): pass `--compare eval/baselines/gpt-6-luna.low.json` to pair one
+with the default's. Every entry point prints both with
 where they came from: the eval header (`model gpt-6-luna (MODEL_NAME from
 /home/you/.env); reasoning effort low (--reasoning-effort); endpoint
 api.openai.com`), the web server's `[config]` startup line, and the CLIs'
@@ -584,10 +595,11 @@ An invalid effort, or one the model's family does not list, stops every entry
 point before anything starts, with the allowed values in the message. (An effort set in an env file can be cleared
 for one run with an empty `REASONING_EFFORT=` in the shell.)
 
-Reasoning models are not deterministic the way gpt-4o-mini at
-`temperature: 0` nearly is: they take no `temperature` at all, so the
-repetitions of one question vary (the same question can get a different
-query, and a different verdict, in the next repetition). A single run is a
+Repetitions are not deterministic: a reasoning model takes no `temperature`
+at all, so the same question can get a different query, and a different
+verdict, in the next repetition, and gpt-4o-mini at `temperature: 0` varies
+too (in Experiment 3, 11 of the 245 dev cases had 1 or 2 passes out of 3 at
+`low`, 5 at `medium` and 6 for gpt-4o-mini; one run each). A single run is a
 sample; every figure in this README is measured with `--repeat 3`, and so
 should any comparison be. A completion cut off at the token limit is an
 `LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if a pilot

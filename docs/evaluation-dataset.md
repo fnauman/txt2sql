@@ -1683,9 +1683,11 @@ How to read it:
   [Experiment 3](experiments/03-models.md#remaining-gaps-dev-cases-only)):
   5 are `default_filter` cases (dev accuracy 70.8%), 4 of them the
   ledger-account rankings by debit or credit.
-- **Repetitions vary.** A reasoning model takes no `temperature`, so its
-  repetitions disagree more often than gpt-4o-mini's at temperature 0 (see
-  [Experiment 3](experiments/03-models.md)); the figures are 3-repetition
+- **Repetitions vary.** Repetitions are not deterministic: a reasoning model
+  takes no `temperature`, and gpt-4o-mini at temperature 0 varies too (11 of
+  the 245 dev cases have 1 or 2 passes out of 3 in this baseline, 6 in the
+  gpt-4o-mini reference; one run each, see
+  [Experiment 3](experiments/03-models.md)). The figures are 3-repetition
   averages, and a comparison needs `--repeat 3` too.
 - **Gold audit effect.** A hints-version-1 run before the audit scored the
   holdout at 35.4%; the version-1 baseline, on the same code after the audit

@@ -6,8 +6,8 @@
 **Status:** complete — adopted (live runs on 2026-10-07 at commit `a57fa44`;
 `gpt-6-luna` at reasoning effort `low` is the default and its run is the
 committed default baseline, `eval/baselines/gpt-6-luna.low.json`). The
-Hypothesis and Design sections are the pre-registration, written before any
-paid call and unchanged since, except where marked.
+Hypothesis and Design sections are the pre-registration as committed at
+`a57fa44`, written before any paid call and unchanged since.
 **Source:** the model-support change (`src/model-config.js`): the request each
 model family accepts, the effort and its source in every header and report,
 reasoning tokens in the usage, and the gpt-6-luna price.
@@ -37,7 +37,7 @@ measured.
 - **Pairing:** each candidate run compares itself with the reference
   explicitly (`--compare eval/baselines/gpt-4o-mini.json`: the default
   baseline of `gpt-6-luna` at an effort would be
-  `eval/baselines/gpt-6-luna.<effort>.json`, which did not exist then). The
+  `eval/baselines/gpt-6-luna.<effort>.json`, which does not exist). The
   comparison flags the model change by design.
 - **Budget:** $4.00 for all remaining paid work, every run capped with
   `--budget-usd`.
@@ -137,7 +137,6 @@ between the two arms). If no arm qualifies, gpt-4o-mini stays the default.
    (`eval/baselines/gpt-6-luna.<effort>.json`) is written only after the
    decision, from a clean tree.
 
-
 ## Offline measurements
 
 No LLM calls; on the final code unless stated otherwise.
@@ -160,9 +159,11 @@ No LLM calls; on the final code unless stated otherwise.
   against a local stand-in). Every live run's header read
   `model gpt-6-luna (--model); reasoning effort low (--reasoning-effort);
   endpoint api.openai.com` (or `medium`), as step 2 requires.
-- **Ceiling.** The validator, fixtures and oracle are the reference's, so the
-  ceiling with perfect SQL is unchanged: 99.0% (the 4 holdout cases flagged
-  `known_validator_rejection`).
+- **Ceiling.** The datasets, fixtures and oracle are the reference's, and
+  `npm run verify-dataset` reports 0 failures on the final code: under the
+  default hints version 2 the validator accepts every gold answer except
+  those of the 4 holdout cases flagged `known_validator_rejection`. So the
+  ceiling with perfect SQL is unchanged: 99.0%.
 
 ### Pilot
 
@@ -251,47 +252,57 @@ again):
   exact McNemar p = 0.000 → significantly better than the baseline; strict
   accuracy 49.2% → 83.0%, Δ +33.8 pts (95% CI +25.2 pts to +41.9 pts)`
 
-**Medium vs low.** A zero-cost rescore of the medium run compared with the
-low run (`npm run eval -- --rescore <medium report.json> --compare <low
-report.json>`): every paired answer case (392), 89.4% → 89.6%, 3 improvements
-and 6 regressions, exact McNemar p = 0.508 → no significant difference. Medium
+**Medium vs low.** A zero-cost rescore of the medium run compared with the low
+run (`npm run eval -- --rescore <medium report.json> --compare <low
+report.json>`; the figures are that rescore's report.json, `comparison`, like
+the every-paired-case rows above, since its console and report.md show the dev
+cases only): every paired answer case (392), 89.4% → 89.6%, 3 improvements and
+6 regressions, exact McNemar p = 0.508 → no significant difference. Medium
 spent twice the reasoning tokens (102,539 against 51,171 over the dev cases)
 and 1 s more at the median for no measurable gain.
 
 **Spend.** $0.747 of the $4.00 budget: pilots $0.0199 ($0.0095 + $0.0104),
 low $0.3276, medium $0.3992.
 
-**Reading it.** The gain is the model's alone: prompt, hints, schema scope,
-validator, retries, datasets, fixtures and oracle are the reference's, and
-the prompt version is identical. On the dev cases, the ones the prompt was
-tuned on for gpt-4o-mini, the gain is +5.7 pts (88.3% → 94.0%); on the blind
-holdout it is +32.4 pts (49.2% → 81.6%, 56 improvements against 5
-regressions), so most of the improvement is on the new intents and wording
-that gpt-4o-mini handled worst. It is out-of-sample evidence twice over: the
-holdout was written blind before this experiment, and neither the model nor
-the prompt was tuned on it. The dev-holdout gap narrows from 39 to 12 points.
-Cost per correct answer falls by more than half ($0.00060 → $0.00027): the
-gpt-6-luna price per token is lower, and retries almost vanish (3.8% →
-0.3%). Latency rises (p95 4.40 s → 5.73 s) with the reasoning tokens. The
-guardrails rejected none of the low arm's dev SQL (0 caught, 0 false
-rejections): every wrong dev answer is a valid query that returns the wrong
-result, which the validator cannot see (the product retries only a query
-that fails generation, validation or execution).
+**Reading it.** The gain is the model's: the prompt version (`4358263bcf82`),
+hints version, schema scope, retry budget, datasets, fixtures and oracle are
+the reference's. The validator code and the hints-v2 semantic-layer overlay
+received review fixes between `4ff6ecb` and `a57fa44` (the semantic-layer
+version recorded in the two baselines' provenance differs; the prompt does
+not), but they move none of the reference's verdicts: on the final code
+`MODEL_NAME=gpt-4o-mini npm run eval -- --offline --gate` rescores its
+recorded SQL with 0 flips, so the comparison scores both sides with the same
+code. On the dev cases, the ones the prompt was tuned on for gpt-4o-mini, the gain is +5.7 pts
+(88.3% → 94.0%); on the blind holdout it is +32.4 pts (49.2% → 81.6%, 56
+improvements against 5 regressions), so most of the improvement is on the new
+intents and wording that gpt-4o-mini handled worst. It is out-of-sample
+evidence twice over: the holdout was written blind before this experiment, and
+neither the model nor the prompt was tuned on it. The dev-holdout gap narrows
+from 39 to 12 points. Cost per correct answer falls by more than half
+($0.00060 → $0.00027): the gpt-6-luna price per token is lower, and retries
+almost vanish (3.8% → 0.3%). Latency rises (p95 4.40 s → 5.73 s) with the
+reasoning tokens. The guardrails rejected none of the low arm's dev SQL (0
+caught, 0 false rejections): every wrong dev answer is a valid query that
+returns the wrong result, which the validator cannot see (the product retries
+only a query that fails generation, validation or execution).
 
-**Repetitions vary.** A reasoning model takes no `temperature`, so the three
-repetitions of a case disagree more often: 11 of the 245 dev cases have 1 or
-2 passes out of 3 at low effort (5 at medium), against 6 for gpt-4o-mini at
-temperature 0 (report.md, Cases). Every figure here averages 3 repetitions
-per case.
+**Repetitions vary.** Repetitions are not deterministic for either model: a
+reasoning model takes no `temperature`, and gpt-4o-mini at temperature 0
+varies too. 11 of the 245 dev cases have 1 or 2 passes out of 3 at low effort,
+5 at medium and 6 for gpt-4o-mini (report.md, Cases; one run each, so this
+does not rank the models' variability). Every live-results figure averages 3
+repetitions per case (the pilot: 1), and every comparison here uses
+`--repeat 3`.
 
 **Threats to validity.** One 3-repetition run per arm on one day; a provider
 update of the model could move it. The reference ran a day earlier
 (2026-10-06, `4ff6ecb`) with the same prompt version, datasets, fixtures and
-oracle. The prompt and the semantic layer were tuned on gpt-4o-mini's dev
+oracle (the validator fixes since then leave its verdicts unchanged, see
+above). The prompt and the semantic layer were tuned on gpt-4o-mini's dev
 failures, which may favour or handicap another model on the dev cases; the
-holdout is the measurement that does not depend on that. The holdout is
-small (147 answer cases over 75 intents) and is read only in aggregate, so
-its gain says nothing about which kinds of holdout question improved.
+holdout is the measurement that does not depend on that. The holdout is small
+(147 answer cases over 75 intents) and is read only in aggregate, so its gain
+says nothing about which kinds of holdout question improved.
 
 ### Remaining gaps (dev cases only)
 
@@ -305,7 +316,7 @@ failure class (the low run's report.md and its report.json, dev cases only):
 
 | `failure_class` | Cases | Which (passes of 3) |
 |---|---|---|
-| `default_filter` | 5 | the ledger-account rankings by debit or credit in March 2026, `core_public_005`, `core_public_009` and their paraphrases `paraphrase_public_005`, `paraphrase_public_009` (0/3 each: postings of non-canceled sales documents only); `tpl_store_qty_mar_2026_651565` (1/3: product lines only for units) |
+| `default_filter` | 5 | the ledger-account rankings by debit or credit in March 2026, `core_public_005`, `core_public_009` and their paraphrases `paraphrase_public_005`, `paraphrase_public_009` (0/3 each: postings of non-canceled sales documents only); `tpl_store_qty_mar_2026_651565` (1/3: the two failing repetitions applied the product-line and cancel filters but listed every location, with a zero row for a store with no March sales) |
 | `aggregation_shape` | 2 | monthly series, `tpl_net_sales_online_orders_monthly_2026_25aa4c`, `tpl_sunvale_net_sales_monthly_q1_2026_334c95` (0/3 each) |
 | (none) | 2 | "SKUs that moved the most units", `paraphrase_public_002` (1/3), `tpl_product_qty_top5_feb_2026_8a9dc1` (0/3) |
 | `entity_resolution` | 1 | `hard_entity_clearspring_units_mar_2026` (0/3) |
@@ -316,10 +327,11 @@ failure class (the low run's report.md and its report.json, dev cases only):
 By tag, 7 of the 13 are `ranking` cases and 4 are `accounting` (the four
 ledger rankings); report.md's breakdown gives dev accuracy 70.8% for
 `default_filter` (11 of 16 cases pass by majority), 79.4% for `accounting`
-and 88.3% for `ranking`, against 94.0% overall. The conventions behind
-`default_filter` (the cancel filter on ledger postings by document date,
-units on product lines only) are the clearest single target for the next
-product change.
+and 88.3% for `ranking`, against 94.0% overall. The ledger convention
+behind 4 of the 5 `default_filter` failures (the cancel filter on ledger
+postings, by document date) is the clearest single target for the next
+product change; listing a group with no rows as a zero row
+(`tpl_store_qty_mar_2026_651565`) is a separate, smaller one.
 
 **Abstain / clarify: 0 of 10 dev cases handled**, as before: the model
 answers every unanswerable or ambiguous question with SQL; the product has
@@ -360,13 +372,18 @@ exact McNemar p = 0.508). So low.
 What changed: `DEFAULT_MODEL` is `gpt-6-luna` and `DEFAULT_REASONING_EFFORT`
 is `low` (`src/model-config.js`). The default is the pair: with no effort set,
 `gpt-6-luna` runs at `low` whether it is defaulted or named (`MODEL_NAME`,
-`--model`; also OpenRouter's `openai/gpt-6-luna`), so a run of it with no
-effort set pairs with `eval/baselines/gpt-6-luna.low.json` like the default
-run; any other model keeps its family's default (`medium` for `gpt-6-sol`,
-none for `gpt-4o-mini`). The low arm's
-run is the committed default baseline, which `npm run eval -- --offline
---gate` (and the CI `db` job) rescores with 0 flips.
+`--model`), so a run of it with no effort set pairs with
+`eval/baselines/gpt-6-luna.low.json` like the default run. OpenRouter's
+`openai/gpt-6-luna` and a dated snapshot (`gpt-6-luna-2026-09-30`) run at
+`low` too, but each looks up its own baseline file
+(`openai__gpt-6-luna.low.json`, `gpt-6-luna-2026-09-30.low.json`; neither is
+committed), so pass `--compare eval/baselines/gpt-6-luna.low.json` to pair
+one with the default's. Any other model keeps its family's default (`medium`
+for `gpt-6-sol`, none for `gpt-4o-mini`). The low arm's run is the committed
+default baseline, which `npm run eval -- --offline --gate` (and the CI `db`
+job) rescores with 0 flips.
 `eval/baselines/gpt-4o-mini.json` stays, unchanged, as the reference of
 experiments 1-3 (`MODEL_NAME=gpt-4o-mini` still runs it and pairs with it).
-The next product work is in the remaining gaps above: the `default_filter`
-conventions and an abstain / clarify channel.
+The next product work is in the remaining gaps above: the cancel filter on
+ledger postings (4 of the 5 `default_filter` failures) and an abstain /
+clarify channel.
