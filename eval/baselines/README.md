@@ -47,8 +47,10 @@ How it is used (details in
 [docs/evaluation-dataset.md](../../docs/evaluation-dataset.md#running-evaluations)):
 
 - **Comparison**: cases are paired by id; a case whose gold changed since the
-  baseline is excluded and listed. Flips are tested with an exact McNemar test;
-  `--gate` fails a run that is significantly worse (and stops with exit 2 when
+  baseline is excluded and listed. Flips are tested with an exact McNemar test
+  (report.md and the console show it over the paired dev cases while the
+  holdout is hidden); `--gate` fails a run that is significantly worse over
+  every paired case (and stops with exit 2 when
   there is no baseline to compare with, when the file is not a report, or when
   it pairs fewer than half of the run's cases).
 - **Rescore**: `--offline` re-validates, re-executes and re-scores the

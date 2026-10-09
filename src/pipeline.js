@@ -307,16 +307,25 @@ function buildMonthRange(year, month) {
 // - a range or a list sharing a year, at either end ("January to March
 //   2026", "from March 2026 to the end of May 2026", "between November 2025
 //   and February 2026", "January and February 2026", "January, February,
-//   and March 2026");
+//   and March 2026", "January, February and/or March 2026", "January;
+//   February; and March 2026", "January vs February 2026", "Jan/Feb 2026"):
+//   every month of the list is left to the model, never the last one alone;
 // - a to-date or open-ended tail ("to date", "year to date", "YTD", "so
 //   far", "onwards", "and later").
 // A month with its own year next to another one ("March 2025 and March 2026")
 // and a ranking size before it ("top 10 March 2026 customers") still resolve.
 const MONTH_ALTERNATION = [...MONTH_TOKEN_TO_INFO.keys()].sort((left, right) => right.length - left.length).join('|');
 const RANGE_CONNECTOR = '(?:-|–|—|to|through|thru|until|till|up to|up until)';
-// A list separator, with the optional serial (Oxford) comma before a
-// conjunction: "January, February, and March 2026".
-const LIST_CONNECTOR = '(?:,?\\s*(?:and|or|&)|,)';
+// A list separator: a comma, semicolon, slash, plus or bar, or a conjunction
+// ("and", "or", "and/or", "or/and", "nor", "plus", "as well as", "and also",
+// "and then", "and finally", "and lastly", "but also", "along with",
+// "together with", "alongside", "compared with", "as against", "then", "&",
+// "vs") with an optional serial (Oxford) comma or semicolon before it, and an
+// optional "in" after it: "January, February, and March 2026", "January;
+// February; and March 2026", "Jan/Feb 2026", "in January, in February and
+// in March 2026".
+const LIST_CONNECTOR =
+  '(?:(?:[,;]?\\s*(?:and\\s*/\\s*or|or\\s*/\\s*and|and\\s+(?:also|then|finally|lastly)|but\\s+also|as\\s+well\\s+as|along\\s+with|together\\s+with|compared\\s+(?:with|to)|as\\s+against|alongside|then|and|or|nor|plus|&|vs\\.?|versus)|[,;/+|])(?:\\s+in)?)';
 const DAY_OF_MONTH = '\\d{1,2}(?:st|nd|rd|th)?';
 // "the end of", "the start of": a point inside the month, not all of it.
 const MONTH_POINT = '(?:(?:the\\s+)?(?:very\\s+)?(?:end|start|beginning|middle|close|half|first half|second half)\\s+of\\s+)';
@@ -625,29 +634,49 @@ const SEPARATE_MEASURE_WORDS = new Set([
   'number',
   'count',
 ]);
-// Words that may stand between a metric phrase and an amount word after it
-// without making that amount a separate measure: "revenue on a gross basis",
-// "revenue in gross terms", "revenue measured gross".
+// Symbols that join two measures like "and" does: "revenue & gross",
+// "revenue + gross", "revenue/gross ratio" (splitWords drops them, so they
+// are read from the separator text).
+const MEASURE_JOINING_SYMBOLS = /[&+/]/;
+// Words that, as all that follows an amount inside parentheses, add it to the
+// metric instead of qualifying it: "revenue (gross too)", "revenue (gross as
+// well)". Anything else after it still qualifies the metric: "revenue (gross
+// and units)" is gross revenue and units, "revenue (gross/day)" gross revenue
+// per day, "revenue (gross or tax included)" one amount by two names; "net"
+// next to the amount ("revenue (gross and net)") is asksForNetMeasure's.
+const PARENTHETICAL_ADDING_TAIL_WORDS = new Set(['too', 'also', 'as', 'well']);
+// Nouns that, with "of", let an amount before the metric still qualify it:
+// "gross amount of revenue", "the gross value of revenue" (gross revenue).
+const AMOUNT_OF_NOUNS = new Set(['amount', 'amounts', 'value', 'values', 'total', 'totals', 'figure', 'figures']);
 // Words that may follow an appositive amount (", gross,") when it modifies
 // the metric before it: a period, grouping or filter phrase.
 const APPOSITIVE_FOLLOWING_WORDS = new Set(['in', 'for', 'during', 'over', 'across', 'from', 'since', 'between', 'by', 'per', 'at', 'on', 'of', 'this', 'last', 'each', 'until', 'through', 'to']);
+// Words that may stand between a metric phrase and an amount word after it
+// without making that amount a separate measure: "revenue on a gross basis",
+// "revenue in gross terms", "revenue measured gross".
 const POSTPOSITIVE_GLUE_WORDS = new Set(['on', 'a', 'an', 'in', 'at', 'as', 'the', 'is', 'are', 'was', 'were', 'measured', 'reported', 'stated', 'calculated', 'counted', 'taken', 'expressed', 'shown']);
 
 /**
  * Whether one of `otherSpans` (an `advisory_when_mentioned` amount) modifies
  * one of `metricSpans` (the metric's matched phrases), as word spans of
  * `questionWords`:
- * - right before it, at most two plain words apart, with no comma or
- *   measure/conjunction word between: "gross revenue", "gross monthly
- *   revenue", "tax inclusive revenue";
- * - right after it, at most three glue words apart, when it is a tax phrase
- *   ("revenue including tax", "average order value, tax included": a tax
- *   phrase qualifies an amount and never names one), in parentheses
- *   ("revenue (gross)"), as one word set off by commas or ending the clause
- *   ("revenue, gross, in March"), or with no comma between and no measure
- *   word after it ("revenue on a gross basis").
+ * - right before it, at most two plain words apart, with no comma, joining
+ *   symbol (& + /) or measure/conjunction word between: "gross revenue",
+ *   "gross monthly revenue", "tax inclusive revenue"; or through "<amount
+ *   noun> of": "gross amount of revenue";
+ * - right after it, at most three glue words apart and no joining symbol
+ *   between: in parentheses unless only an adding tail follows it there
+ *   ("revenue (gross)", "revenue (gross and units)", but not "revenue (gross
+ *   too)"), as a tax phrase ("revenue including tax", "average order value,
+ *   tax included": a tax phrase qualifies an amount and never names one), as
+ *   one word set off by commas or ending the clause ("revenue, gross, in
+ *   March"), or with no comma between and no measure word after it ("revenue
+ *   on a gross basis").
  * Anything else (an amount named elsewhere, "revenue, gross amount", "revenue
- * and the bill total") is a separate measure.
+ * and the bill total", "revenue & gross", "revenue/gross ratio") is a
+ * separate measure. The net amount asked for next to the amount ("net and
+ * gross revenue", "revenue (gross and net)", "revenue including tax and
+ * excluding tax") is read by asksForNetMeasure.
  */
 function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
   const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
@@ -666,10 +695,12 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
     return metricSpans.some((metric) => {
       if (other.end <= metric.start) {
         const gap = between(other.end, metric.start);
+        const amountOf = gap.length === 2 && AMOUNT_OF_NOUNS.has(gap[0]) && gap[1] === 'of';
         return (
           gap.length <= 2 &&
-          gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word)) &&
-          !/[,;:]/.test(separatorsBetween(other.end, metric.start))
+          (amountOf || gap.every((word) => !STOPWORDS.has(word) && !SEPARATE_MEASURE_WORDS.has(word))) &&
+          !/[,;:]/.test(separatorsBetween(other.end, metric.start)) &&
+          !MEASURE_JOINING_SYMBOLS.test(separatorsBetween(other.end, metric.start))
         );
       }
       if (metric.end <= other.start) {
@@ -677,11 +708,23 @@ function otherAmountModifiesMetric(otherSpans, metricSpans, questionWords) {
         if (gap.length > 3 || !gap.every((word) => POSTPOSITIVE_GLUE_WORDS.has(word))) {
           return false;
         }
-        if (isTaxPhrase) {
-          return true;
-        }
         const separators = separatorsBetween(metric.end, other.start);
+        if (MEASURE_JOINING_SYMBOLS.test(separators)) {
+          return false;
+        }
         if (separators.includes('(')) {
+          // Inside the parentheses, only an adding tail after the amount
+          // makes it a second measure: "(gross too)", "(gross as well)",
+          // "(tax included too)".
+          const tail = [];
+          for (let index = other.end; index < questionWords.length && !separatorAt(index).includes(')'); index += 1) {
+            tail.push(questionWords[index].word);
+          }
+          const adds =
+            tail.length > 0 && tail.every((word) => PARENTHETICAL_ADDING_TAIL_WORDS.has(word)) && (!tail.includes('as') || tail.includes('well'));
+          return !adds;
+        }
+        if (isTaxPhrase) {
           return true;
         }
         const nextWord = questionWords[other.end]?.word;
@@ -711,6 +754,149 @@ function everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) {
       )
   );
   return phrases.length > 0 && phrases.every((phrase) => otherAmountModifiesMetric(otherSpans, [phrase], questionWords));
+}
+
+// The net (tax-exclusive) amount's own wordings. Both metrics that carry
+// `advisory_when_mentioned` measure it, so one of these asked for next to
+// another amount names the metric's own column (asksForNetMeasure).
+const NET_AMOUNT_PHRASES = ['net', 'net of tax', 'excluding tax', 'excl tax', 'ex tax', 'exclusive of tax', 'tax exclusive', 'tax excluded', 'before tax', 'pre tax', 'without tax'];
+// The net side of a tax pair written with "tax" once: "revenue (tax included
+// and excluded)", "revenue with tax and without".
+const NET_ELLIPSIS_WORDS = new Set(['excluded', 'excluding', 'exclusive', 'excl', 'without', 'before', 'pre', 'ex']);
+// Words that join a net wording to another amount or to the metric as two
+// measures, or relate the two ("net as a share of gross revenue", "the net to
+// gross ratio"); a join needs one of NET_JOINING_WORDS (or & + / or a comma).
+const NET_JOINING_WORDS = new Set(['and', 'or', 'nor', 'plus', 'minus', 'vs', 'versus', 'against', 'also', 'well', 'along', 'together', 'compared', 'to', 'share', 'percentage', 'percent', 'proportion', 'fraction', 'ratio', 'over', 'divided', 'relative']);
+const NET_LINK_WORDS = new Set([...NET_JOINING_WORDS, 'both', 'but', 'as', 'with', 'a', 'an', 'the', 'of', 'by']);
+// Words that, among the two before a net wording, ask for something other
+// than it: "gross revenue, not net", "instead of net", "excluding the net
+// amount" ("not only net" is no negation).
+const NET_NEGATING_WORDS = new Set(['not', 'never', 'no', 'without', 'excluding', 'exclude', 'except', 'instead', 'rather', 'opposed', 'ignoring', 'ignore']);
+// Abbreviations whose period is no clause boundary: "net vs. gross".
+const NET_LINK_ABBREVIATIONS = new Set(['vs', 'incl', 'excl']);
+const SUM_NOUNS = new Set([...AMOUNT_OF_NOUNS, 'sum', 'sums']);
+
+/**
+ * Whether the question asks for the net amount as a measure of its own next
+ * to another amount (`otherSpans`) or the metric (`metricSpans`): a net
+ * wording (NET_AMOUNT_PHRASES, or the net side of a tax pair) that is
+ * - joined to one of them by a conjunction, a comparison, a joining symbol
+ *   or a comma ("net and gross revenue", "net vs gross revenue", "revenue
+ *   (gross and net)", "net/gross revenue", "net as a share of gross revenue",
+ *   "revenue including tax and excluding tax", "revenue (tax included and
+ *   excluded)", "net of tax and gross revenue", "gross revenue vs net"), or
+ *   right before the metric ("net revenue");
+ * - not negated ("gross revenue, not net", "(not net)", "instead of net",
+ *   "rather than net", "without net figures");
+ * - followed by a boundary, a joining or period word, an amount noun, the
+ *   metric or another amount, not by another noun ("gross revenue and net
+ *   margin", "at Net Mart"; "terms" and "basis" only after another amount:
+ *   "in gross and net terms"). Amounts coordinated after it without a comma
+ *   ("net and gross", "net/gross") modify the noun after the last of them,
+ *   so that noun decides instead: "net and gross revenue" asks for the net
+ *   amount, "net and gross margin category" does not. The metric there may
+ *   be one of its generic words the question used (`genericSpans`: "gross
+ *   revenue and net and gross sales", "gross revenue and net turnover"), and
+ *   it may stand a word or two after the amount, as for an amount modifying
+ *   it (otherAmountModifiesMetric): "net and gross monthly revenue", "net vs
+ *   gross store revenue" ask for the net amount like "net and gross revenue".
+ * "net of ..." other than tax ("gross revenue net of returns") qualifies an
+ * amount, and "net (amount) payable" names another one; neither counts.
+ */
+function asksForNetMeasure(otherSpans, metricSpans, questionWords, genericSpans = []) {
+  const words = questionWords.map((questionWord) => questionWord.word);
+  const separatorAt = (index) => questionWords[index]?.separatorBefore || '';
+  const covered = (span, spans) => spans.some((other) => other !== span && other.start <= span.start && span.end <= other.end);
+  const startsSpan = (index, spans) => spans.some((span) => span.start === index);
+  // A clause boundary in the separators before words start..end.
+  const boundaryBetween = (start, end) => {
+    for (let index = start; index <= end; index += 1) {
+      const separator = separatorAt(index);
+      if (/[;:!?]/.test(separator) || (separator.includes('.') && !NET_LINK_ABBREVIATIONS.has(words[index - 1]))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // The separators before words start..end.
+  const separatorsBetween = (start, end) => {
+    let separators = '';
+    for (let index = start; index <= end; index += 1) {
+      separators += separatorAt(index);
+    }
+    return separators;
+  };
+  // Whether `first` and `second` (first before second) are joined.
+  const joined = (first, second) => {
+    if (first.end > second.start || second.start - first.end > 4 || boundaryBetween(first.end, second.start)) {
+      return false;
+    }
+    const gap = words.slice(first.end, second.start);
+    return gap.every((word) => NET_LINK_WORDS.has(word)) && (gap.some((word) => NET_JOINING_WORDS.has(word)) || /[&+/,]/.test(separatorsBetween(first.end, second.start)));
+  };
+
+  const netSpans = findSynonymSpans(NET_AMOUNT_PHRASES, questionWords).filter(
+    (span) =>
+      !otherSpans.some((other) => other.start < span.end && span.start < other.end) &&
+      !(span.end - span.start === 1 && (words[span.end] === 'of' || words.slice(span.end, span.end + 2).includes('payable')))
+  );
+  for (const other of otherSpans.filter((span) => words.slice(span.start, span.end).includes('tax'))) {
+    let index = other.end;
+    while (index < other.end + 4 && NET_LINK_WORDS.has(words[index])) {
+      index += 1;
+    }
+    if (NET_ELLIPSIS_WORDS.has(words[index]) && !netSpans.some((span) => span.start <= index && index < span.end)) {
+      netSpans.push({ start: index, end: index + 1 });
+    }
+  }
+
+  // The amount (another amount or a net wording) coordinated right after
+  // `span` with no comma or parenthesis between ("net and gross", "net /
+  // gross", "net or pre-tax"), or null: the two modify the same noun.
+  const coordinatedAmountAfter = (span) =>
+    [...otherSpans, ...netSpans.filter((other) => !covered(other, netSpans))]
+      .filter((other) => other.start >= span.end && joined(span, other) && !/[,()]/.test(separatorsBetween(span.end, other.start)))
+      .sort((left, right) => left.start - right.start)[0] || null;
+
+  return netSpans.some((net) => {
+    if (covered(net, netSpans)) {
+      return false;
+    }
+    const before = words.slice(Math.max(0, net.start - 2), net.start);
+    if (before.some((word, offset) => NET_NEGATING_WORDS.has(word) && !(word === 'not' && ['only', 'just'].includes(before[offset + 1])))) {
+      return false;
+    }
+    const otherPartner = otherSpans.some((other) => joined(other, net) || joined(net, other));
+    const metricPartner = metricSpans.some(
+      (metric) => joined(metric, net) || joined(net, metric) || (metric.start === net.end && !/\S/.test(separatorAt(net.end)))
+    );
+    if (!otherPartner && !metricPartner) {
+      return false;
+    }
+    let last = net;
+    for (let following = coordinatedAmountAfter(last); following; following = coordinatedAmountAfter(last)) {
+      last = following;
+    }
+    // The metric's own words: its explicit phrases and the generic words the
+    // question used for it.
+    const metricWordSpans = [...metricSpans, ...genericSpans];
+    // The last of them modifies the metric ("net and gross monthly revenue":
+    // "gross monthly revenue"), so the net wording coordinated with it
+    // modifies the same metric and asks for its net amount.
+    if (otherAmountModifiesMetric([last], metricWordSpans, questionWords)) {
+      return true;
+    }
+    const next = words[last.end];
+    return (
+      next === undefined ||
+      /[,.;:!?()&+/]/.test(separatorAt(last.end)) ||
+      NET_LINK_WORDS.has(next) ||
+      APPOSITIVE_FOLLOWING_WORDS.has(next) ||
+      SUM_NOUNS.has(next) ||
+      startsSpan(last.end, [...otherSpans, ...metricWordSpans, ...netSpans]) ||
+      ((otherPartner || last !== net) && (next === 'terms' || next === 'basis'))
+    );
+  });
 }
 
 /**
@@ -743,14 +929,20 @@ function classifyMetricEnforcement(entry, matchedSynonyms, countIntent, question
   // metric enforced. Only the explicit phrases count, and every one of them
   // must be modified: a modified generic word ("revenue and gross sales") or
   // a second, modified mention ("revenue and gross revenue") leaves an
-  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales")
-  // still enforces.
+  // unmodified "revenue" enforced. An explicit "net" phrase ("net sales"), or
+  // the net amount asked for as its own measure ("net and gross revenue",
+  // "revenue (gross and net)", "revenue including tax and excluding tax";
+  // not a negated "gross revenue, not net": asksForNetMeasure), still
+  // enforces: both metrics that carry the list measure the net amount.
   const otherAmounts = uniqueStrings(entry.advisory_when_mentioned);
+  const otherSpans = otherAmounts.length > 0 && questionWords ? findSynonymSpans(otherAmounts, questionWords) : [];
+  const explicitSpans = otherAmounts.length > 0 && questionWords ? findSynonymSpans(explicitMatches, questionWords) : [];
   if (
     otherAmounts.length > 0 &&
     questionWords &&
-    everyExplicitSpanModified(findSynonymSpans(otherAmounts, questionWords), findSynonymSpans(explicitMatches, questionWords), questionWords) &&
-    !explicitMatches.some((synonym) => splitWords(synonym).includes('net'))
+    everyExplicitSpanModified(otherSpans, explicitSpans, questionWords) &&
+    !explicitMatches.some((synonym) => splitWords(synonym).includes('net')) &&
+    !asksForNetMeasure(otherSpans, explicitSpans, questionWords, findSynonymSpans(advisoryMatches, questionWords))
   ) {
     return { enforcement: 'advisory', enforcementReason: 'other_amount_named', explicitMatches, advisoryMatches };
   }
@@ -2040,20 +2232,30 @@ function isLinkedWithin(adjacency, within, from, to) {
 }
 
 // Retrieved scope, widen-on-demand: the retrieved tables plus `extraTables`
-// (in-scope table names) and their connector tables. First, as before, the
-// shortest foreign-key path from each added table to each retrieved one
-// within three hops (the retrieval join-path bound). Then every retrieved
-// table the foreign-key graph links to the added table but the widened set
-// does not yet link to it gets the shortest path at any length (a simple path
-// has fewer hops than the in-scope schema has tables), nearest first (ties in
-// retrieval order), skipping tables an earlier path already linked. Large
-// schemas (where auto falls back to retrieved) are the ones whose retrieved
-// set can be split into parts more than three hops apart; without the long
-// paths the retry could not join the added table to the part its SQL needs
-// without being rejected again. Where the three-hop paths already link
-// everything the prompt is unchanged. Each long path is one shortest path
-// (findShortestJoinPath breaks ties by table name), not the union of tied
-// ones, which on hub-heavy schemas could pull in much of the schema.
+// (in-scope table names) and their connector tables. Each added table is
+// widened on its own: first, as before, the shortest foreign-key path from it
+// to each retrieved table within three hops (the retrieval join-path bound);
+// then every retrieved table the foreign-key graph links to it but its
+// widening does not yet link to it gets the shortest path at any length (a
+// simple path has fewer hops than the in-scope schema has tables), nearest
+// first (ties in retrieval order), skipping tables an earlier path already
+// linked. Large schemas (where auto falls back to retrieved) are the ones
+// whose retrieved set can be split into parts more than three hops apart;
+// without the long paths the retry could not join the added table to the
+// part its SQL needs without being rejected again. Where the three-hop paths
+// already link everything the prompt is unchanged. Each long path is one
+// shortest path (findShortestJoinPath breaks ties by table name), not the
+// union of tied ones, which on hub-heavy schemas could pull in much of the
+// schema.
+// The widened set is the union of the added tables' own widenings, so it
+// depends on the set of added tables only, not on their order (the live loop
+// passes them in rejection order, verify.js and rescore sorted), and a later
+// widening with more tables keeps every table an earlier one allowed (a retry
+// never loses a connector its previous attempt could use). They are processed
+// in name order, so the connector list is stable too. The cap is the
+// in-scope schema: no path is cut to keep the prompt small, since a cut path
+// is a join the retry cannot write; a widened schema block over the scope's
+// token budget is reported instead (widenBudgetReport).
 // Unknown or already retrieved names are ignored. Null when nothing is added.
 function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const byTableName = new Map(schema.tables.map((table) => [table.tableName, table]));
@@ -2068,16 +2270,14 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
   const { adjacency } = buildForeignKeyGraph(schema.tables);
   const expanded = new Set([...current, ...added]);
   const connectors = new Set();
-  const addPath = (path) => {
-    for (const pathName of path) {
-      if (!expanded.has(pathName)) {
-        connectors.add(pathName);
-      }
-      expanded.add(pathName);
-    }
-  };
   const anyLength = schema.tables.length;
-  for (const addedName of added) {
+  for (const addedName of [...added].sort()) {
+    const own = new Set([...current, addedName]);
+    const addPath = (path) => {
+      for (const pathName of path) {
+        own.add(pathName);
+      }
+    };
     for (const currentName of current) {
       const path = findShortestJoinPath(adjacency, addedName, currentName);
       if (path) {
@@ -2085,13 +2285,19 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
       }
     }
     const longPaths = [...current]
-      .filter((currentName) => !isLinkedWithin(adjacency, expanded, addedName, currentName))
+      .filter((currentName) => !isLinkedWithin(adjacency, own, addedName, currentName))
       .map((currentName) => findShortestJoinPath(adjacency, addedName, currentName, anyLength))
       .filter(Boolean)
       .sort((left, right) => left.length - right.length);
     for (const path of longPaths) {
-      if (!isLinkedWithin(adjacency, expanded, addedName, path[path.length - 1])) {
+      if (!isLinkedWithin(adjacency, own, addedName, path[path.length - 1])) {
         addPath(path);
+      }
+    }
+    for (const name of own) {
+      if (!expanded.has(name)) {
+        connectors.add(name);
+        expanded.add(name);
       }
     }
   }
@@ -2101,6 +2307,18 @@ function widenRetrievedTables(schema, retrievedTables, extraTables) {
     addedTableNames: added.map(tableNameOf),
     connectorTableNames: [...connectors].map(tableNameOf),
   };
+}
+
+// A widened retrieved prompt's schema block (`schemaContext`) against the
+// token budget that sends auto to the retrieved scope (`scope`'s
+// fullSchemaMaxTokens): { widenedSchemaEstimatedTokens, widenOverBudget }.
+// Widening never cuts a join path to fit (widenRetrievedTables), so a
+// widening past the budget, which long paths on a large schema can cause, is
+// reported instead: in the prompt context's schemaScope (and so the result's)
+// and in the live loop's trace (prompt.widen_over_budget).
+function widenBudgetReport(schemaContext, scope) {
+  const widenedSchemaEstimatedTokens = estimatePromptTokens(schemaContext);
+  return { widenedSchemaEstimatedTokens, widenOverBudget: widenedSchemaEstimatedTokens > scope.fullSchemaMaxTokens };
 }
 
 /**
@@ -2149,12 +2367,16 @@ function resolvePromptHintsVersion(hintsVersion, semanticPlan) {
  *   all; 'retrieved' shows and allows the retrieved tables (the prompt every
  *   question had before schema scopes existed, byte for byte);
  * - extraTables: retrieved scope only, in-scope tables to add (widen-on-demand
- *   after a TABLE_SCOPE rejection; see tablesToWidenFor);
+ *   after a TABLE_SCOPE rejection; see tablesToWidenFor). The widened
+ *   allow-list depends on the set of tables, not their order, and grows with
+ *   it (widenRetrievedTables);
  * - hintsVersion: 1 or 2 (src/hints-version.js; default: the plan's, else 2).
  *   Version 1 is the prompt every question had before HINTS_VERSION existed,
  *   byte for byte.
  * `tables` is the allow-list; `context.schemaScope` says which scope applied
- * and `context.hintsVersion` which hints version.
+ * (for a widened prompt also its schema block's token estimate and whether
+ * it is over the budget: widenBudgetReport) and `context.hintsVersion` which
+ * hints version.
  */
 export function buildOptimizedPrompt(
   schema,
@@ -2214,6 +2436,7 @@ export function buildOptimizedPrompt(
         ...scope,
         widenedTables: widened ? widened.addedTableNames : [],
         widenConnectorTables: widened ? widened.connectorTableNames : [],
+        ...(widened ? widenBudgetReport(schemaContext, scope) : {}),
       },
       hintsVersion: version,
       examples: summarizeExamples(relevantExamples),

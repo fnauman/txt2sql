@@ -262,7 +262,7 @@ Inspect retrieval without making an LLM call:
 
 ```bash
 npm run debug-retrieval -- "Show sparkling water product sales by branch month-wise"
-npm run evaluate-retrieval -- --dataset paraphrase-public
+npm run evaluate-retrieval -- --dataset paraphrase-public   # writes generated/retrieval-evaluation-hints-v<N>.json
 ```
 
 Inspect product master-data resolution against the configured database:
@@ -357,7 +357,9 @@ npm run benchmark -- --dataset core-public --repeat 10
 
 Every repetition of every case is kept. The headline is the **strict
 accuracy**: the mean over cases of each case's pass rate across repetitions,
-with a 95% confidence interval from a case bootstrap. The case is the unit
+with a 95% confidence interval from a case bootstrap (over the dev cases
+while the holdout is hidden: the whole-suite figure is then a point estimate,
+see [Evaluation](#evaluation)). The case is the unit
 because repetitions of one case are strongly correlated (failures at
 temperature 0 are systematic), so pooling them as independent trials overstates
 confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
@@ -399,8 +401,9 @@ now, tagged `formerly_holdout`. The fresh holdout is new intents whose
 questions avoid every multi-word phrase of the semantic layer and its tuned
 word "revenue" (single words such as customer, store or units still match
 it), so it measures new intents in partly new wording. It is frozen by
-`datasets/holdout-manifest.json`: a test fails when a holdout case is added,
-removed or changed without a reviewed manifest update
+`datasets/holdout-manifest.json`: a test fails when a holdout case (or an
+oracle control that verifies one) is added, removed or changed without a
+reviewed manifest update
 (`npm run holdout-manifest -- --write --note "..."`). Error analysis and
 experiment design use dev failures only; report.md and the console show the
 holdout in aggregate (accuracy by split), never per case, unless
@@ -420,14 +423,16 @@ flagged code is a system error (any other failure of it, such as a wrong
 result or a rejection for another reason, is judged as usual). The report
 contains:
 
-- `report.md`: strict accuracy with a 95% confidence interval, accuracy by
-  split, who caused each failure (model, guardrail false rejection, retrieval
-  miss, known validator rejection, infrastructure), the guardrail confusion
-  matrix, the abstain / clarify cases handled, a per-case table, cost /
-  latency / retries / tokens (all of these cover the dev cases; holdout
-  cases only with `--reveal-holdout`), and the provenance (git sha, prompt,
-  semantic-layer, fixture and dataset hashes);
-- `report.json` (everything, every repetition) and `trace.jsonl`.
+- `report.md`: strict accuracy and accuracy by split; then, over the dev
+  cases (holdout cases only with `--reveal-holdout`), the 95% confidence
+  interval, majority-pass cases, the intent-clustered accuracy, who caused
+  each failure (model, guardrail false rejection, retrieval miss, known
+  validator rejection, infrastructure), the guardrail confusion matrix, the
+  abstain / clarify cases handled, a per-case table and cost / latency /
+  retries / tokens; and the provenance (git sha, prompt, semantic-layer,
+  fixture and dataset hashes);
+- `report.json` (everything, every repetition) and `trace.jsonl`; both cover
+  every case, holdout included, so reading them reveals the holdout.
 
 **Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
 whole 404-case suite, 3 repetitions, full-schema prompting and hints v2 — the
@@ -435,8 +440,8 @@ defaults `SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-06):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, 205 intents) | **73.6%** (95% CI 69.2%–77.9%) |
-| By split | dev **88.3%** (245 cases) · fresh holdout **49.2%** (147 cases) |
+| Strict accuracy (392 answer cases, every split) | **73.6%** |
+| By split | dev **88.3%** (245 cases, 95% CI 84.4%–92.0%) · fresh holdout **49.2%** (147 cases) |
 | Failures by cause (repetitions, dev cases) | model 86 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
 | Guardrails over every dev attempt | precision 100%, recall 30.4%, false-rejection rate 0% |
 | Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
@@ -447,21 +452,24 @@ How it got here, each step a paired experiment against the previous baseline:
 68.8% → 72.8% on the earlier 255-case suite) and
 [Experiment 2](docs/experiments/02-hints-v2.md) (hints v2 — unambiguous
 business rules, safer date handling, a cleaned semantic layer: 62.2% → 73.6%
-on the 404-case suite, McNemar p < 0.001, and on the blind holdout alone
-41.3% → 49.2%, p = 0.035). The fresh holdout is 77 new intents written blind
+on the 404-case suite, McNemar p < 0.001 on the paired dev cases, and on the
+blind holdout alone 41.3% → 49.2%, p = 0.035 in the live run's paired
+holdout test). The fresh holdout is 77 new intents written blind
 and audited by two independent annotators; reports show it in aggregate only.
 The dev number is in-sample (experiments are designed from dev failures); the
 holdout number is the honest estimate for new kinds of questions — shares and
 ratios, overdue and ageing balances, running totals, period-over-period
 change — and it is where the remaining work is. With perfect SQL the suite's
 ceiling is 99.0% (4 holdout cases are known validator rejections); every dev
-failure of this baseline is a model error. (The failure causes, guardrail,
-behaviour and per-question cost figures are what `npm run eval -- --offline`
-prints by default: they cover the dev cases, the holdout only as its split
-accuracy.) These are measurements of the product, not targets.
+failure of this baseline is a model error. (The interval, failure causes,
+guardrail, behaviour and per-question cost figures are what `npm run eval --
+--offline` prints by default: they cover the dev cases, the holdout only as
+its split accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
-when committed) it adds a paired comparison with an exact McNemar test;
+when committed) it adds a paired comparison with an exact McNemar test (shown
+over the paired dev cases while the holdout is hidden; the gate tests every
+paired case);
 `--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,
 a run below X; with only abstain / clarify cases selected there is no accuracy,
 so `--min-accuracy` is refused with exit 2). Harness, database and
@@ -624,7 +632,7 @@ Notes:
 - You can combine both flags to trace to stdout and a file at the same time
 - All events share a `runId` for correlating events from the same run
 - Each event includes `timestamp` and duration timings (`startedAt`, `endedAt`, `durationMs`)
-- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching, and `schemaScope` (requested and effective scope, the full-schema token estimate, widened tables); a widen-on-demand retry emits `prompt.widened` with the rejected and added tables; `npm run eval` also stamps every trace line with `schemaScopeRequested`, `schemaScopeEffective`, `schemaFullEstimatedTokens` and `schemaWidenOnDemand`
+- Optimized prompt traces include `context.promptCache`, which estimates the stable schema-prefix size available for provider prompt caching, and `schemaScope` (requested and effective scope, the full-schema token estimate, widened tables and, for a widened prompt, its schema token estimate and `widenOverBudget`); a widen-on-demand retry emits `prompt.widened` with the rejected and added tables, and `prompt.widen_over_budget` when the widened schema block is over `SCHEMA_FULL_MAX_TOKENS` (widening never cuts a join path to fit); `npm run eval` also stamps every trace line with `schemaScopeRequested`, `schemaScopeEffective`, `schemaFullEstimatedTokens` and `schemaWidenOnDemand`
 - LLM cost output includes cached input token counts and percentages when the provider returns `prompt_tokens_details.cached_tokens`
 
 ## Prompt Cache Measurement
@@ -638,7 +646,7 @@ npm run measure-prompt-cache -- --suite --schema-scope all
 npm run measure-prompt-cache -- --dataset paraphrase-public --results-file generated/prompt-cache-paraphrase-public.json
 ```
 
-The report includes average characters and estimated tokens, cacheable-prefix and question-part tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups, per schema scope. Over the 255-question suite the full scope averages 4,127 estimated tokens per prompt with 1 distinct prefix (451 tokens per question outside it), the retrieved scope 3,800 with 48 prefixes (1,312 outside them). It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
+The report includes average characters and estimated tokens, cacheable-prefix and question-part tokens, the old monolithic-layout prefix estimate, and cacheable-prefix reuse groups, per schema scope. Over the default 404-question suite with the default hints version 2 (`npm run measure-prompt-cache -- --suite --schema-scope all`, offline) the full scope averages 4,859 estimated tokens per prompt with 1 distinct prefix (498 tokens per question outside it), the retrieved scope 4,518 with 54 prefixes (1,354 outside them); `HINTS_VERSION=1` gives 4,109 for the full scope. It is an offline estimate; actual cached token counts and cost savings come from provider usage metadata during real model runs.
 
 ## Structured Output And Guardrails
 

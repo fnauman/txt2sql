@@ -745,6 +745,20 @@ export async function runOptimizedQuestion({
           prompt: { system: prompt.system, user: prompt.user },
           context: prompt.context,
         });
+        // Widening never cuts a join path to fit the budget that sent auto to
+        // the retrieved scope; a widened schema block past it (long paths on
+        // a large schema) is reported, not silent.
+        if (prompt.context.schemaScope.widenOverBudget) {
+          await trace.emit('prompt.widen_over_budget', {
+            ...attemptContext,
+            widenedTables,
+            connectorTableCount: prompt.context.schemaScope.widenConnectorTables.length,
+            allowedTableCount: allowedTables.length,
+            inScopeTableCount: prompt.context.schemaScope.inScopeTableCount,
+            widenedSchemaEstimatedTokens: prompt.context.schemaScope.widenedSchemaEstimatedTokens,
+            fullSchemaMaxTokens: prompt.context.schemaScope.fullSchemaMaxTokens,
+          });
+        }
       }
 
       continue;

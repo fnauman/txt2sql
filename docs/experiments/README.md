@@ -34,12 +34,33 @@ is the protocol on top of it.
      model would have answered a different prompt.
    - `npm run verify-dataset` under the new setting (every gate), so the
      dataset flags match the product.
-3. **One paid run, paired.** `npm run eval -- --repeat 3` with the new
-   setting. A live run compares itself with `eval/baselines/<model>.json`
-   automatically (`--compare <report.json>` for another baseline): cases are
-   paired by id (a case whose gold or scoring changed is excluded and listed).
-   Add `--budget-usd` as a cap.
-4. **Do not re-baseline in the same step.** The committed baseline is replaced
+3. **One paid run, paired, pre-registered.** Before it, write down the
+   hypothesis, the arms and the decision rule (what the paired holdout test
+   of step 4 must show for the setting to be kept). Then
+   `npm run eval -- --repeat 3` with the new setting. A live run compares
+   itself with `eval/baselines/<model>.json` automatically (`--compare
+   <report.json>` for another baseline): cases are paired by id (a case whose
+   gold or scoring changed is excluded and listed). Add `--budget-usd` as a
+   cap.
+4. **Conclude on the holdout, once.** The out-of-sample evidence an
+   experiment ends with is the paired holdout test, read against the
+   decision rule written down in step 3. Pass `--holdout-summary` on the
+   concluding run, or afterwards, with zero LLM calls, on a rescore of it
+   under the candidate arm's setting: `SETTING=<candidate value> npm run eval
+   -- --rescore <its report.json> --compare <baseline report.json>
+   --holdout-summary`
+   (the rescore re-judges the recorded SQL with today's settings; it must
+   print no "note: the recording ran with …" line, or its holdout line is
+   not the run's and does not conclude anything). report.md's comparison
+   section and the console then add one line over the paired holdout cases:
+   their number, improvements, regressions, the exact McNemar p and verdict,
+   and strict accuracy baseline → candidate with the change and its paired
+   bootstrap 95% CI; nothing per case. Never pass it while designing or
+   tuning the change: error analysis uses dev failures only (see
+   [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy)),
+   and a change reworked after its holdout line was read is no longer
+   measured blind on that holdout.
+5. **Do not re-baseline in the same step.** The committed baseline is replaced
    (`--write-baseline`, from a clean tree) only after the result is reviewed
    and the setting is kept.
 
@@ -64,15 +85,22 @@ For each arm (baseline and candidate):
 - provenance: git sha, prompt version, the product setting as report.md's
   Provenance shows it (for the schema scope: requested and effective scope,
   the full-schema token estimate), model and endpoint, repetitions;
-- strict accuracy with its interval, majority-pass cases, intent-clustered
-  accuracy, accuracy by split (dev / holdout; the holdout in aggregate only:
-  design the experiment from dev failures, never from holdout cases, see
-  [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy));
+- strict accuracy, accuracy by split (dev / holdout; the holdout in
+  aggregate only: design the experiment from dev failures, never from
+  holdout cases, see
+  [the holdout policy](../evaluation-dataset.md#splits-and-the-holdout-policy)),
+  and the dev cases' interval, majority-pass cases and intent-clustered
+  accuracy (report.md gives these for dev cases only while the holdout is
+  hidden);
 - attribution: pass / model / system / infra buckets, guardrail false
   rejections, retrieval misses, known validator rejections, the guardrail
   confusion matrix;
 - the paired table, McNemar p, the accuracy delta with its interval, and the
-  regression and improvement case lists;
+  regression and improvement case lists (report.md gives them over the
+  paired dev cases while the holdout is hidden; the holdout's evidence there
+  is its accuracy by split in both arms and, with `--holdout-summary` on the
+  concluding run, its paired test: paired holdout cases, improvements /
+  regressions, exact McNemar p, the accuracy change with its interval);
 - cost per question and per correct answer, prompt tokens and their cached
   share, p50 / p95 latency, retry rate;
 - the offline numbers it was predicted from (ceiling, rescore, prompt size),

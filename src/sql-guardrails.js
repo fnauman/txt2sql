@@ -601,6 +601,13 @@ function buildRelationModel(analysis, knownTables, { primaryKeyOf = () => [] } =
     qualifiers,
     outputNames,
     relationOf: (ref) => relationOfRef.get(ref) || null,
+    // The relations a block's own FROM clause binds, the block whose FROM it
+    // sees next (null past a derived-table or CTE body), whether a relation
+    // has a column, and the '(' that opens a derived table's or CTE's body.
+    sourcesOf: (blockId) => [...(bindings.get(blockId) || new Map()).values()],
+    enclosingBlock,
+    hasColumn,
+    bodyOpenOf: (relationName) => (isDerivedTableName(relationName) ? (bodies.get(derivedAliasFromTableName(relationName))?.openIndex ?? null) : null),
   };
 }
 
@@ -1119,15 +1126,24 @@ function columnMentioned(sqlText, qualifiedColumn) {
 }
 
 // Wrappers an operand of a column difference may have: a NULL default
-// (COALESCE(col, 0)) or a cast to a non-integer number type, which keep the
-// value; and a SUM, which distributes over the difference, or a ROUND to n
-// places, which both sides must share. (TRUNCATE never reaches this check:
-// the safety layer rejects the word.)
+// (COALESCE(col, 0)) or a cast that keeps the decimals (a decimal type with
+// a scale, or a floating-point type), which keep the value; and a SUM, which
+// distributes over the difference, or a ROUND to n places, which both sides
+// must share. (TRUNCATE never reaches this check: the safety layer rejects
+// the word.)
 const DIFFERENCE_NULL_DEFAULT_FUNCTIONS = new Set(['COALESCE', 'IFNULL', 'NVL']);
 const DIFFERENCE_AGGREGATE_FUNCTIONS = new Set(['SUM']);
 const DIFFERENCE_ROUNDING_FUNCTIONS = new Set(['ROUND']);
 const DIFFERENCE_CAST_FUNCTIONS = new Set(['CAST', 'CONVERT']);
-const DIFFERENCE_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED', 'DOUBLE', 'FLOAT', 'REAL']);
+const DIFFERENCE_DECIMAL_CAST_TYPES = new Set(['DECIMAL', 'DEC', 'NUMERIC', 'FIXED']);
+const DIFFERENCE_FLOAT_CAST_TYPES = new Set(['DOUBLE', 'FLOAT', 'REAL']);
+// Functions that read the difference only as a condition (SIGN keeps its
+// sign, FIELD and INTERVAL compare every argument, ELT reads its first as an
+// index, COUNT only whether it is NULL), and functions or operators that drop
+// its decimals (FLOOR, CEIL, a remainder, an integer division; FORMAT(x, 0)
+// too).
+const DIFFERENCE_CONDITION_FUNCTIONS = new Set(['SIGN', 'FIELD', 'INTERVAL', 'COUNT']);
+const DIFFERENCE_DECIMAL_DROPPING_FUNCTIONS = new Set(['FLOOR', 'CEIL', 'CEILING', 'MOD']);
 // Operators binding tighter than binary minus: next to an operand they take
 // it away from the difference ("a - b * 2", "2 * a - b").
 const DIFFERENCE_TIGHTER_OPERATORS = new Set(['*', '/', '%', '^']);
@@ -1178,21 +1194,67 @@ function isIntegerLiteral(tokens, start, end) {
   return valueStart === end && tokens[end]?.type === 'number' && /^\d+$/.test(tokens[end].value);
 }
 
-// Whether tokens[start..end] names a non-integer number type ("DECIMAL",
-// "DECIMAL(12,2)", "DOUBLE").
+// Whether tokens[start..end] names a number type that keeps the decimals: a
+// floating-point type ("DOUBLE", "FLOAT") or a decimal type with a scale of
+// at least one and an integer digit ("DECIMAL(12,2)"). A bare DECIMAL is
+// DECIMAL(10,0) in MariaDB, and DECIMAL(12,0), SIGNED, UNSIGNED or INTEGER
+// drop the decimals. (A precision too small for the amounts, which
+// overflows, is not caught: the check does not know the columns' types.
+// "DOUBLE PRECISION", which MariaDB's CAST does not take, passes as it did
+// before this check, so the database reports its own syntax error rather
+// than a METRIC_COLUMN rejection naming a difference the SQL computes.)
 function isValueKeepingCastType(tokens, start, end, parens) {
   const typeName = tokens[start];
-  if (typeName?.type !== 'word' || !DIFFERENCE_CAST_TYPES.has(typeName.upper)) {
+  if (typeName?.type !== 'word') {
     return false;
   }
-  return start === end || (isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end);
+  const hasArguments = isPunctToken(tokens[start + 1], '(') && parens.closeOf.get(start + 1) === end;
+  if (DIFFERENCE_FLOAT_CAST_TYPES.has(typeName.upper)) {
+    return start === end || hasArguments || (typeName.upper === 'DOUBLE' && end === start + 1 && isKeywordToken(tokens[end], 'PRECISION'));
+  }
+  if (!DIFFERENCE_DECIMAL_CAST_TYPES.has(typeName.upper) || !hasArguments) {
+    return false;
+  }
+  const args = splitTopLevelArguments(tokens, start + 2, end - 1, parens);
+  const plainNumber = ([from, to]) => (from === to && tokens[from]?.type === 'number' && /^\d+$/.test(tokens[from].value) ? Number(tokens[from].value) : null);
+  const [precision, scale] = args.map(plainNumber);
+  return args.length === 2 && precision !== null && scale !== null && scale >= 1 && precision > scale;
+}
+
+// The operand range [start, end] of the CAST(<operand> AS <type>) or
+// CONVERT(<operand>, <type>) whose '(' is tokens[open], when its type keeps
+// the decimals (isValueKeepingCastType); null otherwise (CONVERT ... USING
+// included).
+function valueKeepingCastOperand(tokens, open, parens) {
+  const close = parens.closeOf.get(open);
+  const functionName = tokens[open - 1]?.upper;
+  if (close === undefined || !DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
+    return null;
+  }
+  const args = splitTopLevelArguments(tokens, open + 1, close - 1, parens);
+  if (functionName === 'CONVERT') {
+    return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? args[0] : null;
+  }
+  if (args.length !== 1) {
+    return null;
+  }
+  // CAST(<operand> AS <type>): the last top-level AS splits them.
+  let asIndex = -1;
+  for (let index = args[0][0]; index <= args[0][1]; index += 1) {
+    if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
+      index = parens.closeOf.get(index);
+    } else if (isKeywordToken(tokens[index], 'AS')) {
+      asIndex = index;
+    }
+  }
+  return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? [args[0][0], asIndex - 1] : null;
 }
 
 /**
  * The column tokens[start..end] reads as a whole, or null: a column reference
  * (`col`, `t.col`, `db.t.col`, quoted or not), in grouping parentheses, in a
- * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast to a non-integer number
- * type (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
+ * NULL default (COALESCE(x, 0), IFNULL(x, 0)), a cast that keeps the decimals
+ * (CAST(x AS DECIMAL(12,2)), CONVERT(x, DOUBLE)), SUM(x) or ROUND(x, n).
  * Returns { column (lower-case name), wrappers (the SUM and ROUND wrappers,
  * outermost first, e.g. ['ROUND(2)', 'SUM']) }.
  */
@@ -1223,22 +1285,8 @@ function columnOperandOf(tokens, start, end, parens) {
       return inner ? { ...inner, wrappers: [`${functionName}(${places ?? 0})`, ...inner.wrappers] } : null;
     }
     if (DIFFERENCE_CAST_FUNCTIONS.has(functionName)) {
-      if (functionName === 'CONVERT') {
-        return args.length === 2 && isValueKeepingCastType(tokens, args[1][0], args[1][1], parens) ? columnOperandOf(tokens, args[0][0], args[0][1], parens) : null;
-      }
-      if (args.length !== 1) {
-        return null;
-      }
-      // CAST(<operand> AS <type>): the last top-level AS splits them.
-      let asIndex = -1;
-      for (let index = args[0][0]; index <= args[0][1]; index += 1) {
-        if (isPunctToken(tokens[index], '(') && parens.closeOf.has(index)) {
-          index = parens.closeOf.get(index);
-        } else if (isKeywordToken(tokens[index], 'AS')) {
-          asIndex = index;
-        }
-      }
-      return asIndex > args[0][0] && isValueKeepingCastType(tokens, asIndex + 1, args[0][1], parens) ? columnOperandOf(tokens, args[0][0], asIndex - 1, parens) : null;
+      const operand = valueKeepingCastOperand(tokens, open, parens);
+      return operand ? columnOperandOf(tokens, operand[0], operand[1], parens) : null;
     }
     if (DIFFERENCE_NULL_DEFAULT_FUNCTIONS.has(functionName)) {
       const defaultsAreNumbers = args.slice(1).every(([from, to]) => {
@@ -1462,21 +1510,210 @@ function groupOperandStart(tokens, open) {
   return isFunctionCallName(tokens, open - 1) ? open - 1 : open;
 }
 
+// The select-list items of the SELECT at tokens[selectIndex], each as
+// { from, to (exclusive) }.
+function selectListItems(tokens, selectIndex, parens) {
+  const items = [];
+  let from = selectIndex + 1;
+  while (isKeywordToken(tokens[from], ...SELECT_OPTION_WORDS)) {
+    from += 1;
+  }
+  for (let at = from; at <= tokens.length; at += 1) {
+    const token = tokens[at];
+    if (isPunctToken(token, '(') && parens.closeOf.has(at)) {
+      at = parens.closeOf.get(at);
+      continue;
+    }
+    if (!token || isPunctToken(token, ',') || isPunctToken(token, ')') || isPunctToken(token, ';') || endsSelectList(tokens, at)) {
+      items.push({ from, to: at });
+      if (!isPunctToken(token, ',')) {
+        break;
+      }
+      from = at + 1;
+    }
+  }
+  return items;
+}
+
+// The select-list item of the SELECT at tokens[selectIndex] that contains
+// tokens[start..end] (same parenthesis level): { position (0-based), from,
+// to (exclusive) }, or null.
+function selectItemAround(tokens, selectIndex, start, end, parens) {
+  const items = selectListItems(tokens, selectIndex, parens);
+  const position = items.findIndex(({ from, to }) => from <= start && end < to);
+  return position < 0 ? null : { position, ...items[position] };
+}
+
+// The first SELECT of the set operation (UNION, INTERSECT, EXCEPT) whose
+// later branch is the SELECT at tokens[selectIndex], inside the group opened
+// at tokens[open]; selectIndex itself when it is no later branch. A later
+// branch's columns take the first branch's names.
+function firstSetOperationSelect(tokens, selectIndex, open, parens) {
+  let first = -1;
+  let setOperation = false;
+  for (let at = open + 1; at < selectIndex; at += 1) {
+    if (isPunctToken(tokens[at], '(') && parens.closeOf.has(at)) {
+      at = parens.closeOf.get(at);
+    } else if (first < 0 && isKeywordToken(tokens[at], 'SELECT') && !tokens[at].afterDot) {
+      first = at;
+    } else if (first >= 0 && isKeywordToken(tokens[at], 'UNION', 'INTERSECT', 'EXCEPT') && !tokens[at].afterDot) {
+      setOperation = true;
+    }
+  }
+  return first >= 0 && setOperation ? first : selectIndex;
+}
+
+// The name of the column the select-list item tokens[from..to) outputs: its
+// alias ("x AS bal", "x bal") or, for a bare column reference, the column's
+// name; '*' for `*` and `q.*`; null for an unnamed expression.
+function selectItemColumnName(tokens, from, to) {
+  const last = tokens[to - 1];
+  if (isOperatorToken(last, '*') && (to - from === 1 || (to - from === 3 && isPunctToken(tokens[from + 1], '.')))) {
+    return '*';
+  }
+  if (to - from >= 3 && isKeywordToken(tokens[to - 2], 'AS') && (identifierTokenName(last) || last.type === 'string')) {
+    return last.type === 'string' ? last.value.slice(1, -1) : identifierTokenName(last);
+  }
+  const alias = to - from >= 2 ? trailingAliasName(tokens, from, to) : null;
+  if (alias !== null) {
+    return alias;
+  }
+  for (let index = from; index < to; index += 1) {
+    const expectIdentifier = (index - from) % 2 === 0;
+    if (expectIdentifier ? !isPlainIdentifierToken(tokens[index]) : !isPunctToken(tokens[index], '.')) {
+      return null;
+    }
+  }
+  return (to - from) % 2 === 1 ? identifierTokenName(last) : null;
+}
+
+// How deep a derived-table or CTE column is followed through the queries
+// that read it (each level a derived table, a CTE or a `*` passing it on),
+// and how many references one difference may follow in all.
+const MAX_DERIVED_COLUMN_DEPTH = 8;
+const MAX_DERIVED_COLUMN_REFERENCES = 256;
+
+// Whether the reference at tokens[at] (a column `name`, a qualified `q.name`,
+// or a `*` / `q.*` select item) reads the derived table or CTE whose body
+// opens at tokens[bodyOpen], resolved the way MariaDB resolves it (see
+// buildRelationModel; `relations` is that model, `tokens` the analyzed
+// tokens): a qualifier names the innermost FROM source so called, from the
+// reference's own query block outwards; a bare name reads the innermost
+// block's FROM source that has the column, so a nested query's own source, a
+// derived table of another UNION branch or another CTE in the same FROM, with
+// a column of that name, is read instead; a bare `*` reads every FROM source
+// of its own block.
+function referenceReadsBody(tokens, at, bodyOpen, relations) {
+  const isBody = (relationName) => relations.bodyOpenOf(relationName) === bodyOpen;
+  const { blockId } = tokens[at];
+  if (isPunctToken(tokens[at - 1], '.')) {
+    const qualifier = identifierTokenName(tokens[at - 2]);
+    const relationName = qualifier === null ? null : relations.resolve(blockId, qualifier);
+    return relationName !== null && isBody(relationName);
+  }
+  if (isOperatorToken(tokens[at], '*')) {
+    return relations.sourcesOf(blockId).some(isBody);
+  }
+  const name = identifierTokenName(tokens[at]);
+  for (let current = blockId; current; current = relations.enclosingBlock(current)) {
+    const sources = relations.sourcesOf(current);
+    if (sources.some(isBody)) {
+      return true;
+    }
+    if (sources.some((relationName) => relations.hasColumn(relationName, name))) {
+      return false;
+    }
+  }
+  return false;
+}
+
 /**
- * Whether the expression tokens[start..end] is a computed value: it reaches a
- * SELECT list (of the query, a derived table, a CTE or a scalar subquery
- * there) through function arguments, arithmetic and CASE results, without
- * being an operand of a comparison or logical operator or sitting in a WHERE,
- * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as
- * "AND NetPayableAmount - PaidAmount > 0" computes no value.
+ * Whether the column `name` that a derived table or CTE body (the
+ * parenthesized group tokens[body[0]..body[1]]) outputs reaches a computed
+ * value in the query that reads it (tokens[scope[0]..scope[1]], the body
+ * left out): a reference to the column, bare or qualified, that is a
+ * computed value (expressionIsComputedValue), or a `*` / `q.*` select item
+ * that passes it on and is one (the only way to read an unnamed column,
+ * `name` null). A column only used to filter, join, group or order rows
+ * computes nothing ("WHERE t.bal > 0" next to SUM(t.other)). A reference
+ * counts only when it reads this body in its own query block
+ * (referenceReadsBody), so a same-named column of another source ("SUM(o.bal)"
+ * next to "WHERE t.bal > 0", or "SUM(bal)" over another derived table next
+ * to "EXISTS (SELECT 1 FROM t WHERE t.bal > 0)") is not it.
  */
-function expressionIsComputedValue(tokens, start, end, parens) {
+function derivedColumnReachesValue(tokens, name, scope, body, parens, depth, walk) {
+  const wanted = name === null ? null : String(name).toLowerCase();
+  for (let at = scope[0]; at <= scope[1]; at += 1) {
+    if (at === body[0]) {
+      at = body[1];
+      continue;
+    }
+    const token = tokens[at];
+    if (isOperatorToken(token, '*')) {
+      const start = isPunctToken(tokens[at - 1], '.') ? at - 2 : at;
+      const before = tokens[start - 1];
+      if (
+        (isKeywordToken(before, 'SELECT', ...SELECT_OPTION_WORDS) || isPunctToken(before, ',')) &&
+        referenceReadsBody(tokens, at, body[0], walk.relations) &&
+        expressionIsComputedValue(tokens, start, at, parens, depth + 1, name, walk)
+      ) {
+        return true;
+      }
+      continue;
+    }
+    const tokenName = token?.type === 'word' || token?.type === 'quoted_identifier' ? identifierTokenName(token) : null;
+    if (!tokenName || wanted === null || String(tokenName).toLowerCase() !== wanted || isPunctToken(tokens[at + 1], '.') || isPunctToken(tokens[at + 1], '(')) {
+      continue;
+    }
+    const qualified = isPunctToken(tokens[at - 1], '.');
+    // Not an alias of the same name ("SUM(x) AS bal", "FROM docs bal").
+    if (!qualified && (isKeywordToken(tokens[at - 1], 'AS') || endsExpression(tokens[at - 1]))) {
+      continue;
+    }
+    if (!referenceReadsBody(tokens, at, body[0], walk.relations)) {
+      continue;
+    }
+    if (expressionIsComputedValue(tokens, qualified ? operandStartBefore(tokens, at, parens) : at, at, parens, depth + 1, null, walk)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether the expression tokens[start..end] is a computed value: it reaches
+ * the query's SELECT list through function arguments, arithmetic, CASE
+ * results, scalar subqueries, and derived-table and CTE columns that the
+ * query reading them uses as values (derivedColumnReachesValue), without
+ * being an operand of a comparison or logical operator, the condition of an
+ * IF(), an argument NULLIF() compares, read as a condition by SIGN(),
+ * FIELD(), INTERVAL(), COUNT() or ELT(), inside a cast or a function or operator that
+ * drops the decimals (CAST(... AS SIGNED), FLOOR(), DIV), or in a WHERE,
+ * HAVING, ON, GROUP BY, ORDER BY or CASE WHEN condition. A filter such as "AND NetPayableAmount - PaidAmount >
+ * 0" computes no value. `passedName` is the column name a `*` select item
+ * passes on when that `*` is the expression (see derivedColumnReachesValue);
+ * `walk` carries the relation model that resolves the references to a
+ * derived-table or CTE column (see referenceReadsBody) and the references
+ * left to follow (past none the answer is no).
+ */
+function expressionIsComputedValue(tokens, start, end, parens, depth, passedName, walk) {
+  walk.references -= 1;
+  if (depth > MAX_DERIVED_COLUMN_DEPTH || walk.references < 0) {
+    return false;
+  }
+  // Set when the previous step left a subquery's select list: the item's
+  // position and output column name.
+  let selectItem = null;
+  // An integer division or a remainder next to the expression drops its
+  // decimals ("SUM(a - b) DIV 1").
+  const dropsDecimals = (token) => isOperatorToken(token, '%') || (token?.type === 'word' && !token.afterDot && (token.upper === 'DIV' || token.upper === 'MOD'));
   for (let guard = 0; guard <= tokens.length; guard += 1) {
-    if (continuesIntoPredicate(tokens, end, parens)) {
+    if (continuesIntoPredicate(tokens, end, parens) || dropsDecimals(tokens[start - 1]) || dropsDecimals(tokens[end + 1])) {
       return false;
     }
     let sameExpression = true;
     let next = null;
+    let nextSelectItem = null;
     for (let at = start - 1; at >= 0 && !next; at -= 1) {
       const token = tokens[at];
       if (isPunctToken(token, ')')) {
@@ -1489,6 +1726,29 @@ function expressionIsComputedValue(tokens, start, end, parens) {
         const close = parens.closeOf.get(at);
         if (close === undefined) {
           return false;
+        }
+        const functionName = isFunctionCallName(tokens, at - 1) ? tokens[at - 1].upper : null;
+        // IF(<condition>, ...) and NULLIF(x, <compared>) use the expression
+        // as a condition; a cast to a type without decimals drops the value.
+        if ((functionName === 'IF' && sameExpression) || (functionName === 'NULLIF' && !sameExpression)) {
+          return false;
+        }
+        if (DIFFERENCE_CAST_FUNCTIONS.has(functionName) && !valueKeepingCastOperand(tokens, at, parens)) {
+          return false;
+        }
+        // SIGN(), FIELD(), INTERVAL(), COUNT() and ELT(<index>, ...) read it
+        // as a condition; FLOOR(), CEIL(), MOD() and FORMAT(x, 0) drop the
+        // decimals. (MOD and INTERVAL are keywords too, so the word before
+        // the parenthesis is read as written.)
+        const callee = tokens[at - 1]?.type === 'word' && !tokens[at - 1].afterDot ? tokens[at - 1].upper : null;
+        if (DIFFERENCE_CONDITION_FUNCTIONS.has(callee) || DIFFERENCE_DECIMAL_DROPPING_FUNCTIONS.has(callee) || (callee === 'ELT' && sameExpression)) {
+          return false;
+        }
+        if (callee === 'FORMAT' && sameExpression) {
+          const places = splitTopLevelArguments(tokens, at + 1, close - 1, parens)[1];
+          if (places && isIntegerLiteral(tokens, places[0], places[1]) && Number(tokens[places[1]].value) === 0) {
+            return false;
+          }
         }
         next = [groupOperandStart(tokens, at), close];
       } else if (isPunctToken(token, ',')) {
@@ -1524,10 +1784,44 @@ function expressionIsComputedValue(tokens, start, end, parens) {
           if (close === undefined) {
             return false;
           }
+          const item = selectItemAround(tokens, at, start, end, parens);
+          // In a later branch of a UNION the column is named by the first.
+          const firstSelect = firstSetOperationSelect(tokens, at, open, parens);
+          const namingItem = item && firstSelect !== at ? selectListItems(tokens, firstSelect, parens)[item.position] : item;
+          const itemName = namingItem ? selectItemColumnName(tokens, namingItem.from, namingItem.to) : null;
+          nextSelectItem = item ? { position: item.position, name: itemName === '*' ? passedName : itemName, star: itemName === '*' } : null;
           next = [groupOperandStart(tokens, open), close];
-        } else if (word === 'FROM' || word === 'JOIN' || word === 'AS') {
-          // A derived table ("FROM (SELECT ...)") or a CTE body ("AS (...)").
-          return true;
+        } else if (word === 'FROM' || word === 'JOIN') {
+          // A derived table ("FROM (SELECT ...) t"): its column must be a
+          // value in the query around it.
+          if (!selectItem || !isPunctToken(tokens[start], '(')) {
+            return false;
+          }
+          const open = enclosingOpenParen(tokens, at, parens);
+          const scope = open < 0 ? [0, tokens.length - 1] : [open + 1, (parens.closeOf.get(open) ?? tokens.length) - 1];
+          return derivedColumnReachesValue(tokens, selectItem.name, scope, [start, end], parens, depth, walk);
+        } else if (word === 'AS') {
+          // A CTE body ("name [(columns)] AS (SELECT ...)"), read by the rest
+          // of its statement; any other AS names an alias.
+          if (at !== start - 1 || !isPunctToken(tokens[start], '(')) {
+            continue;
+          }
+          if (!selectItem) {
+            return false;
+          }
+          let columnName = selectItem.name;
+          if (isPunctToken(tokens[at - 1], ')') && parens.openOf.get(at - 1) !== undefined) {
+            // A column list names the CTE's columns by position.
+            const columns = splitTopLevelArguments(tokens, parens.openOf.get(at - 1) + 1, at - 2, parens);
+            const column = selectItem.star ? null : columns[selectItem.position];
+            columnName = column && column[0] === column[1] ? identifierTokenName(tokens[column[0]]) : null;
+            if (!columnName) {
+              return false;
+            }
+          }
+          const open = enclosingOpenParen(tokens, start, parens);
+          const scopeEnd = open < 0 ? tokens.length - 1 : (parens.closeOf.get(open) ?? tokens.length) - 1;
+          return derivedColumnReachesValue(tokens, columnName, [end + 1, scopeEnd], [start, end], parens, depth, walk);
         } else if (CONDITION_CLAUSE_KEYWORDS.has(word)) {
           return false;
         } else if (PREDICATE_KEYWORDS.has(word) && sameExpression) {
@@ -1539,6 +1833,7 @@ function expressionIsComputedValue(tokens, start, end, parens) {
       return false;
     }
     [start, end] = next;
+    selectItem = nextSelectItem;
   }
   return false;
 }
@@ -1548,15 +1843,22 @@ function expressionIsComputedValue(tokens, start, end, parens) {
  * matched by column name like columnMentioned): a binary minus whose left
  * operand is exactly the minuend column and whose right operand is exactly
  * the subtrahend column, each optionally in COALESCE/IFNULL(col, <number>)
- * defaults, non-integer casts, SUM and ROUND(x, n) (both sides
+ * defaults, casts that keep the decimals, SUM and ROUND(x, n) (both sides
  * summed and rounded alike), and neither operand bound to a
  * tighter operator ("a - b * 2", "x - a - b", "a / b" do not count). The
  * difference must be a computed value (expressionIsComputedValue): in a
- * SELECT list, a derived table's included, not in a filter, join, grouping,
- * ordering or CASE WHEN condition ("WHERE a - b > 0" does not count). A
- * difference of aliases of the two columns ("np - pa") does not count.
+ * SELECT list, directly or through a derived-table or CTE column the query
+ * reads as a value, not in a filter, join, grouping, ordering, CASE WHEN or
+ * IF() condition ("WHERE a - b > 0" does not count), not read as a condition
+ * by SIGN() and the like, nor inside a cast, function or operator that drops
+ * the decimals. A difference of aliases of the two columns ("np - pa")
+ * does not count, and neither do the sum forms "a + (-b)" and "-b + a" (the
+ * rejection names the difference, so a retry writes it plainly). `tokens` are
+ * the analyzed tokens of the SQL and `relations` its relation model
+ * (extractTableContext), which resolve the references to a derived-table or
+ * CTE column.
  */
-function computesColumnDifference(tokens, minuend, subtrahend, parens = matchingParens(tokens)) {
+function computesColumnDifference(tokens, minuend, subtrahend, relations, parens = matchingParens(tokens)) {
   const columnName = (qualified) => String(qualified || '').split('.').pop().toLowerCase();
   const wantLeft = columnName(minuend);
   const wantRight = columnName(subtrahend);
@@ -1585,7 +1887,7 @@ function computesColumnDifference(tokens, minuend, subtrahend, parens = matching
       !negatesMinuend(tokens[leftStart - 1]) &&
       !bindsTighterThanMinus(tokens[rightEnd + 1]) &&
       !(tokens[rightEnd + 1]?.type === 'word' && tokens[rightEnd + 1].upper === 'OVER') &&
-      expressionIsComputedValue(tokens, leftStart, rightEnd, parens)
+      expressionIsComputedValue(tokens, leftStart, rightEnd, parens, 0, null, { references: MAX_DERIVED_COLUMN_REFERENCES, relations })
     ) {
       return true;
     }
@@ -1613,11 +1915,10 @@ function metricEnforcement(metric) {
  *   Revenue" ledger account) is removed earlier, by span arbitration in
  *   buildSemanticPlan, so it never reaches this check.
  */
-function validateMetricGuardrails(sql, promptContext = {}) {
+function validateMetricGuardrails(sql, promptContext = {}, { analysis, model }) {
   const metrics = promptContext.semanticPlan?.metrics || [];
   const hasLineMetric = metrics.some((metric) => metric.name === 'line_net_sales');
   const sqlText = normalizeSqlForColumnSearch(sql);
-  let sqlTokens = null;
   const checkedMetrics = [];
   const warnings = [];
 
@@ -1650,7 +1951,7 @@ function validateMetricGuardrails(sql, promptContext = {}) {
       satisfied:
         preferredColumns.some((column) => columnMentioned(sqlText, column)) ||
         (alternativeDifferences.length > 0 &&
-          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference((sqlTokens ??= significantTokensOf(sql)), minuend, subtrahend))),
+          alternativeDifferences.some(([minuend, subtrahend]) => computesColumnDifference(analysis.tokens, minuend, subtrahend, model))),
       ...(alternativeDifferences.length > 0 ? { alternativeDifferences } : {}),
     });
   }
@@ -2940,7 +3241,7 @@ export function validateSqlGuardrails(
   validateSuspiciousUnqualifiedIdentifiers(sql, knownTables, model.qualifiers, model.derivedTables);
   const joinChecks = validateJoinGuardrails(analysis, knownTables, model, promptContext);
   const fanOutChecks = validateFanOut(analysis, knownTables, promptContext, model);
-  const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext);
+  const { checkedMetrics: metricChecks, warnings: metricWarnings } = validateMetricGuardrails(sql, promptContext, { analysis, model });
   const masterDataChecks = validateMasterDataCandidateIds(sql, promptContext);
 
   return {

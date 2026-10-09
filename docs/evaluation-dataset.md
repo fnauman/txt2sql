@@ -149,13 +149,29 @@ other words).
 the suite, verify-dataset and the hygiene tests skip it) lists every holdout
 case of every dataset with the fingerprints of its question, its gold
 (`gold_fingerprint`), its scoring (`scoring_fingerprint`: gold,
-alternatives and comparison spec; what a comparison pairs cases on) and its
+alternatives and comparison spec; what a comparison pairs cases on), its
 measurement (`measurement_fingerprint`: split, expected behaviour,
 `known_validator_rejection`, expected tables, failure class, difficulty and
 tags, the fields that move a failure between attribution buckets or report
-breakdowns), its intent and datasets, and a dated `history` of notes. The
+breakdowns), its whole definition (`definition_fingerprint`: the suite's
+own notion of one case definition, `caseDefinitionFingerprint`, which also
+covers the row-count pins, signal checks, expected and disallowed columns and
+the canonical question, with the gold and alternative SQL also compared
+inside quoted literals, where `'A  B'` and `'A B'` are different values; only
+the free-text `notes` is left out, since nothing reads it, and a hygiene test
+fails on a dataset field that is in neither list) and its oracle controls
+(`controls_fingerprint`: the negative and positive controls verify-dataset
+applies to the case, found by id or intent as verification finds them, each
+control's id, type, held-out and validator flags and SQL; a control's
+free-text note is left out; `null` for a case without controls), its intent
+and datasets, and a dated `history` of notes. The
 manifest `fingerprint` covers every one of those fields, so every change the
-check reports needs a note. `test/holdout-manifest.test.js` fails when a
+check reports needs a note. `manifestVersion` is the fingerprint scheme (2
+since the definition and controls fingerprints were added on 2026-10-07, a
+change recorded with a note and no case or control changed); a manifest of
+another scheme fails the check until it is rewritten with a note. The check
+reads the controls of `<datasets-dir>/controls` (`--controls-dir` to point
+elsewhere; none there means every controls fingerprint is `null`). `test/holdout-manifest.test.js` fails when a
 holdout case is added, removed (or moved to dev) or changed without the
 manifest being rewritten, when the manifest is edited by hand, and when its
 current state has no note:
@@ -171,15 +187,41 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   reads holdout questions, golds or per-case results to decide what to
   build or how to tune it.
 - The holdout is looked at **in aggregate**: report.md and the console show
-  holdout accuracy by split, never per case and never as a list of flipped
-  cases, unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
-  documented look, for example when retiring a holdout). `report.json` keeps
-  every case for the rescore, the comparison and the gate; opening it is
+  holdout accuracy by split, never per case and never as flipped cases or
+  flip counts (a comparison with a baseline covers the paired dev cases),
+  unless `npm run eval` gets `--reveal-holdout` (for a deliberate,
+  documented look, for example when retiring a holdout) or, for the paired
+  holdout cases' counts and test in one aggregate line,
+  `--holdout-summary` (below). `report.json` keeps
+  every case for the rescore, the comparison and the gate, and `trace.jsonl`
+  (printed on stdout with `--trace`) logs every case's events and the run's
+  all-case statistics; opening either, or running with `--trace`, is
   revealing the holdout.
 - While the holdout is hidden, these still cover every case, holdout
-  included: the headline accuracy and its intervals (their holdout share is
-  the split aggregate), the budget row's spend, and **the exit code with its
-  reasons**. The exit code can give a hidden holdout outcome away in edge
+  included: the headline strict accuracy (a point estimate without an
+  interval: the split accuracies weighted by their case counts), the budget
+  row's spend, and **the exit code with its reasons** (a failed `--gate`
+  tests every paired case, but when a holdout case is paired its reason
+  gives no counts: every case's counts minus the dev ones shown would be
+  the holdout's flips). The
+  headline's intervals, the majority-pass cases, the intent-clustered
+  accuracy, the holdout split row's majority passes, the legacy pooled rate,
+  the count of answer cases left out of accuracy (no counted repetition),
+  the count of cases a run stopped early did not finish, and the comparison
+  (its paired table, accuracy change and interval, McNemar p, verdict and
+  lists) are dev figures: two runs with the same holdout accuracy can differ
+  in how its pass rates spread over cases and intents, in excluded, skipped
+  and cancelled holdout repetitions, or in which holdout cases flipped, and
+  those figures would show it. (The count of answer cases left out is a dev
+  figure so that it agrees with the dev figures beside it; the number of
+  holdout answer cases left out is not hidden: the holdout's case count,
+  less its abstain / clarify cases and the cases its split row counts,
+  gives it.) A comparison recorded without its paired
+  cases cannot be recomputed over the dev cases: its own figures are shown
+  when none of its holdout cases is paired (each is listed as new, not in
+  the run, not counted or with a changed gold), and otherwise report.md and
+  the console say that the dev-only comparison cannot be reconstructed from
+  that recording and show no figure. The exit code can give a hidden holdout outcome away in edge
   cases: in the benchmark profile a run whose dev cases all pass exits 1
   when a holdout case failed, a holdout abstain / clarify case included
   (whose outcome report.md does not show; the reason does not itemize
@@ -188,6 +230,54 @@ npm run holdout-manifest -- --write --note "<what changed and why>"  # record th
   repetitions) count every repetition. Both are kept on purpose: the
   benchmark gate fails on any failed case, and an exit 2 run is not a
   measurement and cannot become a baseline.
+- **Concluding a pre-registered experiment: `--holdout-summary`.** The
+  holdout's paired test is the out-of-sample evidence an experiment
+  concludes with (Experiment 2: 17 improvements and 6 regressions over 147
+  paired holdout cases, exact McNemar p = 0.035). With a comparison that
+  pairs at least one holdout case, `npm run eval -- --holdout-summary` adds
+  **one line** to report.md's comparison section and to the console's
+  comparison: the number of paired holdout cases, their improvements and
+  regressions, the exact McNemar p with the usual verdict wording, and
+  strict accuracy on those cases, baseline → candidate, with the change and
+  its paired bootstrap 95% CI ("Holdout in aggregate (`--holdout-summary`):
+  147 paired holdout case(s); 17 improvement(s), 6 regression(s); exact
+  McNemar p = 0.035 → significantly better than the baseline; strict
+  accuracy … → …, Δ … (95% CI …)"). The figures come from `summarizePairs`
+  over the comparison's paired holdout cases with the comparison's alpha and
+  bootstrap settings: the number of cases, the improvements and
+  regressions, p and the verdict are exactly those of the holdout cases in
+  the full comparison `--reveal-holdout` lists, and so are the accuracies
+  and the change up to the order of a floating-point sum (at a rounding tie,
+  one unit in the last printed digit; with one repetition they are exact).
+  The pairs are taken in a canonical order of their outcomes instead of by
+  id, so every figure on the line, the bootstrap interval included, depends
+  only on the paired outcomes, never on which cases they are (the interval
+  is a paired bootstrap like the dev one, not the same draw as one over the
+  holdout cases in id order). Nothing else about the holdout is shown: no
+  ids, no per-case verdicts, no attribution, behaviour, guardrail or cost
+  figures, no pass-rate changes. Without a comparison, or when no holdout
+  case is paired, it prints nothing extra; without the flag nothing changes. `--gate` decides the same either
+  way; a gate that fails while a holdout case is paired still gives no
+  counts in its reason, which with the flag points at the line too. Use it
+  **only to conclude a pre-registered experiment** (hypothesis, arms and
+  decision rule written down before the paid run, see
+  [docs/experiments/README.md](experiments/README.md)), never while
+  designing or tuning a change: a holdout figure read between iterations
+  becomes a target. Error analysis stays dev-only. Pass it on the concluding
+  run, or afterwards, with zero LLM calls, on a rescore of that run against
+  the same baseline under the candidate arm's setting
+  (`<SETTING>=<candidate value> npm run eval -- --rescore <its report.json>
+  --compare <baseline report.json> --holdout-summary`): a rescore re-judges
+  the recorded SQL with today's code and today's settings, so without the
+  arm's setting it re-runs the validator's decisions under another arm. The
+  rescore must print no "note: the recording ran with schema scope …" or
+  "… hints version …" line (report.md's Provenance then shows a "Recorded
+  schema scope" or "Recorded hints version" row); if it does, its line is
+  not the run's paired holdout test and must not conclude the experiment.
+  With the right setting and nothing else changed since, it gives the run's
+  verdicts. With `--reveal-holdout` (which lists every case and gives the
+  all-case comparison) the same line is printed too: it is the holdout
+  subset's own test, which the all-case comparison does not give.
 - **Any change to the holdout** (a case added, removed, reworded, re-scored,
   re-labelled, for example a `known_validator_rejection` flag, or moved to
   dev) requires a manifest update with a note saying what and
@@ -339,8 +429,9 @@ never tune on its wording or its failures, and do not edit a question or a gold
 to chase a score (an edited question gets a new id). When it has been looked
 at, retire it to dev and add a new holdout instead. Its golds were audited
 before any model answer to it was looked at (below), and the [current
-baseline](#current-baseline) measures it, read in aggregate only (41.3% on
-its 147 answer cases).
+baseline](#current-baseline) measures it, read in aggregate only (49.2% on
+its 147 answer cases under hints version 2; the version-1 baseline before
+it, 41.3%).
 
 It was authored on a branch where the inspected hash-split holdout was still
 `holdout`, and integrated onto the measurement-hygiene change afterwards: the
@@ -1146,6 +1237,7 @@ npm run eval                                        # the whole suite, once
 npm run eval -- --repeat 3                          # three repetitions per case
 npm run eval -- --split holdout                     # only the holdout (or --split dev)
 npm run eval -- --offline --reveal-holdout          # list holdout cases one by one (a deliberate look)
+npm run eval -- --repeat 3 --holdout-summary        # conclude a pre-registered experiment: + the paired holdout test, one line
 npm run eval -- --dataset hard-cases-public         # one dataset
 npm run eval -- --dataset edge-cases-public --tag join_path
 npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
@@ -1251,7 +1343,12 @@ rule).
   accuracy, when a run has both, with what the holdout rule enforces: no
   multi-word semantic-layer phrase and not "revenue"); the **behaviour line** ("Behaviour cases:
   abstain/clarify — N cases, M handled correctly"); the comparison line when
-  there is a baseline.
+  there is a baseline (over the paired dev cases while the holdout is
+  hidden). While the holdout is hidden, the first line gives
+  every case's strict accuracy without an interval ("every split; no
+  interval while the holdout is hidden") and the second line is the dev
+  cases': their strict accuracy with its CI, majority-pass cases and
+  intent-clustered accuracy (the console prints the same two lines).
 - **Attribution** (answer cases only): who caused each outcome, per repetition
   and per case (majority outcome):
 
@@ -1290,16 +1387,23 @@ rule).
 - **Behaviour cases (abstain / clarify)**: per expected behaviour, cases
   handled, the majority outcomes, and a per-case table.
 - **Holdout in aggregate only** (by default): holdout cases appear in the
-  split line and rows only; the case tables, the behaviour-case table, the
-  comparison's flip and exclusion lists and the console's progress, rescore
-  and flip lines leave them out and count them ("N holdout case(s) not
-  listed"), and the failure-class, difficulty and tag breakdowns, the
+  split line and rows only; the case tables, the behaviour-case table and
+  the console's progress and rescore lines leave them out and count them
+  ("N holdout case(s) not listed"); the comparison (report.md and the
+  console) covers the paired dev cases and only says how many holdout cases
+  it left out; and the failure-class, difficulty and tag breakdowns, the
   attribution tables, the guardrail confusion matrix, the behaviour summary
   and the cost, latency, retry and token figures (report.md and the console)
   cover dev cases, so that subtracting
-  the listed dev rows from a total cannot give a holdout outcome away;
+  the listed dev rows from a total cannot give a holdout outcome away; so do
+  the headline's intervals, majority-pass cases and intent-clustered
+  accuracy and the legacy pooled rate, and the holdout's split row shows no
+  majority passes ("not shown");
   holdout behaviour cases are counted, without their outcomes (they are not
-  in the split accuracy). `--reveal-holdout` lists them. See
+  in the split accuracy). `--reveal-holdout` lists them;
+  `--holdout-summary` adds one aggregate line for the comparison's paired
+  holdout cases (counts, McNemar p, accuracy change with its CI) to conclude
+  a pre-registered experiment. See
   [Splits and the holdout policy](#splits-and-the-holdout-policy).
 - **Cases**: id, question, passes / counted repetitions (declined / counted
   for behaviour cases), the case outcome and its attribution. The case
@@ -1315,7 +1419,7 @@ rule).
   A behaviour case's outcome agrees with its majority the same way:
   `declined` only when more than half of its scored repetitions declined.
 - **By split, failure class, difficulty and tag**: cases, accuracy, majority
-  passes.
+  passes (for a hidden holdout's split row, "not shown").
 - **Cost, latency, retries, tokens** (every case, behaviour cases included;
   dev cases only while the holdout is hidden): total cost, cost per question
   and per correct answer, p50/p95 product-loop and LLM-call latency, retry
@@ -1352,7 +1456,8 @@ repeats), so pooling them as independent trials overstates confidence.
   with a cluster bootstrap over intents.
 - **By split** and the other breakdowns use the same per-case pass rates.
 - The old pooled `reliability` block is still in `report.json`, labelled as
-  pooled and correlated.
+  pooled and correlated; report.md's "Legacy pooled reliability" line shows
+  it (over the dev cases while the holdout is hidden).
 
 ### Rescore (no LLM calls)
 
@@ -1409,7 +1514,15 @@ majority over repetitions: regressions and improvements feed an **exact
 two-sided McNemar test**, and a paired case bootstrap gives a 95% CI for the
 change in strict accuracy. The console prints the paired 2x2 table, the
 accuracy change, the McNemar p and the flipped case ids; report.md lists the
-flips with their questions.
+flips with their questions. While the holdout is hidden, both recompute all
+of it over the paired dev cases and leave the holdout cases out of every
+list, saying only how many there are ("Dev cases only: the comparison's N
+holdout case(s) are left out ..."); `--gate` still decides on every paired
+case, holdout included. `--holdout-summary` adds one line for the paired
+holdout cases in aggregate (their number, improvements, regressions, exact
+McNemar p and verdict, accuracy change with its CI; see the
+[holdout policy](#splits-and-the-holdout-policy)), only to conclude a
+pre-registered experiment.
 
 With `--gate` the run exits 1 when the candidate is significantly worse (p <
 0.05 and more regressions than improvements) or, with `--min-accuracy X`, when
@@ -1484,23 +1597,24 @@ purpose.
 `full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
 seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.07 MB. The attribution, guardrail,
-behaviour, per-question cost and latency rows below are what the offline
-rescore (`npm run eval -- --offline`) prints by default: they cover the dev
-cases, and the holdout is read only as its accuracy by split (see the
-[holdout policy](#splits-and-the-holdout-policy); `--reveal-holdout` prints
-every case).
+255, fresh holdout 149), compact file 2.07 MB. The rows below are what the
+offline rescore (`npm run eval -- --offline`) prints by default: every row
+after the first two covers the dev cases, except the whole-run spend that
+opens the Cost row (report.md's Budget row), and the holdout is read only as
+its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
+`--reveal-holdout` prints every case).
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases / 205 intents) | 73.6% (95% CI 69.2%–77.9%, case bootstrap) |
-| Majority-pass cases | 288/392 (Wilson 95% 68.9%–77.6%) |
-| Intent-clustered accuracy | 73.3% (95% CI 67.8%–78.5%) |
+| Strict accuracy (392 answer cases, every split) | 73.6% (a point estimate: no interval while the holdout is hidden) |
 | By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
+| Strict accuracy, dev cases (245 answer cases) | 88.3% (95% CI 84.4%–92.0%, case bootstrap) |
+| Majority-pass cases, dev | 217/245 (Wilson 95% 84.0%–92.0%) |
+| Intent-clustered accuracy, dev (130 intents) | 86.5% (95% CI 81.0%–91.4%) |
 | Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
 | Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
-| Cost | $0.6347 for the whole run (the budget row) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
+| Cost | $0.6347 for the whole run (the Budget row; divided by its 1,212 repetitions about $0.00052 per question, see [Cost](#cost)) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
 | Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
 
 How to read it:
@@ -1509,18 +1623,23 @@ How to read it:
   or tuned on; the fresh holdout (147 answer cases) is new intents written
   blind and audited by two independent annotators. Experiment 2 was designed
   from dev failures, so its dev gain (74.7% → 88.3%) is in-sample; its holdout
-  gain (41.3% → 49.2%, 17 improvements vs 6 regressions, exact McNemar
-  p = 0.035) is the out-of-sample evidence. The remaining 39-point gap is the
+  gain (41.3% → 49.2%; 17 improvements vs 6 regressions, exact McNemar
+  p = 0.035, as the live run's report.md counted the holdout's flips at the
+  time: report.md no longer shows holdout flip counts) is the out-of-sample
+  evidence. The remaining 39-point gap is the
   clearest measurement in this repository: the holdout leans on analytical
   shapes the dev set barely covers (shares and ratios, overdue and ageing
   balances, running totals, month-over-month change, weekday and value-band
   breakdowns) and on unfamiliar wording. Per the
   [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
-- **Gold audit effect.** A run on the same code before the audit scored the
-  holdout at 35.4%; the audit changed 9 of 147 holdout cases (6 alternative
-  readings, 2 rewordings, 1 wrong gold). The rest of the difference is
-  run-to-run variation between two live runs.
+- **Gold audit effect.** A hints-version-1 run before the audit scored the
+  holdout at 35.4%; the version-1 baseline, on the same code after the audit
+  (the earlier baseline below), scored it at 41.3%. The audit changed 10 of
+  the 147 holdout answer cases (6 every-member alternatives, 2 rewordings, a
+  gold fix on 2); the rest of that difference is run-to-run variation
+  between two live runs. The step from 41.3% to this baseline's 49.2% is
+  hints version 2 (Experiment 2), not the audit.
 - **System failures.** None among the dev cases (the holdout's failure
   causes are not shown). Under hints v2 the dev flagged case (`e1b20a`) is no
   longer rejected; the 4 holdout cases flagged `known_validator_rejection`
@@ -1554,9 +1673,14 @@ version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
 ### Cost
 
 LLM cost is small: the committed gpt-4o-mini baseline cost $0.00052 per
-question (one case repetition, up to two LLM calls), so one repetition of the
+question over the whole run ($0.6347 over its 1,212 case repetitions,
+holdout included; a repetition makes up to two LLM calls), so one repetition of the
 whole 404-case suite is about 21 cents and `--repeat 3` about 63 cents
 (measured: $0.6347), inside the default 1 USD budget. `--budget-usd` caps it.
+(The $0.00051 per question that report.md and the [current
+baseline](#current-baseline) table give is the dev cases' figure: while the
+holdout is hidden, report.md's cost rows cover the dev cases, and only its
+Budget row is the whole run's spend.)
 Rescoring and `--offline` cost nothing.
 
 ## Known limits
@@ -1565,10 +1689,11 @@ Rescoring and `--offline` cost nothing.
   fixtures were designed against; the held-out tiers (about 75-79%) are the
   estimate for a new mistake family. See [Oracle controls](#oracle-controls-and-kill-rate)
   and [Known blind spots](#known-blind-spots).
-- **A small holdout, measured once**: the inspected holdout was retired to
-  dev (`formerly_holdout`); the fresh one (147 answer cases over 75 intents)
-  is measured by the [current baseline](#current-baseline) in aggregate only
-  (one 3-repetition run, 41.3%, a wide interval at that size). **A
+- **A small holdout, one run per product version**: the inspected holdout
+  was retired to dev (`formerly_holdout`); the fresh one (147 answer cases
+  over 75 intents) is measured in aggregate only, by one 3-repetition run
+  per hints version on the audited set (the [current baseline](#current-baseline), version 2:
+  49.2%; the version-1 baseline: 41.3%), a wide interval at that size. **A
   holdout mixes two effects**: unseen intents and unseen vocabulary. It avoids
   the semantic layer's multi-word phrases and its enforced word "revenue", not
   its single-word entity synonyms, so its wording differs from dev's
@@ -1632,6 +1757,13 @@ npm run verify-dataset -- --write-pins            # rewrite expected_row_counts
 npm run build-eval-dataset -- --check             # the templated files are up to date
 npm run evaluate-retrieval -- --dataset edge-cases-public
 ```
+
+`evaluate-retrieval` writes `generated/retrieval-evaluation-hints-v<N>.json`
+for the hints version it ran (so a `HINTS_VERSION=1` run and a default run
+never overwrite each other; `--results-file <path>` writes elsewhere) and
+records that version (`hints_version`) and the evaluation reports' product
+configuration block (`product`: schema scope and hints version; the schema
+scope does not change what retrieval returns).
 
 The controls come from `datasets/controls` or `--controls-dir <dir>`. A
 missing directory, one without any `*.json` controls file, JSON that is not

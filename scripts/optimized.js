@@ -188,6 +188,11 @@ async function main() {
       }
       if (result.schemaScope?.widenedTables?.length) {
         cli.log(`Widened on demand: ${result.schemaScope.widenedTables.join(', ')}`);
+        if (result.schemaScope.widenOverBudget) {
+          cli.log(
+            `Widened schema is over the token budget: about ${result.schemaScope.widenedSchemaEstimatedTokens} of ${result.schemaScope.fullSchemaMaxTokens} estimated tokens (${result.promptTables.length} of ${result.schemaScope.inScopeTableCount} in-scope tables)`
+          );
+        }
       }
       const masterDataCandidateCount = (result.masterDataCandidates || []).reduce(
         (count, group) => count + (group.totalCandidateCount || 0),
