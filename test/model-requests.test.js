@@ -284,6 +284,7 @@ test('OpenRouter: with OPENAI_API_KEY unset, OPENROUTER_API_KEY is the key (only
 
   assert.deepEqual(resolveLlmApiKey({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }), { apiKey: 'k', source: 'OPENROUTER_API_KEY' });
   assert.deepEqual(resolveLlmApiKey({ OPENAI_API_KEY: 'o', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }), { apiKey: 'o', source: 'OPENAI_API_KEY' });
+  assert.deepEqual(resolveLlmApiKey({ OPENAI_BASE_URL: 'http://openrouter.ai/api/v1', OPENROUTER_API_KEY: 'k' }), { apiKey: null, source: null }, 'no key over plain http');
   // Another endpoint never receives the OpenRouter key.
   assert.deepEqual(resolveLlmApiKey({ OPENROUTER_API_KEY: 'k' }), { apiKey: null, source: null });
   assert.deepEqual(resolveLlmApiKey({ OPENAI_BASE_URL: baseUrl, OPENROUTER_API_KEY: 'k' }), { apiKey: null, source: null });

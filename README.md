@@ -638,7 +638,8 @@ OPENAI_BASE_URL=https://openrouter.ai/api/v1 MODEL_NAME=openai/gpt-6-luna REASON
 ```
 
 `OPENROUTER_API_KEY` is used only when `OPENAI_API_KEY` is unset and the
-host is openrouter.ai. `OPENAI_API_KEY` wins whenever it is set, on OpenRouter
+`OPENAI_BASE_URL` is an `https://` URL on openrouter.ai (a plain-http one is
+not OpenRouter: the key is never sent without TLS). `OPENAI_API_KEY` wins whenever it is set, on OpenRouter
 too: remove it from the env file (or set it to your OpenRouter key, or clear
 it for one run with an empty `OPENAI_API_KEY=` on the command line) when
 `OPENAI_BASE_URL` points at OpenRouter, or your OpenAI key is sent to
@@ -677,7 +678,7 @@ Runtime default: `gpt-6-luna` at reasoning effort `low` when `MODEL_NAME` and `R
 
 Supported cost estimates: `gpt-4o-mini`, `gpt-6-luna` ($0.10 input, $0.01 cached input, $0.50 output per 1M tokens) and `gpt-6-sol` ($2, $0.20, $10; both OpenAI's published prices, verified 2026-10-07), `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4`. A row also prices its date-suffixed snapshots (`gpt-5.4-mini-2026-03-05`, or the `-YYYYMMDD` form), and nothing else: another model that shares its prefix (`gpt-6-sol-pro`, `gpt-6-luna-mini`) has no price rather than the base row's. A model id is looked up without its vendor prefix, so OpenRouter's `openai/gpt-6-luna` gets the `gpt-6-luna` price (a variant such as `openai/gpt-6-luna:free` does not). A call the provider answers under an id with no price (a gateway's alias) is costed at the requested model's price.
 
-To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. An entry for a model that is not listed adds it when it has both `inputPerMillion` and `outputPerMillion` (`cachedInputPerMillion` optional). A key without a vendor prefix applies under any vendor, like the listed rows; a key with one (`"acme/sql-1"`, `"openai/gpt-6-luna"`) applies only to that vendor's ids, and wins over a key without one. Malformed JSON is ignored. `npm run eval -- --budget-usd X` refuses to start for a model without a price: its spend, and so the budget, could not be tracked.
+To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. An entry for a model that is not listed adds it when it has both `inputPerMillion` and `outputPerMillion` (`cachedInputPerMillion` optional). A field that is not a price (a finite number ≥ 0; `currency` a non-empty string) is ignored rather than merged, so a bad override cannot make a cost `NaN` or negative and slip past `--budget-usd`. A key without a vendor prefix applies under any vendor, like the listed rows; a key with one (`"acme/sql-1"`, `"openai/gpt-6-luna"`) applies only to that vendor's ids, and wins over a key without one. Malformed JSON is ignored. `npm run eval -- --budget-usd X` refuses to start for a model without a price: its spend, and so the budget, could not be tracked.
 
 Example CLI output:
 

@@ -311,8 +311,9 @@ export function reasoningEnabled(model, reasoningEffort = null) {
 
 /**
  * The OpenAI-compatible endpoint host (with port) of OPENAI_BASE_URL, and
- * whether it is OpenRouter. No base URL means the SDK default,
- * api.openai.com; an unparseable one has host null.
+ * whether it is OpenRouter: an https URL on openrouter.ai (a plain-http one
+ * is not, so OPENROUTER_API_KEY is never sent without TLS). No base URL
+ * means the SDK default, api.openai.com; an unparseable one has host null.
  */
 export function resolveEndpoint(env = process.env) {
   const raw = nonBlank(env.OPENAI_BASE_URL);
@@ -322,7 +323,8 @@ export function resolveEndpoint(env = process.env) {
   try {
     const url = new URL(raw);
     const hostname = url.hostname.toLowerCase();
-    return { baseUrlHost: url.host || null, isOpenRouter: hostname === 'openrouter.ai' || hostname.endsWith('.openrouter.ai') };
+    const onOpenRouter = hostname === 'openrouter.ai' || hostname.endsWith('.openrouter.ai');
+    return { baseUrlHost: url.host || null, isOpenRouter: url.protocol === 'https:' && onOpenRouter };
   } catch {
     return { baseUrlHost: null, isOpenRouter: false };
   }
