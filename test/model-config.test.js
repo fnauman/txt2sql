@@ -270,6 +270,8 @@ test('resolveCompletionSettings: endpoint host, OpenRouter, require_parameters a
   assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' }), { baseUrlHost: 'openrouter.ai', isOpenRouter: true });
   assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'https://eu.OpenRouter.ai/api/v1' }), { baseUrlHost: 'eu.openrouter.ai', isOpenRouter: true });
   assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'https://notopenrouter.ai/v1' }), { baseUrlHost: 'notopenrouter.ai', isOpenRouter: false });
+  // Plain http on openrouter.ai is not OpenRouter: OPENROUTER_API_KEY must never travel without TLS.
+  assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'http://openrouter.ai/api/v1' }), { baseUrlHost: 'openrouter.ai', isOpenRouter: false });
   assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'http://127.0.0.1:9999/v1' }), { baseUrlHost: '127.0.0.1:9999', isOpenRouter: false });
   assert.deepEqual(resolveEndpoint({ OPENAI_BASE_URL: 'not a url' }), { baseUrlHost: null, isOpenRouter: false });
   assert.equal(resolveCompletionSettings({ OPENROUTER_REQUIRE_PARAMETERS: '0' }).requireParameters, false);

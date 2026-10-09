@@ -350,6 +350,28 @@ test('MODEL_PRICING_OVERRIDES can add a model that is not listed, only with both
   assert.equal(hasModelPrice('acme/sql-1'), false);
 });
 
+test('MODEL_PRICING_OVERRIDES fields that are not prices are ignored, for listed and added models alike', () => {
+  const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({
+    'gpt-6-luna': { inputPerMillion: 'oops', outputPerMillion: -1, cachedInputPerMillion: null, currency: '' },
+    'gpt-4o-mini': { inputPerMillion: Infinity, outputPerMillion: 7, currency: 'EUR' },
+    'acme/sql-1': { inputPerMillion: 1, outputPerMillion: 2, cachedInputPerMillion: 'free', currency: 42 },
+  });
+  try {
+    // A listed row keeps its own rates where the override is not a price, so
+    // a --budget-usd run never counts a call as NaN or negative spend.
+    const luna = calculateCost('gpt-6-luna', usage);
+    assert.deepEqual([luna.inputCost, luna.outputCost, luna.totalCost, luna.currency], [0.1, 0.5, 0.6, 'USD']);
+    const mini = calculateCost('gpt-4o-mini', usage);
+    assert.deepEqual([mini.inputCost, mini.outputCost, mini.currency], [0.15, 7, 'EUR']);
+    // An added model: the valid fields only; the cached rate falls back to the input rate.
+    const added = calculateCost('acme/sql-1', { ...usage, prompt_tokens_details: { cached_tokens: 1_000_000 } });
+    assert.deepEqual([added.inputCost, added.outputCost, added.currency], [1, 2, 'USD']);
+  } finally {
+    delete process.env.MODEL_PRICING_OVERRIDES;
+  }
+});
+
 test('a price row covers its own id and dated snapshots, never another model that shares its prefix', () => {
   const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
   for (const model of ['gpt-6-luna-2026-10-01', 'openai/gpt-6-luna', 'openai/gpt-6-luna-20261001', 'gpt-4o-mini-2024-07-18', 'gpt-5.4-mini-2026-03-05']) {

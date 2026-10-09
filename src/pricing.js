@@ -22,7 +22,10 @@
 // An override for a listed model replaces the given fields; one for a model
 // that is not listed adds it when it has both inputPerMillion and
 // outputPerMillion (cachedInputPerMillion optional), so --budget-usd can track
-// any model. A key without a vendor prefix applies under any vendor, like the
+// any model. A field that is not a price (a finite number >= 0; currency a
+// non-empty string) is ignored, never merged: a bad override cannot turn a
+// cost into NaN or a negative amount, which a --budget-usd run would count
+// as free. A key without a vendor prefix applies under any vendor, like the
 // rows; a key with one (openai/gpt-6-luna, acme/sql-1) only to model ids
 // under that vendor, and wins over a key without one.
 //
@@ -116,7 +119,7 @@ function getPricingOverrides() {
   // Split like the model ids they price: { vendor, id, pricing } per entry.
   cachedOverrides = Object.entries(parsed)
     .filter(([, pricing]) => pricing && typeof pricing === 'object')
-    .map(([name, pricing]) => ({ ...splitModelId(name), pricing }))
+    .map(([name, pricing]) => ({ ...splitModelId(name), pricing: priceFieldsOf(pricing) }))
     .filter((entry) => entry.id);
   return cachedOverrides;
 }
@@ -160,6 +163,22 @@ function byVendorSpecificity(left, right) {
 
 function isPrice(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+// The valid price fields of an override entry, and nothing else: a field
+// that is not a price (or a currency that is not a non-empty string) is
+// dropped, so merging an override can never produce a NaN or negative cost.
+function priceFieldsOf(pricing) {
+  const fields = {};
+  for (const key of ['inputPerMillion', 'cachedInputPerMillion', 'outputPerMillion']) {
+    if (isPrice(pricing[key])) {
+      fields[key] = pricing[key];
+    }
+  }
+  if (typeof pricing.currency === 'string' && pricing.currency.trim()) {
+    fields.currency = pricing.currency;
+  }
+  return fields;
 }
 
 function normalizeTokenCount(value) {
@@ -222,17 +241,11 @@ function resolveModelPricing(model) {
   // A model that is not listed: a complete override entry prices it (one
   // keyed with the model's vendor wins over one without).
   const added = overrides
-    .filter((entry) => isPrice(entry.pricing.inputPerMillion) && isPrice(entry.pricing.outputPerMillion) && isSnapshotOf(id, entry.id))
+    .filter((entry) => 'inputPerMillion' in entry.pricing && 'outputPerMillion' in entry.pricing && isSnapshotOf(id, entry.id))
     .sort(byVendorSpecificity);
   if (added.length > 0) {
     const { id: name, pricing } = added.at(-1);
-    return {
-      model: name,
-      inputPerMillion: pricing.inputPerMillion,
-      ...(isPrice(pricing.cachedInputPerMillion) ? { cachedInputPerMillion: pricing.cachedInputPerMillion } : {}),
-      outputPerMillion: pricing.outputPerMillion,
-      currency: typeof pricing.currency === 'string' ? pricing.currency : 'USD',
-    };
+    return { model: name, currency: 'USD', ...pricing };
   }
 
   return null;
