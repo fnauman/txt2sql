@@ -11,7 +11,7 @@ import {
   TABLE_ALIASES,
 } from './constants.js';
 import { buildCompletionOptions, resolveLlmApiKey } from './model-config.js';
-import { calculateCost } from './pricing.js';
+import { calculateCallCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { normalizeHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig } from './schema-scope.js';
@@ -2579,12 +2579,13 @@ function assertCompleteChoice(choice, details) {
   }
 }
 
-// The cost of one call: priced by the model the provider reports (a dated
-// snapshot of the requested one, usually), else by the requested model, whose
-// price --budget-usd was checked against: an answer under an id the price
-// list does not know must still count against the budget.
+// The cost of one call (calculateCallCost): the requested model's price when
+// the provider answers under it, a dated snapshot of it or its id without the
+// vendor prefix (so a vendor-keyed override still applies); another id is
+// priced as itself, and one the price list does not know at the requested
+// model's price, the one --budget-usd was checked against.
 function callCost(responseModel, model, usage) {
-  return calculateCost(responseModel, usage) ?? (responseModel !== model ? calculateCost(model, usage) : null);
+  return calculateCallCost(responseModel, model, usage);
 }
 
 // `modelConfig` (optional): the reasoning effort and the endpoint settings

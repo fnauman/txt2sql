@@ -260,6 +260,11 @@ export function hasModelPrice(model) {
   return resolveModelPricing(model) !== null;
 }
 
+/** The currency of `model`'s price (USD for the rows; an override may set another), null with no price. */
+export function modelPriceCurrency(model) {
+  return resolveModelPricing(model)?.currency ?? null;
+}
+
 function formatTokenCount(value) {
   return Number.isFinite(value) ? String(value) : '?';
 }
@@ -356,6 +361,27 @@ function estimateOf(cost) {
     return cost.estimatedCost;
   }
   return cost.source === undefined || cost.source === null ? cost.totalCost || 0 : null;
+}
+
+/**
+ * The cost of one call, answered under `responseModel` for a request of
+ * `requestedModel`. A provider usually answers under a dated snapshot of the
+ * requested id, and a gateway may drop the vendor prefix (openai/gpt-6-luna
+ * answered as gpt-6-luna): when the answering id is the requested model or a
+ * dated snapshot of it (and names no other vendor), the requested model's
+ * price applies, its vendor-keyed MODEL_PRICING_OVERRIDES entry included.
+ * Another id is priced as itself; one with no price at the requested model's
+ * price, the one --budget-usd was checked against: an answer under an id the
+ * price list does not know must still count against the budget.
+ */
+export function calculateCallCost(responseModel, requestedModel, usage) {
+  const requested = splitModelId(requestedModel);
+  const answered = splitModelId(responseModel);
+  const sameModel = isSnapshotOf(answered.id, requested.id) && (answered.vendor === null || answered.vendor === requested.vendor);
+  if (sameModel) {
+    return calculateCost(requestedModel, usage);
+  }
+  return calculateCost(responseModel, usage) ?? calculateCost(requestedModel, usage);
 }
 
 export function mergeUsage(usages = []) {

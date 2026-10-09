@@ -60,7 +60,7 @@ import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../s
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
-import { hasModelPrice } from '../src/pricing.js';
+import { modelPriceCurrency } from '../src/pricing.js';
 import {
   completionSettingsOf,
   DEFAULT_MODEL,
@@ -1147,16 +1147,28 @@ function createLiveClient(options) {
  * Why a live run with --budget-usd must not start (null when it may): the
  * model has no price (a row in src/pricing.js, found without a vendor prefix,
  * or a MODEL_PRICING_OVERRIDES entry), so its spend, and the budget, cannot
- * be tracked. A provider-reported cost only arrives after a call.
+ * be tracked; or its price is in another currency (an override's `currency`),
+ * which the pool would add to the USD total as if it were dollars. A
+ * provider-reported cost only arrives after a call.
  */
 export function budgetPricingRefusal(options) {
-  if (options.budgetUsd == null || hasModelPrice(options.model)) {
+  if (options.budgetUsd == null) {
     return null;
   }
-  return (
-    `--budget-usd needs a price for model "${options.model}" (src/pricing.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion); ` +
-    'without it the budget cannot be enforced, so the run does not start.'
-  );
+  const currency = modelPriceCurrency(options.model);
+  if (currency === null) {
+    return (
+      `--budget-usd needs a price for model "${options.model}" (src/pricing.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion); ` +
+      'without it the budget cannot be enforced, so the run does not start.'
+    );
+  }
+  if (currency !== 'USD') {
+    return (
+      `--budget-usd is a cap in USD, but model "${options.model}" is priced in ${currency} (MODEL_PRICING_OVERRIDES); ` +
+      'price it in USD, or run without --budget-usd.'
+    );
+  }
+  return null;
 }
 
 async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
