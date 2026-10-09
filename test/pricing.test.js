@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { generateBasicSql, generateOptimizedResponse } from '../src/pipeline.js';
-import { calculateCost, formatUsageAndCost, hasModelPrice, mergeCosts, mergeUsage } from '../src/pricing.js';
+import { calculateCallCost, calculateCost, formatUsageAndCost, hasModelPrice, mergeCosts, mergeUsage, modelPriceCurrency } from '../src/pricing.js';
 
 function createMockClient(content) {
   return {
@@ -404,6 +404,31 @@ test('MODEL_PRICING_OVERRIDES keys with a vendor apply under that vendor only, a
   } finally {
     delete process.env.MODEL_PRICING_OVERRIDES;
   }
+});
+
+test('calculateCallCost keeps the requested model\'s vendor-keyed price when the answer drops the prefix or is a snapshot', () => {
+  const usage = { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 };
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({ 'openai/gpt-6-luna': { inputPerMillion: 9, outputPerMillion: 9 } });
+  try {
+    // openai/gpt-6-luna requested: answered as itself, without the vendor, or as a dated snapshot, the override prices it.
+    for (const answered of ['openai/gpt-6-luna', 'gpt-6-luna', 'gpt-6-luna-2026-09-30', 'openai/gpt-6-luna-20260930']) {
+      assert.equal(calculateCallCost(answered, 'openai/gpt-6-luna', usage).totalCost, 18, answered);
+    }
+    // Another model, or the same id under another vendor, is priced as itself.
+    assert.equal(calculateCallCost('gpt-6-sol', 'openai/gpt-6-luna', usage).totalCost, 12);
+    assert.equal(calculateCallCost('azure/gpt-6-luna', 'openai/gpt-6-luna', usage).totalCost, 0.6);
+    // An id with no price: the requested model's price, the one the budget was checked against.
+    assert.equal(calculateCallCost('gpt-6-luna-routed-variant', 'openai/gpt-6-luna', usage).totalCost, 18);
+    assert.equal(calculateCallCost('acme/unknown', 'openai/gpt-6-luna', usage).totalCost, 18);
+  } finally {
+    delete process.env.MODEL_PRICING_OVERRIDES;
+  }
+  // Without an override the answer's own row is the requested model's row.
+  assert.deepEqual(calculateCallCost('gpt-6-luna-2026-09-30', 'gpt-6-luna', usage), calculateCost('gpt-6-luna', usage));
+  assert.equal(calculateCallCost('acme/unknown', 'acme/other', usage), null, 'neither priced');
+  // The price currency, for the USD budget gate.
+  assert.equal(modelPriceCurrency('gpt-6-luna'), 'USD');
+  assert.equal(modelPriceCurrency('acme/unknown'), null);
 });
 
 test('a call answered under an unpriced id is costed at the requested model\'s price', async () => {

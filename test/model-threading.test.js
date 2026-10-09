@@ -419,6 +419,15 @@ test('a paid eval with --budget-usd refuses to start for a model without a price
   // gpt-5.4-pro never gets that far: the pipeline cannot call it at all.
   assert.throws(() => parseEvalArgs(['--model', 'gpt-5.4-pro', '--budget-usd', '1'], { env: {} }), { code: 'INVALID_CONFIG', message: /^--model "gpt-5\.4-pro" is not supported/ });
   assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna-2026-10-01', '--budget-usd', '1'], { env: {} })), null);
+  // A price in another currency would be added to the USD total as dollars: refused too.
+  process.env.MODEL_PRICING_OVERRIDES = JSON.stringify({ 'acme/sql-1': { inputPerMillion: 1, outputPerMillion: 2, currency: 'EUR' }, 'gpt-6-luna': { currency: 'SEK' } });
+  try {
+    assert.match(budgetPricingRefusal(parseEvalArgs(['--model', 'acme/sql-1', '--budget-usd', '1'], { env: {} })) || '', /^--budget-usd is a cap in USD, but model "acme\/sql-1" is priced in EUR/);
+    assert.match(budgetPricingRefusal(parseEvalArgs(['--model', 'gpt-6-luna', '--budget-usd', '1'], { env: {} })) || '', /is priced in SEK/);
+    assert.equal(budgetPricingRefusal(parseEvalArgs(['--model', 'acme/sql-1'], { env: {} })), null, 'no budget: nothing to enforce');
+  } finally {
+    delete process.env.MODEL_PRICING_OVERRIDES;
+  }
 });
 
 test('distinct model ids never share a baseline file or a run directory', () => {
