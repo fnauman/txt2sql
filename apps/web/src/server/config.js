@@ -8,7 +8,14 @@
 // startup error, and returns a deeply frozen object.
 
 import { resolveHintsVersion } from '../../../../src/hints-version.js';
-import { completionSettingsOf, DEFAULT_MODEL, describeReasoningEffort, resolveLlmApiKey, resolveModelConfig } from '../../../../src/model-config.js';
+import {
+  completionSettingsOf,
+  DEFAULT_MODEL,
+  DEFAULT_REASONING_EFFORT,
+  describeReasoningEffort,
+  resolveLlmApiKey,
+  resolveModelConfig,
+} from '../../../../src/model-config.js';
 import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
@@ -122,7 +129,10 @@ export const DEFAULT_WEB_CONFIG = Object.freeze({
   shutdownTimeoutMs: 10_000,
   openAiTimeoutMs: 60_000,
   openAiMaxRetries: 1,
+  // The product default: DEFAULT_MODEL at DEFAULT_REASONING_EFFORT (MODEL_NAME
+  // and REASONING_EFFORT override them; loadWebConfig resolves both).
   model: DEFAULT_MODEL,
+  reasoningEffort: DEFAULT_REASONING_EFFORT,
 });
 
 export function loadWebConfig(env = process.env) {

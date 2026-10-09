@@ -102,7 +102,9 @@ jobs:
         # With a committed baseline, a guardrail, oracle or fixture change that
         # makes its recorded SQL score significantly worse fails the job. The
         # default baseline path comes from the runner itself (the repository's
-        # one default model, src/model-config.js, unless MODEL_NAME is set).
+        # one default model and its default reasoning effort, DEFAULT_MODEL and
+        # DEFAULT_REASONING_EFFORT in src/model-config.js, unless MODEL_NAME or
+        # REASONING_EFFORT is set).
         run: |
           baseline=$(node --input-type=module -e "import('./scripts/eval.js').then((eval_) => console.log(eval_.defaultBaselineForEnv(process.env)))")
           if [ -f "$baseline" ]; then

@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
 import test, { after, before } from 'node:test';
 
-import { resolveCompletionSettings, resolveLlmApiKey } from '../src/model-config.js';
+import { defaultBaselineForEnv } from '../scripts/eval.js';
+import { DEFAULT_MODEL, resolveCompletionSettings, resolveLlmApiKey, resolveModelConfig } from '../src/model-config.js';
 import { createOpenAiClient, generateBasicSql, generateOptimizedResponse } from '../src/pipeline.js';
 import { loadWebConfig } from '../apps/web/src/server/config.js';
 
 // The exact HTTP request bodies each model gets, through the real OpenAI SDK
 // against a local OpenAI-compatible stand-in (no network, no key). The
 // expected bodies are written out literally: gpt-4o-mini's must stay byte for
-// byte the request of the committed baseline.
+// byte the request of its committed baseline (eval/baselines/gpt-4o-mini.json,
+// the reference of experiments 1-3), and the default model's the request its
+// committed default baseline recorded.
 
 const prompt = { system: 'system prompt', user: 'user prompt' };
 const messages = [
@@ -151,13 +155,31 @@ test('gpt-6-luna: effort none keeps temperature 0; low and medium drop it, send 
   assert.equal(basic, wire({ model: 'gpt-6-luna', max_completion_tokens: 16000, reasoning_effort: 'medium', messages }));
 });
 
-test('no effort set: gpt-6-luna sends its default effort (medium) explicitly; gpt-5.4-mini (default none) keeps the base request', async () => {
+test('no effort set: gpt-6-luna (the default model) sends the product default effort (low), gpt-6-sol its family default (medium); gpt-5.4-mini (default none) keeps the base request', async () => {
   const client = localClient();
   const settings = { ...resolveCompletionSettings({}), reasoningEffort: null };
   const luna = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-6-luna', prompt, modelConfig: settings }));
-  assert.equal(luna, wire({ model: 'gpt-6-luna', max_completion_tokens: 16000, response_format: RESPONSE_FORMAT, reasoning_effort: 'medium', messages }));
+  assert.equal(luna, wire({ model: 'gpt-6-luna', max_completion_tokens: 16000, response_format: RESPONSE_FORMAT, reasoning_effort: 'low', messages }));
+  const sol = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-6-sol', prompt, modelConfig: settings }));
+  assert.equal(sol, wire({ model: 'gpt-6-sol', max_completion_tokens: 16000, response_format: RESPONSE_FORMAT, reasoning_effort: 'medium', messages }));
   const mini = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-5.4-mini', prompt, modelConfig: settings }));
   assert.equal(mini, wire({ model: 'gpt-5.4-mini', temperature: 0, max_completion_tokens: 3200, response_format: RESPONSE_FORMAT, messages }));
+});
+
+test('the default configuration sends the request its committed default baseline recorded', async () => {
+  const config = resolveModelConfig({ env: {} });
+  const baseline = JSON.parse(fs.readFileSync(defaultBaselineForEnv({}), 'utf8'));
+  assert.deepEqual([baseline.provenance.product.model, baseline.provenance.product.reasoningEffort], [config.model, config.reasoningEffort]);
+  assert.equal(config.model, DEFAULT_MODEL);
+  const body = JSON.parse(
+    await lastBodyOf(() => generateOptimizedResponse({ client: localClient(), model: config.model, prompt, modelConfig: { ...resolveCompletionSettings({}), reasoningEffort: config.reasoningEffort } }))
+  );
+  // requestOptions is the optimized request without the model, messages and response format.
+  const { model, messages: sent, response_format: format, ...options } = body;
+  assert.equal(model, config.model);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(format, RESPONSE_FORMAT);
+  assert.deepEqual(options, baseline.provenance.product.requestOptions);
 });
 
 test('an unknown model keeps the request every model had before; with an effort it is treated as a reasoning model', async () => {

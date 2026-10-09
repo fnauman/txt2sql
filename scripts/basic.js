@@ -17,7 +17,7 @@ import {
   resolveStatementTimeoutMs,
   validateReadOnlySql,
 } from '../src/pipeline.js';
-import { DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
+import { DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
@@ -27,7 +27,8 @@ const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
 const USAGE = `Usage: npm run basic -- [question] [--refresh-schema] [--trace] [--trace-file <path>]
 ${ENV_USAGE}
-Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family).
+Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family;
+unset: ${DEFAULT_REASONING_EFFORT} for ${DEFAULT_MODEL}, else the family's default).
 Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).`;
 
 async function main() {

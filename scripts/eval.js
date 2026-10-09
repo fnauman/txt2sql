@@ -64,6 +64,7 @@ import { modelPriceCurrency } from '../src/pricing.js';
 import {
   completionSettingsOf,
   DEFAULT_MODEL,
+  DEFAULT_REASONING_EFFORT,
   describeModelConfig,
   describeModelNotices,
   describeReasoningEffort,
@@ -102,8 +103,9 @@ identical question + gold):
 Run:
   --model <name>              default MODEL_NAME, else ${DEFAULT_MODEL}
   --reasoning-effort <v>      ${REASONING_EFFORTS.join('|')}, checked per model family (default
-                              REASONING_EFFORT; unset: the family's default, e.g. medium for
-                              gpt-6*, or none sent)
+                              REASONING_EFFORT; unset: ${DEFAULT_REASONING_EFFORT} for ${DEFAULT_MODEL}, the product
+                              default, else the family's default, e.g. medium for the other
+                              gpt-6* models, or none sent)
   --repeat N                  repetitions per case, all kept (default 1)
   --concurrency N             cases in flight (default ${DEFAULT_CONCURRENCY})
   --case-timeout-ms N         per-case deadline, 0 disables (default ${DEFAULT_CASE_TIMEOUT_MS})

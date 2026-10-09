@@ -5,7 +5,7 @@
 // (docs/experiments/02-hints-v2.md).
 //
 // - 1: the prompts, semantic plans and validator decisions every run had
-//   before HINTS_VERSION existed, byte for byte (the committed baseline's).
+//   before HINTS_VERSION existed, byte for byte (the version-1 baselines').
 // - 2 (default): "hints v2": no resolved range for a date phrase the resolver
 //   only partly understands, unambiguous business rules (posting date, brand
 //   path, ranking limits, count and single-total shapes, time grain), the

@@ -8,8 +8,10 @@ import {
   baseModelId,
   buildCompletionOptions,
   DEFAULT_MODEL,
+  DEFAULT_REASONING_EFFORT,
   defaultReasoningEffort,
   DEFAULT_REASONING_MAX_COMPLETION_TOKENS,
+  isDefaultModel,
   modelCapabilities,
   normalizeReasoningEffort,
   REASONING_EFFORTS,
@@ -21,8 +23,10 @@ import {
   UNKNOWN_FAMILY_REASONING_EFFORTS,
   unsupportedModelReason,
 } from '../src/model-config.js';
+import { loadEnvironment } from '../src/env.js';
+import { calculateCost } from '../src/pricing.js';
 import { resolveRunModelSettings } from '../src/query-service.js';
-import { parseEvalArgs } from '../scripts/eval.js';
+import { defaultBaselineForEnv, parseEvalArgs } from '../scripts/eval.js';
 import { DEFAULT_WEB_CONFIG, loadWebConfig } from '../apps/web/src/server/config.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -103,15 +107,74 @@ test('resolveModelName: --model, then MODEL_NAME, then DEFAULT_MODEL, each with 
   assert.deepEqual(resolveModelName({ MODEL_NAME: 'gpt-6-luna' }, { flag: null }), { model: 'gpt-6-luna', source: 'MODEL_NAME' });
 });
 
-test('every entry point falls back to the same DEFAULT_MODEL', () => {
-  // Pinned on purpose: the committed baseline (eval/baselines/gpt-4o-mini.json)
-  // is the default model's, and the CI db job gates against the default
-  // model's baseline only when it exists, so a changed default would silently
-  // turn the offline gate off until a baseline of the new default is committed.
-  assert.equal(DEFAULT_MODEL, 'gpt-4o-mini');
-  assert.equal(parseEvalArgs([], { env: {} }).model, DEFAULT_MODEL);
-  assert.equal(DEFAULT_WEB_CONFIG.model, DEFAULT_MODEL);
-  assert.equal(loadWebConfig({}).model, DEFAULT_MODEL);
+test('every entry point falls back to the same DEFAULT_MODEL at DEFAULT_REASONING_EFFORT', () => {
+  // Pinned on purpose: the committed default baseline
+  // (eval/baselines/gpt-6-luna.low.json, Experiment 3) is the default pair's,
+  // and the CI db job gates against the default pair's baseline only when it
+  // exists, so a changed default would silently turn the offline gate off
+  // until a baseline of the new default is committed.
+  assert.deepEqual([DEFAULT_MODEL, DEFAULT_REASONING_EFFORT], ['gpt-6-luna', 'low']);
+  assert.ok(fs.existsSync(defaultBaselineForEnv({})), `the default pair has a committed baseline: ${defaultBaselineForEnv({})}`);
+  assert.match(defaultBaselineForEnv({}), /eval\/baselines\/gpt-6-luna\.low\.json$/);
+  // The product default's effort is one the default model accepts.
+  assert.equal(normalizeReasoningEffort(DEFAULT_MODEL, DEFAULT_REASONING_EFFORT), DEFAULT_REASONING_EFFORT);
+  const evalDefaults = parseEvalArgs([], { env: {} });
+  assert.deepEqual(
+    [evalDefaults.model, evalDefaults.modelSource, evalDefaults.reasoningEffort, evalDefaults.reasoningEffortSource],
+    [DEFAULT_MODEL, 'default', DEFAULT_REASONING_EFFORT, 'default']
+  );
+  assert.deepEqual([DEFAULT_WEB_CONFIG.model, DEFAULT_WEB_CONFIG.reasoningEffort], [DEFAULT_MODEL, DEFAULT_REASONING_EFFORT]);
+  const web = loadWebConfig({});
+  assert.deepEqual([web.model, web.reasoningEffort], [DEFAULT_MODEL, DEFAULT_REASONING_EFFORT]);
+});
+
+test('.env.example, the documented starting point, leaves the default model and effort alone', async () => {
+  // A fresh setup copies it to .env, and the env beats DEFAULT_MODEL /
+  // DEFAULT_REASONING_EFFORT at every entry point: an active MODEL_NAME or
+  // REASONING_EFFORT there is a second default, and once pinned the old
+  // reference model (gpt-4o-mini) under the adopted one. Comment them out.
+  const env = {};
+  const loaded = await loadEnvironment(['--dotenv', path.join(REPO_ROOT, '.env.example')], { env });
+  assert.equal(loaded.loaded, true, '.env.example exists');
+  const pinned = ['MODEL_NAME', 'REASONING_EFFORT'].filter((name) => name in env);
+  assert.deepEqual(pinned, [], 'leave MODEL_NAME and REASONING_EFFORT unset (commented out) in .env.example: the default is DEFAULT_MODEL at DEFAULT_REASONING_EFFORT');
+  const config = resolveModelConfig({ env });
+  assert.deepEqual(
+    [config.model, config.modelSource, config.reasoningEffort, config.reasoningEffortSource],
+    [DEFAULT_MODEL, 'default', DEFAULT_REASONING_EFFORT, 'default']
+  );
+});
+
+test('the default model runs at the product default effort whenever no effort is set, named or defaulted', () => {
+  for (const model of ['gpt-6-luna', ' GPT-6-Luna ', 'openai/gpt-6-luna']) {
+    assert.equal(isDefaultModel(model), true, model);
+    assert.equal(defaultReasoningEffort(model), 'low', model);
+  }
+  // A dated snapshot of the default model is the default model too, as the
+  // price table reads it (src/pricing.js prices it as gpt-6-luna).
+  for (const model of ['gpt-6-luna-2026-09-30', 'gpt-6-luna-20260930', 'openai/gpt-6-luna-2026-09-30']) {
+    assert.equal(isDefaultModel(model), true, model);
+    assert.equal(defaultReasoningEffort(model), 'low', model);
+    assert.equal(calculateCost(model, { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })?.model, DEFAULT_MODEL, model);
+  }
+  // Other models keep their family's default; a lookalike is another model.
+  for (const [model, effort] of [
+    ['gpt-6-sol', 'medium'],
+    ['gpt-6-luna-mini', 'medium'],
+    ['gpt-6-luna-2026', 'medium'],
+    ['gpt-6-luna-mini-2026-09-30', 'medium'],
+    ['gpt-4o-mini', null],
+  ]) {
+    assert.equal(isDefaultModel(model), false, model);
+    assert.equal(defaultReasoningEffort(model), effort, model);
+  }
+  // MODEL_NAME naming the default model with no effort set is the default
+  // pair, so it pairs with the same baseline file.
+  assert.equal(defaultBaselineForEnv({ MODEL_NAME: 'gpt-6-luna' }), defaultBaselineForEnv({}));
+  // A set effort always wins.
+  assert.equal(parseEvalArgs(['--reasoning-effort', 'medium'], { env: {} }).reasoningEffort, 'medium');
+  assert.equal(parseEvalArgs([], { env: { REASONING_EFFORT: 'high' } }).reasoningEffort, 'high');
+  assert.equal(parseEvalArgs([], { env: { REASONING_EFFORT: 'none' } }).reasoningEffort, 'none');
 });
 
 test('the capability map is keyed by the model id without a vendor prefix or variant suffix', () => {
@@ -269,7 +332,9 @@ test('normalizeReasoningEffort validates the effort per family and fails with th
 
 test('with no effort set, a family whose provider default reasons runs at it explicitly; a none default keeps the base request', () => {
   for (const [model, effort] of [
-    ['gpt-6-luna', 'medium'],
+    // The default model: the product default's effort, not its family's.
+    ['gpt-6-luna', 'low'],
+    ['gpt-6-sol', 'medium'],
     ['openai/gpt-6-sol', 'medium'],
     ['gpt-5-mini', 'medium'],
     ['o3', 'medium'],
@@ -327,11 +392,17 @@ test('buildCompletionOptions keeps the base options for non-reasoning models and
     });
   }
   // A reasoning model with no effort set runs at its family's default effort,
-  // sent explicitly (gpt-6: medium) ...
-  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-6-luna', maxCompletionTokens: 9000 }), {
+  // sent explicitly (gpt-6: medium), the default model at the product
+  // default's (gpt-6-luna: low) ...
+  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-6-sol', maxCompletionTokens: 9000 }), {
     max_completion_tokens: 9000,
     response_format: { type: 'json_object' },
     reasoning_effort: 'medium',
+  });
+  assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-6-luna', maxCompletionTokens: 9000 }), {
+    max_completion_tokens: 9000,
+    response_format: { type: 'json_object' },
+    reasoning_effort: 'low',
   });
   assert.deepEqual(buildCompletionOptions(base, { model: 'gpt-5-mini' }), { max_completion_tokens: 16000, response_format: { type: 'json_object' }, reasoning_effort: 'medium' });
   // ... unless that default is none (gpt-5.1 and later): the base request,

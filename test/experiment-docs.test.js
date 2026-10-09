@@ -5,6 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { defaultBaselineForEnv } from '../scripts/eval.js';
+import { DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '../src/model-config.js';
+
 // The experiment write-ups (docs/experiments/) quote numbers that commands
 // reproduce; these checks keep the commands pointed at the right recording.
 
@@ -93,8 +96,8 @@ function sentences(text) {
     .filter(Boolean);
 }
 
-test('the committed baseline is described as what it recorded: its schema scope and its cost', () => {
-  const baseline = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+test('the committed default baseline is described as what it recorded: its schema scope and its cost', () => {
+  const baseline = JSON.parse(fs.readFileSync(defaultBaselineForEnv({}), 'utf8'));
   const recordedScope = baseline.provenance.product.schemaScope;
   assert.ok(recordedScope?.effective, 'the baseline records its schema scope');
 
@@ -110,21 +113,36 @@ test('the committed baseline is described as what it recorded: its schema scope 
     }
   }
 
-  // Quoted costs of the committed baseline are its own.
+  // Quoted costs of the committed default baseline are its own, and it is the
+  // default pair's.
+  assert.deepEqual([baseline.model, baseline.provenance.product.reasoningEffort], [DEFAULT_MODEL, DEFAULT_REASONING_EFFORT]);
+  const escape = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const spent = baseline.budget.spentUsd;
   const repetitions = baseline.stats.repetitions.total;
   const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
-  const readmeCost = /\(the committed baseline: \$(\d+\.\d+) for (\d+) repetitions\)/.exec(readme);
-  assert.ok(readmeCost, 'README quotes the committed baseline cost');
+  const readmeCost = /\(the committed default baseline: \$(\d+\.\d+) for (\d+) repetitions[;)]/.exec(readme);
+  assert.ok(readmeCost, 'README quotes the committed default baseline cost');
   assert.equal(readmeCost[1], spent.toFixed(2));
   assert.equal(Number(readmeCost[2]), baseline.runner.repeat);
+  assert.match(readme, new RegExp(`\\| Cost and latency \\| ${escape(`$${spent.toFixed(4)}`)} for the whole run `));
 
   const guide = fs.readFileSync(path.join(REPO_ROOT, 'docs/evaluation-dataset.md'), 'utf8').replace(/\s+/g, ' ');
-  const perQuestion = /committed gpt-4o-mini baseline cost \$(\d+\.\d+) per question/.exec(guide);
+  const perQuestion = new RegExp(
+    `committed default baseline ${escape(`(${DEFAULT_MODEL} at reasoning effort ${DEFAULT_REASONING_EFFORT})`)} cost \\$(\\d+\\.\\d+) per question`
+  ).exec(guide);
   assert.ok(perQuestion, 'docs/evaluation-dataset.md quotes the per-question cost');
   assert.equal(perQuestion[1], (spent / repetitions).toFixed(5));
   const measured = /`--repeat 3` about (\d+) cents \(measured: \$(\d+\.\d+)[;)]/.exec(guide);
   assert.ok(measured, 'docs/evaluation-dataset.md quotes the measured --repeat 3 cost');
   assert.equal(measured[2], spent.toFixed(4));
   assert.equal(Number(measured[1]), Math.round(spent * 100));
+  assert.ok(guide.includes(`| Cost | $${spent.toFixed(4)} for the whole run (the Budget row`), 'the Current baseline table quotes the whole-run spend');
+
+  // The gpt-4o-mini reference of experiments 1-3, where the docs quote its cost.
+  const reference = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'eval/baselines/gpt-4o-mini.json'), 'utf8'));
+  const referenceSpent = `$${reference.budget.spentUsd.toFixed(4)}`;
+  assert.ok(guide.includes(`the gpt-4o-mini reference ${referenceSpent} (Experiment 3)`), 'the Cost section quotes the reference');
+  const earlier = /still committed as `eval\/baselines\/gpt-4o-mini\.json`, the reference of experiments 1-3 \(.*?(\$\d+\.\d+) for the whole run/.exec(guide);
+  assert.ok(earlier, 'Earlier baselines quote the reference');
+  assert.equal(earlier[1], referenceSpent);
 });

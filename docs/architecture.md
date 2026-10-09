@@ -101,8 +101,9 @@ Everything the prompt tells the model beyond the schema (business rules, the
 temporal resolver, the semantic layer, retrieval's tokens, the metric
 guardrail's arbitration) is one versioned layer, `HINTS_VERSION`
 (`src/hints-version.js`, default 2). A change to it can then be A/B'd as one
-variable against the committed baseline, with `HINTS_VERSION=1` reproducing
-the baseline's prompts byte for byte. Version 2's semantic-layer changes live
+variable against the committed default baseline, with `HINTS_VERSION=1`
+reproducing the prompts from before hints v2 (the version-1 baselines') byte
+for byte. Version 2's semantic-layer changes live
 in an overlay (`metadata/semantic-layer.hints-v2.json`, entries replacing the
 same-named entries of `metadata/semantic-layer.json`), so the base file stays
 the version-1 layer. The error analysis behind version 2, and its offline

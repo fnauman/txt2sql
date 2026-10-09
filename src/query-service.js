@@ -298,8 +298,9 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
  * OPENROUTER_REQUIRE_PARAMETERS, LLM_MAX_COMPLETION_TOKENS) from the env.
  * `reasoningEffort` null means none set (the env is not read); either way the
  * effort is validated for the model, so a bad one fails before any work, and
- * with none set the model family's default effort applies
- * (defaultReasoningEffort: medium for gpt-6*, null for gpt-4o-mini).
+ * with none set the default effort applies (defaultReasoningEffort: low for
+ * the default model gpt-6-luna, medium for the other gpt-6* models, null for
+ * gpt-4o-mini).
  */
 export function resolveRunModelSettings({ model = undefined, reasoningEffort = undefined, completionSettings = undefined } = {}, env = process.env) {
   const resolvedModel = model ?? resolveModelName(env).model;

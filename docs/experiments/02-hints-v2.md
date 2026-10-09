@@ -2,7 +2,7 @@
 
 **Variable:** `HINTS_VERSION`, from `1` (the committed baseline's prompt
 knowledge) to `2` (the new default).
-**Status:** complete — adopted (live run on 2026-10-06; `HINTS_VERSION=2` is the default and its run is the committed baseline).
+**Status:** complete — adopted (live run on 2026-10-06; `HINTS_VERSION=2` is the default and its run was the committed baseline until [Experiment 3](03-models.md), which kept it as the gpt-4o-mini reference, `eval/baselines/gpt-4o-mini.json`).
 **Source:** the error analysis of the 66 failing cases of the Experiment 1
 baseline, and the skeptic review's first recommendation ("Exp A: pipeline
 de-poisoning plus knowledge-only semantic layer").
@@ -316,8 +316,10 @@ Holdout numbers are aggregates.
 
 These rescores ran against the version-1 baseline of that base. The committed
 `eval/baselines/gpt-4o-mini.json` has since been replaced by the version-2
-live run (see Live results), so plain `npm run eval -- --offline` now rescores
-that run (73.6% under either `HINTS_VERSION`). To reproduce the numbers in
+live run (see Live results), so `npm run eval -- --rescore
+eval/baselines/gpt-4o-mini.json` now rescores that run (73.6% under either
+`HINTS_VERSION`; plain `npm run eval -- --offline` rescores the default
+baseline, gpt-6-luna at reasoning effort low since Experiment 3). To reproduce the numbers in
 this section, rescore the earlier file (the base branch's baseline, as it
 was before the commit "eval: adopt hints v2 and refresh the baseline from its
 live run") explicitly; see Reproduce below.
@@ -368,9 +370,9 @@ node --test test/hints-version.test.js test/hints-v2.test.js
 npm run seed-fixtures
 npm run verify-dataset
 HINTS_VERSION=1 npm run verify-dataset
-# rescore of the committed baseline (no LLM calls; now the version-2 live run)
-npm run eval -- --offline
-HINTS_VERSION=1 npm run eval -- --offline
+# rescore of the version-2 live run, kept as the gpt-4o-mini reference (no LLM calls)
+npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
+HINTS_VERSION=1 npm run eval -- --rescore eval/baselines/gpt-4o-mini.json
 # rescore of the earlier version-1 baseline (the 62.2% above)
 git show "$(git log -1 --format=%H --grep='adopt hints v2 and refresh the baseline')^:eval/baselines/gpt-4o-mini.json" > /tmp/v1-baseline.json
 npm run eval -- --rescore /tmp/v1-baseline.json --compare /tmp/v1-baseline.json

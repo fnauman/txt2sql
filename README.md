@@ -88,6 +88,11 @@ DB_ADMIN_USER=root
 MARIADB_ROOT_PASSWORD=<root password>   # or DB_ADMIN_PASSWORD
 ```
 
+Leave `MODEL_NAME` and `REASONING_EFFORT` unset (or commented out) in `.env`
+to run the default, `gpt-6-luna` at reasoning effort `low` (see
+[Models](#models)). Every entry point prints the model and the effort with
+their source, so a `MODEL_NAME` that `.env` sets shows up there.
+
 Why two users: least privilege is the real security boundary. The SQL validator is defense in depth, but a query that gets past it still runs as a user that can only `SELECT` from the demo databases, so it cannot write, read server files, or read other databases on the same MariaDB instance.
 
 4. Start MariaDB 10.6:
@@ -175,12 +180,12 @@ Common variables:
 - `DB_HOST`, `DB_PORT`, `DB_SOCKET`
 - `DB_USER` (query user, default `demo_readonly`)
 - `DB_READONLY_USER` / `DB_READONLY_PASSWORD` (Docker Compose only: the query user the init script creates; they default to `demo_readonly` / `DB_PASSWORD`)
-- `MODEL_NAME` (default `gpt-4o-mini`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
+- `MODEL_NAME` (default `gpt-6-luna`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family; unset, `gpt-6-luna` runs at `low`), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
-- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved` on its own reproduces the product loop of the previous (retrieved-scope) baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baseline ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
-- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions of the committed baseline byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
+- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved HINTS_VERSION=1 MODEL_NAME=gpt-4o-mini` reproduces the product loop of the retrieved-scope baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baselines ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
+- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions from before hints v2 (the version-1 baselines') byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -360,9 +365,11 @@ accuracy**: the mean over cases of each case's pass rate across repetitions,
 with a 95% confidence interval from a case bootstrap (over the dev cases
 while the holdout is hidden: the whole-suite figure is then a point estimate,
 see [Evaluation](#evaluation)). The case is the unit
-because repetitions of one case are strongly correlated (failures at
-temperature 0 are systematic), so pooling them as independent trials overstates
-confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
+because repetitions of one case are strongly correlated (most failures are
+systematic: nearly all for gpt-4o-mini at temperature 0, and most for the
+default reasoning model too, whose recorded run split more dev cases across
+its 3 repetitions, 11 of 245 against 6), so pooling them as independent
+trials overstates confidence; the old pooled `reliability` block (with its pooled Wilson bound) is
 still written for older consumers, labelled as such. A repeated run is a
 measurement and does not fail the process on run-to-run variance.
 
@@ -434,37 +441,51 @@ contains:
 - `report.json` (everything, every repetition) and `trace.jsonl`; both cover
   every case, holdout included, so reading them reveals the holdout.
 
-**Current baseline** (`eval/baselines/gpt-4o-mini.json`: gpt-4o-mini, the
-whole 404-case suite, 3 repetitions, full-schema prompting and hints v2 — the
-defaults `SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-06):
+**Current baseline** (`eval/baselines/gpt-6-luna.low.json`: gpt-6-luna at
+reasoning effort low, the default model, on the whole 404-case suite, 3
+repetitions, full-schema prompting and hints v2 — the defaults
+`SCHEMA_SCOPE=auto`, `HINTS_VERSION=2` — measured on 2026-10-07, the low arm
+of [Experiment 3](docs/experiments/03-models.md)):
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, every split) | **73.6%** |
-| By split | dev **88.3%** (245 cases, 95% CI 84.4%–92.0%) · fresh holdout **49.2%** (147 cases) |
-| Failures by cause (repetitions, dev cases) | model 86 · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
-| Guardrails over every dev attempt | precision 100%, recall 30.4%, false-rejection rate 0% |
+| Strict accuracy (392 answer cases, every split) | **89.4%** |
+| By split | dev **94.0%** (245 cases, 95% CI 91.2%–96.6%) · fresh holdout **81.6%** (147 cases) |
+| Failures by cause (repetitions, dev cases) | model 44, every one a wrong result · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
+| Guardrails over every dev attempt | no guardrail rejection: false-rejection rate 0%, recall 0.0% (none of the 44 wrong queries was caught: they are valid SQL with the wrong meaning) |
 | Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
-| Cost and latency | $0.63 for the whole run · dev cases: $0.00060 per correct answer, p50 2.4 s, p95 4.4 s, 83.5% of prompt tokens cached |
+| Cost and latency | $0.3276 for the whole run · dev cases: $0.00024 per question, $0.00027 per correct answer, p50 3.04 s, p95 5.73 s, retry rate 0.3% |
 
-How it got here, each step a paired experiment against the previous baseline:
+The reference it replaced, gpt-4o-mini on the same prompt and suite
+(`eval/baselines/gpt-4o-mini.json`, kept for comparisons), scored 73.6%:
+dev 88.3%, fresh holdout 49.2%, $0.00060 per correct answer, p95 4.40 s. How
+it got here, each step a paired experiment against the previous baseline:
 [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting:
-68.8% → 72.8% on the earlier 255-case suite) and
+68.8% → 72.8% on the earlier 255-case suite),
 [Experiment 2](docs/experiments/02-hints-v2.md) (hints v2 — unambiguous
 business rules, safer date handling, a cleaned semantic layer: 62.2% → 73.6%
 on the 404-case suite, McNemar p < 0.001 on the paired dev cases, and on the
 blind holdout alone 41.3% → 49.2%, p = 0.035 in the live run's paired
-holdout test). The fresh holdout is 77 new intents written blind
-and audited by two independent annotators; reports show it in aggregate only.
-The dev number is in-sample (experiments are designed from dev failures); the
-holdout number is the honest estimate for new kinds of questions — shares and
-ratios, overdue and ageing balances, running totals, period-over-period
-change — and it is where the remaining work is. With perfect SQL the suite's
-ceiling is 99.0% (4 holdout cases are known validator rejections); every dev
-failure of this baseline is a model error. (The interval, failure causes,
-guardrail, behaviour and per-question cost figures are what `npm run eval --
---offline` prints by default: they cover the dev cases, the holdout only as
-its split accuracy.) These are measurements of the product, not targets.
+holdout test) and [Experiment 3](docs/experiments/03-models.md) (the model:
+gpt-4o-mini → gpt-6-luna at reasoning effort low with the same prompt, 73.6%
+→ 89.4%; 74 improvements against 8 regressions over the 392 paired answer
+cases, McNemar p < 0.001; medium effort scored 89.6%, not significantly
+better, at a higher cost). Experiment 3's out-of-sample evidence is the blind
+holdout: 49.2% → 81.6%, 56 improvements against 5 regressions, p < 0.001 in
+its paired holdout test, where the paired dev cases moved 88.3% → 94.0%. The
+fresh holdout is 77 new intents written blind and audited by two independent
+annotators; reports show it in aggregate only. The dev number is in-sample
+(experiments are designed from dev failures); the holdout number is the
+honest estimate for new kinds of questions — shares and ratios, overdue and
+ageing balances, running totals, period-over-period change — and the
+12-point gap between them is where the remaining work is. With perfect SQL
+the suite's ceiling is 99.0% (4 holdout cases are known validator
+rejections); every dev failure of this baseline is a model error. A
+reasoning model is not deterministic (see [Models](#models)), so these are
+averages over 3 repetitions. (The interval, failure causes, guardrail,
+behaviour and per-question cost figures are what `npm run eval -- --offline`
+prints by default: they cover the dev cases, the holdout only as its split
+accuracy.) These are measurements of the product, not targets.
 
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
 when committed, `/` in a model id written `__`; that is the whole rule for a
@@ -483,7 +504,8 @@ provider problems (and case deadlines) exit 2, never 1, and Ctrl-C still writes
 a partial report. `--rescore <report.json>` and `--offline` re-validate,
 re-execute and re-score recorded SQL with zero LLM calls. Useful flags: `--repeat 3`, `--budget-usd 1`, `--dataset`, `--tag`,
 `--case-id`, `--split`, `--reveal-holdout`. One repetition of the whole 404-case suite costs
-about 21 cents on gpt-4o-mini (the committed baseline: $0.63 for 3 repetitions). The dataset composition, the generator, how to add a
+about 11 cents on gpt-6-luna at low effort (the committed default baseline: $0.33 for 3 repetitions;
+gpt-4o-mini cost about twice as much). The dataset composition, the generator, how to add a
 case, setup, flags, how to read the report, and the CI jobs are in
 [docs/evaluation-dataset.md](docs/evaluation-dataset.md#running-evaluations).
 
@@ -515,9 +537,18 @@ The API server (`apps/web/src/server/main.js`) loads the env file first, then va
 
 ## Models
 
-The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-4o-mini`
-(`DEFAULT_MODEL` in `src/model-config.js`). A reasoning model also takes
-`REASONING_EFFORT` (or `--reasoning-effort`). Every entry point prints both with
+The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-6-luna`
+at reasoning effort `low` (`DEFAULT_MODEL` and `DEFAULT_REASONING_EFFORT` in
+`src/model-config.js`): the product default, adopted by
+[Experiment 3](docs/experiments/03-models.md) over `gpt-4o-mini`. A reasoning
+model also takes `REASONING_EFFORT` (or `--reasoning-effort`). The default is
+the pair: `gpt-6-luna` with no effort set runs at `low` also when `MODEL_NAME`
+(or `--model`) names it, and pairs with the same baseline file. OpenRouter's
+`openai/gpt-6-luna` and a dated snapshot such as `gpt-6-luna-2026-09-30` run
+at `low` too, but each looks up its own baseline file
+(`openai__gpt-6-luna.low.json`, `gpt-6-luna-2026-09-30.low.json`, not
+committed): pass `--compare eval/baselines/gpt-6-luna.low.json` to pair one
+with the default's. Every entry point prints both with
 where they came from: the eval header (`model gpt-6-luna (MODEL_NAME from
 /home/you/.env); reasoning effort low (--reasoning-effort); endpoint
 api.openai.com`), the web server's `[config]` startup line, and the CLIs'
@@ -531,8 +562,8 @@ capability map is keyed by the model id without a vendor prefix, so
 
 | Family | Reasoning | `REASONING_EFFORT` values | With no effort set |
 |---|---|---|---|
-| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the committed baseline's request, byte for byte |
-| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the request of the gpt-4o-mini reference baseline, byte for byte |
+| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `gpt-6-luna`, the default model: `low` (the product default); the others: `medium` (the provider default); sent and recorded |
 | `gpt-6-astra`, `gpt-6.1-sol` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`: the API rejects it) | `medium` (6.1 Sol's provider default; Astra's page states none, so it is sent explicitly) |
 | `gpt-5.5*` | yes | `none`, `low`, `medium`, `high`, `xhigh` | `medium` (the provider default), sent and recorded |
 | `gpt-5.6*` | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
@@ -552,23 +583,32 @@ supported, checked on 2026-10-07). The map files them under the `gpt-5*` and
 o-series rows (`codex-mini-latest` under "anything else"), so a run with one
 starts and its first request fails on api.openai.com: do not use them here.
 
-With reasoning on (any effort but `none`, set or the family's default) the
+With reasoning on (any effort but `none`, set or defaulted) the
 request drops `temperature` / `top_p`, sends `reasoning_effort` and raises
 `max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
 because reasoning tokens count against that limit and 3200 would truncate. A
-family's default effort is sent and recorded like a set one (source
-`default`), so `gpt-6-luna` with no effort and with `REASONING_EFFORT=medium`
-is the same run with the same baseline file, and a provider changing its
-default cannot change a run unseen. At effort `none` the request keeps
+default effort (the product default's for `gpt-6-luna`, the family's for
+another model) is sent and recorded like a set one (source `default`), so
+`gpt-6-luna` with no effort and with `REASONING_EFFORT=low` is the same run
+with the same baseline file (`eval/baselines/gpt-6-luna.low.json`), as are
+`gpt-6-sol` with no effort and with `REASONING_EFFORT=medium`, and a provider
+changing its default cannot change a run unseen. At effort `none` the request keeps
 `temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`.
 An invalid effort, or one the model's family does not list, stops every entry
 point before anything starts, with the allowed values in the message. (An effort set in an env file can be cleared
-for one run with an empty `REASONING_EFFORT=` in the shell.) Without
-`temperature: 0` a reasoning model's repetitions vary more than gpt-4o-mini's,
-so measure it with `--repeat 3`; a completion cut off at the token limit is an
-`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if the pilot
-shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`;
-to pair a new model with the committed gpt-4o-mini baseline, pass
+for one run with an empty `REASONING_EFFORT=` in the shell.)
+
+Repetitions are not deterministic: a reasoning model takes no `temperature`
+at all, so the same question can get a different query, and a different
+verdict, in the next repetition, and gpt-4o-mini at `temperature: 0` varies
+too (in Experiment 3, 11 of the 245 dev cases had 1 or 2 passes out of 3 at
+`low`, 5 at `medium` and 6 for gpt-4o-mini; one run each). A single run is a
+sample; every figure in this README is measured with `--repeat 3`, and so
+should any comparison be. A completion cut off at the token limit is an
+`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if a pilot
+shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`
+(the default pair against `eval/baselines/gpt-6-luna.low.json`); to pair a run
+with the gpt-4o-mini reference of experiments 1-3, pass
 `--compare eval/baselines/gpt-4o-mini.json` (the comparison then states the
 model change).
 
@@ -593,7 +633,7 @@ npm run eval -- --dataset core-public --budget-usd 0.5
 
 For a single run from the shell, put the variables on the command line
 instead (`NAME=value` lines on their own are not exported, so the eval would
-not see them and would run `gpt-4o-mini` on api.openai.com):
+not see them and would run the default `gpt-6-luna` on api.openai.com):
 
 ```bash
 OPENAI_BASE_URL=https://openrouter.ai/api/v1 MODEL_NAME=openai/gpt-6-luna REASONING_EFFORT=low \
@@ -637,7 +677,7 @@ reports record the host (never a key).
 
 Every LLM call automatically estimates token costs based on the model used. Costs are printed per-call and as a run total.
 
-Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset (`DEFAULT_MODEL` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
+Runtime default: `gpt-6-luna` at reasoning effort `low` when `MODEL_NAME` and `REASONING_EFFORT` are unset (`DEFAULT_MODEL` and `DEFAULT_REASONING_EFFORT` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
 Supported cost estimates: `gpt-4o-mini`, `gpt-6-luna` ($0.10 input, $0.01 cached input, $0.50 output per 1M tokens) and `gpt-6-sol` ($2, $0.20, $10; both OpenAI's published prices, verified 2026-10-07), `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4`. A row also prices its date-suffixed snapshots (`gpt-5.4-mini-2026-03-05`, or the `-YYYYMMDD` form), and nothing else: another model that shares its prefix (`gpt-6-sol-pro`, `gpt-6-luna-mini`) has no price rather than the base row's. A model id is looked up without its vendor prefix, so OpenRouter's `openai/gpt-6-luna` gets the `gpt-6-luna` price (a variant such as `openai/gpt-6-luna:free` does not). A call the provider answers under an id with no price (a gateway's alias) is costed at the requested model's price.
 

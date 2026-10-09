@@ -16,7 +16,7 @@ import {
 } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
-import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
+import { completionSettingsOf, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
@@ -31,7 +31,8 @@ Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables)
 Schema scope: SCHEMA_SCOPE=auto|full|retrieved (default auto), SCHEMA_FULL_MAX_TOKENS (default 8000),
 SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).
 Hints version: HINTS_VERSION=1|2 (default 2; 1 is the prompt before hints v2).
-Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family).`;
+Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family;
+unset: ${DEFAULT_REASONING_EFFORT} for ${DEFAULT_MODEL}, else the family's default).`;
 
 async function main() {
   const argv = process.argv.slice(2);

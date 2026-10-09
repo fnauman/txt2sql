@@ -429,9 +429,10 @@ never tune on its wording or its failures, and do not edit a question or a gold
 to chase a score (an edited question gets a new id). When it has been looked
 at, retire it to dev and add a new holdout instead. Its golds were audited
 before any model answer to it was looked at (below), and the [current
-baseline](#current-baseline) measures it, read in aggregate only (49.2% on
-its 147 answer cases under hints version 2; the version-1 baseline before
-it, 41.3%).
+baseline](#current-baseline) measures it, read in aggregate only (81.6% on
+its 147 answer cases with gpt-6-luna at reasoning effort low; the gpt-4o-mini
+reference under hints version 2, 49.2%; the version-1 baseline before it,
+41.3%).
 
 It was authored on a branch where the inspected hash-split holdout was still
 `holdout`, and integrated onto the measurement-hygiene change afterwards: the
@@ -603,7 +604,7 @@ that a failure on a convention is visible as such, and so that no experiment
 is credited with a convention it happened to change. They were reviewed
 after the error analysis of the Experiment 1 failures: the golds were kept,
 one alternative reading was added (`hard_entity_lakeside_spend_q1_2026`,
-below; the committed baseline answered it with the bill total, so a rescore
+below; the gpt-4o-mini baseline committed then answered it with the bill total, so a rescore
 passes it: a gold decision, not a model gain), and where the analysis found another reading defensible but the
 gold stays, the reason is given.
 
@@ -938,7 +939,7 @@ The rules are in the [comparison spec](#comparison-spec-value-aware-scoring);
   with a total grouped by the store is empty on a fixture where the store
   sold nothing, and one NULL row is what the gold returns there.
 
-Rescoring the committed gpt-4o-mini baseline (no LLM calls) with and without
+Rescoring the gpt-4o-mini baseline committed then (no LLM calls) with and without
 them flips five of its failing cases to pass (the three customer pivots and
 `tpl_net_sales_south_store_mar_2026` ×2) and none the other way; a gain from
 the relaxations is a measurement change, not a model gain. A comparison with
@@ -1240,8 +1241,8 @@ npm run eval -- --offline --reveal-holdout          # list holdout cases one by 
 npm run eval -- --repeat 3 --holdout-summary        # conclude a pre-registered experiment: + the paired holdout test, one line
 npm run eval -- --dataset hard-cases-public         # one dataset
 npm run eval -- --dataset edge-cases-public --tag join_path
-npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate
-npm run eval -- --rescore generated/runs/<run>/all/gpt-4o-mini/report.json
+npm run eval -- --compare eval/baselines/gpt-4o-mini.json --gate  # pair with the gpt-4o-mini reference
+npm run eval -- --rescore generated/runs/<run>/all/gpt-6-luna.low/report.json
 npm run eval -- --offline                           # no LLM: setup, verify, rescore the baseline
 npm run eval -- --help                              # every flag
 ```
@@ -1523,8 +1524,9 @@ a recording of another model or effort, and `runner.flags` records them as
 ### Compare and gate
 
 `--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
-when present, with the effort when one is set or the model family has a
-reasoning default (`medium` for `gpt-6*`), and a `/` in the model id
+when present, with the effort when one is set or defaulted (`low` for the
+default model `gpt-6-luna`, the family's reasoning default for another model,
+e.g. `medium` for `gpt-6-sol`), and a `/` in the model id
 written `__`; an id that is not plain (plain: lower-case letters and digits
 with single `.` or `-` between them, in `/`-separated parts, not ending in
 `.<effort>`) is written sanitized plus `_` and the first 8 hex digits of its
@@ -1615,21 +1617,30 @@ retries, measured 1,374,116 bytes; a real model's longer SQL can add some. A fil
 partial run (filters, fewer fixtures, or a case set that differs from the
 default suite) is refused before it starts; `--baseline-file <path>` saves
 such a subset somewhere else, never inside `eval/baselines/` (every file there
-is a model's default baseline). The committed baseline is
-`eval/baselines/gpt-4o-mini.json` (see [Current baseline](#current-baseline));
-it has to be re-made whenever the datasets, the prompt or the model change on
-purpose.
+is a model's default baseline). The committed default baseline is
+`eval/baselines/gpt-6-luna.low.json`, the default model at its default effort
+(see [Current baseline](#current-baseline)); it has to be re-made whenever
+the datasets, the prompt or the default model or effort change on purpose.
+`eval/baselines/gpt-4o-mini.json` is kept as the reference of experiments 1-3
+(pass `--compare eval/baselines/gpt-4o-mini.json` to pair with it; a run with
+`MODEL_NAME=gpt-4o-mini` pairs with it by default).
 
 ### Current baseline
 
-`eval/baselines/gpt-4o-mini.json`, written by
-`npm run eval -- --repeat 3 --budget-usd 1.5 --write-baseline` on 2026-10-06
-(the [Experiment 2](experiments/02-hints-v2.md) live run, at commit
-`4ff6ecb`): gpt-4o-mini at api.openai.com, `SCHEMA_SCOPE` unset (`auto` →
-`full`), `HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures
-seed `094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
+`eval/baselines/gpt-6-luna.low.json`, the low arm of
+[Experiment 3](experiments/03-models.md): written by
+`npm run eval -- --model gpt-6-luna --reasoning-effort low --repeat 3
+--compare eval/baselines/gpt-4o-mini.json --holdout-summary --budget-usd 1.00
+--write-baseline --baseline-file <outside the repository>` on 2026-10-07 at
+commit `a57fa44` (a clean tree) and committed after the decision (its two
+local output paths in the runner flags replaced with `<outside the repository>`):
+gpt-6-luna at reasoning effort low (request options `max_completion_tokens`
+16000, `reasoning_effort` low; the default model at its default effort since
+then) at api.openai.com, `SCHEMA_SCOPE` unset (`auto` → `full`),
+`HINTS_VERSION` unset (2), prompt version `4358263bcf82`, fixtures seed
+`094282546fe5` / v2 `7adec1b3bc33` / v3 `51d1c42c3b88`, the whole default
 suite (404 unique cases: 392 answer cases and 12 abstain/clarify cases; dev
-255, fresh holdout 149), compact file 2.07 MB. The rows below are what the
+255, fresh holdout 149), compact file 2.10 MB. The rows below are what the
 offline rescore (`npm run eval -- --offline`) prints by default: every row
 after the first two covers the dev cases, except the whole-run spend that
 opens the Cost row (report.md's Budget row), and the holdout is read only as
@@ -1638,54 +1649,79 @@ its accuracy by split (see the [holdout policy](#splits-and-the-holdout-policy);
 
 | Measure | Result |
 |---|---|
-| Strict accuracy (392 answer cases, every split) | 73.6% (a point estimate: no interval while the holdout is hidden) |
-| By split | dev 88.3% (245 cases) · fresh holdout 49.2% (147 cases) |
-| Strict accuracy, dev cases (245 answer cases) | 88.3% (95% CI 84.4%–92.0%, case bootstrap) |
-| Majority-pass cases, dev | 217/245 (Wilson 95% 84.0%–92.0%) |
-| Intent-clustered accuracy, dev (130 intents) | 86.5% (95% CI 81.0%–91.4%) |
-| Attribution, dev cases (repetitions) | pass 649 · model 86 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
-| Guardrail confusion, dev cases (761 attempts) | 34 wrong SQL caught, 0 correct SQL rejected, 78 wrong SQL accepted; precision 100%, recall 30.4% |
+| Strict accuracy (392 answer cases, every split) | 89.4% (a point estimate: no interval while the holdout is hidden) |
+| By split | dev 94.0% (245 cases) · fresh holdout 81.6% (147 cases) |
+| Strict accuracy, dev cases (245 answer cases) | 94.0% (95% CI 91.2%–96.6%, case bootstrap) |
+| Majority-pass cases, dev | 232/245 (Wilson 95% 91.1%–96.9%) |
+| Intent-clustered accuracy, dev (130 intents) | 94.1% (95% CI 90.7%–97.0%) |
+| Attribution, dev cases (repetitions) | pass 691 · model 44 · system 0 (known validator rejections 0, retrieval misses 0, guardrail false rejections 0) · infrastructure 0 · skipped 0 |
+| Guardrail confusion, dev cases (736 attempts) | 0 wrong SQL caught, 0 correct SQL rejected, 44 wrong SQL accepted, 1 safety-layer rejection (never run); precision n/a, recall 0.0% |
 | Behaviour cases | dev: 0 of 10 handled (abstain / clarify); 2 holdout cases, outcomes not shown |
-| Cost | $0.6347 for the whole run (the Budget row; divided by its 1,212 repetitions about $0.00052 per question, see [Cost](#cost)) · dev cases: $0.00051 per question · $0.00060 per correct answer · 83.5% of prompt tokens cached |
-| Latency, dev cases | p50 2.39 s · p95 4.40 s (product loop) · retry rate 3.8% |
+| Cost | $0.3276 for the whole run (the Budget row; divided by its 1,212 repetitions about $0.00027 per question, see [Cost](#cost)) · dev cases: $0.1849 in all, $0.00024 per question, $0.00027 per correct answer |
+| Tokens, dev cases | prompt 3,345,434 (cached 2,740,668) · completion 194,015 (reasoning 51,171) |
+| Latency, dev cases | p50 3.04 s · p95 5.73 s (product loop) · retry rate 0.3% |
 
 How to read it:
 
 - **Dev vs holdout.** Dev (245 answer cases) is everything that was inspected
   or tuned on; the fresh holdout (147 answer cases) is new intents written
-  blind and audited by two independent annotators. Experiment 2 was designed
-  from dev failures, so its dev gain (74.7% → 88.3%) is in-sample; its holdout
-  gain (41.3% → 49.2%; 17 improvements vs 6 regressions, exact McNemar
-  p = 0.035, as the live run's report.md counted the holdout's flips at the
-  time: report.md no longer shows holdout flip counts) is the out-of-sample
-  evidence. The remaining 39-point gap is the
-  clearest measurement in this repository: the holdout leans on analytical
-  shapes the dev set barely covers (shares and ratios, overdue and ageing
-  balances, running totals, month-over-month change, weekday and value-band
+  blind and audited by two independent annotators. Experiment 3 changed only
+  the model, with the prompt tuned on gpt-4o-mini's dev failures: against the
+  gpt-4o-mini reference its dev gain (88.3% → 94.0%; 18 improvements vs 3
+  regressions over the paired dev cases, exact McNemar p = 0.001) is on the
+  cases the prompt was tuned on, and its holdout gain (49.2% → 81.6%; 56
+  improvements vs 5 regressions, exact McNemar p < 0.001, the experiment's
+  `--holdout-summary` line) is the out-of-sample evidence. The gap between
+  the splits shrank from 39 to 12 points and is still the clearest
+  measurement in this repository: the holdout leans on analytical shapes the
+  dev set barely covers (shares and ratios, overdue and ageing balances,
+  running totals, month-over-month change, weekday and value-band
   breakdowns) and on unfamiliar wording. Per the
   [holdout policy](#splits-and-the-holdout-policy), only dev failures are
   analysed case by case.
+- **Dev failures.** All 44 failing dev repetitions are wrong results (13
+  cases by majority, broken down by failure class in
+  [Experiment 3](experiments/03-models.md#remaining-gaps-dev-cases-only)):
+  5 are `default_filter` cases (dev accuracy 70.8%), 4 of them the
+  ledger-account rankings by debit or credit.
+- **Repetitions vary.** Repetitions are not deterministic: a reasoning model
+  takes no `temperature`, and gpt-4o-mini at temperature 0 varies too (11 of
+  the 245 dev cases have 1 or 2 passes out of 3 in this baseline, 6 in the
+  gpt-4o-mini reference; one run each, see
+  [Experiment 3](experiments/03-models.md)). The figures are 3-repetition
+  averages, and a comparison needs `--repeat 3` too.
 - **Gold audit effect.** A hints-version-1 run before the audit scored the
   holdout at 35.4%; the version-1 baseline, on the same code after the audit
   (the earlier baseline below), scored it at 41.3%. The audit changed 10 of
   the 147 holdout answer cases (6 every-member alternatives, 2 rewordings, a
   gold fix on 2); the rest of that difference is run-to-run variation
-  between two live runs. The step from 41.3% to this baseline's 49.2% is
-  hints version 2 (Experiment 2), not the audit.
+  between two live runs. The step from 41.3% to 49.2% is hints version 2
+  (Experiment 2), and the step from 49.2% to this baseline's 81.6% is the
+  model (Experiment 3), not the audit.
 - **System failures.** None among the dev cases (the holdout's failure
   causes are not shown). Under hints v2 the dev flagged case (`e1b20a`) is no
   longer rejected; the 4 holdout cases flagged `known_validator_rejection`
   (`METRIC_COLUMN`) cap strict accuracy at 99.0% with perfect SQL.
-- **Guardrails** (dev cases) never reject correct SQL but catch under a
-  third of wrong SQL (34 of 112 attempts); most wrong answers are
-  semantically wrong SQL that is still valid.
+- **Guardrails** (dev cases) never reject correct SQL, and with gpt-6-luna
+  they rejected no attempt at all (one more attempt stopped at the read-only
+  safety layer, outside the matrix): none of the 44 wrong attempts is caught
+  (the gpt-4o-mini reference: 34 of 112). Every wrong answer is semantically
+  wrong SQL that is still valid, so the product never retries it either.
 - **Reproduction.** `npm run eval -- --offline --gate` rescores this file's
   recorded SQL with today's code and reproduces it exactly (0 flips).
 
 Earlier baselines: the retrieved-scope baseline (prompt version
 `0c314451d4b7`, 68.8% on the 255-case suite), the full-schema baseline of
-[Experiment 1](experiments/01-schema-scope.md) (72.8% on that suite), and the
-version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
+[Experiment 1](experiments/01-schema-scope.md) (72.8% on that suite), the
+version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%),
+and the gpt-4o-mini baseline of [Experiment 2](experiments/02-hints-v2.md),
+still committed as `eval/baselines/gpt-4o-mini.json`, the reference of
+experiments 1-3 (gpt-4o-mini, hints v2, prompt version `4358263bcf82`,
+2026-10-06 at `4ff6ecb`; `npm run eval -- --rescore
+eval/baselines/gpt-4o-mini.json` prints 73.6%; dev 88.3% (95% CI
+84.4%–92.0%), holdout 49.2%; $0.6347 for the whole run, dev cases $0.00060
+per correct answer, p50 2.39 s, p95 4.40 s, retry rate 3.8%; guardrail
+precision 100%, recall 30.4%).
 
 ### CI
 
@@ -1704,16 +1740,17 @@ version-1 baseline on the 404-case suite (62.2%; dev 74.7%, holdout 41.3%).
 
 ### Cost
 
-LLM cost is small: the committed gpt-4o-mini baseline cost $0.00052 per
-question over the whole run ($0.6347 over its 1,212 case repetitions,
-holdout included; a repetition makes up to two LLM calls), so one repetition of the
-whole 404-case suite is about 21 cents and `--repeat 3` about 63 cents
-(measured: $0.6347), inside the default 1 USD budget. `--budget-usd` caps it.
-(The $0.00051 per question that report.md and the [current
-baseline](#current-baseline) table give is the dev cases' figure: while the
-holdout is hidden, report.md's cost rows cover the dev cases, and only its
-Budget row is the whole run's spend.)
-Rescoring and `--offline` cost nothing.
+LLM cost is small: the committed default baseline (gpt-6-luna at reasoning
+effort low) cost $0.00027 per question over the whole run ($0.3276 over its
+1,212 case repetitions, holdout included; a repetition makes up to two LLM
+calls), so one repetition of the whole 404-case suite is about 11 cents and
+`--repeat 3` about 33 cents (measured: $0.3276), inside the default 1 USD
+budget. `--budget-usd` caps it. The same run at reasoning effort medium cost
+$0.3992, and the gpt-4o-mini reference $0.6347 (Experiment 3). (The $0.00024
+per question that report.md and the [current baseline](#current-baseline)
+table give is the dev cases' figure: while the holdout is hidden, report.md's
+cost rows cover the dev cases, and only its Budget row is the whole run's
+spend.) Rescoring and `--offline` cost nothing.
 
 ## Known limits
 
@@ -1724,8 +1761,9 @@ Rescoring and `--offline` cost nothing.
 - **A small holdout, one run per product version**: the inspected holdout
   was retired to dev (`formerly_holdout`); the fresh one (147 answer cases
   over 75 intents) is measured in aggregate only, by one 3-repetition run
-  per hints version on the audited set (the [current baseline](#current-baseline), version 2:
-  49.2%; the version-1 baseline: 41.3%), a wide interval at that size. **A
+  per product version on the audited set (the [current baseline](#current-baseline),
+  gpt-6-luna at low effort: 81.6%; the gpt-4o-mini reference, hints version
+  2: 49.2%; the version-1 baseline: 41.3%), a wide interval at that size. **A
   holdout mixes two effects**: unseen intents and unseen vocabulary. It avoids
   the semantic layer's multi-word phrases and its enforced word "revenue", not
   its single-word entity synonyms, so its wording differs from dev's
