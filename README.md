@@ -564,7 +564,10 @@ capability map is keyed by the model id without a vendor prefix, so
 |---|---|---|---|
 | `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the request of the gpt-4o-mini reference baseline, byte for byte |
 | `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `gpt-6-luna`, the default model: `low` (the product default); the others: `medium` (the provider default); sent and recorded |
-| `gpt-5.2*` and later (e.g. `gpt-5.4-mini`) | yes | `none`, `low`, `medium`, `high`, `xhigh` | the provider default is `none`: the `gpt-4o*` request |
+| `gpt-6-astra`, `gpt-6.1-sol` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`: the API rejects it) | `medium` (6.1 Sol's provider default; Astra's page states none, so it is sent explicitly) |
+| `gpt-5.5*` | yes | `none`, `low`, `medium`, `high`, `xhigh` | `medium` (the provider default), sent and recorded |
+| `gpt-5.6*` | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-5.2*` and later, `gpt-5.5` and `gpt-5.6` aside (e.g. `gpt-5.4-mini`) | yes | `none`, `low`, `medium`, `high`, `xhigh` | the provider default is `none`: the `gpt-4o*` request |
 | `gpt-5.1*` | yes | `none`, `low`, `medium`, `high` | the provider default is `none`: the `gpt-4o*` request |
 | `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
 | o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |

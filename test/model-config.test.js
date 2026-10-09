@@ -23,6 +23,7 @@ import {
   UNKNOWN_FAMILY_REASONING_EFFORTS,
   unsupportedModelReason,
 } from '../src/model-config.js';
+import { loadEnvironment } from '../src/env.js';
 import { calculateCost } from '../src/pricing.js';
 import { resolveRunModelSettings } from '../src/query-service.js';
 import { defaultBaselineForEnv, parseEvalArgs } from '../scripts/eval.js';
@@ -127,6 +128,23 @@ test('every entry point falls back to the same DEFAULT_MODEL at DEFAULT_REASONIN
   assert.deepEqual([web.model, web.reasoningEffort], [DEFAULT_MODEL, DEFAULT_REASONING_EFFORT]);
 });
 
+test('.env.example, the documented starting point, leaves the default model and effort alone', async () => {
+  // A fresh setup copies it to .env, and the env beats DEFAULT_MODEL /
+  // DEFAULT_REASONING_EFFORT at every entry point: an active MODEL_NAME or
+  // REASONING_EFFORT there is a second default, and once pinned the old
+  // reference model (gpt-4o-mini) under the adopted one. Comment them out.
+  const env = {};
+  const loaded = await loadEnvironment(['--dotenv', path.join(REPO_ROOT, '.env.example')], { env });
+  assert.equal(loaded.loaded, true, '.env.example exists');
+  const pinned = ['MODEL_NAME', 'REASONING_EFFORT'].filter((name) => name in env);
+  assert.deepEqual(pinned, [], 'leave MODEL_NAME and REASONING_EFFORT unset (commented out) in .env.example: the default is DEFAULT_MODEL at DEFAULT_REASONING_EFFORT');
+  const config = resolveModelConfig({ env });
+  assert.deepEqual(
+    [config.model, config.modelSource, config.reasoningEffort, config.reasoningEffortSource],
+    [DEFAULT_MODEL, 'default', DEFAULT_REASONING_EFFORT, 'default']
+  );
+});
+
 test('the default model runs at the product default effort whenever no effort is set, named or defaulted', () => {
   for (const model of ['gpt-6-luna', ' GPT-6-Luna ', 'openai/gpt-6-luna']) {
     assert.equal(isDefaultModel(model), true, model);
@@ -171,6 +189,11 @@ test('the capability map is keyed by the model id without a vendor prefix or var
     ['gpt-6-luna', 'gpt-6', true],
     ['openai/gpt-6-sol', 'gpt-6', true],
     ['gpt-6', 'gpt-6', true],
+    ['gpt-6-astra', 'gpt-6-astra', true],
+    ['openai/gpt-6-astra-2026-09-01', 'gpt-6-astra', true],
+    ['gpt-6.1-sol', 'gpt-6.1-sol', true],
+    ['openai/gpt-6.1-sol', 'gpt-6.1-sol', true],
+    ['gpt-6.1', 'gpt-6', true],
     ['gpt-5', 'gpt-5', true],
     ['gpt-5-mini', 'gpt-5', true],
     ['gpt-5-nano-2025-08-07', 'gpt-5', true],
@@ -179,6 +202,11 @@ test('the capability map is keyed by the model id without a vendor prefix or var
     ['gpt-5.2', 'gpt-5.2+', true],
     ['gpt-5.4-mini', 'gpt-5.2+', true],
     ['openai/gpt-5.4', 'gpt-5.2+', true],
+    ['gpt-5.5', 'gpt-5.5', true],
+    ['gpt-5.5-2026-07-01', 'gpt-5.5', true],
+    ['openai/gpt-5.6', 'gpt-5.6', true],
+    ['gpt-5.6-mini', 'gpt-5.6', true],
+    ['gpt-5.7', 'gpt-5.2+', true],
     ['gpt-5.10', 'gpt-5.2+', true],
     ['o3-mini', 'o-series', true],
     ['o4-mini-2025-04-16', 'o-series', true],
@@ -197,6 +225,12 @@ test('the capability map is keyed by the model id without a vendor prefix or var
     );
   }
   assert.deepEqual(modelCapabilities('gpt-6-luna').efforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  // gpt-6-astra and gpt-6.1-sol take no `none` (their pages and the reasoning guide, 2026-10-09).
+  assert.deepEqual(modelCapabilities('gpt-6-astra').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(modelCapabilities('gpt-6.1-sol').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  // gpt-5.5 and gpt-5.6 default to medium again; 5.6 adds max.
+  assert.deepEqual(modelCapabilities('gpt-5.5').efforts, ['none', 'low', 'medium', 'high', 'xhigh']);
+  assert.deepEqual(modelCapabilities('gpt-5.6').efforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
   // The efforts each gpt-5 generation takes: no none for the original
   // gpt-5 / -mini / -nano, xhigh from gpt-5.2 on.
   assert.deepEqual(modelCapabilities('gpt-5-mini').efforts, ['low', 'medium', 'high']);
@@ -213,6 +247,8 @@ test('the -pro models (Responses API only) are refused before anything starts, o
     ['gpt-5.4-pro-2026-03-05', 'gpt-5-pro'],
     ['openai/gpt-5.4-pro', 'gpt-5-pro'],
     ['gpt-5.2-pro', 'gpt-5-pro'],
+    ['gpt-5.5-pro', 'gpt-5-pro'],
+    ['gpt-5.6-pro', 'gpt-5-pro'],
     ['gpt-5-pro', 'gpt-5-pro'],
     ['o3-pro', 'o-series-pro'],
     ['o1-pro-2025-03-19', 'o-series-pro'],
@@ -276,6 +312,12 @@ test('normalizeReasoningEffort validates the effort per family and fails with th
   invalid('gpt-5.4-mini', 'max', /REASONING_EFFORT "max" is not supported by gpt-5\.4-mini \(the gpt-5\.2\+ family\); allowed: none, low, medium, high, xhigh\./);
   invalid('gpt-5.1', 'xhigh', /\(the gpt-5\.1 family\); allowed: none, low, medium, high\./);
   invalid('gpt-5-mini', 'none', /REASONING_EFFORT "none" is not supported by gpt-5-mini \(the gpt-5 family\); allowed: low, medium, high\./);
+  // Astra and 6.1 Sol: `none` is refused here, not by the API (a 400).
+  invalid('gpt-6-astra', 'none', /REASONING_EFFORT "none" is not supported by gpt-6-astra \(the gpt-6-astra family\); allowed: low, medium, high, xhigh, max\./);
+  invalid('openai/gpt-6.1-sol', 'none', /\(the gpt-6\.1-sol family\); allowed: low, medium, high, xhigh, max\./);
+  invalid('gpt-5.5', 'max', /\(the gpt-5\.5 family\); allowed: none, low, medium, high, xhigh\./);
+  assert.equal(normalizeReasoningEffort('gpt-5.6', 'max'), 'max');
+  assert.equal(normalizeReasoningEffort('gpt-6.1-sol', 'xhigh'), 'xhigh');
   invalid('o3-mini', 'none', /allowed: low, medium, high\./);
   invalid('acme-sql-1', 'max', /a model outside the capability map\); allowed: none, low, medium, high\./);
   assert.equal(normalizeReasoningEffort('gpt-5.4-mini', 'xhigh'), 'xhigh');
@@ -296,8 +338,13 @@ test('with no effort set, a family whose provider default reasons runs at it exp
     ['openai/gpt-6-sol', 'medium'],
     ['gpt-5-mini', 'medium'],
     ['o3', 'medium'],
+    ['gpt-6-astra', 'medium'],
+    ['openai/gpt-6.1-sol', 'medium'],
+    ['gpt-5.5', 'medium'],
+    ['gpt-5.6', 'medium'],
     ['gpt-5.1', null],
     ['gpt-5.4-mini', null],
+    ['gpt-5.7', null],
     ['gpt-4o-mini', null],
     ['acme-sql-1', null],
   ]) {
