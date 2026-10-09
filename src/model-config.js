@@ -19,10 +19,11 @@
 //   (gpt-5*-pro, o1-pro, o3-pro) are Responses-API-only: every entry point
 //   refuses them before anything starts (assertModelSupported).
 // - With no effort set, a family whose provider default reasons (gpt-6*,
-//   gpt-5 / -mini / -nano, the o-series: medium) runs at that default, sent
-//   and recorded explicitly, so a provider changing its default cannot change
-//   a run unseen and `medium` set or defaulted is the same run. A family whose
-//   default is `none` (gpt-5.1 and later) keeps the base request until an
+//   gpt-5 / -mini / -nano, gpt-5.5, gpt-5.6, the o-series: medium) runs at
+//   that default, sent and recorded explicitly, so a provider changing its
+//   default cannot change a run unseen and `medium` set or defaulted is the
+//   same run. A family whose default is `none` (gpt-5.1 and the gpt-5.2+
+//   family, gpt-5.5 and gpt-5.6 aside) keeps the base request until an
 //   effort is set.
 // - The reasoning effort (REASONING_EFFORT, or --reasoning-effort in npm run
 //   eval) is validated per family before anything is started: an unknown
@@ -67,12 +68,20 @@ const MAX_COMPLETION_TOKENS_LIMIT = 1_000_000;
 // accepts (null: no reasoning effort at all); `defaultEffort` is the effort
 // the provider applies when none is sent. gpt-6: verified on 2026-10-07
 // (developers.openai.com/api/docs/models/gpt-6-luna and gpt-6-sol: none, low,
-// medium (default), high, xhigh, max). gpt-5: the original gpt-5, -mini and
-// -nano take minimal (not offered here), low, medium (default) and high, and
-// no `none`; gpt-5.1 added `none` and made it the default; gpt-5.2 and later
-// add xhigh. The -chat models of gpt-5.x take no effort and stay outside the
-// map (the request they always had). A snapshot that differs needs its own
-// entry here.
+// medium (default), high, xhigh, max). gpt-6-astra and gpt-6.1-sol take no
+// `none` (low, medium, high, xhigh, max; the reasoning guide: `none` is a
+// 400 for Astra, "not supported" for 6.1 Sol), so they have their own
+// entries ahead of gpt-6*; 6.1 Sol defaults to medium, Astra's page states
+// no default, so medium (the gpt-6 default) is what a run sends. gpt-5: the
+// original gpt-5, -mini and -nano take minimal (not offered here), low,
+// medium (default) and high, and no `none`; gpt-5.1 added `none` and made
+// it the default; gpt-5.2 and later add xhigh. gpt-5.5 (none, low, medium,
+// high, xhigh) and gpt-5.6 (plus max) default to medium again, so each has
+// its own entry ahead of the gpt-5.2+ family. The gpt-5.5 / 5.6 / 6-astra /
+// 6.1-sol pages and the reasoning guide (developers.openai.com/api/docs/
+// guides/reasoning) were verified on 2026-10-09. The -chat models of gpt-5.x
+// take no effort and stay outside the map (the request they always had). A
+// snapshot that differs needs its own entry here.
 //
 // `unsupported` marks a family this pipeline cannot call at all, with why:
 // every entry point refuses it before anything starts (resolveModelConfig,
@@ -86,6 +95,22 @@ const CHAT_COMPLETIONS_ONLY = 'this pipeline sends Chat Completions requests wit
 export const MODEL_FAMILIES = Object.freeze([
   Object.freeze({ family: 'gpt-4o', label: 'gpt-4o*', pattern: /^gpt-4o(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
   Object.freeze({ family: 'gpt-4.1', label: 'gpt-4.1*', pattern: /^gpt-4\.1(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
+  Object.freeze({
+    family: 'gpt-6-astra',
+    label: 'gpt-6-astra*',
+    pattern: /^gpt-6-astra(?:-|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']),
+    defaultEffort: 'medium',
+  }),
+  Object.freeze({
+    family: 'gpt-6.1-sol',
+    label: 'gpt-6.1-sol*',
+    pattern: /^gpt-6\.1-sol(?:-|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']),
+    defaultEffort: 'medium',
+  }),
   Object.freeze({ family: 'gpt-6', label: 'gpt-6*', pattern: /^gpt-6(?:[.-]|$)/, reasoning: true, efforts: REASONING_EFFORTS, defaultEffort: 'medium' }),
   Object.freeze({
     family: 'gpt-5-pro',
@@ -97,8 +122,24 @@ export const MODEL_FAMILIES = Object.freeze([
     unsupported: `the gpt-5*-pro models are served only by the Responses API; ${CHAT_COMPLETIONS_ONLY}`,
   }),
   Object.freeze({
+    family: 'gpt-5.6',
+    label: 'gpt-5.6*',
+    pattern: /^gpt-5\.6(?:-(?!chat)|$)/,
+    reasoning: true,
+    efforts: REASONING_EFFORTS,
+    defaultEffort: 'medium',
+  }),
+  Object.freeze({
+    family: 'gpt-5.5',
+    label: 'gpt-5.5*',
+    pattern: /^gpt-5\.5(?:-(?!chat)|$)/,
+    reasoning: true,
+    efforts: Object.freeze(['none', 'low', 'medium', 'high', 'xhigh']),
+    defaultEffort: 'medium',
+  }),
+  Object.freeze({
     family: 'gpt-5.2+',
-    label: 'gpt-5.2* and later',
+    label: 'gpt-5.2* and later (gpt-5.5 and gpt-5.6 aside)',
     pattern: /^gpt-5\.(?:[2-9]|[1-9]\d+)(?:-(?!chat)|$)/,
     reasoning: true,
     efforts: Object.freeze(['none', 'low', 'medium', 'high', 'xhigh']),
@@ -215,7 +256,7 @@ export function assertModelSupported(model, { source = 'model', file = null } = 
 
 /**
  * The effort a run of `model` uses when none is set: its family's provider
- * default when that default reasons (medium for gpt-6*, gpt-5 / -mini /
+ * default when that default reasons (medium for gpt-6*, gpt-5.5, gpt-5.6, gpt-5 / -mini /
  * -nano and the o-series), sent and recorded like a set one; null for a
  * family whose default is `none` (gpt-5.1 and later keep the base request),
  * a non-reasoning family and a model outside the map.
