@@ -48,6 +48,10 @@ export function createDefaultRuntimeFactory(config) {
       clientOptions: { timeoutMs: config.openAi.timeoutMs, maxRetries: config.openAi.maxRetries },
       schemaScope: config.schemaScope,
       hintsVersion: config.hintsVersion ?? undefined,
+      // MODEL_NAME, REASONING_EFFORT & co. as the config read them.
+      model: config.model,
+      reasoningEffort: config.reasoningEffort ?? null,
+      completionSettings: config.completionSettings ?? undefined,
       trace: createBufferedTraceLogger({ enabled: false, pipeline: 'web-runtime' }),
     });
 }
@@ -323,7 +327,7 @@ function streamResultFrames(res, payload, includeDebug, cacheHit) {
 // was presented): say WHAT is wrong (by code) without the host:port, paths or
 // driver detail that raw messages carry. The raw message goes to the server log.
 const ANONYMOUS_INFRA_MESSAGES = {
-  OPENAI_NOT_CONFIGURED: 'OPENAI_API_KEY is not configured on the server.',
+  OPENAI_NOT_CONFIGURED: 'OPENAI_API_KEY (or OPENROUTER_API_KEY with an openrouter.ai OPENAI_BASE_URL) is not configured on the server.',
   DB_NOT_CONFIGURED: 'The database settings are incomplete on the server.',
   DB_SCHEMA_MISSING: 'The database is missing the expected demo tables.',
   ER_ACCESS_DENIED_ERROR: 'The database rejected the configured credentials.',
@@ -531,6 +535,9 @@ export function createApp({
         connection: runtime.connection,
         schema: runtime.schema,
         model: runtime.model,
+        // From the web config (REASONING_EFFORT & co.), never process.env.
+        reasoningEffort: config.reasoningEffort ?? null,
+        completionSettings: config.completionSettings ?? undefined,
         question,
         trace,
         includeInsights,
@@ -618,6 +625,7 @@ export function createApp({
       openAiConfigured: config.openAi.configured,
       dbConfigured: config.database.configured,
       model: config.model,
+      reasoningEffort: config.reasoningEffort ?? null,
       authRequired: config.authEnabled,
       debugAllowed: config.allowDebug,
       // The result cache and client cross-filter only engage for the demo

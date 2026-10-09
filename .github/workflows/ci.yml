@@ -100,9 +100,12 @@ jobs:
         run: node --test --test-concurrency=1 test/mariadb.integration.test.js test/eval-fixtures.integration.test.js test/eval-runner.integration.test.js
       - name: Offline evaluation (rescore the committed baseline; no LLM calls)
         # With a committed baseline, a guardrail, oracle or fixture change that
-        # makes its recorded SQL score significantly worse fails the job.
+        # makes its recorded SQL score significantly worse fails the job. The
+        # default baseline path comes from the runner itself (the repository's
+        # one default model, src/model-config.js, unless MODEL_NAME is set).
         run: |
-          if [ -f "eval/baselines/${MODEL_NAME:-gpt-4o-mini}.json" ]; then
+          baseline=$(node --input-type=module -e "import('./scripts/eval.js').then((eval_) => console.log(eval_.defaultBaselineForEnv(process.env)))")
+          if [ -f "$baseline" ]; then
             npm run eval -- --offline --gate
           else
             npm run eval -- --offline

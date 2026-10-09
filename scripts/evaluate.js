@@ -90,9 +90,11 @@ function sumDurations(attempts, step) {
  *   case whose signal fired before it finished is reported as 'aborted' (with
  *   whatever it recorded): a gold run or a scoring cut short is neither a
  *   broken gold nor a verdict.
- * - `schemaScope` (a scope name or config, src/schema-scope.js) and
- *   `hintsVersion` (src/hints-version.js) are passed to the product loop;
- *   omitted, the product loop reads SCHEMA_SCOPE & co. and HINTS_VERSION.
+ * - `schemaScope` (a scope name or config, src/schema-scope.js),
+ *   `hintsVersion` (src/hints-version.js), `reasoningEffort` and
+ *   `completionSettings` (src/model-config.js) are passed to the product
+ *   loop; omitted, the product loop reads SCHEMA_SCOPE & co., HINTS_VERSION,
+ *   REASONING_EFFORT and the endpoint settings.
  * - `dependencies.runQuestion` / `dependencies.scorePrediction` replace the
  *   product loop / oracle in tests.
  * - An abstain / clarify case (expected_behavior) has no gold: nothing is run
@@ -117,6 +119,8 @@ export async function evaluateQuestion({
   signal = null,
   schemaScope = undefined,
   hintsVersion = undefined,
+  reasoningEffort = undefined,
+  completionSettings = undefined,
   dependencies = {},
 }) {
   const { runQuestion = runOptimizedQuestion, scorePrediction = scoreAgainstGold } = dependencies;
@@ -208,6 +212,8 @@ export async function evaluateQuestion({
     signal,
     ...(schemaScope === undefined ? {} : { schemaScope }),
     ...(hintsVersion === undefined ? {} : { hintsVersion }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(completionSettings === undefined ? {} : { completionSettings }),
   });
   const questionMs = questionTimer.stop().durationMs;
   const attempts = extractAttempts(caseTrace.events);

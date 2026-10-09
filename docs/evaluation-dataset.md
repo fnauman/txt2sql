@@ -1271,7 +1271,10 @@ npm run eval -- --help                              # every flag
    run too. A failure stops the run with exit 2 before any LLM call;
    `--skip-verify` runs anyway, `--skip-controls` verifies the gold only.
 4. **The run** (needs `OPENAI_API_KEY`; `OPENAI_BASE_URL` for an
-   OpenAI-compatible endpoint; `MODEL_NAME` or `--model`). Every selected case
+   OpenAI-compatible endpoint; `MODEL_NAME` or `--model`, and for a reasoning
+   model `REASONING_EFFORT` or `--reasoning-effort`, checked per model family
+   before anything starts; the header line names both with their source and
+   the endpoint host, see "Models" in the root README). Every selected case
    goes through the product loop (`evaluateQuestion` -> `runOptimizedQuestion`)
    on `--concurrency` workers (default 4), each repetition under a deadline
    (`--case-timeout-ms`, default 120000) that covers the whole repetition:
@@ -1290,7 +1293,7 @@ npm run eval -- --help                              # every flag
 5. **Attribution, statistics, comparison, report.** Guardrail rejections are
    re-run on the fixtures, every repetition gets an outcome, and
    `report.json`, `report.md` and `trace.jsonl` are written to
-   `generated/runs/<timestamp>/<suite>/<model>/`.
+   `generated/runs/<timestamp>/<suite>/<model>[.<effort>]/`.
 
 The suite defaults to every dataset in `datasets/`, de-duplicated by case id
 and by identical question and gold scored the same way (same alternatives,
@@ -1324,7 +1327,9 @@ dev|holdout|all` (default all), `--case-id`, `--tag` (any of), `--intent`;
 (in a rescore too). `--fixtures` scores on a subset (it must include `seed`).
 Flags are checked strictly: an unknown flag, a flag missing its value or a
 stray argument stops with exit 2 before anything starts. A live run also
-checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price) before
+checks `OPENAI_API_KEY` (and, with `--budget-usd`, the model's price: a row
+in `src/pricing.js`, found without a vendor prefix, or a
+`MODEL_PRICING_OVERRIDES` entry; without one the run refuses to start) before
 the database is touched.
 
 `npm run benchmark` and `npm run evaluate` run the same runner with `--profile
@@ -1423,8 +1428,9 @@ rule).
 - **Cost, latency, retries, tokens** (every case, behaviour cases included;
   dev cases only while the holdout is hidden): total cost, cost per question
   and per correct answer, p50/p95 product-loop and LLM-call latency, retry
-  rate, prompt (cached) and completion tokens, the budget (always the whole
-  run's spend).
+  rate, prompt (cached) and completion tokens ("completion N (reasoning M)"
+  when a reasoning model reported reasoning tokens, which are part of the
+  completion tokens), the budget (always the whole run's spend).
 - **Verification**: fixture status, the kill rates per dataset, and the
   undecided, invalid and unscored negative controls (counts per dataset, ids
   below the table).
@@ -1433,9 +1439,12 @@ rule).
   hashes `metadata/semantic-layer.json` and its overlay
   `metadata/semantic-layer.hints-v2.json` together, and the overlay is named),
   the schema scope (requested and effective, the full-schema token estimate,
-  widen-on-demand), the hints version (`product.hintsVersion`), schema,
-  fixture, dataset and controls hashes, model, the LLM endpoint host (never
-  keys), Node and every runner flag. The comparison table shows both reports'
+  widen-on-demand), the hints version (`product.hintsVersion`), the model
+  settings (`product.model`, `product.modelSource`: `--model`, `MODEL_NAME`
+  or `default`, `recorded` in a rescore; `product.reasoningEffort` and its
+  source; `product.requestOptions`, the optimized request's options as sent
+  without the response format), schema, fixture, dataset and controls hashes,
+  model, the LLM endpoint host (never keys), Node and every runner flag. The comparison table shows both reports'
   schema scopes and hints versions (a report from before a setting reads "not
   recorded (before SCHEMA_SCOPE: retrieved, no widening)" or "not recorded
   (before HINTS_VERSION: 1)"), and so does the console when they differ.
@@ -1499,14 +1508,37 @@ report.md say when the recording ran another hints version;
 `HINTS_VERSION=1` re-judges a report from before the setting exactly as it
 ran.
 
+The model settings are the recording's, not today's (no LLM is called):
+report.md, `report.model` and `provenance.product` name the recorded model
+and effort (source `recorded`). The configured ones (`--model` /
+`MODEL_NAME`, `--reasoning-effort` / `REASONING_EFFORT`) only pick the default
+baseline to rescore, so the header calls them "configured", the console notes
+a recording of another model or effort, and `runner.flags` records them as
+`configuredModel`, `configuredReasoningEffort` and their sources.
+
 `--offline` runs the preflight, fixtures and verification, then rescores
-`eval/baselines/<model>.json` when it exists, or says there is none and exits 0
+`eval/baselines/<model>[.<effort>].json` when it exists, or says there is none and exits 0
 (exit 2 with `--gate`).
 
 ### Compare and gate
 
-`--compare <report.json>` (default: `eval/baselines/<model>.json` when present;
-`--no-baseline` turns that off) aligns cases by id. A case whose gold or
+`--compare <report.json>` (default: `eval/baselines/<model>[.<effort>].json`
+when present, with the effort when one is set or the model family has a
+reasoning default (`medium` for `gpt-6*`), and a `/` in the model id
+written `__`; an id that is not plain (plain: lower-case letters and digits
+with single `.` or `-` between them, in `/`-separated parts, not ending in
+`.<effort>`) is written sanitized plus `_` and the first 8 hex digits of its
+SHA-256, so ids that sanitize alike still get their own file; `--no-baseline`
+turns that off) aligns cases by id. When the two
+reports ran another model or reasoning effort the comparison says so
+(`modelChange`; a "Model change" line in report.md, a `model:` line on the
+console, and a note when the baseline is loaded): the paired test then
+measures the model change. Other request options with the same model and
+effort (`LLM_MAX_COMPLETION_TOKENS`, OpenRouter's `require_parameters`; the
+prompt version does not cover them) are flagged the same way when both
+reports record them (`modelChange.requestOptions`, a "Request options" row
+and a "Request change" line in report.md, a `request options:` console
+line). A case whose gold or
 scoring fingerprint changed is excluded and listed, as are cases one report
 did not count or whose majority outcome is a timeout; behaviour cases are not
 compared; new and removed cases are listed. Per paired case the verdict is the
@@ -1554,7 +1586,7 @@ Exit 2 wins over 1.
 
 ### Baselines
 
-The committed baseline for a model lives at `eval/baselines/<model>.json`: a
+The committed baseline for a model lives at `eval/baselines/<model>[.<effort>].json`: a
 **compact** report of the whole default suite (see `eval/baselines/README.md`).
 `npm run eval -- --repeat 3 --write-baseline` writes one from a clean tree,
 only when the run exits 0 with no case skipped by the budget; the run's own

@@ -14,8 +14,10 @@
 //     --repeat and an optional --budget-usd; or, with --rescore / --offline,
 //     re-judge a recorded report with zero LLM calls.
 //  5. Attribute every failure, compute case-level statistics, compare with
-//     the baseline (--compare, default eval/baselines/<model>.json) and write
-//     generated/runs/<timestamp>/<suite>/<model>/{report.json,report.md,trace.jsonl}.
+//     the baseline (--compare, default eval/baselines/<model>[.<effort>].json,
+//     `/` in the model id as `__`, a hash added for an id that is not plain:
+//     modelFileLabel) and write
+//     generated/runs/<timestamp>/<suite>/<model>[.<effort>]/{report.json,report.md,trace.jsonl}.
 //
 // Exit codes: 0 success; 2 harness/dataset/infrastructure failure (database,
 // fixtures, verification gates, gold errors, infra errors, provider outages or
@@ -58,7 +60,18 @@ import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../s
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
-import { calculateCost } from '../src/pricing.js';
+import { modelPriceCurrency } from '../src/pricing.js';
+import {
+  completionSettingsOf,
+  DEFAULT_MODEL,
+  describeModelConfig,
+  describeModelNotices,
+  describeReasoningEffort,
+  modelFileLabel,
+  modelLabel,
+  REASONING_EFFORTS,
+  resolveModelConfig,
+} from '../src/model-config.js';
 import { errorCodeOf, resolveMaxRetries } from '../src/query-service.js';
 import { createCliOutput, createTraceLogger, serializeError } from '../src/trace.js';
 import { evaluateQuestion } from './evaluate.js';
@@ -77,7 +90,7 @@ export const USAGE = `Usage: npm run eval -- [options]
 One command: database preflight (starts the docker-compose MariaDB if needed),
 fixture seeding, gold + controls verification, the evaluation run, attribution,
 statistics, baseline comparison, and report.json + report.md + trace.jsonl under
-generated/runs/<timestamp>/<suite>/<model>/.
+generated/runs/<timestamp>/<suite>/<model>[.<effort>]/.
 
 Suite (default: every dataset in datasets/, de-duplicated by case id and by
 identical question + gold):
@@ -87,7 +100,10 @@ identical question + gold):
   --split dev|holdout|all     cases without a split count as dev (default all)
   --case-id <id[,id]>  --tag <tag[,tag]>  --intent <intentId[,intentId]>
 Run:
-  --model <name>              default MODEL_NAME, else gpt-4o-mini
+  --model <name>              default MODEL_NAME, else ${DEFAULT_MODEL}
+  --reasoning-effort <v>      ${REASONING_EFFORTS.join('|')}, checked per model family (default
+                              REASONING_EFFORT; unset: the family's default, e.g. medium for
+                              gpt-6*, or none sent)
   --repeat N                  repetitions per case, all kept (default 1)
   --concurrency N             cases in flight (default ${DEFAULT_CONCURRENCY})
   --case-timeout-ms N         per-case deadline, 0 disables (default ${DEFAULT_CASE_TIMEOUT_MS})
@@ -103,13 +119,16 @@ Setup:
   --min-heldout-kill-rate 0   held-out kill-rate floor per dataset
   --refresh-schema            recompile generated/schema.json from models/
 Compare and gate:
-  --compare <report.json>     baseline to compare with (default eval/baselines/<model>.json when present)
+  --compare <report.json>     baseline to compare with (default eval/baselines/<model>[.<effort>].json
+                              when present; a "/" in the model id is written "__"; an id that is not
+                              plain (lower-case letters and digits, single "." or "-" between them, no
+                              trailing .<effort>) is sanitized and gets "_" plus a hash of the id)
   --no-baseline               do not compare with the default baseline
   --gate                      exit 1 when significantly worse than the baseline (McNemar p < 0.05)
   --min-accuracy X            with --gate: exit 1 when strict accuracy < X (exit 2 when
                               only abstain / clarify cases are selected: no accuracy)
   --write-baseline            also save a compact copy of report.json (what rescore, compare and gate
-                              read) as eval/baselines/<model>.json (only from a clean run of the
+                              read) as eval/baselines/<model>[.<effort>].json (only from a clean run of the
                               whole default suite on every fixture)
   --baseline-file <path>      with --write-baseline: save there instead (allows a filtered subset;
                               never inside eval/baselines/, which holds only full default baselines)
@@ -155,6 +174,7 @@ const VALUE_FLAGS = new Set([
   '--tag',
   '--intent',
   '--model',
+  '--reasoning-effort',
   '--repeat',
   '--concurrency',
   '--case-timeout-ms',
@@ -304,16 +324,33 @@ function parseNumber(argv, name, fallback, { min = 0, max = Number.POSITIVE_INFI
   return value;
 }
 
-function sanitizeSegment(value) {
-  return String(value || 'unknown').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+/**
+ * The default baseline of a model at a reasoning effort:
+ * eval/baselines/<model>[.<effort>].json, with `/` in the model id mapped to
+ * `__` (modelFileLabel): eval/baselines/gpt-4o-mini.json,
+ * eval/baselines/gpt-6-luna.low.json, eval/baselines/openai__gpt-6-luna.low.json;
+ * an id that is not plain gets a hash of itself (openai__gpt-6-luna-free_<hash>.json).
+ */
+export function defaultBaselinePath(model, reasoningEffort = null, baselinesDir = DEFAULT_BASELINES_DIR) {
+  return path.resolve(baselinesDir, `${modelFileLabel(model, reasoningEffort)}.json`);
 }
 
-export function defaultBaselinePath(model, baselinesDir = DEFAULT_BASELINES_DIR) {
-  return path.resolve(baselinesDir, `${sanitizeSegment(model)}.json`);
+/**
+ * The default baseline of a run configured by `env` alone (no flags), as the
+ * CI db job checks for it before an offline --gate.
+ */
+export function defaultBaselineForEnv(env = process.env) {
+  const config = resolveModelConfig({ env });
+  return defaultBaselinePath(config.model, config.reasoningEffort);
 }
 
-/** Parses the command line into run options (throws HarnessError on bad usage). */
-export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = process.env } = {}) {
+/**
+ * Parses the command line into run options (throws HarnessError on bad usage
+ * or an invalid model setting). `envFile` ({ path, vars }: the env file and
+ * the variables it set) only lets the header say where MODEL_NAME or
+ * REASONING_EFFORT came from.
+ */
+export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = process.env, envFile = null } = {}) {
   validateEvalArgv(argv);
   const profile = getOptionValue(argv, '--profile') || defaultProfile;
   if (!PROFILES.includes(profile)) {
@@ -337,6 +374,18 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   if (minAccuracy !== null && !gate) {
     throw usageError('--min-accuracy only applies with --gate.');
   }
+  // --model / MODEL_NAME / DEFAULT_MODEL and --reasoning-effort /
+  // REASONING_EFFORT (validated for the model), plus the endpoint settings.
+  let modelConfig;
+  try {
+    modelConfig = resolveModelConfig({
+      env,
+      flags: { model: getOptionValue(argv, '--model'), reasoningEffort: getOptionValue(argv, '--reasoning-effort') },
+      envFile,
+    });
+  } catch (error) {
+    throw new HarnessError(error.message, { code: error.code || 'INVALID_CONFIG', cause: error });
+  }
   const options = {
     profile,
     datasetsDir: path.resolve(getOptionValue(argv, '--datasets-dir') || DEFAULT_DATASETS_DIR),
@@ -346,7 +395,13 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     caseIds: parseList(getOptionValue(argv, '--case-id')),
     tags: parseList(getOptionValue(argv, '--tag')),
     intents: parseList(getOptionValue(argv, '--intent')),
-    model: getOptionValue(argv, '--model') || env.MODEL_NAME || 'gpt-4o-mini',
+    model: modelConfig.model,
+    modelSource: modelConfig.modelSource,
+    reasoningEffort: modelConfig.reasoningEffort,
+    reasoningEffortSource: modelConfig.reasoningEffortSource,
+    // The whole resolved configuration (endpoint settings, notices, the env
+    // file a setting came from); not recorded in runner.flags.
+    modelConfig,
     repeat: parseInteger(argv, '--repeat', 1, { min: 1, max: 100 }),
     concurrency: parseInteger(argv, '--concurrency', DEFAULT_CONCURRENCY, { min: 1, max: 64 }),
     caseTimeoutMs: parseInteger(argv, '--case-timeout-ms', DEFAULT_CASE_TIMEOUT_MS, { min: 0 }),
@@ -384,12 +439,14 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   if (options.baselineFile && !options.writeBaseline) {
     throw usageError('--baseline-file only applies with --write-baseline.');
   }
-  if (writesDefaultBaseline(options) && path.resolve(baselineTarget(options)) !== defaultBaselinePath(options.model)) {
-    // eval/baselines/<model>.json is what runs of <model> pair with: another
-    // name there would replace another model's baseline (or invent one).
+  if (writesDefaultBaseline(options) && path.resolve(baselineTarget(options)) !== defaultBaselinePath(options.model, options.reasoningEffort)) {
+    // eval/baselines/<model>[.<effort>].json is what runs of <model> at that
+    // effort pair with: another name there would replace another model's
+    // baseline (or invent one).
     throw usageError(
       `--baseline-file ${repoRelative(options.baselineFile)} is inside ${repoRelative(DEFAULT_BASELINES_DIR)}, which holds only each model's default baseline; ` +
-        `this run's model ${options.model} writes ${repoRelative(defaultBaselinePath(options.model))}. Save elsewhere, or run with --model matching the file name.`
+        `this run's model ${modelLabel(options.model, options.reasoningEffort)} writes ${repoRelative(defaultBaselinePath(options.model, options.reasoningEffort))}. ` +
+        'Save elsewhere, or run with --model (and --reasoning-effort) matching the file name.'
     );
   }
   if (writesDefaultBaseline(options)) {
@@ -409,9 +466,9 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   return options;
 }
 
-/** Where --write-baseline writes: --baseline-file, else eval/baselines/<model>.json. */
+/** Where --write-baseline writes: --baseline-file, else eval/baselines/<model>[.<effort>].json. */
 export function baselineTarget(options) {
-  return options.baselineFile || defaultBaselinePath(options.model);
+  return options.baselineFile || defaultBaselinePath(options.model, options.reasoningEffort);
 }
 
 /**
@@ -459,16 +516,29 @@ export function baselineSuiteRefusal(selection, defaultSelection) {
   return problems.length > 0 ? problems.join('; ') : null;
 }
 
+// A rescore runs the recording's model settings (provenance.product): the
+// configured ones only pick the default baseline to rescore, so its runner
+// block records them under names that do not read as the run's model.
+const RESCORE_MODEL_FLAG_NAMES = Object.freeze({
+  model: 'configuredModel',
+  modelSource: 'configuredModelSource',
+  reasoningEffort: 'configuredReasoningEffort',
+  reasoningEffortSource: 'configuredReasoningEffortSource',
+});
+
 /**
  * Every parsed option, as recorded in the report's runner block (none is a
- * secret; absolute paths are made repo-relative).
+ * secret; absolute paths are made repo-relative). The resolved model
+ * configuration is left out: its model and effort (with their sources) are
+ * options of their own, and the product block of the provenance records the
+ * request options. `rescore`: the model options are renamed configured*.
  */
-export function describeRunnerFlags(options) {
+export function describeRunnerFlags(options, { rescore = false } = {}) {
   const relative = (value) => (typeof value === 'string' && path.isAbsolute(value) ? repoRelative(value) : value);
   return Object.fromEntries(
     Object.entries(options)
-      .filter(([key]) => key !== 'argv')
-      .map(([key, value]) => [key, Array.isArray(value) ? value.map(relative) : relative(value)])
+      .filter(([key]) => key !== 'argv' && key !== 'modelConfig')
+      .map(([key, value]) => [(rescore && RESCORE_MODEL_FLAG_NAMES[key]) || key, Array.isArray(value) ? value.map(relative) : relative(value)])
   );
 }
 
@@ -897,10 +967,10 @@ export async function writeReport(report, { reportPath, cli, revealHoldout = fal
   return markdownPath;
 }
 
-async function loadBaseline(options, model, cli) {
+async function loadBaseline(options, model, cli, reasoningEffort = options.reasoningEffort ?? null) {
   let baselinePath = options.compare;
   if (!baselinePath && !options.noBaseline) {
-    const candidate = defaultBaselinePath(model);
+    const candidate = defaultBaselinePath(model, reasoningEffort);
     if (await fileExists(candidate)) {
       baselinePath = candidate;
     }
@@ -910,10 +980,27 @@ async function loadBaseline(options, model, cli) {
   }
   const report = await readBaselineReport(baselinePath);
   cli.log(`Baseline: ${baselinePath}`);
-  if (report.model && report.model !== model) {
-    cli.log(`  note: the baseline was run with ${report.model}, this run uses ${model}.`);
+  const note = baselineModelNote(report, model, reasoningEffort);
+  if (note) {
+    cli.log(note);
   }
   return { path: baselinePath, report };
+}
+
+/**
+ * The console note when a baseline ran another model or reasoning effort
+ * than this run (a report from before REASONING_EFFORT sent none); null when
+ * both match.
+ */
+export function baselineModelNote(report, model, reasoningEffort = null) {
+  const baselineEffort = report?.provenance?.product?.reasoningEffort ?? null;
+  if ((!report?.model || report.model === model) && baselineEffort === (reasoningEffort ?? null)) {
+    return null;
+  }
+  return (
+    `  note: the baseline was run with ${modelLabel(report?.model || 'an unrecorded model', baselineEffort)}, this run uses ${modelLabel(model, reasoningEffort)}: ` +
+    'the comparison measures the model change too.'
+  );
 }
 
 function finish(result, options, cli) {
@@ -953,7 +1040,7 @@ async function checkGateBaseline(options, cli) {
   if (!options.gate || options.compare || options.rescore) {
     return;
   }
-  const candidate = defaultBaselinePath(options.model);
+  const candidate = defaultBaselinePath(options.model, options.reasoningEffort);
   if (!options.noBaseline && (await fileExists(candidate))) {
     return;
   }
@@ -1043,25 +1130,55 @@ function createLiveClient(options) {
   } catch (error) {
     throw new HarnessError(
       error.code === 'OPENAI_NOT_CONFIGURED'
-        ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell). Use --offline or --rescore <report.json> to evaluate without LLM calls.'
+        ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell; OPENROUTER_API_KEY also works with an https://openrouter.ai OPENAI_BASE_URL). ' +
+          'Use --offline or --rescore <report.json> to evaluate without LLM calls.'
         : `Cannot create the OpenAI client: ${error.message}`,
       { code: error.code || 'OPENAI_NOT_CONFIGURED', cause: error }
     );
   }
-  if (options.budgetUsd != null && calculateCost(options.model, { prompt_tokens: 1, completion_tokens: 1 }) === null) {
-    throw new HarnessError(
-      `--budget-usd needs a price for model "${options.model}" (src/pricing.js or MODEL_PRICING_OVERRIDES); without it the cost cannot be tracked.`,
-      { code: 'NO_PRICING' }
-    );
+  const pricingRefusal = budgetPricingRefusal(options);
+  if (pricingRefusal) {
+    throw new HarnessError(pricingRefusal, { code: 'NO_PRICING' });
   }
   return client;
 }
 
-async function runLive({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
-  const model = options.model;
+/**
+ * Why a live run with --budget-usd must not start (null when it may): the
+ * model has no price (a row in src/pricing.js, found without a vendor prefix,
+ * or a MODEL_PRICING_OVERRIDES entry), so its spend, and the budget, cannot
+ * be tracked; or its price is in another currency (an override's `currency`),
+ * which the pool would add to the USD total as if it were dollars. A
+ * provider-reported cost only arrives after a call.
+ */
+export function budgetPricingRefusal(options) {
+  if (options.budgetUsd == null) {
+    return null;
+  }
+  const currency = modelPriceCurrency(options.model);
+  if (currency === null) {
+    return (
+      `--budget-usd needs a price for model "${options.model}" (src/pricing.js, or MODEL_PRICING_OVERRIDES with inputPerMillion and outputPerMillion); ` +
+      'without it the budget cannot be enforced, so the run does not start.'
+    );
+  }
+  if (currency !== 'USD') {
+    return (
+      `--budget-usd is a cap in USD, but model "${options.model}" is priced in ${currency} (MODEL_PRICING_OVERRIDES); ` +
+      'price it in USD, or run without --budget-usd.'
+    );
+  }
+  return null;
+}
+
+async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification, client, signals = process }) {
+  const model = modelConfig.model;
+  const { reasoningEffort } = modelConfig;
+  const completionSettings = completionSettingsOf(modelConfig);
   const maxRetries = resolveMaxRetries();
   const statementTimeoutMs = resolveStatementTimeoutMs();
-  const runPaths = createBenchmarkRunPaths({ datasetName: selection.name, model, outputDir: options.outputDir, traceDir: options.traceDir });
+  // generated/runs/<timestamp>/<suite>/<model>[.<effort>]/
+  const runPaths = createBenchmarkRunPaths({ datasetName: selection.name, model: modelFileLabel(model, reasoningEffort), outputDir: options.outputDir, traceDir: options.traceDir });
   const reportPath = options.resultsFile || runPaths.reportPath;
   const tracePath = options.traceFile || runPaths.tracePath;
   const runner = {
@@ -1084,13 +1201,20 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
     datasets: selection.datasets,
     controlsFiles: (controlsIndex?.files || []).map((name) => path.join(options.controlsDir, name)),
     model,
+    modelConfig: {
+      model,
+      modelSource: modelConfig.modelSource,
+      reasoningEffort,
+      reasoningEffortSource: modelConfig.reasoningEffortSource,
+      completionSettings,
+    },
     runner,
     schemaScope,
     hintsVersion,
   });
   const suite = describeSuite(selection, { repoRelative });
   // Read the baseline before spending anything: a broken file fails fast.
-  const baseline = await loadBaseline(options, model, cli);
+  const baseline = await loadBaseline(options, model, cli, reasoningEffort);
   const trace = await createTraceLogger({
     enabled: true,
     logToStdout: options.traceToStdout,
@@ -1100,6 +1224,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
   });
   await trace.emit('run.started', {
     model,
+    reasoningEffort,
     argv: options.argv || [],
     suite,
     runner,
@@ -1111,7 +1236,8 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
 
   const entries = selection.entries;
   cli.log(
-    `\nRunning ${entries.length} case(s) × ${options.repeat} repetition(s) with ${model} on ${options.concurrency} worker(s); ` +
+    `\nRunning ${entries.length} case(s) × ${options.repeat} repetition(s) with ${model} (reasoning effort ${describeReasoningEffort(reasoningEffort)}) ` +
+      `on ${options.concurrency} worker(s); ` +
       `case deadline ${options.caseTimeoutMs ? `${options.caseTimeoutMs} ms` : 'off'}; budget ${options.budgetUsd != null ? `$${options.budgetUsd}` : 'none'}; ` +
       `retries ${maxRetries}; statement timeout ${statementTimeoutMs} ms.`
   );
@@ -1132,6 +1258,8 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
           connections,
           schema,
           model,
+          reasoningEffort,
+          completionSettings,
           testCase,
           caseIndex: caseIndex + 1,
           datasetName: entries[caseIndex].datasets[0],
@@ -1224,10 +1352,25 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, select
   }
 }
 
-async function runRescore({ options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification }) {
+/**
+ * The console note of a rescore whose recording ran other model settings
+ * than the configured ones (a rescore keeps the recording's; the configured
+ * ones only picked the default baseline to rescore); null when they match.
+ */
+export function rescoreModelNote(recorded, configured) {
+  if (recorded.model === configured.model && (recorded.reasoningEffort ?? null) === (configured.reasoningEffort ?? null)) {
+    return null;
+  }
+  return (
+    `  note: the recording ran ${modelLabel(recorded.model, recorded.reasoningEffort ?? null)}, and a rescore keeps its model settings; ` +
+    `the configured ${modelLabel(configured.model, configured.reasoningEffort ?? null)} is not used.`
+  );
+}
+
+async function runRescore({ options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification }) {
   let sourcePath = options.rescore;
   if (!sourcePath) {
-    const candidate = defaultBaselinePath(options.model);
+    const candidate = defaultBaselinePath(options.model, options.reasoningEffort);
     if (!(await fileExists(candidate))) {
       if (options.gate) {
         throw new HarnessError(`--offline --gate needs a baseline to rescore, and there is none at ${repoRelative(candidate)}.`, { code: 'NO_BASELINE' });
@@ -1247,6 +1390,16 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
     throw new HarnessError(`${sourcePath} ${compactProblem}.`, { code: 'REPORT_INVALID' });
   }
   const model = recorded.model || options.model;
+  // A rescore makes no LLM call: the model settings are the recording's
+  // (null effort for a report from before REASONING_EFFORT).
+  const recordedProduct = recorded.provenance?.product || {};
+  const recordedModelConfig = {
+    model,
+    modelSource: 'recorded',
+    reasoningEffort: recordedProduct.reasoningEffort ?? null,
+    reasoningEffortSource: 'recorded',
+    requestOptions: recordedProduct.requestOptions ?? null,
+  };
   const statementTimeoutMs = resolveStatementTimeoutMs();
   const currentCases = new Map(selection.entries.map((entry) => [entry.testCase.id, entry.testCase]));
   // The selection filters pick which recorded cases are rescored (judged on
@@ -1281,6 +1434,10 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
   const recordedScope = source.provenance?.product?.schemaScope || null;
   const recordedHintsVersion = source.provenance?.product?.hintsVersion ?? null;
   cli.log(`\nRescoring ${source.results.length} case(s) from ${sourcePath} with zero LLM calls...`);
+  const modelNote = rescoreModelNote(recordedModelConfig, modelConfig);
+  if (modelNote) {
+    cli.log(modelNote);
+  }
   const scopeNote = rescoreSchemaScopeNote(recordedScope, validate.schemaScope);
   if (scopeNote) {
     cli.log(scopeNote);
@@ -1337,7 +1494,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
     goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS,
     fixtures: connections.map((entry) => entry.name),
     verify: options.verify,
-    flags: describeRunnerFlags(options),
+    flags: describeRunnerFlags(options, { rescore: true }),
   };
   const provenance = await collectProvenance({
     schema,
@@ -1346,6 +1503,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
     datasets: selection.datasets,
     controlsFiles: (controlsIndex?.files || []).map((name) => path.join(options.controlsDir, name)),
     model,
+    modelConfig: recordedModelConfig,
     runner,
     schemaScope,
     hintsVersion,
@@ -1361,7 +1519,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
   );
   // Today's suite (with the same filters): what the gate must have checked.
   comparison.suiteCoverage = describeSuiteCoverage(describeFilters(filters) ? filterSuiteEntries(selection.entries, filters) : selection.entries, comparison);
-  const runPaths = createBenchmarkRunPaths({ datasetName: `${suite.name}-rescore`, model, outputDir: options.outputDir });
+  const runPaths = createBenchmarkRunPaths({ datasetName: `${suite.name}-rescore`, model: modelFileLabel(model, recordedModelConfig.reasoningEffort), outputDir: options.outputDir });
   const reportPath = options.resultsFile || runPaths.reportPath;
   const report = buildReport({
     mode: 'rescore',
@@ -1386,6 +1544,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
       promptVersion: source.provenance?.promptVersion || null,
       schemaScope: recordedScope,
       hintsVersion: recordedHintsVersion,
+      reasoningEffort: recordedModelConfig.reasoningEffort,
       reportVersion: source.reportVersion || 1,
       compact: isCompactReport(source),
     },
@@ -1395,6 +1554,21 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, sel
   return finish(computeExitCode(report, options), options, cli);
 }
 
+/**
+ * The run's resolved model configuration: parseEvalArgs's, or (options built
+ * another way) resolved from the options' model and effort and the env.
+ */
+function runModelConfig(options, env = process.env) {
+  if (options.modelConfig) {
+    return options.modelConfig;
+  }
+  try {
+    return resolveModelConfig({ env, flags: { model: options.model, reasoningEffort: options.reasoningEffort } });
+  } catch (error) {
+    throw new HarnessError(error.message, { code: error.code || 'INVALID_CONFIG', cause: error });
+  }
+}
+
 /** Runs the evaluation for parsed options; returns the exit code. */
 export async function runEval(options, { cli = createCliOutput({ traceToStdout: options.traceToStdout }), env = process.env } = {}) {
   const fixtures = resolveFixtures(options.fixtureNames);
@@ -1402,10 +1576,18 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
     throw usageError(`--fixtures must include the primary fixture "${PRIMARY_FIXTURE.name}" (the product loop runs there).`);
   }
   const rescoreMode = Boolean(options.rescore || options.offline);
+  const modelConfig = runModelConfig(options, env);
+  // The model and the effort with where each came from, and the endpoint:
+  // a MODEL_NAME pinned by an env file is never used silently. A rescore
+  // runs the recording's model settings (it says so when they differ): the
+  // configured ones only pick the default baseline.
   cli.log(
-    `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): model ${options.model}; ` +
+    `txt2sql eval (${options.profile} profile${rescoreMode ? ', no LLM calls' : ''}): ${rescoreMode ? 'configured ' : ''}${describeModelConfig(modelConfig)}; ` +
       `fixtures ${fixtures.map((fixture) => fixture.name).join(', ')}`
   );
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
+  }
   // Configuration problems fail before anything is started, seeded or spent.
   await checkGateBaseline(options, cli);
   let schemaScope;
@@ -1546,12 +1728,14 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
       cli.log('Verify: skipped.');
     }
 
-    const context = { options, cli, schema, schemaScope, hintsVersion, selection, connections, fixtureStatus, controlsIndex, verification, client };
+    const context = { options, cli, schema, schemaScope, hintsVersion, modelConfig, selection, connections, fixtureStatus, controlsIndex, verification, client };
     return rescoreMode ? await runRescore(context) : await runLive(context);
   } finally {
     await closeFixtureConnections(connections);
   }
 }
+
+const MODEL_ENV_VARS = ['MODEL_NAME', 'REASONING_EFFORT'];
 
 export async function main(argv = process.argv.slice(2), { profile = 'eval' } = {}) {
   if (hasOptionFlag(argv, '--help')) {
@@ -1560,8 +1744,12 @@ export async function main(argv = process.argv.slice(2), { profile = 'eval' } = 
   }
   let cli = createCliOutput({ traceToStdout: hasOptionFlag(argv, '--trace') });
   try {
-    await loadEnvironment(argv);
-    const options = parseEvalArgs(argv, { profile, env: process.env });
+    // Which model settings the env file (not the shell) supplied, so the
+    // header can say so (the file never overrides a variable already set).
+    const before = Object.fromEntries(MODEL_ENV_VARS.map((name) => [name, process.env[name]]));
+    const envInfo = await loadEnvironment(argv);
+    const fromFile = envInfo.loaded ? MODEL_ENV_VARS.filter((name) => before[name] === undefined && process.env[name] !== undefined) : [];
+    const options = parseEvalArgs(argv, { profile, env: process.env, envFile: fromFile.length > 0 ? { path: envInfo.path, vars: fromFile } : null });
     cli = createCliOutput({ traceToStdout: options.traceToStdout });
     return await runEval(options, { cli });
   } catch (error) {

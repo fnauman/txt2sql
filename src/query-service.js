@@ -20,6 +20,7 @@ import {
 import { normalizeHintsVersion, resolveHintsVersion } from './hints-version.js';
 import { normalizeSchemaScopeConfig, resolveSchemaScopeConfig } from './schema-scope.js';
 import { resolveMasterDataCandidates } from './master-data-resolver.js';
+import { assertModelSupported, defaultReasoningEffort, normalizeReasoningEffort, resolveCompletionSettings, resolveModelName } from './model-config.js';
 import { mergeCosts, mergeUsage } from './pricing.js';
 import { clearSemanticLayerCache } from './semantic-layer.js';
 import { createTimer, serializeError } from './trace.js';
@@ -291,6 +292,30 @@ function createSuccessResult({ question, questionIndex, sql, rawRows, response, 
   };
 }
 
+/**
+ * The model settings of a run: the caller's, else MODEL_NAME (DEFAULT_MODEL),
+ * REASONING_EFFORT and the endpoint settings (OPENAI_BASE_URL,
+ * OPENROUTER_REQUIRE_PARAMETERS, LLM_MAX_COMPLETION_TOKENS) from the env.
+ * `reasoningEffort` null means none set (the env is not read); either way the
+ * effort is validated for the model, so a bad one fails before any work, and
+ * with none set the model family's default effort applies
+ * (defaultReasoningEffort: medium for gpt-6*, null for gpt-4o-mini).
+ */
+export function resolveRunModelSettings({ model = undefined, reasoningEffort = undefined, completionSettings = undefined } = {}, env = process.env) {
+  const resolvedModel = model ?? resolveModelName(env).model;
+  const modelSource = model === undefined || model === null ? resolveModelName(env).source : 'model';
+  assertModelSupported(resolvedModel, { source: modelSource === 'default' ? 'the default model' : modelSource });
+  const fromEnv = reasoningEffort === undefined;
+  return {
+    model: resolvedModel,
+    reasoningEffort:
+      normalizeReasoningEffort(resolvedModel, fromEnv ? env.REASONING_EFFORT : reasoningEffort, {
+        source: fromEnv ? 'REASONING_EFFORT' : 'reasoningEffort',
+      }) ?? defaultReasoningEffort(resolvedModel),
+    completionSettings: completionSettings ?? resolveCompletionSettings(env),
+  };
+}
+
 export async function loadOptimizedQueryRuntime({
   refreshSchema = false,
   modelsDir = DEFAULT_MODELS_DIR,
@@ -300,8 +325,17 @@ export async function loadOptimizedQueryRuntime({
   clientOptions = {},
   schemaScope = undefined,
   hintsVersion = undefined,
+  model: requestedModel = undefined,
+  reasoningEffort: requestedReasoningEffort = undefined,
+  completionSettings: requestedCompletionSettings = undefined,
 } = {}) {
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  // The caller's model settings (the web server's config), else MODEL_NAME,
+  // REASONING_EFFORT & co. from the env; a bad effort fails here.
+  const { model, reasoningEffort, completionSettings } = resolveRunModelSettings({
+    model: requestedModel,
+    reasoningEffort: requestedReasoningEffort,
+    completionSettings: requestedCompletionSettings,
+  });
   const effectiveConnectionLimit = connectionLimit ?? resolveDbConnectionLimit();
   // SCHEMA_SCOPE / SCHEMA_FULL_MAX_TOKENS / SCHEMA_WIDEN_ON_DEMAND and
   // HINTS_VERSION unless the caller (the web server's config) passes its own;
@@ -315,6 +349,7 @@ export async function loadOptimizedQueryRuntime({
   const client = createOpenAiClient(clientOptions);
   await trace.emit('openai.client_ready', {
     model,
+    reasoningEffort,
     openAiBaseUrl: process.env.OPENAI_BASE_URL || null,
   });
 
@@ -348,6 +383,9 @@ export async function loadOptimizedQueryRuntime({
   let closePromise = null;
   return {
     model,
+    // The effort and endpoint settings to pass to runOptimizedQuestion.
+    reasoningEffort,
+    completionSettings,
     schema,
     client,
     connection,
@@ -394,7 +432,9 @@ export async function runOptimizedQuestion({
   client,
   connection,
   schema,
-  model = process.env.MODEL_NAME || 'gpt-4o-mini',
+  model = undefined,
+  reasoningEffort = undefined,
+  completionSettings = undefined,
   question,
   questionIndex = 1,
   trace = createNoopTraceLogger(),
@@ -425,6 +465,10 @@ export async function runOptimizedQuestion({
 
   const effectiveMaxRetries = maxRetries ?? resolveMaxRetries();
   assertNonNegativeInteger('maxRetries', effectiveMaxRetries);
+  // Likewise the model (MODEL_NAME, else DEFAULT_MODEL), its reasoning effort
+  // (REASONING_EFFORT, validated for the model) and the endpoint settings.
+  const runModel = resolveRunModelSettings({ model, reasoningEffort, completionSettings });
+  const llmModelConfig = { ...runModel.completionSettings, reasoningEffort: runModel.reasoningEffort };
   // Like maxRetries: the caller's setting, else SCHEMA_SCOPE & co. from the env.
   const schemaScopeConfig = schemaScope === undefined ? resolveSchemaScopeConfig() : normalizeSchemaScopeConfig(schemaScope);
   // Likewise HINTS_VERSION (src/hints-version.js).
@@ -611,10 +655,11 @@ export async function runOptimizedQuestion({
     try {
       response = await generateOptimizedResponse({
         client,
-        model,
+        model: runModel.model,
         prompt,
         retryContext,
         signal,
+        modelConfig: llmModelConfig,
       });
     } catch (error) {
       lastError = error;

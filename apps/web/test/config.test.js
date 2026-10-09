@@ -213,3 +213,41 @@ test('loadWebConfig reads the schema scope with the shared resolver and reports 
       error.problems.some((problem) => /SCHEMA_FULL_MAX_TOKENS must be an integer/.test(problem))
   );
 });
+
+test('loadWebConfig reads the model, its reasoning effort and the endpoint with the shared resolver; the startup line shows them', () => {
+  const defaults = loadWebConfig({});
+  assert.deepEqual([defaults.model, defaults.modelSource, defaults.reasoningEffort, defaults.reasoningEffortSource], ['gpt-4o-mini', 'default', null, 'default']);
+  assert.deepEqual({ ...defaults.completionSettings }, { baseUrlHost: 'api.openai.com', isOpenRouter: false, requireParameters: true, maxCompletionTokens: 16000 });
+  assert.match(describeWebConfig(defaults), /^model=gpt-4o-mini\(default\) reasoningEffort=unset\(default\) endpoint=api\.openai\.com auth=off /);
+
+  const luna = loadWebConfig({ MODEL_NAME: 'gpt-6-luna', REASONING_EFFORT: 'low', LLM_MAX_COMPLETION_TOKENS: '20000' });
+  assert.deepEqual([luna.model, luna.modelSource, luna.reasoningEffort, luna.reasoningEffortSource], ['gpt-6-luna', 'MODEL_NAME', 'low', 'REASONING_EFFORT']);
+  assert.equal(luna.completionSettings.maxCompletionTokens, 20000);
+  assert.ok(Object.isFrozen(luna.completionSettings));
+  assert.match(describeWebConfig(luna), /^model=gpt-6-luna\(MODEL_NAME\) reasoningEffort=low\(REASONING_EFFORT\) endpoint=api\.openai\.com /);
+  // No effort set: gpt-6's default effort (medium), recorded like a set one;
+  // gpt-5.1 and later default to none and keep the base request (unset).
+  const lunaDefault = loadWebConfig({ MODEL_NAME: 'gpt-6-luna' });
+  assert.deepEqual([lunaDefault.reasoningEffort, lunaDefault.reasoningEffortSource], ['medium', 'default']);
+  assert.match(describeWebConfig(lunaDefault), /reasoningEffort=medium\(default\)/);
+  assert.match(describeWebConfig(loadWebConfig({ MODEL_NAME: 'gpt-5.4-mini' })), /reasoningEffort=unset\(default\)/);
+
+  const openRouter = loadWebConfig({ MODEL_NAME: 'openai/gpt-6-luna', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENROUTER_REQUIRE_PARAMETERS: '0' });
+  assert.equal(openRouter.completionSettings.isOpenRouter, true);
+  assert.match(describeWebConfig(openRouter), / endpoint=openrouter\.ai\(openrouter,requireParameters=off\) /);
+  assert.deepEqual([...openRouter.modelNotices], []);
+  // Startup notes: an OPENAI_API_KEY that, next to OPENROUTER_API_KEY, goes to OpenRouter.
+  const bothKeys = loadWebConfig({ OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENAI_API_KEY: 'o', OPENROUTER_API_KEY: 'k' });
+  assert.deepEqual([...bothKeys.modelNotices], [
+    'OPENAI_API_KEY and OPENROUTER_API_KEY are both set: OPENAI_API_KEY is the key sent to openrouter.ai (unset OPENAI_API_KEY to use OPENROUTER_API_KEY).',
+  ]);
+
+  // A bad effort is one more startup problem, reported with the rest.
+  assert.throws(
+    () => loadWebConfig({ MODEL_NAME: 'gpt-4o-mini', REASONING_EFFORT: 'low', HINTS_VERSION: 'v2' }),
+    (error) =>
+      error instanceof WebConfigError &&
+      error.problems.length === 2 &&
+      error.problems.some((problem) => /REASONING_EFFORT "low" does not apply to gpt-4o-mini/.test(problem))
+  );
+});

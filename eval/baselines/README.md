@@ -1,7 +1,18 @@
 # Evaluation baselines
 
-`npm run eval` compares every run with `eval/baselines/<model>.json` when that
-file exists (for example `gpt-4o-mini.json`), and `npm run eval -- --offline`
+`npm run eval` compares every run with `eval/baselines/<model>[.<effort>].json`
+when that file exists (for example `gpt-4o-mini.json`; a reasoning model run at
+an effort pairs with its own file, e.g. `gpt-6-luna.low.json`, also at its
+family's default effort when none is set, e.g. `gpt-6-luna.medium.json`, and a
+`/` in the model id is written `__`, e.g. `openai__gpt-6-luna.low.json`. That
+is the whole rule for a plain id: lower-case letters and digits with single
+`.` or `-` between them, in `/`-separated parts, not ending in `.<effort>`. Any
+other id is written sanitized (characters outside letters, digits, `.` and `-`
+as `-`) plus `_` and the first 8 hex digits of its SHA-256, e.g.
+`openai__gpt-6-luna-free_<hash>.json` for `openai/gpt-6-luna:free` (also
+`a--b`, `gpt-6-luna.low` as a model id, or an upper-case id), so ids that
+sanitize alike still get their own file), and
+`npm run eval -- --offline`
 (the CI `db` job) rescores it with no LLM calls. The committed baseline is
 `gpt-4o-mini.json` (gpt-4o-mini, the whole 404-case suite with the fresh
 holdout, 3 repetitions, full-schema prompting via the default

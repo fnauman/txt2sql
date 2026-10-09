@@ -16,6 +16,7 @@ import {
 } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
+import { completionSettingsOf, DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 import { resolveMaxRetries, runOptimizedQuestion } from '../src/query-service.js';
@@ -29,7 +30,8 @@ ${ENV_USAGE}
 Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).
 Schema scope: SCHEMA_SCOPE=auto|full|retrieved (default auto), SCHEMA_FULL_MAX_TOKENS (default 8000),
 SCHEMA_WIDEN_ON_DEMAND (default: on for auto, off for an explicit retrieved).
-Hints version: HINTS_VERSION=1|2 (default 2; 1 is the prompt before hints v2).`;
+Hints version: HINTS_VERSION=1|2 (default 2; 1 is the prompt before hints v2).
+Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family).`;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -58,13 +60,17 @@ async function main() {
   });
   const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const modelConfig = resolveModelConfig({ env: process.env });
+  const { model, reasoningEffort } = modelConfig;
   const questions = customQuestion ? [customQuestion] : DEFAULT_OPTIMIZED_QUESTIONS;
 
   await trace.emit('run.started', {
     argv,
     environment: envInfo,
     model,
+    modelSource: modelConfig.modelSource,
+    reasoningEffort,
+    reasoningEffortSource: modelConfig.reasoningEffortSource,
     questionCount: questions.length,
     refreshSchema,
     modelsDir: MODELS_DIR,
@@ -139,7 +145,10 @@ async function main() {
   });
   await reportQueryUserPrivileges(connection);
 
-  cli.log(`Model: ${model}`);
+  cli.log(`Model: ${describeModelConfig(modelConfig)}`);
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
+  }
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);
   cli.log(`Schema scope: ${describeSchemaScope(effectiveSchemaScope)}`);
@@ -156,6 +165,8 @@ async function main() {
         connection,
         schema,
         model,
+        reasoningEffort,
+        completionSettings: completionSettingsOf(modelConfig),
         question,
         questionIndex: index + 1,
         trace,

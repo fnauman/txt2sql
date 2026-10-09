@@ -10,6 +10,7 @@ is the protocol on top of it.
 |---|---|---|---|
 | 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | complete — adopted |
 | 02 | [Hints v2](02-hints-v2.md) | `HINTS_VERSION` (1 → 2: de-poisoned rules, temporal resolution, semantic layer) | complete — adopted |
+| 03 | [Models](03-models.md) | `MODEL_NAME` / `REASONING_EFFORT` (gpt-4o-mini → gpt-6-luna at low / medium) | pre-registered — not yet run |
 
 ## How an experiment is run
 
@@ -19,7 +20,11 @@ is the protocol on top of it.
    the old value must give the baseline's prompt version in provenance and,
    rescored, the baseline's numbers exactly. Everything else stays fixed: the
    model (`MODEL_NAME`), the datasets and their gold, the fixtures, the
-   semantic layer, the retry budget, the statement timeout.
+   semantic layer, the retry budget, the statement timeout. A model
+   experiment changes `MODEL_NAME` / `REASONING_EFFORT` instead: the
+   baseline's model keeps its request byte for byte
+   (`test/model-requests.test.js`), and the run header must name the model and
+   the effort with their source.
 2. **Offline first, for $0.** Before any paid call:
    - prompt size and cache layout per arm: `npm run measure-prompt-cache --
      --suite` (characters, estimated tokens, distinct cacheable prefixes);
@@ -38,7 +43,7 @@ is the protocol on top of it.
    hypothesis, the arms and the decision rule (what the paired holdout test
    of step 4 must show for the setting to be kept). Then
    `npm run eval -- --repeat 3` with the new setting. A live run compares
-   itself with `eval/baselines/<model>.json` automatically (`--compare
+   itself with `eval/baselines/<model>[.<effort>].json` automatically (`--compare
    <report.json>` for another baseline): cases are paired by id (a case whose
    gold or scoring changed is excluded and listed). Add `--budget-usd` as a
    cap.

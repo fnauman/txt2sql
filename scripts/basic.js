@@ -17,6 +17,7 @@ import {
   resolveStatementTimeoutMs,
   validateReadOnlySql,
 } from '../src/pipeline.js';
+import { DEFAULT_MODEL, describeModelConfig, describeModelNotices, resolveModelConfig } from '../src/model-config.js';
 import { formatUsageAndCost, mergeCosts, mergeUsage } from '../src/pricing.js';
 import { createCliOutput, createTimer, createTraceLogger, resolveTraceOptions, serializeError } from '../src/trace.js';
 
@@ -26,6 +27,7 @@ const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
 const USAGE = `Usage: npm run basic -- [question] [--refresh-schema] [--trace] [--trace-file <path>]
 ${ENV_USAGE}
+Model: MODEL_NAME (default ${DEFAULT_MODEL}); REASONING_EFFORT for a reasoning model (none|low|medium|high|xhigh|max, per family).
 Generated SQL runs with QUERY_STATEMENT_TIMEOUT_MS (default 8000 ms; 0 disables).`;
 
 async function main() {
@@ -52,13 +54,17 @@ async function main() {
   });
   const positional = getPositionalArgs(argv, [...ENV_OPTIONS_WITH_VALUES, '--trace-file']);
   const customQuestion = positional.join(' ').trim();
-  const model = process.env.MODEL_NAME || 'gpt-4o-mini';
+  const modelConfig = resolveModelConfig({ env: process.env });
+  const { model, reasoningEffort } = modelConfig;
   const questions = customQuestion ? [customQuestion] : DEFAULT_BASIC_QUESTIONS;
 
   await trace.emit('run.started', {
     argv,
     environment: envInfo,
     model,
+    modelSource: modelConfig.modelSource,
+    reasoningEffort,
+    reasoningEffortSource: modelConfig.reasoningEffortSource,
     questionCount: questions.length,
     refreshSchema,
     modelsDir: MODELS_DIR,
@@ -131,7 +137,10 @@ async function main() {
 
   const allowedTables = schema.tables.map((table) => table.tableName);
 
-  cli.log(`Model: ${model}`);
+  cli.log(`Model: ${describeModelConfig(modelConfig)}`);
+  for (const line of describeModelNotices(modelConfig)) {
+    cli.log(line);
+  }
   cli.log(`Schema file: ${SCHEMA_PATH}`);
   cli.log(`In-scope tables: ${allowedTables.join(', ')}`);
   cli.log(`Environment: ${envInfo.path || 'not found'}`);
@@ -170,7 +179,7 @@ async function main() {
 
         const llmTimer = createTimer();
         try {
-          generated = await generateBasicSql({ client, model, prompt });
+          generated = await generateBasicSql({ client, model, prompt, modelConfig });
         } catch (error) {
           // A truncated/refused completion (LlmResponseError) was still billed;
           // keep the run totals honest.

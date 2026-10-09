@@ -15,6 +15,12 @@
 // Abstain / clarify (behavior) cases are skipped: they never count in strict
 // accuracy.
 //
+// A different model or reasoning effort on the two sides is flagged
+// (`modelChange`): the paired test then measures the model change, not (only)
+// a product change. So are different request options when both sides record
+// them (LLM_MAX_COMPLETION_TOKENS, OpenRouter's require_parameters), which the
+// prompt version does not cover.
+//
 // Reports from before the runner rewrite (no results[i].summary) are read too:
 // their per-case pass rate comes from reliability.perCase when present, else
 // from the single recorded status.
@@ -97,8 +103,27 @@ function describeReport(report, label) {
     schemaScope: report?.provenance?.product?.schemaScope || null,
     // null for a report from before HINTS_VERSION (hints version 1).
     hintsVersion: report?.provenance?.product?.hintsVersion ?? null,
+    // null when none was set, also for a report from before REASONING_EFFORT.
+    reasoningEffort: report?.provenance?.product?.reasoningEffort ?? null,
+    // The optimized request's options as sent (null for a report from before
+    // they were recorded, and for a rescore of one).
+    requestOptions: report?.provenance?.product?.requestOptions ?? null,
     mode: report?.mode || 'run',
   };
+}
+
+// Key order does not make two request options different.
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /**
@@ -163,8 +188,23 @@ export function summarizePairs(pairs, { alpha = 0.05, resamples = BOOTSTRAP_RESA
 }
 
 /**
+ * { model, reasoningEffort, requestOptions } (each a boolean: changed) when
+ * the two described reports ran another model, effort or request options;
+ * null when all match. A report that does not record its model, or its
+ * request options, is not a change of that.
+ */
+export function describeModelChange(baseline, candidate) {
+  const model = Boolean(baseline?.model && candidate?.model && baseline.model !== candidate.model);
+  const reasoningEffort = (baseline?.reasoningEffort ?? null) !== (candidate?.reasoningEffort ?? null);
+  const requestOptions = Boolean(
+    baseline?.requestOptions && candidate?.requestOptions && canonicalJson(baseline.requestOptions) !== canonicalJson(candidate.requestOptions)
+  );
+  return model || reasoningEffort || requestOptions ? { model, reasoningEffort, requestOptions } : null;
+}
+
+/**
  * Compares a candidate report with a baseline report. Returns
- * { baseline, candidate, baselineCases, candidateCases, paired,
+ * { baseline, candidate, modelChange, baselineCases, candidateCases, paired,
  *   excluded: { goldChanged, notCounted },
  *   newCases, removedCases, holdoutCases, flips: { regressions, improvements },
  *   rateChanges, accuracy: { baseline, candidate, delta, deltaCi95 },
@@ -217,9 +257,12 @@ export function compareReports(baselineReport, candidateReport, {
   paired.sort((left, right) => left.id.localeCompare(right.id));
   const summary = summarizePairs(paired, { alpha, resamples, seed });
 
+  const baselineDescription = describeReport(baselineReport, baselineLabel);
+  const candidateDescription = describeReport(candidateReport, candidateLabel);
   return {
-    baseline: describeReport(baselineReport, baselineLabel),
-    candidate: describeReport(candidateReport, candidateLabel),
+    baseline: baselineDescription,
+    candidate: candidateDescription,
+    modelChange: describeModelChange(baselineDescription, candidateDescription),
     alpha,
     // Case counts of both reports: the gate needs to know how much of the
     // run the pairing covers.

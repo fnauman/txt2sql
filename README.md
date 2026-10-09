@@ -165,7 +165,7 @@ Loading behavior:
 
 Required environment variables:
 
-- `OPENAI_API_KEY` (for anything that calls the model)
+- `OPENAI_API_KEY` (for anything that calls the model; with an OpenRouter `OPENAI_BASE_URL`, `OPENROUTER_API_KEY` works too, see [Models](#models))
 - `DB_NAME`
 - `DB_PASSWORD` (the query user's password; `DB_USER` defaults to `demo_readonly`)
 - `DB_ADMIN_PASSWORD` or `MARIADB_ROOT_PASSWORD` (only for `bootstrap-db` and `seed-demo`; `DB_ADMIN_USER` defaults to `root`)
@@ -175,7 +175,7 @@ Common variables:
 - `DB_HOST`, `DB_PORT`, `DB_SOCKET`
 - `DB_USER` (query user, default `demo_readonly`)
 - `DB_READONLY_USER` / `DB_READONLY_PASSWORD` (Docker Compose only: the query user the init script creates; they default to `demo_readonly` / `DB_PASSWORD`)
-- `MODEL_NAME`, `OPENAI_BASE_URL`
+- `MODEL_NAME` (default `gpt-4o-mini`), `OPENAI_BASE_URL`, and for reasoning models `REASONING_EFFORT` (`none`, `low`, `medium`, `high`, `xhigh`, `max`, checked per model family), `LLM_MAX_COMPLETION_TOKENS` (default `16000`, requests with reasoning on only) and `OPENROUTER_REQUIRE_PARAMETERS` (default on, OpenRouter only): see [Models](#models). Every entry point prints the model with its source (`--model`, `MODEL_NAME` or `default`) and the effort
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
@@ -466,10 +466,16 @@ guardrail, behaviour and per-question cost figures are what `npm run eval --
 --offline` prints by default: they cover the dev cases, the holdout only as
 its split accuracy.) These are measurements of the product, not targets.
 
-With a baseline (`--compare <report.json>`, or `eval/baselines/<model>.json`
-when committed) it adds a paired comparison with an exact McNemar test (shown
-over the paired dev cases while the holdout is hidden; the gate tests every
-paired case);
+With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
+when committed, `/` in a model id written `__`; that is the whole rule for a
+plain id, lower-case letters and digits with single `.` or `-` between them, in
+`/`-separated parts, not ending in `.<effort>`; any other id, such as
+`openai/gpt-6-luna:free`, `a--b` or `gpt-6-luna.low`, is written sanitized
+(characters outside letters, digits, `.` and `-` as `-`) plus `_` and the first
+8 hex digits of the id's SHA-256, so ids that sanitize alike still get their
+own file) it adds a paired comparison with an exact McNemar test
+(shown over the paired dev cases while the holdout is hidden; the gate tests every
+paired case; and it says so when the two sides ran another model or reasoning effort);
 `--gate` makes a significantly worse run exit 1 (and, with `--min-accuracy X`,
 a run below X; with only abstain / clarify cases selected there is no accuracy,
 so `--min-accuracy` is refused with exit 2). Harness, database and
@@ -507,15 +513,135 @@ Default local URLs (`WEB_FRONTEND_PORT` and `WEB_API_PORT` change them; `web:dev
 
 The API server (`apps/web/src/server/main.js`) loads the env file first, then validates its settings: an invalid `WEB_*` value stops startup with one error listing every problem, so values set only in `.env` (such as `WEB_API_TOKEN`) take effect. It loads the repository root `.env` by default unless `--dotenv`, `ENV_FILE`, `ENV_DIR`, or `USE_HOME_ENV=1` is set; pass the flag through npm as `npm run web:start -- --dotenv <path>` (same for `web:dev`), and relative paths resolve against the directory you ran npm from. It binds to `127.0.0.1` by default; on a loopback bind, requests whose `Host` header is not a loopback name or listed in `WEB_ALLOWED_HOSTS` get 403, and API requests from an `Origin` outside `WEB_ALLOWED_ORIGINS` get 403. Set `WEB_API_HOST=0.0.0.0` only for trusted networks, together with `WEB_API_TOKEN`. SIGTERM/SIGINT drain in-flight requests for up to `WEB_SHUTDOWN_TIMEOUT_MS`. See `apps/web/README.md` for every setting, the admin schema-refresh endpoint and the health checks.
 
+## Models
+
+The model is `MODEL_NAME` (or `--model` for `npm run eval`), else `gpt-4o-mini`
+(`DEFAULT_MODEL` in `src/model-config.js`). A reasoning model also takes
+`REASONING_EFFORT` (or `--reasoning-effort`). Every entry point prints both with
+where they came from: the eval header (`model gpt-6-luna (MODEL_NAME from
+/home/you/.env); reasoning effort low (--reasoning-effort); endpoint
+api.openai.com`), the web server's `[config]` startup line, and the CLIs'
+`Model:` line; `--model` that overrides a different `MODEL_NAME` prints a note.
+Reports record them in `provenance.product` (`model`, `modelSource`,
+`reasoningEffort`, `reasoningEffortSource` and the `requestOptions` sent).
+
+Each model family gets the request it accepts (`src/model-config.js`; the
+capability map is keyed by the model id without a vendor prefix, so
+`openai/gpt-6-luna` is `gpt-6-luna`):
+
+| Family | Reasoning | `REASONING_EFFORT` values | With no effort set |
+|---|---|---|---|
+| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the committed baseline's request, byte for byte |
+| `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-6-astra`, `gpt-6.1-sol` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`: the API rejects it) | `medium` (6.1 Sol's provider default; Astra's page states none, so it is sent explicitly) |
+| `gpt-5.5*` | yes | `none`, `low`, `medium`, `high`, `xhigh` | `medium` (the provider default), sent and recorded |
+| `gpt-5.6*` | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `medium` (the provider default), sent and recorded |
+| `gpt-5.2*` and later, `gpt-5.5` and `gpt-5.6` aside (e.g. `gpt-5.4-mini`) | yes | `none`, `low`, `medium`, `high`, `xhigh` | the provider default is `none`: the `gpt-4o*` request |
+| `gpt-5.1*` | yes | `none`, `low`, `medium`, `high` | the provider default is `none`: the `gpt-4o*` request |
+| `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
+| o-series (`o3`, `o4-mini`, ...) | yes | `low`, `medium`, `high` | `medium` (the provider default), sent and recorded |
+| `gpt-5*-pro` (e.g. `gpt-5.4-pro`), o-series `-pro` (`o1-pro`, `o3-pro`) | not supported | none (the model is refused) | every entry point stops before anything starts: these models are served only by the Responses API (OpenAI lists Chat Completions as not supported), while every request here is a Chat Completions request with a strict `json_schema` response format |
+| anything else (also the `gpt-5*-chat` models) | unknown | `none`, `low`, `medium`, `high` (any but `none` makes it a reasoning model) | the `gpt-4o*` request |
+
+Known unsupported but not refused up front: OpenAI also serves the `-codex`
+models (`gpt-5-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`,
+`gpt-5.1-codex-mini`, `gpt-5.2-codex`, `gpt-5.3-codex`, `codex-mini-latest`)
+and the deep-research models (`o3-deep-research`, `o4-mini-deep-research`) in
+the Responses API only (their model pages list Chat Completions as not
+supported, checked on 2026-10-07). The map files them under the `gpt-5*` and
+o-series rows (`codex-mini-latest` under "anything else"), so a run with one
+starts and its first request fails on api.openai.com: do not use them here.
+
+With reasoning on (any effort but `none`, set or the family's default) the
+request drops `temperature` / `top_p`, sends `reasoning_effort` and raises
+`max_completion_tokens` to `LLM_MAX_COMPLETION_TOKENS` (default `16000`),
+because reasoning tokens count against that limit and 3200 would truncate. A
+family's default effort is sent and recorded like a set one (source
+`default`), so `gpt-6-luna` with no effort and with `REASONING_EFFORT=medium`
+is the same run with the same baseline file, and a provider changing its
+default cannot change a run unseen. At effort `none` the request keeps
+`temperature: 0` and the 1200 / 3200 limits, plus `reasoning_effort: "none"`.
+An invalid effort, or one the model's family does not list, stops every entry
+point before anything starts, with the allowed values in the message. (An effort set in an env file can be cleared
+for one run with an empty `REASONING_EFFORT=` in the shell.) Without
+`temperature: 0` a reasoning model's repetitions vary more than gpt-4o-mini's,
+so measure it with `--repeat 3`; a completion cut off at the token limit is an
+`LLM_TRUNCATED` model failure (raise `LLM_MAX_COMPLETION_TOKENS` if the pilot
+shows many). Reports compare against `eval/baselines/<model>[.<effort>].json`;
+to pair a new model with the committed gpt-4o-mini baseline, pass
+`--compare eval/baselines/gpt-4o-mini.json` (the comparison then states the
+model change).
+
+### OpenRouter
+
+Any OpenAI-compatible endpoint works through `OPENAI_BASE_URL`. For
+[OpenRouter](https://openrouter.ai), use its vendor-prefixed model ids. Put
+these lines in `.env` (or the env file you pass with `--dotenv`):
+
+```text
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=sk-or-...
+MODEL_NAME=openai/gpt-6-luna
+REASONING_EFFORT=low
+```
+
+then run as usual:
+
+```bash
+npm run eval -- --dataset core-public --budget-usd 0.5
+```
+
+For a single run from the shell, put the variables on the command line
+instead (`NAME=value` lines on their own are not exported, so the eval would
+not see them and would run `gpt-4o-mini` on api.openai.com):
+
+```bash
+OPENAI_BASE_URL=https://openrouter.ai/api/v1 MODEL_NAME=openai/gpt-6-luna REASONING_EFFORT=low \
+  npm run eval -- --dataset core-public --budget-usd 0.5
+```
+
+`OPENROUTER_API_KEY` is used only when `OPENAI_API_KEY` is unset and the
+`OPENAI_BASE_URL` is an `https://` URL on openrouter.ai (a plain-http one is
+not OpenRouter: the key is never sent without TLS). `OPENAI_API_KEY` wins whenever it is set, on OpenRouter
+too: remove it from the env file (or set it to your OpenRouter key, or clear
+it for one run with an empty `OPENAI_API_KEY=` on the command line) when
+`OPENAI_BASE_URL` points at OpenRouter, or your OpenAI key is sent to
+openrouter.ai and the calls fail authentication. The eval header, the web
+startup log and the `basic` / `optimized` CLIs (under their `Model:` line)
+print a note when both keys are set for OpenRouter.
+
+The capability map and the price list strip the vendor prefix, so
+`openai/gpt-6-luna` gets the `gpt-6-luna` request options and price. On
+OpenRouter every request also carries `provider: { "require_parameters": true }`:
+OpenRouter then routes only to endpoints that support every parameter sent
+(`response_format`, `reasoning_effort`, `max_completion_tokens`, ...) instead of
+silently dropping one. How strictly a provider enforces a strict
+`json_schema` response format still varies; set
+`OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. The
+cost OpenRouter reports for each call (`usage.cost`) is the call's cost, also
+for a model with a price row (the estimate is kept beside it), so totals and
+`--budget-usd` count what was charged. With your own provider key on
+OpenRouter (BYOK) `usage.cost` is only OpenRouter's fee, so the charge counted
+is that fee plus the upstream provider's cost
+(`usage.cost_details.upstream_inference_cost`); a BYOK call that does not
+report the upstream cost counts at the local estimate (no cost for a model
+without a price row). `--budget-usd` still needs a price up
+front: add one with `MODEL_PRICING_OVERRIDES` for a model without a row (see
+[LLM Cost Tracking](#llm-cost-tracking)). The
+eval header names the endpoint host and the `require_parameters` setting
+(`endpoint openrouter.ai (OpenRouter, require_parameters on)`), so does the web
+startup line (`endpoint=openrouter.ai(openrouter,requireParameters=on)`), and
+reports record the host (never a key).
+
 ## LLM Cost Tracking
 
 Every LLM call automatically estimates token costs based on the model used. Costs are printed per-call and as a run total.
 
-Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset. The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
+Runtime default: `gpt-4o-mini` when `MODEL_NAME` is unset (`DEFAULT_MODEL` in `src/model-config.js`, the one place the default is set; every entry point and the CI job read it). The `gpt-5.4-*` rows are included for OpenAI-compatible gateway deployments configured with `OPENAI_BASE_URL`.
 
-Supported cost estimates: `gpt-4o-mini`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4` (including date-suffixed snapshots like `gpt-5.4-mini-2026-03-05`).
+Supported cost estimates: `gpt-4o-mini`, `gpt-6-luna` ($0.10 input, $0.01 cached input, $0.50 output per 1M tokens) and `gpt-6-sol` ($2, $0.20, $10; both OpenAI's published prices, verified 2026-10-07), `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4`. A row also prices its date-suffixed snapshots (`gpt-5.4-mini-2026-03-05`, or the `-YYYYMMDD` form), and nothing else: another model that shares its prefix (`gpt-6-sol-pro`, `gpt-6-luna-mini`) has no price rather than the base row's. A model id is looked up without its vendor prefix, so OpenRouter's `openai/gpt-6-luna` gets the `gpt-6-luna` price (a variant such as `openai/gpt-6-luna:free` does not). A call the provider answers under an id with no price (a gateway's alias) is costed at the requested model's price.
 
-To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. Models that are not listed above cannot be added this way, and malformed JSON is ignored.
+To change the prices of a listed model without editing code, set `MODEL_PRICING_OVERRIDES` to a JSON map keyed by its base name, e.g. `MODEL_PRICING_OVERRIDES='{"gpt-5.4-mini":{"inputPerMillion":0.7,"outputPerMillion":4.2}}'`; the given fields replace that model's defaults. An entry for a model that is not listed adds it when it has both `inputPerMillion` and `outputPerMillion` (`cachedInputPerMillion` optional). A field that is not a price (a finite number ≥ 0; `currency` a non-empty string) is ignored rather than merged, so a bad override cannot make a cost `NaN` or negative and slip past `--budget-usd`. A key without a vendor prefix applies under any vendor, like the listed rows; a key with one (`"acme/sql-1"`, `"openai/gpt-6-luna"`) applies only to that vendor's ids, and wins over a key without one. Malformed JSON is ignored. `npm run eval -- --budget-usd X` refuses to start for a model without a price, or with a price in another currency than USD: its spend, and so the budget, could not be tracked in dollars.
 
 Example CLI output:
 
@@ -536,7 +662,7 @@ LLM attempt 2: $0.001800 (1100 input + 210 output tokens, gpt-5.4-mini)
 Total LLM: $0.003450 (2100 input + 410 output tokens, gpt-5.4-mini)
 ```
 
-For unknown models, the output shows `cost unavailable` with the token counts still visible.
+For unknown models, the output shows `cost unavailable` with the token counts still visible, unless the provider reported the call's cost itself (`usage.cost`, as OpenRouter does): then that is the cost, marked `cost reported by the provider`. A reported cost is the cost for priced models too (it is what the call was charged; with your own provider key on OpenRouter, BYOK, the fee in `usage.cost` plus `usage.cost_details.upstream_inference_cost`), so run totals and `--budget-usd` count it; the local estimate stays beside it (`estimatedCost`, shown as `cost reported by the provider (local estimate $0.004859)`), and the charge is also kept as `providerCost`. A question's or a run's total keeps the label when every call's cost was reported, and says `cost partly reported by the provider` (source `mixed`) when only some were. Reasoning models report reasoning tokens inside the output tokens (`completion_tokens_details.reasoning_tokens`, billed as output); the cost line shows them (`900 output tokens incl. 640 reasoning`), traces keep each call's usage as reported, and `report.md` shows `completion N (reasoning M)`.
 
 Quick test (no DB or API key needed):
 

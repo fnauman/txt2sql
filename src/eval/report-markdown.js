@@ -2,6 +2,7 @@
 // and rendered on GitHub (plain Markdown tables, no HTML).
 
 import { describeHintsVersion, sameHintsVersion } from '../hints-version.js';
+import { describeReasoningEffort, modelLabel } from '../model-config.js';
 import { describeSchemaScope, sameSchemaScopeBehaviour } from '../schema-scope.js';
 import { BUCKET_ORDER, EXCLUDED_OUTCOMES, OUTCOME_BUCKETS, OUTCOME_ORDER, summarizeAttribution, summarizeBehavior } from './attribution.js';
 import { summarizePairs } from './compare.js';
@@ -296,6 +297,47 @@ function schemaScopeText(scope) {
   return scope ? describeSchemaScope(scope) : 'not recorded (before SCHEMA_SCOPE: retrieved, no widening)';
 }
 
+// A comparison side's effort (a report from before REASONING_EFFORT sent none).
+function comparisonEffortText(side) {
+  return side.model ? describeReasoningEffort(side.reasoningEffort ?? null) : side.reasoningEffort || 'n/a';
+}
+
+// The report's model with its reasoning effort when one was set
+// (provenance.product.reasoningEffort; reports from before it sent none).
+function reportModelLabel(report) {
+  return modelLabel(report.model, report.provenance?.product?.reasoningEffort ?? null);
+}
+
+// Recorded request options as text ("temperature 0, max_completion_tokens 3200").
+function requestOptionsText(requestOptions, missing = 'n/a') {
+  return requestOptions
+    ? Object.entries(requestOptions)
+        .map(([key, value]) => `${key} ${typeof value === 'object' ? JSON.stringify(value) : value}`)
+        .join(', ')
+    : missing;
+}
+
+// The model settings rows of the provenance table; a report from before they
+// were recorded (no product.modelSource) has none.
+function modelSettingsRows(provenance) {
+  const product = provenance.product;
+  if (!product || !('modelSource' in product)) {
+    return [];
+  }
+  return [
+    [
+      'Model settings',
+      `model from ${product.modelSource || 'n/a'}; reasoning effort ${describeReasoningEffort(product.reasoningEffort)} ` +
+        `(${product.reasoningEffortSource || 'n/a'}); request options: ${requestOptionsText(product.requestOptions)}`,
+    ],
+  ];
+}
+
+// The model or the effort changed (not only the request options).
+function modelOrEffortChanged(comparison) {
+  return Boolean(comparison.modelChange?.model || comparison.modelChange?.reasoningEffort);
+}
+
 // Same behaviour: the same effective scope (and, for the retrieved scope, the
 // same widen-on-demand setting); auto -> full behaves like full.
 const sameSchemaScope = sameSchemaScopeBehaviour;
@@ -391,14 +433,14 @@ function headline(report, hidden = new Set(), shown = displayedSummaries(report,
     // cases' (displayedSummaries).
     lines.push(
       `**Strict accuracy ${formatPercent(strict.value)}** (every split; no interval while the holdout is hidden) · ` +
-        `${stats.cases.counted} cases · ${repetitions} · ${report.model} · ${date}`
+        `${stats.cases.counted} cases · ${repetitions} · ${reportModelLabel(report)} · ${date}`
     );
     lines.push('');
     lines.push(devAccuracyText(shown.accuracy));
   } else {
     lines.push(
       `**Strict accuracy ${formatPercent(strict.value)}** (95% CI ${formatInterval(strict.ci95)}, case bootstrap) · ` +
-        `${stats.cases.counted} cases · ${stats.cases.intents} intents · ${repetitions} · ${report.model} · ${date}`
+        `${stats.cases.counted} cases · ${stats.cases.intents} intents · ${repetitions} · ${reportModelLabel(report)} · ${date}`
     );
     lines.push('');
     lines.push(
@@ -538,6 +580,15 @@ export function renderComparisonConsole(recorded, { revealHoldout = false, holdo
     : comparisonConsoleFigures(comparison);
   if (holdout) {
     lines.push(`  holdout in aggregate (--holdout-summary): ${holdoutSummaryText(holdout)}`);
+  }
+  if (modelOrEffortChanged(comparison)) {
+    lines.push(
+      `  model: ${modelLabel(comparison.baseline?.model || 'n/a', comparison.baseline?.reasoningEffort ?? null)} → ` +
+        `${modelLabel(comparison.candidate?.model || 'n/a', comparison.candidate?.reasoningEffort ?? null)} (the comparison measures the model change)`
+    );
+  }
+  if (comparison.modelChange?.requestOptions) {
+    lines.push(`  request options: ${requestOptionsText(comparison.baseline?.requestOptions)} → ${requestOptionsText(comparison.candidate?.requestOptions)}`);
   }
   if (!sameSchemaScope(comparison.baseline?.schemaScope, comparison.candidate?.schemaScope)) {
     lines.push(`  schema scope: ${schemaScopeText(comparison.baseline?.schemaScope)} → ${schemaScopeText(comparison.candidate?.schemaScope)}`);
@@ -867,7 +918,11 @@ function costSection(report, hidden = new Set(), shown = displayedSummaries(repo
       'Retry rate',
       `${formatPercent(retries.rate)} of questions (${retries.questionsWithRetry}/${retries.questions}); ${retries.retryCalls} of ${retries.llmCalls} LLM calls were retries`,
     ],
-    ['Tokens', `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}`],
+    [
+      'Tokens',
+      `prompt ${formatCount(tokens.prompt)} (cached ${formatCount(tokens.cached)}) · completion ${formatCount(tokens.completion)}` +
+        (tokens.reasoning > 0 ? ` (reasoning ${formatCount(tokens.reasoning)})` : ''),
+    ],
   ];
   const rows = noListedCase ? [] : usageRows;
   if (report.budget?.limitUsd != null) {
@@ -910,6 +965,10 @@ function comparisonSection(comparison, holdoutSummary = null) {
       [
         ['Report', base.label || 'n/a', cand.label || 'this run'],
         ['Model', base.model || 'n/a', cand.model || 'n/a'],
+        ['Reasoning effort', comparisonEffortText(base), comparisonEffortText(cand)],
+        ...(base.requestOptions || cand.requestOptions
+          ? [['Request options', requestOptionsText(base.requestOptions, 'not recorded'), requestOptionsText(cand.requestOptions, 'not recorded')]]
+          : []),
         ['Generated', base.generatedAt || 'n/a', cand.generatedAt || 'n/a'],
         ['Git', `${short(base.gitSha, 10)}${base.gitDirty ? ' (dirty)' : ''}`, `${short(cand.gitSha, 10)}${cand.gitDirty ? ' (dirty)' : ''}`],
         ['Prompt version', short(base.promptVersion), short(cand.promptVersion)],
@@ -924,6 +983,19 @@ function comparisonSection(comparison, holdoutSummary = null) {
       ]
     )
   );
+  if (modelOrEffortChanged(comparison)) {
+    lines.push('');
+    lines.push(
+      `**Model change:** the baseline ran ${modelLabel(base.model || 'n/a', base.reasoningEffort ?? null)} and the candidate ` +
+        `${modelLabel(cand.model || 'n/a', cand.reasoningEffort ?? null)}, so the paired comparison measures the model change, not only a product change.`
+    );
+  } else if (comparison.modelChange?.requestOptions) {
+    lines.push('');
+    lines.push(
+      `**Request change:** the same model and effort ran with other request options (${requestOptionsText(base.requestOptions)} → ` +
+        `${requestOptionsText(cand.requestOptions)}), so the paired comparison measures that change too.`
+    );
+  }
   if (!comparison.devFiguresUnavailable) {
     const contingency = contingencyOf(comparison);
     lines.push('');
@@ -1072,6 +1144,7 @@ function provenanceSection(report) {
     ['Datasets', (provenance.datasets || []).map((dataset) => `${dataset.name} ${short(dataset.sha256)}`).join(', ') || 'n/a'],
     ['Controls', (provenance.controls || []).map((file) => `${file.path} ${short(file.sha256)}`).join(', ') || 'none'],
     ['Model / endpoint', `${provenance.model || report.model} @ ${provenance.llmEndpoint?.host || 'n/a'}`],
+    ...modelSettingsRows(provenance),
     ['Node', `${provenance.node || 'n/a'} (${provenance.platform || 'n/a'})`],
     [
       'Runner',
@@ -1124,7 +1197,7 @@ export function renderReportMarkdown(report, { revealHoldout = false, holdoutSum
   const shown = displayedSummaries(report, hidden);
   const comparison = report.comparison ? displayedComparison(report.comparison, { revealHoldout }) : null;
   const holdout = holdoutSummary && report.comparison ? holdoutPairSummary(report.comparison) : null;
-  const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${report.model}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
+  const title = `# Evaluation report: ${report.suite?.name || report.dataset?.name || 'suite'} · ${reportModelLabel(report)}${report.mode === 'rescore' ? ' (rescore)' : ''}`;
   const sections = [
     title,
     headline(report, hidden, shown, comparison),
@@ -1157,7 +1230,7 @@ export function renderHeadline(report, { revealHoldout = false, holdoutSummary =
   const attribution = shown.attribution;
   const usage = shown.usage;
   const buckets = attribution.repetitions.byBucket;
-  const run = `${stats.repeat} repetition(s), ${report.model}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`;
+  const run = `${stats.repeat} repetition(s), ${reportModelLabel(report)}${report.mode === 'rescore' ? ' [rescore, no LLM calls]' : ''}`;
   const dev = shown.accuracy;
   const lines = [
     ...(shown.hidden

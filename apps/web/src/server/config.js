@@ -8,6 +8,7 @@
 // startup error, and returns a deeply frozen object.
 
 import { resolveHintsVersion } from '../../../../src/hints-version.js';
+import { completionSettingsOf, DEFAULT_MODEL, describeReasoningEffort, resolveLlmApiKey, resolveModelConfig } from '../../../../src/model-config.js';
 import { resolveSchemaScopeConfig } from '../../../../src/schema-scope.js';
 import { isLoopbackHost, normalizeHostname } from './security.js';
 
@@ -121,7 +122,7 @@ export const DEFAULT_WEB_CONFIG = Object.freeze({
   shutdownTimeoutMs: 10_000,
   openAiTimeoutMs: 60_000,
   openAiMaxRetries: 1,
-  model: 'gpt-4o-mini',
+  model: DEFAULT_MODEL,
 });
 
 export function loadWebConfig(env = process.env) {
@@ -212,6 +213,16 @@ export function loadWebConfig(env = process.env) {
   } catch (error) {
     problems.push(error.message);
   }
+  // The model (MODEL_NAME, else DEFAULT_MODEL), its reasoning effort
+  // (REASONING_EFFORT, validated for the model) and the endpoint settings
+  // (OPENAI_BASE_URL, OPENROUTER_REQUIRE_PARAMETERS, LLM_MAX_COMPLETION_TOKENS),
+  // read by the same resolver as the CLI and npm run eval.
+  let modelConfig = null;
+  try {
+    modelConfig = resolveModelConfig({ env });
+  } catch (error) {
+    problems.push(error.message);
+  }
 
   if (problems.length > 0) {
     throw new WebConfigError(problems);
@@ -252,11 +263,18 @@ export function loadWebConfig(env = process.env) {
     shutdownTimeoutMs,
     runtimeRetireGraceMs,
     openAi: {
-      configured: Boolean(env.OPENAI_API_KEY),
+      // OPENAI_API_KEY, or OPENROUTER_API_KEY for an openrouter.ai base URL.
+      configured: Boolean(resolveLlmApiKey(env).apiKey),
       timeoutMs: openAiTimeoutMs,
       maxRetries: openAiMaxRetries,
     },
-    model: read.string('MODEL_NAME', defaults.model),
+    model: modelConfig.model,
+    modelSource: modelConfig.modelSource,
+    reasoningEffort: modelConfig.reasoningEffort,
+    reasoningEffortSource: modelConfig.reasoningEffortSource,
+    completionSettings: completionSettingsOf(modelConfig),
+    // Printed at startup (e.g. an OPENAI_API_KEY that goes to OpenRouter).
+    modelNotices: [...modelConfig.notices],
     schemaScope: { ...schemaScope },
     hintsVersion,
     database: {
@@ -273,6 +291,9 @@ export function describeWebConfig(config) {
   const origins = config.allowedOrigins.join(',');
   const hosts = config.hostCheck ? ['localhost', '127.0.0.1', '[::1]', ...config.allowedHosts].join(',') : 'unchecked';
   return [
+    `model=${config.model}(${config.modelSource})`,
+    `reasoningEffort=${describeReasoningEffort(config.reasoningEffort)}(${config.reasoningEffortSource})`,
+    describeEndpointSetting(config.completionSettings),
     `auth=${config.authEnabled ? 'on' : 'off'}`,
     `debug=${config.allowDebug ? 'allowed' : 'denied'}`,
     `hosts=${hosts}`,
@@ -286,6 +307,14 @@ export function describeWebConfig(config) {
     describeSchemaScopeSetting(config.schemaScope),
     `hintsVersion=${config.hintsVersion ?? 'default'}`,
   ].join(' ');
+}
+
+function describeEndpointSetting(settings) {
+  if (!settings) {
+    return 'endpoint=default';
+  }
+  const host = settings.baseUrlHost ?? 'unparseable';
+  return settings.isOpenRouter ? `endpoint=${host}(openrouter,requireParameters=${settings.requireParameters ? 'on' : 'off'})` : `endpoint=${host}`;
 }
 
 function describeSchemaScopeSetting(scope) {
