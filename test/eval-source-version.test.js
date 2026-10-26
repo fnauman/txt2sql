@@ -45,3 +45,25 @@ test('completion records source drift and prevents promoting a changed run', asy
   assert.equal(changed.sourceUnchangedDuringRun, false);
   assert.match(baselineRefusal({ provenance: changed }, { code: 0, reasons: [] }), /source tree changed/);
 });
+
+test('key and credential files are never fingerprinted; root Compose config is', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'txt2sql-source-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'src'));
+  const names = ['src/a.js', 'src/server.pem', 'src/deploy.key', 'src/credentials.json', 'src/secrets.yml', 'src/id_ed25519', 'test/db-credentials.test.js', 'docker-compose.yml'];
+  await fs.mkdir(path.join(root, 'test'));
+  for (const name of names) await fs.writeFile(path.join(root, name), name);
+  const run = async () => ({ stdout: names.join('\0') });
+  const { files } = await resolveSourceVersion(root, { run });
+  assert.deepEqual(files.map((f) => f.path), ['docker-compose.yml', 'src/a.js', 'test/db-credentials.test.js']);
+});
+
+test('a failed final source check leaves the run unverified instead of throwing, and blocks a baseline', async () => {
+  const { finishProvenance } = await import('../src/eval/provenance.js');
+  const { baselineRefusal } = await import('../scripts/eval.js');
+  const failing = await finishProvenance({ source: { sha256: 'before' } }, { repoRoot: '/nonexistent-root-for-test' });
+  // No Git there: the listing fails and the fingerprint is unavailable.
+  assert.equal(failing.sourceUnchangedDuringRun, null);
+  assert.match(baselineRefusal({ provenance: failing }, { code: 0, reasons: [] }), /could not be verified/);
+  assert.match(baselineRefusal({}, { code: 0, reasons: [] }), /could not be verified/);
+});
