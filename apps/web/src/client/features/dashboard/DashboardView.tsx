@@ -13,7 +13,7 @@ export function DashboardView({ pins, onRemove }: { pins: DashboardPin[]; onRemo
         <h1>Pinned results</h1>
       </div>
       {pins.length === 0 ? (
-        <div className="empty-dashboard">No pinned products</div>
+        <div className="empty-dashboard">Pin a table or chart from a query result to build your dashboard.</div>
       ) : (
         <div className="pin-grid">
           {pins.map((pin) => {
