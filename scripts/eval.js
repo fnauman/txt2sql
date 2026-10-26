@@ -1070,12 +1070,15 @@ async function checkGateBaseline(options, cli) {
 // further call would fail the same way. They are LLM outages in attribution
 // (isLlmUnavailableCode: excluded from accuracy, exit 2), and the first one
 // stops the run.
-const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']);
+const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_402', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']);
 
 /** Why a repetition's result must stop the run (a provider configuration rejection), or null. */
 export function providerConfigRejection(result) {
   if (result?.status !== 'llm_error' || !CONFIG_REJECTION_CODES.has(result.error_code)) {
     return null;
+  }
+  if (result.error_code === 'HTTP_402') {
+    return 'the LLM provider refused the request for payment (HTTP_402: the account is out of credit); no further case is started';
   }
   return `the LLM provider rejected the request (${result.error_code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model); no further case is started`;
 }
@@ -1136,10 +1139,12 @@ export function createRunStopper({ cli, signals = process, exit = (code) => proc
 function createLiveClient(options) {
   let client;
   try {
-    client = createOpenAiClient();
+    client = createOpenAiClient({ model: options.model });
   } catch (error) {
     throw new HarnessError(
-      error.code === 'OPENAI_NOT_CONFIGURED'
+      error.code === 'ANTHROPIC_NOT_CONFIGURED'
+        ? error.message + ' Use --offline or --rescore <report.json> to evaluate without LLM calls.'
+        : error.code === 'OPENAI_NOT_CONFIGURED'
         ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell; OPENROUTER_API_KEY also works with an https://openrouter.ai OPENAI_BASE_URL). ' +
           'Use --offline or --rescore <report.json> to evaluate without LLM calls.'
         : `Cannot create the OpenAI client: ${error.message}`,

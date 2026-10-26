@@ -144,7 +144,7 @@ export function errorCodeOf(error) {
 // they fail fast instead of paying for another app attempt, and the web API
 // answers them as gateway errors (502/503/504), not as an unprocessable
 // question (422).
-const LLM_UNAVAILABLE_CODES = new Set(['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND', 'HTTP_429']);
+const LLM_UNAVAILABLE_CODES = new Set(['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_402', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND', 'HTTP_429']);
 
 export function isLlmUnavailableCode(code) {
   return LLM_UNAVAILABLE_CODES.has(code) || /^HTTP_5\d\d$/.test(String(code || ''));
@@ -313,7 +313,7 @@ export function resolveRunModelSettings({ model = undefined, reasoningEffort = u
       normalizeReasoningEffort(resolvedModel, fromEnv ? env.REASONING_EFFORT : reasoningEffort, {
         source: fromEnv ? 'REASONING_EFFORT' : 'reasoningEffort',
       }) ?? defaultReasoningEffort(resolvedModel),
-    completionSettings: completionSettings ?? resolveCompletionSettings(env),
+    completionSettings: completionSettings ?? resolveCompletionSettings({ ...env, MODEL_NAME: resolvedModel }),
   };
 }
 
@@ -347,7 +347,7 @@ export async function loadOptimizedQueryRuntime({
   // The OpenAI client is cheap and fails fast on missing/invalid settings, so it
   // is created first: a misconfigured server never compiles the schema or opens
   // a pool for a runtime it cannot use.
-  const client = createOpenAiClient(clientOptions);
+  const client = createOpenAiClient({ ...clientOptions, model });
   await trace.emit('openai.client_ready', {
     model,
     reasoningEffort,
@@ -643,6 +643,7 @@ export async function runOptimizedQuestion({
             stage: pendingRetryNote?.stage ?? lastErrorStage,
             tablesUsed: lastResponse?.tables_used || [],
             assumptions: lastResponse?.assumptions || [],
+            ...(lastResponse?.assistantMessage ? { assistantMessage: lastResponse.assistantMessage } : {}),
           };
     pendingRetryNote = null;
     const attemptContext = {
