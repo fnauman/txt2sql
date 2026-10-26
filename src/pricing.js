@@ -50,6 +50,13 @@
 // row in another currency (a MODEL_PRICING_OVERRIDES currency) keeps its
 // estimate as the cost, with the charge beside it as providerCost (USD).
 const BASE_MODEL_PRICING = Object.freeze({
+  // Provider prices verified 2026-10-14, standard online requests <100k input.
+  'claude-haiku-5-5': Object.freeze({ inputPerMillion: 0.1, cachedInputPerMillion: 0.01, cacheWriteInputPerMillion: 0.125, outputPerMillion: 0.5, currency: 'USD' }),
+  'claude-sonnet-5-5': Object.freeze({ inputPerMillion: 2, cachedInputPerMillion: 0.1, cacheWriteInputPerMillion: 2.5, outputPerMillion: 10, currency: 'USD' }),
+  'gemini-3.8-flash': Object.freeze({ inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75, currency: 'USD' }),
+  // OpenRouter catalog snapshot 2026-10-14; routing can choose a provider
+  // with different rates. The returned usage.cost remains authoritative.
+  'deepseek-v4.1-flash': Object.freeze({ inputPerMillion: 0.02016, cachedInputPerMillion: 0.0054, outputPerMillion: 0.891, currency: 'USD' }),
   'gpt-4o-mini': Object.freeze({
     inputPerMillion: 0.15,
     cachedInputPerMillion: 0.075,
@@ -170,7 +177,7 @@ function isPrice(value) {
 // dropped, so merging an override can never produce a NaN or negative cost.
 function priceFieldsOf(pricing) {
   const fields = {};
-  for (const key of ['inputPerMillion', 'cachedInputPerMillion', 'outputPerMillion']) {
+  for (const key of ['inputPerMillion', 'cachedInputPerMillion', 'cacheWriteInputPerMillion', 'outputPerMillion']) {
     if (isPrice(pricing[key])) {
       fields[key] = pricing[key];
     }
@@ -285,6 +292,7 @@ export function calculateCost(model, usage) {
     Math.max(0, normalizeTokenCount(usage?.prompt_tokens_details?.cached_tokens) ?? 0)
   );
   const uncachedPromptTokens = promptTokens - cachedPromptTokens;
+  const cacheWritePromptTokens = Math.min(uncachedPromptTokens, Math.max(0, normalizeTokenCount(usage?.prompt_tokens_details?.cache_creation_tokens) ?? 0));
   const totalTokens = normalizeTokenCount(usage?.total_tokens) ?? promptTokens + completionTokens;
   if (!pricing) {
     // No price here: the provider's reported cost is the cost (with no input /
@@ -306,7 +314,8 @@ export function calculateCost(model, usage) {
     };
   }
   const inputCost = roundCurrency(
-    (uncachedPromptTokens / 1_000_000) * pricing.inputPerMillion +
+    ((uncachedPromptTokens - cacheWritePromptTokens) / 1_000_000) * pricing.inputPerMillion +
+      (cacheWritePromptTokens / 1_000_000) * (pricing.cacheWriteInputPerMillion ?? pricing.inputPerMillion) +
       (cachedPromptTokens / 1_000_000) * (pricing.cachedInputPerMillion ?? pricing.inputPerMillion)
   );
   const outputCost = roundCurrency((completionTokens / 1_000_000) * pricing.outputPerMillion);

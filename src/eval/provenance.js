@@ -39,7 +39,7 @@ import { promisify } from 'node:util';
 
 import { businessRulesFor, FEW_SHOT_EXAMPLES } from '../constants.js';
 import { normalizeHintsVersion } from '../hints-version.js';
-import { buildCompletionOptions } from '../model-config.js';
+import { buildCompletionOptions, isNativeAnthropic } from '../model-config.js';
 import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffectiveSchemaScope } from '../pipeline.js';
 
 const execFileAsync = promisify(execFile);
@@ -177,6 +177,7 @@ export function computeSchemaVersion(schema) {
 export function describeLlmEndpoint(env = process.env) {
   const raw = env.OPENAI_BASE_URL;
   if (!raw || String(raw).trim() === '') {
+    if (isNativeAnthropic(env.MODEL_NAME, env)) return { host: 'api.anthropic.com', source: 'model' };
     return { host: 'api.openai.com', source: 'default' };
   }
   try {
@@ -203,7 +204,9 @@ export function describeModelProduct(modelConfig = null, model = null) {
   let requestOptions = config.requestOptions ?? null;
   if (requestOptions === null && config.completionSettings && resolvedModel) {
     const options = buildCompletionOptions(OPTIMIZED_MODEL_REQUEST_OPTIONS, { ...config.completionSettings, model: resolvedModel, reasoningEffort });
-    requestOptions = Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'response_format'));
+    requestOptions = Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'response_format').map(([key, value]) =>
+      key === 'output_config' ? [key, { effort: value.effort }] : [key, value]
+    ));
   }
   return {
     model: resolvedModel,
@@ -297,7 +300,7 @@ export async function collectProvenance({
     datasets: datasetEntries,
     controls: controlsEntries,
     model,
-    llmEndpoint: describeLlmEndpoint(env),
+    llmEndpoint: describeLlmEndpoint({ ...env, MODEL_NAME: model ?? env.MODEL_NAME }),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
     runner,

@@ -1131,10 +1131,12 @@ export function createRunStopper({ cli, signals = process, exit = (code) => proc
 function createLiveClient(options) {
   let client;
   try {
-    client = createOpenAiClient();
+    client = createOpenAiClient({ model: options.model });
   } catch (error) {
     throw new HarnessError(
-      error.code === 'OPENAI_NOT_CONFIGURED'
+      error.code === 'ANTHROPIC_NOT_CONFIGURED'
+        ? error.message + ' Use --offline or --rescore <report.json> to evaluate without LLM calls.'
+        : error.code === 'OPENAI_NOT_CONFIGURED'
         ? 'OPENAI_API_KEY is required for a live run (set it in .env or the shell; OPENROUTER_API_KEY also works with an https://openrouter.ai OPENAI_BASE_URL). ' +
           'Use --offline or --rescore <report.json> to evaluate without LLM calls.'
         : `Cannot create the OpenAI client: ${error.message}`,

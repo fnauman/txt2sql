@@ -437,7 +437,7 @@ test('errorCodeOf classifies real OpenAI SDK errors by class', () => {
   assert.equal(errorCodeOf(APIError.generate(401, { error: { message: 'bad key', code: 'invalid_api_key' } }, 'bad key', {})), 'HTTP_401');
   assert.equal(errorCodeOf(APIError.generate(503, { error: { message: 'down' } }, 'down', {})), 'HTTP_503');
 
-  for (const code of ['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_429', 'HTTP_500', 'HTTP_503']) {
+  for (const code of ['LLM_TIMEOUT', 'LLM_CONNECTION_ERROR', 'HTTP_401', 'HTTP_402', 'HTTP_429', 'HTTP_500', 'HTTP_503']) {
     assert.equal(isLlmUnavailableCode(code), true, code);
   }
   for (const code of ['LLM_TRUNCATED', 'LLM_REFUSED', 'HTTP_400', 'ER_BAD_FIELD_ERROR', null]) {
