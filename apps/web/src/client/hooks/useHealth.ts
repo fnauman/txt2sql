@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { loadHealth } from '../api';
-import type { HealthResponse } from '../types';
+import { createHealthCheck, type HealthSnapshot } from './healthCheck';
 
-export function useHealth(): HealthResponse | null {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+export type { HealthStatus } from './healthCheck';
+
+export function useHealth() {
+  const [snapshot, setSnapshot] = useState<HealthSnapshot>({ health: null, status: 'checking' });
+  const check = useMemo(() => createHealthCheck(loadHealth, setSnapshot), []);
 
   useEffect(() => {
-    loadHealth().then(setHealth).catch(() => setHealth(null));
-  }, []);
+    void check.refresh();
+    return () => check.dispose();
+  }, [check]);
 
-  return health;
+  return { health: snapshot.health, status: snapshot.status, refresh: check.refresh };
 }

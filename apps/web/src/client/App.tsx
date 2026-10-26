@@ -21,7 +21,7 @@ export default function App() {
   const [question, setQuestion] = useState('');
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [includeInsights, setIncludeInsights] = useState(true);
-  const health = useHealth();
+  const { health, status: healthStatus, refresh: refreshHealth } = useHealth();
   const { theme, toggle: toggleTheme } = useTheme();
   const { recentQueries, pushRecent } = useRecentQueries();
   const { pins, addPin, removePin } = usePins();
@@ -105,10 +105,11 @@ export default function App() {
             <div className="query-copy">
               <p className="eyebrow">demo query console</p>
               <h1>Ask the database directly.</h1>
-              <StatusBar health={health} />
+              <StatusBar health={health} status={healthStatus} onRetry={() => void refreshHealth()} />
             </div>
             <form className="query-composer" onSubmit={submit}>
               <textarea
+                aria-label="Your database question"
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
                 placeholder="Show outstanding balance by customer"
