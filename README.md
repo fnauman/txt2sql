@@ -487,6 +487,19 @@ behaviour and per-question cost figures are what `npm run eval -- --offline`
 prints by default: they cover the dev cases, the holdout only as its split
 accuracy.) These are measurements of the product, not targets.
 
+Later experiments kept the default.
+[Experiment 4](docs/experiments/04-provider-models.md) ran Claude Haiku and
+Sonnet 5.5, Gemini 3.8 Flash and DeepSeek V4.1 Flash on the same suite: 91.2%
+to 94.6%, no significant gain from high effort, and every model 0 of 10 on
+the dev abstain/clarify cases. [Experiment 5](docs/experiments/05-prompt-robustness.md)
+found no correct-to-wrong losses under presentation-only prompt changes on 16
+dev intents (one noisy Gemini case), too small to estimate broader sensitivity. [Experiment 6](docs/experiments/06-evaluation-review.md), an offline
+audit, reproduced the baseline exactly but found that the oracle catches only
+78–87% of held-out wrong-SQL controls on three of six datasets, and the holdout has now informed
+several model comparisons. The suite is therefore a regression suite on one
+synthetic schema, not evidence of production accuracy;
+[the roadmap](docs/production-roadmap.md) sets out what a production claim needs.
+
 With a baseline (`--compare <report.json>`, or `eval/baselines/<model>[.<effort>].json`
 when committed, `/` in a model id written `__`; that is the whole rule for a
 plain id, lower-case letters and digits with single `.` or `-` between them, in
