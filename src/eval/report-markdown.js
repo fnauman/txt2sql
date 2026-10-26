@@ -1132,6 +1132,9 @@ function provenanceSection(report) {
     .join('; ');
   const rows = [
     ['Git', provenance.git?.sha ? `${provenance.git.sha.slice(0, 12)}${provenance.git.dirty ? ' (dirty working tree)' : ''}` : 'n/a'],
+    ['Experiment label', provenance.experimentLabel || 'not recorded'],
+    ['Source fingerprint', provenance.source?.sha256 ? `${short(provenance.source.sha256)} (${provenance.source.files.length} source files)` : 'not captured in this recording'],
+    ['Source during run', provenance.sourceUnchangedDuringRun === true ? 'unchanged' : provenance.sourceUnchangedDuringRun === false ? 'CHANGED — diagnostic only' : 'not verified in this recording'],
     ['Prompt version', short(provenance.promptVersion)],
     ['Schema scope', schemaScopeText(provenance.product?.schemaScope)],
     ['Hints version', describeHintsVersion(provenance.product?.hintsVersion)],
