@@ -49,7 +49,7 @@ import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures
 import { isHoldoutCase } from '../src/eval/holdout.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
-import { collectProvenance, finishProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
+import { collectProvenance, finishProvenance, hashFile, repoRelative, resolveSourceVersion, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { behaviorPassText, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
@@ -1026,6 +1026,11 @@ export function baselineRefusal(report, exit) {
   if (report.provenance?.sourceUnchangedDuringRun === false) {
     return 'the source tree changed while the run was in progress';
   }
+  // A baseline needs a source identity: an unavailable fingerprint (no Git,
+  // an unreadable file) cannot show that the run's source stayed fixed.
+  if (report.provenance?.sourceUnchangedDuringRun !== true) {
+    return 'the source tree could not be verified as unchanged during the run';
+  }
   if (exit.code !== 0) {
     return `the run exited ${exit.code} (${exit.reasons.join('; ')})`;
   }
@@ -1065,12 +1070,15 @@ async function checkGateBaseline(options, cli) {
 // further call would fail the same way. They are LLM outages in attribution
 // (isLlmUnavailableCode: excluded from accuracy, exit 2), and the first one
 // stops the run.
-const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']);
+const CONFIG_REJECTION_CODES = new Set(['HTTP_401', 'HTTP_402', 'HTTP_403', 'HTTP_404', 'LLM_MODEL_NOT_FOUND']);
 
 /** Why a repetition's result must stop the run (a provider configuration rejection), or null. */
 export function providerConfigRejection(result) {
   if (result?.status !== 'llm_error' || !CONFIG_REJECTION_CODES.has(result.error_code)) {
     return null;
+  }
+  if (result.error_code === 'HTTP_402') {
+    return 'the LLM provider refused the request for payment (HTTP_402: the account is out of credit); no further case is started';
   }
   return `the LLM provider rejected the request (${result.error_code}: check OPENAI_API_KEY, OPENAI_BASE_URL and the model); no further case is started`;
 }
@@ -1454,6 +1462,8 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, mod
   if (hintsNote) {
     cli.log(hintsNote);
   }
+  // Fingerprint the source before the work, so finishProvenance covers it.
+  const sourceAtStart = await resolveSourceVersion();
   const rescored = await rescoreReportCases(source, {
     currentCases,
     connections,
@@ -1515,6 +1525,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, mod
     runner,
     schemaScope,
     hintsVersion,
+    sourceState: sourceAtStart,
   });
   Object.assign(provenance, await finishProvenance(provenance));
   const generatedAt = new Date().toISOString();

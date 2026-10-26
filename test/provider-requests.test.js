@@ -4,7 +4,7 @@ import test from 'node:test';
 import { describeModelProduct } from '../src/eval/provenance.js';
 import { completionSettingsOf, normalizeReasoningEffort, resolveModelConfig } from '../src/model-config.js';
 import { createOpenAiClient, generateOptimizedResponse } from '../src/pipeline.js';
-import { calculateCost } from '../src/pricing.js';
+import { calculateCost, mergeUsage } from '../src/pricing.js';
 
 const answer = JSON.stringify({ sql: 'SELECT 1', explanation: 'ok', tables_used: [], assumptions: [] });
 const signed = [
@@ -177,4 +177,46 @@ test('Native Claude truncation retains billed usage and refuses to parse partial
     generateOptimizedResponse({ client, model, prompt }),
     (error) => error.code === 'LLM_TRUNCATED' && error.usage.completion_tokens === 16000 && error.cost.totalCost > 0
   );
+});
+
+test('A malformed native reply still replays its signed thinking on the corrective retry', async () => {
+  const model = 'claude-sonnet-5-5';
+  const malformed = [
+    { type: 'thinking', thinking: '', signature: 'signed-malformed' },
+    { type: 'text', text: 'SELECT 1 -- not JSON' },
+  ];
+  const requests = [];
+  let call = 0;
+  const client = createOpenAiClient({
+    env: { MODEL_NAME: model, ANTHROPIC_API_KEY: 'test-key', OPENAI_MAX_RETRIES: '0' },
+    fetch: async (url, init) => {
+      requests.push(JSON.parse(init.body));
+      call += 1;
+      return Response.json({
+        id: `reply-${call}`,
+        model,
+        stop_reason: 'end_turn',
+        content: call === 1 ? malformed : signed,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    },
+  });
+  const first = await generateOptimizedResponse({ client, model, prompt });
+  assert.equal(first.explanation, 'Model response was not valid JSON.');
+  assert.deepEqual(first.assistantMessage.anthropic_content, malformed);
+  await generateOptimizedResponse({
+    client,
+    model,
+    prompt,
+    retryContext: { sql: first.sql, error: 'invalid JSON', assistantMessage: first.assistantMessage },
+  });
+  assert.deepEqual(requests[1].messages[1].content, malformed);
+});
+
+test('Question usage totals keep cache-write tokens across calls', () => {
+  const call = { prompt_tokens: 150, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 100, cache_creation_tokens: 20 } };
+  assert.deepEqual(mergeUsage([call]).prompt_tokens_details, { cached_tokens: 100, cache_creation_tokens: 20 });
+  assert.deepEqual(mergeUsage([call, call]).prompt_tokens_details, { cached_tokens: 200, cache_creation_tokens: 40 });
+  // OpenAI usage has no cache-write field, and its totals do not gain one.
+  assert.deepEqual(mergeUsage([{ prompt_tokens: 5, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 2 } }]).prompt_tokens_details, { cached_tokens: 2 });
 });
