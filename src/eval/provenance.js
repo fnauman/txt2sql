@@ -113,9 +113,12 @@ export async function resolveSourceVersion(cwd = REPO_ROOT, { run = execFileAsyn
   }
   const allowed = name => /^(?:src|scripts|models|metadata|datasets|test|docker|deploy|\.github)\//.test(name) ||
     /^apps\/web\/(?:src|scripts|test|public)\//.test(name) ||
-    /^(?:package(?:-lock)?\.json|apps\/web\/(?:package\.json|tsconfig\.json|vite\.config\.ts|index\.html)|docs\/experiments\/03-models\.md)$/.test(name);
+    /^(?:package(?:-lock)?\.json|docker-compose\.yml|apps\/web\/(?:package\.json|tsconfig\.json|vite\.config\.ts|index\.html)|docs\/experiments\/03-models\.md)$/.test(name);
+  // Key and credential files never enter the fingerprint (or a snapshot of it).
+  const secretLike = part => /\.env(?:\.|$)/i.test(part) || /\.(?:pem|key|p12|pfx|jks)$/i.test(part) ||
+    /^id_(?:rsa|dsa|ecdsa|ed25519)/i.test(part) || /(?:^|[-_.])(?:secrets?|credentials?)(?:\.(?:json|ya?ml|txt|ini|toml|conf))?$/i.test(part);
   const names = [...new Set(listed.split('\0').filter(Boolean))].filter(name =>
-    allowed(name) && !name.split('/').some(part => /\.env(?:\.|$)/i.test(part) || ['node_modules', 'dist', 'generated'].includes(part))
+    allowed(name) && !name.split('/').some(part => secretLike(part) || ['node_modules', 'dist', 'generated'].includes(part))
   ).sort();
   const files = [];
   for (const name of names) {
@@ -135,8 +138,15 @@ export async function resolveSourceVersion(cwd = REPO_ROOT, { run = execFileAsyn
   return { formatVersion: 1, sha256: files.length ? sha256Hex(stableStringify(files)) : null, files, status: files.length ? 'captured' : 'unavailable' };
 }
 
+// Never throws: a failed final check leaves the run unverified (and refused as
+// a baseline) instead of losing a finished report.
 export async function finishProvenance(provenance, { repoRoot = REPO_ROOT, sourceState = null } = {}) {
-  const final = sourceState || await resolveSourceVersion(repoRoot);
+  let final;
+  try {
+    final = sourceState || (await resolveSourceVersion(repoRoot));
+  } catch (error) {
+    return { sourceVersionAtFinish: null, sourceUnchangedDuringRun: null, sourceCheckError: error.code || error.message };
+  }
   const initialHash = provenance.source?.sha256;
   return {
     sourceVersionAtFinish: final.sha256,
