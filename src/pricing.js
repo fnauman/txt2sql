@@ -402,6 +402,8 @@ export function mergeUsage(usages = []) {
   let hasUsage = false;
   let hasCachedPromptTokens = false;
   let cachedPromptTokens = 0;
+  let hasCacheWriteTokens = false;
+  let cacheWriteTokens = 0;
   let hasReasoningTokens = false;
   let reasoningTokens = 0;
   let hasProviderCost = false;
@@ -425,6 +427,12 @@ export function mergeUsage(usages = []) {
       hasCachedPromptTokens = true;
       cachedPromptTokens += Math.min(promptTokens, Math.max(0, cachedTokens));
     }
+    // Anthropic cache writes (priced apart from reads and uncached input).
+    const writeTokens = normalizeTokenCount(usage?.prompt_tokens_details?.cache_creation_tokens);
+    if (writeTokens !== null) {
+      hasCacheWriteTokens = true;
+      cacheWriteTokens += Math.min(promptTokens, Math.max(0, writeTokens));
+    }
 
     const callReasoningTokens = reasoningTokensOf(usage);
     if (callReasoningTokens !== null) {
@@ -443,9 +451,10 @@ export function mergeUsage(usages = []) {
     return null;
   }
 
-  if (hasCachedPromptTokens) {
+  if (hasCachedPromptTokens || hasCacheWriteTokens) {
     totals.prompt_tokens_details = {
-      cached_tokens: cachedPromptTokens,
+      ...(hasCachedPromptTokens ? { cached_tokens: cachedPromptTokens } : {}),
+      ...(hasCacheWriteTokens ? { cache_creation_tokens: cacheWriteTokens } : {}),
     };
   }
 

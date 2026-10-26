@@ -2738,6 +2738,10 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   });
 
   const cleaned = cleanModelOutput(rawText);
+  // Signed thinking blocks / reasoning_details must be replayed unchanged on a
+  // corrective retry, also after a reply that was not valid JSON.
+  const message = response.choices[0]?.message;
+  const replay = message?.anthropic_content || message?.reasoning_details ? { assistantMessage: message } : {};
 
   try {
     const parsed = JSON.parse(cleaned);
@@ -2746,9 +2750,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       explanation: parsed.explanation || '',
       tables_used: Array.isArray(parsed.tables_used) ? parsed.tables_used : [],
       assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
-      ...(response.choices[0]?.message?.anthropic_content || response.choices[0]?.message?.reasoning_details ? {
-        assistantMessage: response.choices[0].message,
-      } : {}),
+      ...replay,
       rawText,
       usage,
       cost: callCost(responseModel, model, usage),
@@ -2763,6 +2765,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       explanation: 'Model response was not valid JSON.',
       tables_used: [],
       assumptions: ['Response parsing failed; SQL was extracted from raw output.'],
+      ...replay,
       rawText,
       usage,
       cost: callCost(responseModel, model, usage),
