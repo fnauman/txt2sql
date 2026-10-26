@@ -101,6 +101,49 @@ export async function resolveGitState(cwd = REPO_ROOT, { run = execFileAsync } =
   }
 }
 
+// A base commit plus `dirty: true` cannot identify the code used by a run.
+// Hash executable/configuration inputs, including untracked experiment code.
+// Do not enumerate env files, generated data, traces, or arbitrary home files.
+export async function resolveSourceVersion(cwd = REPO_ROOT, { run = execFileAsync } = {}) {
+  let listed;
+  try {
+    listed = (await run('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd, maxBuffer: 8 * 1024 * 1024 })).stdout;
+  } catch {
+    return { formatVersion: 1, sha256: null, files: [], status: 'unavailable' };
+  }
+  const allowed = name => /^(?:src|scripts|models|metadata|datasets|test|docker|deploy|\.github)\//.test(name) ||
+    /^apps\/web\/(?:src|scripts|test|public)\//.test(name) ||
+    /^(?:package(?:-lock)?\.json|apps\/web\/(?:package\.json|tsconfig\.json|vite\.config\.ts|index\.html)|docs\/experiments\/03-models\.md)$/.test(name);
+  const names = [...new Set(listed.split('\0').filter(Boolean))].filter(name =>
+    allowed(name) && !name.split('/').some(part => /\.env(?:\.|$)/i.test(part) || ['node_modules', 'dist', 'generated'].includes(part))
+  ).sort();
+  const files = [];
+  for (const name of names) {
+    const absolute = path.resolve(cwd, name);
+    if (path.relative(cwd, absolute).startsWith('..') || path.isAbsolute(path.relative(cwd, absolute))) continue;
+    try {
+      if ((await fs.lstat(absolute)).isSymbolicLink()) continue;
+      const actual = await fs.realpath(absolute);
+      const relative = path.relative(cwd, actual);
+      if (relative.startsWith('..') || path.isAbsolute(relative) || !(await fs.stat(actual)).isFile()) continue;
+      files.push({ path: name, sha256: await hashFile(absolute) });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      files.push({ path: name, sha256: null });
+    }
+  }
+  return { formatVersion: 1, sha256: files.length ? sha256Hex(stableStringify(files)) : null, files, status: files.length ? 'captured' : 'unavailable' };
+}
+
+export async function finishProvenance(provenance, { repoRoot = REPO_ROOT, sourceState = null } = {}) {
+  const final = sourceState || await resolveSourceVersion(repoRoot);
+  const initialHash = provenance.source?.sha256;
+  return {
+    sourceVersionAtFinish: final.sha256,
+    sourceUnchangedDuringRun: initialHash && final.sha256 ? initialHash === final.sha256 : null,
+  };
+}
+
 /**
  * Prompt version: sha256 of what decides the prompt the model sees apart from
  * the question and the schema (hashed separately): the optimized system prompt
@@ -208,10 +251,13 @@ export async function collectProvenance({
   semanticLayerPath = SEMANTIC_LAYER_PATH,
   semanticLayerOverlayPath = SEMANTIC_LAYER_OVERLAY_PATH,
   gitState = null,
+  sourceState = null,
+  experimentLabel = null,
   schemaScope = undefined,
   hintsVersion = undefined,
 } = {}) {
   const git = gitState || (await resolveGitState(repoRoot));
+  const source = sourceState || (await resolveSourceVersion(repoRoot));
   const datasetEntries = [];
   for (const dataset of datasets) {
     datasetEntries.push({ name: dataset.name, path: repoRelative(dataset.path, repoRoot), sha256: await hashFile(dataset.path) });
@@ -237,6 +283,9 @@ export async function collectProvenance({
   }));
   return {
     git,
+    source,
+    experimentLabel: experimentLabel ?? env.EXPERIMENT_LABEL ?? null,
+    codeVersion: git.dirty === false ? git.sha : `${git.sha || 'unknown'}+source.${source.sha256 || 'unavailable'}`,
     promptVersion: computePromptVersion(schema, { schemaScope, hintsVersion }),
     product: describeProductConfig(schema, schemaScope, hintsVersion, modelConfig, model),
     semanticLayerVersion,
@@ -268,6 +317,8 @@ export function traceMetadataFromProvenance(provenance) {
     dbProfileVersion: shortHash(provenance?.fixturesVersion),
     gitSha: provenance?.git?.sha || null,
     gitDirty: provenance?.git?.dirty ?? null,
+    sourceVersion: provenance?.source?.sha256 || null,
+    experimentLabel: provenance?.experimentLabel || null,
     schemaScopeRequested: provenance?.product?.schemaScope?.requested ?? null,
     schemaScopeEffective: provenance?.product?.schemaScope?.effective ?? null,
     schemaFullEstimatedTokens: provenance?.product?.schemaScope?.fullSchemaEstimatedTokens ?? null,

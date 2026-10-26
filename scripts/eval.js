@@ -49,7 +49,7 @@ import { FIXTURES, PRIMARY_FIXTURE, resolveFixtures } from '../src/eval/fixtures
 import { isHoldoutCase } from '../src/eval/holdout.js';
 import { closeFixtureConnections, createGoldCache, GOLD_STATEMENT_TIMEOUT_MS, openFixtureConnections } from '../src/eval/oracle.js';
 import { DEFAULT_CASE_TIMEOUT_MS, DEFAULT_CONCURRENCY, runCaseRepetitions } from '../src/eval/pool.js';
-import { collectProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
+import { collectProvenance, finishProvenance, hashFile, repoRelative, traceMetadataFromProvenance } from '../src/eval/provenance.js';
 import { behaviorPassText, renderHeadline, renderReportMarkdown } from '../src/eval/report-markdown.js';
 import { rescoreReportCases, testCaseFromRecord } from '../src/eval/rescore.js';
 import { attributeCaseRuns, buildReport, describeSuite, REPORT_VERSION } from '../src/eval/runner.js';
@@ -1023,6 +1023,9 @@ function finish(result, options, cli) {
  * a clean, complete run (exit 0, no case skipped) replaces it.
  */
 export function baselineRefusal(report, exit) {
+  if (report.provenance?.sourceUnchangedDuringRun === false) {
+    return 'the source tree changed while the run was in progress';
+  }
   if (exit.code !== 0) {
     return `the run exited ${exit.code} (${exit.reasons.join('; ')})`;
   }
@@ -1299,6 +1302,7 @@ async function runLive({ options, cli, schema, schemaScope, hintsVersion, modelC
       entries.map((entry, index) => ({ entry, repetitions: run.repetitions[index] })),
       { connections, goldCache, schema, statementTimeoutMs, goldTimeoutMs: GOLD_STATEMENT_TIMEOUT_MS }
     );
+    Object.assign(provenance, await finishProvenance(provenance));
     const generatedAt = new Date().toISOString();
     const comparison = baseline
       ? compareReports(baseline.report, { results: caseRecords, model, generatedAt, provenance, mode: 'run' }, { baselineLabel: repoRelative(baseline.path) })
@@ -1510,6 +1514,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, mod
     schemaScope,
     hintsVersion,
   });
+  Object.assign(provenance, await finishProvenance(provenance));
   const generatedAt = new Date().toISOString();
   const baseline = options.compare
     ? { path: options.compare, report: await readBaselineReport(options.compare) }

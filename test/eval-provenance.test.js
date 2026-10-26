@@ -116,6 +116,8 @@ test('collectProvenance hashes files, keeps repo-relative paths and never record
     dbProfileVersion: provenance.fixturesVersion.slice(0, 12),
     gitSha: 'f00',
     gitDirty: true,
+    sourceVersion: provenance.source.sha256,
+    experimentLabel: null,
     schemaScopeRequested: 'auto',
     schemaScopeEffective: 'full',
     schemaFullEstimatedTokens: provenance.product.schemaScope.fullSchemaEstimatedTokens,
