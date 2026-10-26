@@ -1,7 +1,16 @@
+// Summarize one robustness run into <run>/summary.json. Options:
+//   --historical <dir>  add the unchanged-repeat stability of the full reports
+//                       in <dir> (plus the committed GPT baselines)
+//   --publish <file>    also write the summary there (e.g. the committed
+//                       docs/experiments/results/05-prompt-robustness-summary.json)
 import fs from 'node:fs';
 import path from 'node:path';
+import { getOptionValue } from '../src/env.js';
 import { bootstrapInterval, wilsonInterval, summarizeRunUsage } from '../src/eval/stats.js';
-const directory = path.resolve(process.argv[2] || 'generated/prompt-robustness-2026-10-14');
+const args = process.argv.slice(2);
+const directory = path.resolve(args[0] && !args[0].startsWith('--') ? args[0] : 'generated/prompt-robustness-2026-10-14');
+const historicalDirectory = getOptionValue(args, '--historical');
+const publishPath = getOptionValue(args, '--publish');
 const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json')));
 const read = file => JSON.parse(fs.readFileSync(file));
 const summaries = manifest.arms.map(arm => {
@@ -23,9 +32,11 @@ const summaries = manifest.arms.map(arm => {
     versionStatus: report.provenance ? 'recorded-at-run' : 'legacy-run-without-source-capture',
   };
 });
-const historicalFiles = fs.readdirSync('generated/provider-benchmark-2026-10-14/full').filter(f => f.endsWith('.json'))
-  .map(f => 'generated/provider-benchmark-2026-10-14/full/' + f)
-  .concat(['eval/baselines/gpt-6-luna.low.json', 'eval/baselines/gpt-4o-mini.json']);
+const historicalFiles = historicalDirectory
+  ? fs.readdirSync(historicalDirectory).filter(f => f.endsWith('.json')).sort()
+    .map(f => path.join(historicalDirectory, f))
+    .concat(['eval/baselines/gpt-6-luna.low.json', 'eval/baselines/gpt-4o-mini.json'])
+  : [];
 const unchangedRepeatStability = historicalFiles.map(file => {
   const r = read(file);
   const records = r.results.filter(c => c.split === 'dev' && c.expected_behavior === 'answer');
@@ -43,7 +54,9 @@ const unchangedRepeatStability = historicalFiles.map(file => {
 });
 const result = { generatedAt: new Date().toISOString(), protocol: { cases: manifest.cases.length, distinctIntents: 16, variants: manifest.variants, split: 'dev', selection: manifest.selection, scope: 'Model-boundary presentation changes; deterministic application context held fixed', confidenceUnit: 'Case / distinct intent; three tweaks are not independent trials' }, summaries, unchangedRepeatStability, totalReturnedCostUsd: summaries.reduce((s, r) => s + r.returnedCostUsd, 0), plannedTotalCapUsd: manifest.arms.reduce((s, a) => s + a.budgetUsd, 0) };
 fs.writeFileSync(path.join(directory, 'summary.json'), JSON.stringify(result, null, 2));
-fs.mkdirSync('docs/experiments/results', { recursive: true });
-fs.writeFileSync('docs/experiments/results/05-prompt-robustness-summary.json', JSON.stringify(result, null, 2) + '\n');
+if (publishPath) {
+  fs.mkdirSync(path.dirname(path.resolve(publishPath)), { recursive: true });
+  fs.writeFileSync(publishPath, JSON.stringify(result, null, 2) + '\n');
+}
 for (const s of summaries) console.log(JSON.stringify(s));
 console.log(JSON.stringify({ totalReturnedCostUsd: result.totalReturnedCostUsd }));

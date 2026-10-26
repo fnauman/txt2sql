@@ -106,9 +106,9 @@ hardware economics do. Electricity, idle time and operations need to be counted.
 
 The UI already supports SSE progress, cancellation, SQL inspection, tables,
 charts and dashboard pins. The review reproduced an API-down state that stayed
-on “Connecting.” This change adds a five-second health deadline, a clear
-unavailable state and Retry; also a question-field accessibility label and
-useful dashboard empty-state guidance.
+on “Connecting.” A separate web fix (PR #18) adds a five-second health
+deadline, a clear unavailable state and Retry; also a question-field
+accessibility label and useful dashboard empty-state guidance.
 
 Browser checks covered API unavailable → Retry → connected, synthetic successful
 table, empty result and model timeout. The preview used a fake runtime with no

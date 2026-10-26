@@ -221,7 +221,7 @@ whose usage was not returned, and excludes unrelated account activity.
 The OpenRouter full arms used caps of $10.08 (Gemini low), $1.00 (DeepSeek low),
 and $1.04 (DeepSeek high); all completed below their caps.
 
-Validation: 2,172 tests passed (32 opt-in database tests skipped); provider
+Validation: the unit suite passed (opt-in database tests skipped); provider
 wire-format tests cover both Claude models at low/high effort, signed-thinking
 replay, Gemini reasoning-detail replay, cache-write pricing, missing-provider
 keys, unsupported efforts, truncation, DeepSeek reasoning-detail replay, and

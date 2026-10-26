@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { perturbRequest, summarizeRobustness } from '../src/eval/prompt-robustness.js';
+import { excludeBudgetBlocked, perturbRequest, summarizeRobustness } from '../src/eval/prompt-robustness.js';
 const prefix = 'In-scope schema:\nTable A\nColumns:\nid\n\nTable B\nColumns:\nname';
 const suffix = '\n\nQuestion-specific context:\n\nQuestion:\nShow total sales.\n\nResolved temporal references:\n2026\n';
 const native = { messages: [{ role: 'system', content: 'Fixed rules' }, { role: 'user', content: [{ type: 'text', text: prefix, cache_control: { type: 'ephemeral' } }, { type: 'text', text: suffix }] }] };
@@ -36,4 +36,15 @@ test('correctness sensitivity separates unchanged stochastic flips, tweak losses
   assert.equal(s.byVariant[2].losses, 1);
   assert.equal(s.byVariant[2].improvements, 1);
   assert.equal(s.byVariant[3].valid, 3);
+});
+test('a budget-blocked call is excluded, never scored as a correct-to-wrong flip', () => {
+  const blocked = excludeBudgetBlocked({ outcome: 'llm_error', bucket: 'model', counted: true }, { status: 'llm_error', error_code: 'ROBUSTNESS_BUDGET_LIMIT' });
+  assert.deepEqual([blocked.outcome, blocked.bucket, blocked.counted], ['budget_skipped', 'harness', false]);
+  const scored = { outcome: 'wrong_result', bucket: 'model', counted: true };
+  assert.equal(excludeBudgetBlocked(scored, { status: 'llm_error', error_code: 'LLM_TRUNCATED' }), scored);
+  const pass = { outcome: 'pass', counted: true, bucket: 'pass' };
+  const s = summarizeRobustness([{ id: 'a', repetitions: [pass, pass, blocked, pass, pass] }]);
+  assert.equal(s.completeCases, 0);
+  assert.equal(s.byVariant[2].losses, 0);
+  assert.equal(s.byVariant[2].valid, 0);
 });

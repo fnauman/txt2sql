@@ -40,6 +40,15 @@ export function perturbRequest(request, variant) {
   return { ...request, messages };
 }
 
+// A call the arm budget stopped before dispatch (or whose price was unknown)
+// never produced a verdict: exclude it instead of scoring an LLM error.
+export const BUDGET_BLOCKED_CODE = 'ROBUSTNESS_BUDGET_LIMIT';
+
+export function excludeBudgetBlocked(attributed, result) {
+  if (result?.error_code !== BUDGET_BLOCKED_CODE && attributed?.error_code !== BUDGET_BLOCKED_CODE) return attributed;
+  return { ...attributed, outcome: 'budget_skipped', bucket: 'harness', counted: false };
+}
+
 export function correctnessState(result) {
   if (!result || result.counted === false || ['infra', 'harness', 'skipped'].includes(result.bucket) || result.timed_out || result.outcome === 'timeout') return null;
   return result.outcome === 'pass';

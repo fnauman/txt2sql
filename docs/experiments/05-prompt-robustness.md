@@ -80,6 +80,20 @@ node scripts/benchmark-robustness.mjs --use-home-env \
 Use existing seeded database credentials in the environment. `--db-config`
 accepts a local JSON environment file; credentials never enter reports or argv.
 Run each model in the frozen manifest once. Existing reports are never replaced.
+The runner checks the fixtures read-only before any call (as `npm run eval
+-- --no-seed` does) and stops on drift. A call the arm budget blocks is
+excluded from scoring, not counted as a model error (the published runs had
+no blocked calls).
+
+```bash
+node scripts/summarize-robustness.mjs generated/my-robustness-run
+```
+
+This writes `summary.json` in the run directory. `--historical <dir>` adds the
+unchanged-repeat stability of an Experiment 4 report directory, and
+`--publish <file>` also writes the summary to a committed path; the published
+summary was made with `--historical generated/provider-benchmark-2026-10-14/full
+--publish docs/experiments/results/05-prompt-robustness-summary.json`.
 The original experiment's seeded database was reused, then stopped after the
 last report was verified. The product default, gold, and scoring were unchanged.
 

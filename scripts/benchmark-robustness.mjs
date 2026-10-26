@@ -13,7 +13,8 @@ import { runCaseRepetitions } from '../src/eval/pool.js';
 import { attributeRepetition } from '../src/eval/attribution.js';
 import { evaluateQuestion } from './evaluate.js';
 import { createTraceLogger } from '../src/trace.js';
-import { ROBUSTNESS_VARIANTS, perturbRequest, summarizeRobustness } from '../src/eval/prompt-robustness.js';
+import { ROBUSTNESS_VARIANTS, excludeBudgetBlocked, perturbRequest, summarizeRobustness } from '../src/eval/prompt-robustness.js';
+import { ensureFixtures } from '../src/eval/setup.js';
 import { collectProvenance, finishProvenance, resolveGitState, resolveSourceVersion } from '../src/eval/provenance.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,9 +62,12 @@ process.env.LLM_MAX_COMPLETION_TOKENS = '16000';
 process.env.OPENAI_BASE_URL = /^(google|deepseek)\//.test(model) ? 'https://openrouter.ai/api/v1' : '';
 if (process.env.OPENAI_BASE_URL) process.env.OPENAI_API_KEY = '';
 const runtime = await loadOptimizedQueryRuntime({ model, reasoningEffort: 'low', schemaScope: 'full', hintsVersion: 2, clientOptions: { maxRetries: 0 }, connectionLimit: 4 });
+// The evaluator's fixture check, read-only: drifted or stale fixtures would
+// score the model's SQL against different rows than its prompt described.
+const fixtureStatus = await ensureFixtures({ fixtures: FIXTURES, schema: runtime.schema, allowSeed: false, strict: true, log: line => console.log(line) });
 const connections = FIXTURES.map(fixture => ({ name: fixture.name, database: fixture.database, connection: createMariaDbPool({ connectionLimit: 4, env: { ...process.env, DB_NAME: fixture.database } }) }));
 const trace = await createTraceLogger({ enabled: true, filePath: path.join(output, stem + '.trace.jsonl'), pipeline: 'prompt-robustness', metadata: { model, reasoningEffort: 'low' } });
-const provenance = await collectProvenance({ schema: runtime.schema, model, modelConfig: { model, reasoningEffort: 'low', completionSettings: runtime.completionSettings }, datasets: [{ name: 'frozen-robustness-manifest', path: manifestPath }], schemaScope: 'full', hintsVersion: 2, experimentLabel: getOptionValue(args, '--experiment-label') || 'prompt-robustness', runner: { repeat: 5, concurrency: 2, caseTimeoutMs: 120000, sdkMaxRetries: 0, productMaxRetries: 1 } });
+const provenance = await collectProvenance({ schema: runtime.schema, model, modelConfig: { model, reasoningEffort: 'low', completionSettings: runtime.completionSettings }, fixtures: fixtureStatus, datasets: [{ name: 'frozen-robustness-manifest', path: manifestPath }], schemaScope: 'full', hintsVersion: 2, experimentLabel: getOptionValue(args, '--experiment-label') || 'prompt-robustness', runner: { repeat: 5, concurrency: 2, caseTimeoutMs: 120000, sdkMaxRetries: 0, productMaxRetries: 1 } });
 await trace.emit('run.provenance', { provenance });
 const ledger = { spentUsd: 0, reservedUsd: 0, blockedCalls: 0, calls: 0 };
 const reserveRates = model === 'claude-sonnet-5-5' ? [2.5, 10] : model.startsWith('google/') ? [0.75, 3.75] : model.startsWith('deepseek/') ? [0.10, 2] : [0.125, 0.5];
@@ -106,7 +110,7 @@ try {
     },
     onResult: info => console.log(JSON.stringify({ model, completed: info.completed, total: manifest.cases.length * 5, variant: ROBUSTNESS_VARIANTS[info.repetition - 1], status: info.result.status, spentUsd: info.spentUsd })),
   });
-  const records = manifest.cases.map((testCase, index) => ({ id: testCase.id, intentId: testCase.intentId, repetitions: run.repetitions[index].map((result, index) => ({ ...attributeRepetition(result, testCase), variant: ROBUSTNESS_VARIANTS[index] })) }));
+  const records = manifest.cases.map((testCase, index) => ({ id: testCase.id, intentId: testCase.intentId, repetitions: run.repetitions[index].map((result, index) => ({ ...excludeBudgetBlocked(attributeRepetition(result, testCase), result), variant: ROBUSTNESS_VARIANTS[index] })) }));
   Object.assign(provenance, await finishProvenance(provenance));
   const report = { generatedAt: new Date().toISOString(), provenance, model, effort: 'low', elapsedMs: Date.now() - started, manifestHash: hash(fs.readFileSync(manifestPath)), schemaTables: runtime.schema.tables.length, fixtures: FIXTURES.map(f => f.name), budget: { limitUsd: arm.budgetUsd, ...ledger }, summary: summarizeRobustness(records), records };
   fs.writeFileSync(destination, JSON.stringify(report, null, 2));
