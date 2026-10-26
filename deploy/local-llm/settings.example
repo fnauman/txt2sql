@@ -1,0 +1,13 @@
+# Copy to an ignored file outside this directory; do not commit credentials.
+# Select a release supported by the chosen model and RTX Blackwell kernels.
+# Record its actual tested image digest; do not use a floating latest tag.
+VLLM_IMAGE=vllm/vllm-openai@sha256:REPLACE_WITH_VERIFIED_IMAGE_DIGEST
+LOCAL_MODEL_PATH=/absolute/path/to/frozen/checkpoint
+LOCAL_LLM_API_KEY=REPLACE_WITH_A_DEDICATED_LOCAL_SECRET
+# Laptop 24 GB pilot: begin with one sequence, then try two.
+LOCAL_MAX_MODEL_LEN=8192
+LOCAL_MAX_NUM_SEQS=1
+LOCAL_GPU_FRACTION=0.85
+# Workstation with 96 GB physical VRAM and an 80 GB planning budget:
+# LOCAL_MAX_NUM_SEQS=4
+# LOCAL_GPU_FRACTION=0.80

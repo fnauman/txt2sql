@@ -1,0 +1,1394 @@
+{
+  "generatedAt": "2026-10-14T17:58:58.429Z",
+  "measurementScope": {
+    "accuracy": "392 answer cases; mean per-case pass rate over 3 repetitions",
+    "latencyAndCostPerCorrect": "255 development questions including 10 behavior cases; 765 repetitions",
+    "historicalReferences": "earlier runs; not same-day latency controls",
+    "claudeReasoningTokens": "included in billed completion tokens; separate count unavailable",
+    "openRouterHighGemini": "diagnostic pilot only; one 120-second deadline failure, projected full cost above available credit"
+  },
+  "historicalReferences": [
+    {
+      "model": "gpt-4o-mini",
+      "effort": null,
+      "historical": true,
+      "precision": "full recording",
+      "source": "eval/baselines/gpt-4o-mini.json",
+      "reportDate": "2026-10-06T12:06:26.541Z",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.7364,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.883
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.4921
+        }
+      ],
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 2386,
+        "p95": 4401.6
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.39211,
+        "questions": 765,
+        "perQuestion": 0.000513,
+        "correct": 649,
+        "perCorrect": 0.000604,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "fullSpendUsd": 0.634683,
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144"
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "historical": true,
+      "precision": "full recording",
+      "source": "eval/baselines/gpt-6-luna.low.json",
+      "reportDate": "2026-10-07T07:26:08.358Z",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.8937,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9401
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8163
+        }
+      ],
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 3042.9,
+        "p95": 5726.3
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.184891,
+        "questions": 765,
+        "perQuestion": 0.000242,
+        "correct": 691,
+        "perCorrect": 0.000268,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "fullSpendUsd": 0.327579,
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144"
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "medium",
+      "historical": true,
+      "precision": "rounded published figures; full recording unavailable in repository",
+      "source": "docs/experiments/03-models.md",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.896,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.936
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.83
+        }
+      ],
+      "devLatency": {
+        "n": 765,
+        "p50": 4030,
+        "p95": 6360
+      },
+      "devCost": {
+        "currency": "USD",
+        "perQuestion": 0.00028,
+        "perCorrect": 0.00031
+      },
+      "fullSpendUsd": 0.3992
+    }
+  ],
+  "pilots": [
+    {
+      "file": "claude-haiku-5-5.high.json",
+      "model": "claude-haiku-5-5",
+      "effort": "high",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 5197.5,
+        "p95": 7395.3
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.018628,
+        "questions": 24,
+        "perQuestion": 0.000776,
+        "correct": 24,
+        "perCorrect": 0.000776,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "claude-haiku-5-5.low.json",
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 3886.2,
+        "p95": 6248.8
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.016634,
+        "questions": 24,
+        "perQuestion": 0.000693,
+        "correct": 24,
+        "perCorrect": 0.000693,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "claude-sonnet-5-5.high.json",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 3316.4,
+        "p95": 4218.5
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.15927,
+        "questions": 24,
+        "perQuestion": 0.006636,
+        "correct": 24,
+        "perCorrect": 0.006636,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "claude-sonnet-5-5.low.json",
+      "model": "claude-sonnet-5-5",
+      "effort": "low",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 3210,
+        "p95": 3987.2
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.21862,
+        "questions": 24,
+        "perQuestion": 0.009109,
+        "correct": 24,
+        "perCorrect": 0.009109,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "deepseek__deepseek-v4.1-flash.high.json",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "high",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 3345.6,
+        "p95": 5509.8
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.011361,
+        "questions": 24,
+        "perQuestion": 0.000473,
+        "correct": 24,
+        "perCorrect": 0.000473,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "deepseek__deepseek-v4.1-flash.low.json",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "low",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 2153.7,
+        "p95": 3742.6
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.008277,
+        "questions": 24,
+        "perQuestion": 0.000345,
+        "correct": 24,
+        "perCorrect": 0.000345,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    },
+    {
+      "file": "google__gemini-3.8-flash.high.json",
+      "model": "google/gemini-3.8-flash",
+      "effort": "high",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 0.9583,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 28178.2,
+        "p95": 110369.5
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.464758,
+        "questions": 24,
+        "perQuestion": 0.019365,
+        "correct": 23,
+        "perCorrect": 0.020207,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 1
+      },
+      "outcomes": {
+        "pass": 23,
+        "timeout": 1
+      },
+      "stopped": null
+    },
+    {
+      "file": "google__gemini-3.8-flash.low.json",
+      "model": "google/gemini-3.8-flash",
+      "effort": "low",
+      "developmentOnly": true,
+      "answerCases": 24,
+      "repeat": 1,
+      "strictAccuracy": 1,
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 24,
+        "p50": 4202.8,
+        "p95": 14482.4
+      },
+      "cost": {
+        "currency": "USD",
+        "total": 0.110823,
+        "questions": 24,
+        "perQuestion": 0.004618,
+        "correct": 24,
+        "perCorrect": 0.004618,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "outcomes": {
+        "pass": 24
+      },
+      "stopped": null
+    }
+  ],
+  "summaries": [
+    {
+      "file": "claude-haiku-5-5.high.json",
+      "model": "claude-haiku-5-5",
+      "effort": "high",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9294,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9605
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8776
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9361,
+        "upper": 0.9823,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 5262.6,
+        "p95": 7572
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.588223,
+        "questions": 765,
+        "perQuestion": 0.000769,
+        "correct": 706,
+        "perCorrect": 0.000833,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 1,
+        "rate": 0.0013,
+        "llmCalls": 766,
+        "retryCalls": 1
+      },
+      "devTokens": {
+        "prompt": 6145114,
+        "cached": 5438600,
+        "completion": 926371,
+        "reasoning": null,
+        "total": 7071485
+      },
+      "fullSpendUsd": 1.044199,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1093,
+        "wrong_result": 74,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 9
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9294,
+          "delta": 0.0357,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0162,
+            "upper": 0.0561,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 5,
+          "improvements": 17,
+          "p": 0.016901,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8776,
+          "delta": 0.0612,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0181,
+            "upper": 0.1066,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 3,
+          "improvements": 12,
+          "p": 0.035156,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "api.anthropic.com",
+        "source": "model"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 10
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T09:46:33.939Z",
+      "costSources": []
+    },
+    {
+      "file": "claude-haiku-5-5.low.json",
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9286,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9592
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8776
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9347,
+        "upper": 0.981,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 3878.8,
+        "p95": 6031.1
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.425232,
+        "questions": 765,
+        "perQuestion": 0.000556,
+        "correct": 705,
+        "perCorrect": 0.000603,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 0,
+        "rate": 0,
+        "llmCalls": 765,
+        "retryCalls": 0
+      },
+      "devTokens": {
+        "prompt": 6136734,
+        "cached": 5431500,
+        "completion": 600788,
+        "reasoning": null,
+        "total": 6737522
+      },
+      "fullSpendUsd": 0.765925,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1092,
+        "wrong_result": 74,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 9,
+        "guardrail_true_rejection": 1
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9286,
+          "delta": 0.0349,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0162,
+            "upper": 0.0544,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 6,
+          "improvements": 17,
+          "p": 0.03469,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8776,
+          "delta": 0.0612,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0204,
+            "upper": 0.1066,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 4,
+          "improvements": 12,
+          "p": 0.076813,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "api.anthropic.com",
+        "source": "model"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 10
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T09:15:52.433Z",
+      "costSources": []
+    },
+    {
+      "file": "claude-sonnet-5-5.high.json",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9464,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9714
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.9048
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.951,
+        "upper": 0.9918,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 3219,
+        "p95": 5115.1
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 5.224218,
+        "questions": 765,
+        "perQuestion": 0.006829,
+        "correct": 714,
+        "perCorrect": 0.007317,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 0,
+        "rate": 0,
+        "llmCalls": 765,
+        "retryCalls": 0
+      },
+      "devTokens": {
+        "prompt": 6136734,
+        "cached": 5431500,
+        "completion": 327060,
+        "reasoning": null,
+        "total": 6463794
+      },
+      "fullSpendUsd": 9.276558,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1113,
+        "wrong_result": 59,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 4
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9464,
+          "delta": 0.0527,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.034,
+            "upper": 0.0731,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 2,
+          "improvements": 19,
+          "p": 0.000221,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.9048,
+          "delta": 0.0884,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0476,
+            "upper": 0.1338,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 2,
+          "improvements": 13,
+          "p": 0.007385,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "api.anthropic.com",
+        "source": "model"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 10
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T09:39:03.950Z",
+      "costSources": []
+    },
+    {
+      "file": "claude-sonnet-5-5.low.json",
+      "model": "claude-sonnet-5-5",
+      "effort": "low",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9354,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9633
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8889
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9388,
+        "upper": 0.9837,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 2971.9,
+        "p95": 4070.9
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 4.895428,
+        "questions": 765,
+        "perQuestion": 0.006399,
+        "correct": 708,
+        "perCorrect": 0.006914,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 0,
+        "rate": 0,
+        "llmCalls": 765,
+        "retryCalls": 0
+      },
+      "devTokens": {
+        "prompt": 6136734,
+        "cached": 5403100,
+        "completion": 287365,
+        "reasoning": null,
+        "total": 6424099
+      },
+      "fullSpendUsd": 8.198426,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1100,
+        "wrong_result": 68,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_true_rejection": 2,
+        "guardrail_false_rejection": 6
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9354,
+          "delta": 0.0417,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0221,
+            "upper": 0.0629,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 5,
+          "improvements": 18,
+          "p": 0.010622,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8889,
+          "delta": 0.0726,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0317,
+            "upper": 0.1179,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 3,
+          "improvements": 12,
+          "p": 0.035156,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "better"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "api.anthropic.com",
+        "source": "model"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 10
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T09:19:12.113Z",
+      "costSources": []
+    },
+    {
+      "file": "deepseek__deepseek-v4.1-flash.high.json",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "high",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9158,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9524
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8549
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9252,
+        "upper": 0.9755,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 3181.3,
+        "p95": 5985.1
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.300287,
+        "questions": 765,
+        "perQuestion": 0.000393,
+        "correct": 700,
+        "perCorrect": 0.000429,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 5,
+        "rate": 0.0065,
+        "llmCalls": 770,
+        "retryCalls": 5
+      },
+      "devTokens": {
+        "prompt": 3441551,
+        "cached": 3225600,
+        "completion": 373388,
+        "reasoning": 165811,
+        "total": 3814939
+      },
+      "fullSpendUsd": 0.622984,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1077,
+        "wrong_result": 92,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 7
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9158,
+          "delta": 0.0221,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0034,
+            "upper": 0.0417,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 8,
+          "improvements": 17,
+          "p": 0.107752,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8549,
+          "delta": 0.0385,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0023,
+            "upper": 0.0771,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 4,
+          "improvements": 11,
+          "p": 0.118469,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "openrouter.ai",
+        "source": "OPENAI_BASE_URL"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 16
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T14:19:06.781Z",
+      "costSources": [
+        "provider"
+      ]
+    },
+    {
+      "file": "deepseek__deepseek-v4.1-flash.low.json",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "low",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9116,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9524
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8435
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9238,
+        "upper": 0.9769,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 2521.1,
+        "p95": 4573.3
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 0.232456,
+        "questions": 765,
+        "perQuestion": 0.000304,
+        "correct": 700,
+        "perCorrect": 0.000332,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 8,
+        "rate": 0.0105,
+        "llmCalls": 773,
+        "retryCalls": 8
+      },
+      "devTokens": {
+        "prompt": 3457490,
+        "cached": 3249920,
+        "completion": 271515,
+        "reasoning": 73942,
+        "total": 3729005
+      },
+      "fullSpendUsd": 0.449272,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1072,
+        "wrong_result": 98,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 6
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9116,
+          "delta": 0.0179,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": -0.0026,
+            "upper": 0.0391,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 10,
+          "improvements": 15,
+          "p": 0.424356,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8435,
+          "delta": 0.0272,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": -0.0136,
+            "upper": 0.0703,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 6,
+          "improvements": 10,
+          "p": 0.454498,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "openrouter.ai",
+        "source": "OPENAI_BASE_URL"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 16
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T13:54:47.011Z",
+      "costSources": [
+        "provider"
+      ]
+    },
+    {
+      "file": "google__gemini-3.8-flash.low.json",
+      "model": "google/gemini-3.8-flash",
+      "effort": "low",
+      "answerCases": 392,
+      "repeat": 3,
+      "strictAccuracy": 0.9294,
+      "bySplit": [
+        {
+          "split": "dev",
+          "cases": 245,
+          "accuracy": 0.9646
+        },
+        {
+          "split": "holdout",
+          "cases": 147,
+          "accuracy": 0.8707
+        }
+      ],
+      "devAccuracyCi95": {
+        "method": "case bootstrap (percentile)",
+        "lower": 0.9401,
+        "upper": 0.985,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "devLatency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 765,
+        "p50": 3514.5,
+        "p95": 8885.4
+      },
+      "devCost": {
+        "currency": "USD",
+        "total": 2.967732,
+        "questions": 765,
+        "perQuestion": 0.003879,
+        "correct": 709,
+        "perCorrect": 0.004186,
+        "questionsWithoutCost": 0,
+        "questionsWithoutLlmCall": 0
+      },
+      "devRetries": {
+        "questions": 765,
+        "questionsWithRetry": 1,
+        "rate": 0.0013,
+        "llmCalls": 766,
+        "retryCalls": 1
+      },
+      "devTokens": {
+        "prompt": 3546389,
+        "cached": 676259,
+        "completion": 203844,
+        "reasoning": 0,
+        "total": 3750233
+      },
+      "fullSpendUsd": 4.984299,
+      "excluded": {},
+      "outcomes": {
+        "pass": 1093,
+        "wrong_result": 71,
+        "answered_instead_of_clarify": 15,
+        "answered_instead_of_abstain": 21,
+        "guardrail_false_rejection": 10,
+        "guardrail_true_rejection": 2
+      },
+      "stopped": null,
+      "comparison": {
+        "paired": 392,
+        "accuracy": {
+          "baseline": 0.8937,
+          "candidate": 0.9294,
+          "delta": 0.0357,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0153,
+            "upper": 0.057,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 7,
+          "improvements": 17,
+          "p": 0.063915,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "holdoutComparison": {
+        "paired": 147,
+        "accuracy": {
+          "baseline": 0.8163,
+          "candidate": 0.8707,
+          "delta": 0.0544,
+          "deltaCi95": {
+            "method": "paired case bootstrap (percentile)",
+            "lower": 0.0113,
+            "upper": 0.0998,
+            "resamples": 10000,
+            "seed": 20261005
+          }
+        },
+        "mcnemar": {
+          "regressions": 5,
+          "improvements": 11,
+          "p": 0.210114,
+          "test": "exact two-sided (binomial on discordant pairs)"
+        },
+        "verdict": "no_significant_difference"
+      },
+      "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+      "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+      "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+      "endpoint": {
+        "host": "openrouter.ai",
+        "source": "OPENAI_BASE_URL"
+      },
+      "git": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 14
+      },
+      "sourceVersion": null,
+      "codeVersion": null,
+      "versionStatus": "base-commit-and-dirty-flag-only",
+      "verification": {
+        "skipped": false,
+        "cases": 404,
+        "problems": 0,
+        "gateFailures": 0
+      },
+      "reportDate": "2026-10-14T14:01:59.314Z",
+      "costSources": [
+        "provider"
+      ]
+    }
+  ],
+  "thinkingComparisons": [
+    {
+      "model": "claude-haiku-5-5",
+      "baseline": "low",
+      "candidate": "high",
+      "paired": 392,
+      "accuracy": {
+        "baseline": 0.9286,
+        "candidate": 0.9294,
+        "delta": 0.0009,
+        "deltaCi95": {
+          "method": "paired case bootstrap (percentile)",
+          "lower": -0.0094,
+          "upper": 0.0119,
+          "resamples": 10000,
+          "seed": 20261005
+        }
+      },
+      "mcnemar": {
+        "regressions": 4,
+        "improvements": 5,
+        "p": 1,
+        "test": "exact two-sided (binomial on discordant pairs)"
+      },
+      "verdict": "no_significant_difference"
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "baseline": "low",
+      "candidate": "high",
+      "paired": 392,
+      "accuracy": {
+        "baseline": 0.9354,
+        "candidate": 0.9464,
+        "delta": 0.0111,
+        "deltaCi95": {
+          "method": "paired case bootstrap (percentile)",
+          "lower": 0,
+          "upper": 0.0238,
+          "resamples": 10000,
+          "seed": 20261005
+        }
+      },
+      "mcnemar": {
+        "regressions": 1,
+        "improvements": 5,
+        "p": 0.21875,
+        "test": "exact two-sided (binomial on discordant pairs)"
+      },
+      "verdict": "no_significant_difference"
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "baseline": "low",
+      "candidate": "high",
+      "paired": 392,
+      "accuracy": {
+        "baseline": 0.9116,
+        "candidate": 0.9158,
+        "delta": 0.0043,
+        "deltaCi95": {
+          "method": "paired case bootstrap (percentile)",
+          "lower": -0.006,
+          "upper": 0.0153,
+          "resamples": 10000,
+          "seed": 20261005
+        }
+      },
+      "mcnemar": {
+        "regressions": 3,
+        "improvements": 7,
+        "p": 0.34375,
+        "test": "exact two-sided (binomial on discordant pairs)"
+      },
+      "verdict": "no_significant_difference"
+    }
+  ],
+  "pilotSpendUsd": 1.00837,
+  "fullSpendUsd": 25.341663,
+  "probeSpendUsd": 0.00122795,
+  "spendingCaveat": "Native estimates plus OpenRouter usage.cost; excludes any provider charge for aborted calls without returned usage and any unrelated account activity"
+}
