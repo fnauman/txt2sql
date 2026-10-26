@@ -1,44 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { loadHealth } from '../api';
-import type { HealthResponse } from '../types';
+import { createHealthCheck, type HealthSnapshot } from './healthCheck';
 
-export type HealthStatus = 'checking' | 'connected' | 'unavailable';
+export type { HealthStatus } from './healthCheck';
 
 export function useHealth() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [status, setStatus] = useState<HealthStatus>('checking');
-  const active = useRef<AbortController | null>(null);
-  const refresh = useCallback(async () => {
-    active.current?.abort();
-    const controller = new AbortController();
-    active.current = controller;
-    const timer = window.setTimeout(() => controller.abort(), 5000);
-    setStatus('checking');
-    try {
-      const next = await loadHealth(controller.signal);
-      if (active.current === controller) {
-        setHealth(next);
-        setStatus('connected');
-      }
-    } catch {
-      if (active.current === controller) {
-        setHealth(null);
-        setStatus('unavailable');
-      }
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }, []);
+  const [snapshot, setSnapshot] = useState<HealthSnapshot>({ health: null, status: 'checking' });
+  const check = useMemo(() => createHealthCheck(loadHealth, setSnapshot), []);
 
   useEffect(() => {
-    void refresh();
-    return () => {
-      const controller = active.current;
-      active.current = null;
-      controller?.abort();
-    };
-  }, [refresh]);
+    void check.refresh();
+    return () => check.dispose();
+  }, [check]);
 
-  return { health, status, refresh };
+  return { health: snapshot.health, status: snapshot.status, refresh: check.refresh };
 }
