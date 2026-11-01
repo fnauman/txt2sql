@@ -26,8 +26,8 @@ import { selectSuite } from '../src/eval/suite.js';
 //   (the known false rejection, controls rp4) -> guardrail_false_rejection;
 // - core_public_007 gets SQL without the IsActive filter -> wrong_result;
 // - abstain / clarify cases get `SELECT 1` (answered instead of declining),
-//   except hard_abstain_competitor_prices, which gets an empty query
-//   (declined: handled correctly);
+//   except hard_abstain_competitor_prices, which gets a typed abstention
+//   (abstained: handled correctly);
 // - in the "regressed" mode six paraphrase cases get `SELECT 1`;
 // - in the "expensive" mode every call reports 1M prompt tokens;
 // - in the "slow" mode it answers after 5 s;
@@ -98,7 +98,9 @@ before(async () => {
       } else if (mode === 'regressed' && REGRESSED.includes(testCase?.id)) {
         sql = 'SELECT 1';
       }
-      const content = JSON.stringify({ sql, explanation: 'stand-in', tables_used: testCase?.expected_tables || [], assumptions: [] });
+      const content = JSON.stringify({ decision: sql ? 'answer' : 'abstain', clarification_questions: [],
+        sql, explanation: sql ? 'stand-in' : 'Competitor pricing is not in the available schema.',
+        tables_used: testCase?.expected_tables || [], assumptions: [] });
       const promptTokens = mode === 'expensive' ? 1_000_000 : 2000;
       setTimeout(
         () => {
@@ -368,7 +370,8 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   assert.equal(report.behavior.cases, behavior.length);
   assert.equal(report.behavior.handled, 1);
   const byId = Object.fromEntries(report.results.map((record) => [record.id, record]));
-  assert.equal(byId.hard_abstain_competitor_prices.summary.outcome, 'declined');
+  assert.equal(byId.hard_abstain_competitor_prices.summary.outcome, 'abstained');
+  assert.equal(byId.hard_abstain_competitor_prices.repetitions[0].responseContractVersion, 2);
   for (const testCase of behavior.filter((entry) => entry.id !== 'hard_abstain_competitor_prices')) {
     assert.equal(byId[testCase.id].summary.outcome, `answered_instead_of_${testCase.expected_behavior}`, testCase.id);
     assert.equal(byId[testCase.id].summary.counted, 0, testCase.id);
@@ -435,7 +438,7 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
   }
   assert.equal(report.results.filter((record) => record.split === 'holdout').length, holdoutCases.length);
   assert.match(markdown, /## Behaviour cases \(abstain \/ clarify\)/);
-  assert.match(run.stdout, /ok   hard_abstain_competitor_prices: declined \(expects abstain\)/);
+  assert.match(run.stdout, /ok   hard_abstain_competitor_prices: abstained \(expects abstain\)/);
 
   // --split holdout runs only the holdout, still in aggregate on the console
   // and in report.md; --reveal-holdout lists the cases.
@@ -456,7 +459,7 @@ test('the whole default suite: splits, behaviour cases and known validator rejec
 test('behaviour-only selections: the benchmark profile fails an answered case; --min-accuracy is refused before any LLM call', { skip }, async () => {
   mode = 'base';
   // The stand-in answers every abstain case with SQL except
-  // hard_abstain_competitor_prices, which it declines.
+  // hard_abstain_competitor_prices, which returns a typed abstention.
   const unanswerable = ['--dataset', 'hard-cases-public', '--tag', 'unanswerable'];
   const answered = await runEval(['--profile', 'benchmark', ...unanswerable], 'benchmark-behaviour');
   assert.equal(answered.code, 1, `${answered.stdout}\n${answered.stderr}`);
