@@ -170,7 +170,7 @@ Loading behavior:
 
 Required environment variables:
 
-- `OPENAI_API_KEY` (for anything that calls the model; with an OpenRouter `OPENAI_BASE_URL`, `OPENROUTER_API_KEY` works too, see [Models](#models))
+- `OPENAI_API_KEY` (for anything that calls the model; with an OpenRouter `OPENAI_BASE_URL`, `OPENROUTER_API_KEY` works too, and a native Claude model uses `ANTHROPIC_API_KEY` instead, see [Models](#models))
 - `DB_NAME`
 - `DB_PASSWORD` (the query user's password; `DB_USER` defaults to `demo_readonly`)
 - `DB_ADMIN_PASSWORD` or `MARIADB_ROOT_PASSWORD` (only for `bootstrap-db` and `seed-demo`; `DB_ADMIN_USER` defaults to `root`)
@@ -562,6 +562,9 @@ capability map is keyed by the model id without a vendor prefix, so
 
 | Family | Reasoning | `REASONING_EFFORT` values | With no effort set |
 |---|---|---|---|
+| `claude-haiku-5-5`, `claude-sonnet-5-5` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`) | `medium` (Haiku) / `high` (Sonnet), the provider defaults; sent and recorded. Native requests go to api.anthropic.com (see [Anthropic](#anthropic)) |
+| `gemini-3.8-flash` (OpenRouter `google/gemini-3.8-flash`) | yes | `low`, `medium`, `high` | `medium`, sent and recorded |
+| `deepseek-v4.1-flash` (OpenRouter `deepseek/deepseek-v4.1-flash`) | yes | `low`, `high`, `max` | `high`, sent and recorded |
 | `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the request of the gpt-4o-mini reference baseline, byte for byte |
 | `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `gpt-6-luna`, the default model: `low` (the product default); the others: `medium` (the provider default); sent and recorded |
 | `gpt-6-astra`, `gpt-6.1-sol` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`: the API rejects it) | `medium` (6.1 Sol's provider default; Astra's page states none, so it is sent explicitly) |
@@ -612,6 +615,31 @@ with the gpt-4o-mini reference of experiments 1-3, pass
 `--compare eval/baselines/gpt-4o-mini.json` (the comparison then states the
 model change).
 
+### Anthropic
+
+`claude-haiku-5-5` and `claude-sonnet-5-5` with no `OPENAI_BASE_URL` go to
+Anthropic's native Messages API with `ANTHROPIC_API_KEY` (`OPENAI_API_KEY` is
+never sent there). `src/anthropic-client.js` translates the Chat Completions
+request inside the existing SDK's transport, so timeouts, cancellation and
+retries behave as for OpenAI, without a second SDK. The request uses adaptive
+thinking with the effort as `output_config.effort`, the same strict JSON
+schema as `output_config.format`, and `max_tokens` from
+`LLM_MAX_COMPLETION_TOKENS`. The stable schema prefix of the prompt carries a
+cache breakpoint (the text is split into blocks, not changed), cache writes
+are priced separately from cache reads, and a corrective retry replays the
+signed thinking blocks unchanged. Reports record the endpoint as
+`api.anthropic.com`. The same models with an OpenRouter `OPENAI_BASE_URL`
+(`anthropic/claude-...`) use the OpenRouter request below.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... MODEL_NAME=claude-haiku-5-5 REASONING_EFFORT=low \
+  npm run eval -- --compare eval/baselines/gpt-6-luna.low.json
+```
+
+[Experiment 4](docs/experiments/04-provider-models.md) measured both models,
+Gemini 3.8 Flash and DeepSeek V4.1 Flash on the 404-case suite; the default
+model did not change.
+
 ### OpenRouter
 
 Any OpenAI-compatible endpoint works through `OPENAI_BASE_URL`. For
@@ -655,7 +683,10 @@ The capability map and the price list strip the vendor prefix, so
 OpenRouter every request also carries `provider: { "require_parameters": true }`:
 OpenRouter then routes only to endpoints that support every parameter sent
 (`response_format`, `reasoning_effort`, `max_completion_tokens`, ...) instead of
-silently dropping one. How strictly a provider enforces a strict
+silently dropping one. Claude, Gemini and DeepSeek models on OpenRouter get
+OpenRouter's unified `reasoning: { enabled: true, effort }` and `max_tokens`
+instead of `reasoning_effort` / `max_completion_tokens`, and their
+`reasoning_details` are replayed unchanged on a corrective retry. How strictly a provider enforces a strict
 `json_schema` response format still varies; set
 `OPENROUTER_REQUIRE_PARAMETERS=0` only to let OpenRouter route anyway. The
 cost OpenRouter reports for each call (`usage.cost`) is the call's cost, also

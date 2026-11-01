@@ -688,6 +688,7 @@ test('a rejected key, a wrong endpoint or an unknown model stops the run; other 
   for (const code of ['HTTP_400', 'HTTP_429', 'HTTP_500', 'LLM_TIMEOUT', 'LLM_TRUNCATED']) {
     assert.equal(providerConfigRejection({ status: 'llm_error', error_code: code }), null, code);
   }
+  assert.match(providerConfigRejection({ status: 'llm_error', error_code: 'HTTP_402' }), /HTTP_402: the account is out of credit\); no further case is started/);
   assert.equal(providerConfigRejection({ status: 'pass', error_code: 'HTTP_404' }), null);
 });
 

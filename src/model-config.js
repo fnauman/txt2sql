@@ -107,6 +107,10 @@ const MAX_COMPLETION_TOKENS_LIMIT = 1_000_000;
 const CHAT_COMPLETIONS_ONLY = 'this pipeline sends Chat Completions requests with a strict json_schema response format';
 
 export const MODEL_FAMILIES = Object.freeze([
+  Object.freeze({ family: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', pattern: /^claude-haiku-5-5(?:-|$)/, reasoning: true, efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']), defaultEffort: 'medium' }),
+  Object.freeze({ family: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', pattern: /^claude-sonnet-5-5(?:-|$)/, reasoning: true, efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']), defaultEffort: 'high' }),
+  Object.freeze({ family: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', pattern: /^gemini-3\.8-flash(?:-|$)/, reasoning: true, efforts: Object.freeze(['low', 'medium', 'high']), defaultEffort: 'medium' }),
+  Object.freeze({ family: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', pattern: /^deepseek-v4\.1-flash(?:-|$)/, reasoning: true, efforts: Object.freeze(['low', 'high', 'max']), defaultEffort: 'high' }),
   Object.freeze({ family: 'gpt-4o', label: 'gpt-4o*', pattern: /^gpt-4o(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
   Object.freeze({ family: 'gpt-4.1', label: 'gpt-4.1*', pattern: /^gpt-4\.1(?:-|$)/, reasoning: false, efforts: null, defaultEffort: null }),
   Object.freeze({
@@ -359,6 +363,7 @@ export function reasoningEnabled(model, reasoningEffort = null) {
 export function resolveEndpoint(env = process.env) {
   const raw = nonBlank(env.OPENAI_BASE_URL);
   if (!raw) {
+    if (isNativeAnthropic(env.MODEL_NAME, env)) return { baseUrlHost: 'api.anthropic.com', isOpenRouter: false };
     return { baseUrlHost: 'api.openai.com', isOpenRouter: false };
   }
   try {
@@ -371,6 +376,10 @@ export function resolveEndpoint(env = process.env) {
   }
 }
 
+export function isNativeAnthropic(model, env = process.env) {
+  return /^claude-(?:haiku|sonnet)-5-5(?:-|$)/.test(baseModelId(model)) && !nonBlank(env.OPENAI_BASE_URL);
+}
+
 /**
  * The API key for the configured endpoint and the variable it came from:
  * OPENAI_API_KEY, else (only when OPENAI_BASE_URL is on openrouter.ai)
@@ -378,6 +387,7 @@ export function resolveEndpoint(env = process.env) {
  * The key itself is never logged or recorded.
  */
 export function resolveLlmApiKey(env = process.env) {
+  if (isNativeAnthropic(env.MODEL_NAME, env)) return { apiKey: nonBlank(env.ANTHROPIC_API_KEY), source: 'ANTHROPIC_API_KEY' };
   const openAiKey = nonBlank(env.OPENAI_API_KEY);
   if (openAiKey) {
     return { apiKey: openAiKey, source: 'OPENAI_API_KEY' };
@@ -452,6 +462,17 @@ export function buildCompletionOptions(base, settings = {}) {
   // Never build a request for a model the pipeline cannot call.
   assertModelSupported(model);
   const effort = normalizeReasoningEffort(model, reasoningEffort, { source: 'reasoningEffort' }) ?? defaultReasoningEffort(model);
+  const claude = /^claude-(?:haiku|sonnet)-5-5(?:-|$)/.test(baseModelId(model));
+  if (claude && !isOpenRouter && (!settings.baseUrlHost || settings.baseUrlHost === 'api.anthropic.com')) {
+    return {
+      max_tokens: maxCompletionTokens,
+      thinking: { type: 'adaptive', display: 'omitted' },
+      output_config: {
+        effort,
+        ...(base.response_format?.json_schema ? { format: { type: 'json_schema', schema: base.response_format.json_schema.schema } } : {}),
+      },
+    };
+  }
   let options = base;
   if (reasoningEnabled(model, effort)) {
     const rest = Object.fromEntries(Object.entries(base).filter(([key]) => key !== 'temperature' && key !== 'top_p'));
@@ -459,6 +480,10 @@ export function buildCompletionOptions(base, settings = {}) {
   } else if (effort) {
     // Effort `none`: no reasoning, so the deterministic base options stay.
     options = { ...base, reasoning_effort: effort };
+  }
+  if (isOpenRouter && effort && (claude || /^(?:gemini-|deepseek-v4\.1-flash)/.test(baseModelId(model)))) {
+    const { reasoning_effort, max_completion_tokens, ...rest } = options;
+    options = { ...rest, max_tokens: max_completion_tokens, reasoning: { enabled: true, effort } };
   }
   if (isOpenRouter && requireParameters) {
     options = { ...options, provider: { require_parameters: true } };
@@ -515,7 +540,7 @@ export function resolveModelConfig({ env = process.env, flags = {}, envFile = nu
       `--reasoning-effort ${reasoningEffort} overrides REASONING_EFFORT=${envEffort}${fromFile('REASONING_EFFORT') ? ` (from ${fromFile('REASONING_EFFORT')})` : ''}.`
     );
   }
-  const completionSettings = resolveCompletionSettings(env);
+  const completionSettings = resolveCompletionSettings({ ...env, MODEL_NAME: model });
   // OPENAI_API_KEY wins over OPENROUTER_API_KEY (resolveLlmApiKey), also on
   // OpenRouter: say so, so an OpenAI key is never sent there unnoticed.
   if (completionSettings.isOpenRouter && nonBlank(env.OPENAI_API_KEY) && nonBlank(env.OPENROUTER_API_KEY)) {

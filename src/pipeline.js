@@ -10,7 +10,8 @@ import {
   NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
-import { buildCompletionOptions, resolveLlmApiKey } from './model-config.js';
+import { buildCompletionOptions, isNativeAnthropic, resolveLlmApiKey } from './model-config.js';
+import { createAnthropicClient } from './anthropic-client.js';
 import { calculateCallCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { normalizeHintsVersion } from './hints-version.js';
@@ -2662,12 +2663,22 @@ export const OPTIMIZED_MODEL_REQUEST_OPTIONS = {
 
 export async function generateOptimizedResponse({ client, model, prompt, retryContext = null, signal = null, modelConfig = null }) {
   const messages = [{ role: 'system', content: prompt.system }];
+  let userContent = prompt.user;
+  // Anthropic requires an explicit breakpoint for the already stable schema
+  // prefix. Splitting text into blocks preserves every prompt character.
+  if (buildCompletionOptions(OPTIMIZED_MODEL_REQUEST_OPTIONS, { ...modelConfig, model }).thinking && prompt.context?.promptCache) {
+    const length = prompt.context.promptCache.cacheablePrefixChars - prompt.system.length;
+    if (length > 0 && length < prompt.user.length) userContent = [
+      { type: 'text', text: prompt.user.slice(0, length), cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: prompt.user.slice(length) },
+    ];
+  }
 
   if (!retryContext) {
-    messages.push({ role: 'user', content: prompt.user });
+    messages.push({ role: 'user', content: userContent });
   } else {
-    messages.push({ role: 'user', content: prompt.user });
-    messages.push({
+    messages.push({ role: 'user', content: userContent });
+    messages.push(retryContext.assistantMessage ?? {
       role: 'assistant',
       content: JSON.stringify({
         sql: retryContext.sql,
@@ -2727,6 +2738,10 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   });
 
   const cleaned = cleanModelOutput(rawText);
+  // Signed thinking blocks / reasoning_details must be replayed unchanged on a
+  // corrective retry, also after a reply that was not valid JSON.
+  const message = response.choices[0]?.message;
+  const replay = message?.anthropic_content || message?.reasoning_details ? { assistantMessage: message } : {};
 
   try {
     const parsed = JSON.parse(cleaned);
@@ -2735,6 +2750,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       explanation: parsed.explanation || '',
       tables_used: Array.isArray(parsed.tables_used) ? parsed.tables_used : [],
       assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
+      ...replay,
       rawText,
       usage,
       cost: callCost(responseModel, model, usage),
@@ -2749,6 +2765,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       explanation: 'Model response was not valid JSON.',
       tables_used: [],
       assumptions: ['Response parsing failed; SQL was extracted from raw output.'],
+      ...replay,
       rawText,
       usage,
       cost: callCost(responseModel, model, usage),
@@ -3536,15 +3553,17 @@ export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env =
 // https://openrouter.ai base URL to a local stand-in with it.
 // The key is OPENAI_API_KEY, else OPENROUTER_API_KEY for an openrouter.ai
 // OPENAI_BASE_URL (resolveLlmApiKey).
-export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env, fetch = undefined } = {}) {
-  const { apiKey } = resolveLlmApiKey(env);
+export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env, fetch = undefined, model = env.MODEL_NAME } = {}) {
+  const providerEnv = { ...env, MODEL_NAME: model };
+  const { apiKey } = resolveLlmApiKey(providerEnv);
   if (!apiKey) {
-    const error = new Error('OPENAI_API_KEY is required (or OPENROUTER_API_KEY with an https://openrouter.ai OPENAI_BASE_URL).');
-    error.code = 'OPENAI_NOT_CONFIGURED';
+    const error = new Error(isNativeAnthropic(model, env) ? 'ANTHROPIC_API_KEY is required for a native Claude request.' : 'OPENAI_API_KEY is required (or OPENROUTER_API_KEY with an https://openrouter.ai OPENAI_BASE_URL).');
+    error.code = isNativeAnthropic(model, env) ? 'ANTHROPIC_NOT_CONFIGURED' : 'OPENAI_NOT_CONFIGURED';
     throw error;
   }
 
   const options = resolveOpenAiClientOptions({ timeoutMs, maxRetries }, env);
+  if (isNativeAnthropic(model, env)) return createAnthropicClient({ apiKey, ...options, ...(fetch && { fetch }) });
   return new OpenAI({
     apiKey,
     ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),

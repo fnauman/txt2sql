@@ -56,6 +56,7 @@ test('every outcome class gets its bucket and counted flag', () => {
     [repetition('execution_error', [accepted('SELECT nope', { ok: false, stage: 'execution', code: 'ER_BAD_FIELD_ERROR' })]), 'execution_error', 'model', true],
     [repetition('llm_error', [], { error_code: 'LLM_TRUNCATED' }), 'llm_error', 'model', true],
     [repetition('llm_error', [], { error_code: 'HTTP_429' }), 'llm_outage', 'infra', false],
+    [repetition('llm_error', [], { error_code: 'HTTP_402' }), 'llm_outage', 'infra', false],
     [repetition('llm_error', [], { error_code: 'LLM_TIMEOUT' }), 'llm_outage', 'infra', false],
     [repetition('infra_error', [], { error_code: 'ECONNREFUSED' }), 'infra_error', 'infra', false],
     // A wrong model name or endpoint: an outage of the configuration, not the model's answer.
