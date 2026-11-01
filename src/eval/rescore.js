@@ -244,7 +244,7 @@ export async function rescoreRepetition(repetition, {
   maxAttempts = 2,
   score = scoreAgainstGold,
 }) {
-  const recorded = stripAttribution(repetition);
+  const recorded = { ...stripAttribution(repetition), responseContractVersion: recordedResponseContractVersion(null, repetition) };
   const originalStatus = recorded.status;
   if (isBehaviorCase(testCase)) {
     // No gold to re-score against: whether the recorded run produced SQL is
@@ -524,6 +524,21 @@ export async function rescoreRepetition(repetition, {
 }
 
 /**
+ * The protocol used by the recorded generation, not today's scorer. Reports
+ * written before repetitions carried it can use run provenance. A rescore's
+ * product block describes the current scorer, so its source protocol wins.
+ * Missing historical protocol metadata means version 1; never upgrade it just
+ * because today's scorer supports a newer response shape.
+ */
+export function recordedResponseContractVersion(report, repetition) {
+  if (repetition?.responseContractVersion !== undefined) return repetition.responseContractVersion;
+  if (report?.mode === 'rescore' && report.rescoredFrom?.responseContractVersion !== undefined) {
+    return report.rescoredFrom.responseContractVersion;
+  }
+  return report?.provenance?.product?.responseContractVersion ?? 1;
+}
+
+/**
  * Rescores every case of a report. `currentCases` maps id -> today's
  * normalized case. Returns [{ entry: { testCase, datasets }, repetitions,
  * caseSource }] in report order, ready for the runner's attribution step.
@@ -556,7 +571,8 @@ export async function rescoreReportCases(report, {
       goldError = error;
     }
     const results = [];
-    for (const repetition of repetitions) {
+    for (const sourceRepetition of repetitions) {
+      const repetition = { ...sourceRepetition, responseContractVersion: recordedResponseContractVersion(report, sourceRepetition) };
       results.push(
         goldError
           ? goldErrorRepetition(repetition, goldError)

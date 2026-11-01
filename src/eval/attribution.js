@@ -171,7 +171,9 @@ function producedSql(repetition) {
 }
 
 // Codes with which a finished product loop returned no SQL on purpose: the
-// model sent an empty query (EMPTY_SQL) or refused (LLM_REFUSED).
+// model sent an empty query (EMPTY_SQL) or refused (LLM_REFUSED). These
+// count as handled only for version-1 recordings; version 2 requires the
+// matching explicit decision, never a failed generation or an empty answer.
 const DECLINE_CODES = new Set(['EMPTY_SQL', 'LLM_REFUSED']);
 
 /**
@@ -194,7 +196,8 @@ export function classifyBehaviorRepetition(repetition, testCase) {
     if (producedSql(repetition)) {
       outcome = answered;
       tags.push('not_executed');
-    } else if (DECLINE_CODES.has(finalCode) || DECLINE_CODES.has(repetition.error_code)) {
+    } else if ((repetition.responseContractVersion === undefined || repetition.responseContractVersion === 1) &&
+        (DECLINE_CODES.has(finalCode) || DECLINE_CODES.has(repetition.error_code))) {
       outcome = 'declined';
     } else {
       outcome = 'llm_error';

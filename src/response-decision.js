@@ -14,7 +14,7 @@ export function responseDecision(parsed) {
     throw Object.assign(new Error('The model response must be an object.'), { code: 'LLM_INVALID_DECISION' });
   }
   const decision = Object.hasOwn(parsed, 'decision') ? parsed.decision : 'answer';
-  const questions = parsed.clarification_questions ?? [];
+  const questions = Object.hasOwn(parsed, 'clarification_questions') ? parsed.clarification_questions : [];
   const invalid = !['answer', 'clarify', 'abstain'].includes(decision) ||
     (Object.hasOwn(parsed, 'decision') && decision === 'answer' &&
       (typeof parsed.sql !== 'string' || !parsed.sql.trim())) ||

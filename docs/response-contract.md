@@ -36,10 +36,16 @@ respond to today's decision prompt.
 
 Behavior cases score the matching typed decision separately from SQL accuracy:
 `clarified` and `abstained` are handled, `wrong_behavior` is not. A nonanswer to
-an answerable case is a counted model failure (`declined_answer`). Legacy
-recordings retain their old empty-SQL/refusal `declined` score; do not interpret
-that score as proof that a useful clarification was asked. New compact reports
-retain the decision and the actual clarification questions.
+an answerable case is a counted model failure (`declined_answer`). Every live
+repetition records `responseContractVersion: 2`; an empty SQL
+answer or provider refusal is a failed response, not a handled behavior case.
+Legacy recordings without protocol metadata are treated as version 1 and
+retain their old empty-SQL/refusal `declined` score; do not interpret
+that score as proof that a useful clarification was asked. Compact reports and
+rescoring preserve each repetition's original protocol
+version, decision and actual clarification questions. Older v2 reports missing
+the repetition field inherit their run's protocol metadata; a rescore of a v1
+recording keeps v1 even though the current scorer uses v2.
 
 Automated tests exercise the real product loop with controlled model replies,
 HTTP/SSE serialization, the client stream reducer, rejection of conflicting

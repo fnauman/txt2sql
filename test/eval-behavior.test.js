@@ -424,7 +424,8 @@ test('evaluateQuestion runs no gold and no oracle for a behavior case; executed 
     },
   });
   assert.equal(declined.status, 'validation_error');
-  assert.equal(classifyRepetition(declined, abstainCase).outcome, 'declined');
+  assert.equal(declined.responseContractVersion, 2);
+  assert.equal(classifyRepetition(declined, abstainCase).outcome, 'llm_error');
 });
 
 test('rescore keeps a behavior case as recorded (inherited): there is no gold to replay against', async () => {

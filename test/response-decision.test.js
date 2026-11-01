@@ -67,6 +67,8 @@ test('wrong decision types fail behavior scoring and nonanswers count against an
 test('inconsistent decisions never become executable SQL or a successful refusal', async () => {
   const malformed = [
     reply('answer'),
+    { ...reply('answer'), sql: 'SELECT Id FROM Entry', clarification_questions: null },
+    { ...reply('abstain'), clarification_questions: null },
     { ...reply('clarify'), sql: 'SELECT Id FROM Entry' },
     { ...reply('clarify'), clarification_questions: [] },
     { ...reply('abstain'), explanation: 42 },
@@ -84,6 +86,23 @@ test('inconsistent decisions never become executable SQL or a successful refusal
     assert.equal(result.errorCode, 'LLM_INVALID_DECISION');
     assert.equal(result.llmUsage.total_tokens, 60);
   }
+});
+
+test('null clarification questions trigger a corrective retry without executing SQL', async () => {
+  const invalid = clientFor({ ...reply('abstain'), clarification_questions: null });
+  const corrected = clientFor(reply('abstain'));
+  let calls = 0;
+  const client = { chat: { completions: { create: async request =>
+    (++calls === 1 ? invalid : corrected).chat.completions.create(request),
+  } } };
+  const result = await runOptimizedQuestion({ client, schema, model: 'gpt-4o-mini', question: 'Show entries', maxRetries: 1,
+    connection: { query: async () => { throw new Error('A non-answer must not execute SQL'); } } });
+  assert.equal(result.success, true);
+  assert.equal(result.decision, 'abstain');
+  assert.equal(result.attemptCount, 2);
+  assert.equal(calls, 2);
+  assert.equal(result.llmUsage.total_tokens, 120);
+  assert.match(corrected.requests[0].messages.at(-1).content, /inconsistent response decision/);
 });
 
 test('supported and legacy answer responses still go through SQL safety and execution', async () => {

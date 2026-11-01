@@ -896,12 +896,12 @@ export function formatProgress({ testCase, repetition, result, completed, total,
         : result.status;
   let passed = status === 'pass';
   if (isBehaviorCase(testCase)) {
-    // An abstain / clarify case passes when the product returned no SQL. A
+    // A behavior case passes on its matching decision (or a legacy decline). A
     // repetition that is not judged on that (a timeout, an outage, a budget
     // skip) keeps its usual label.
     const judged = classifyRepetition(result, testCase);
     if (judged.behavior_counted) {
-      passed = judged.outcome === 'declined';
+      passed = ['declined', 'clarified', 'abstained'].includes(judged.outcome);
       status = `${judged.outcome} (expects ${testCase.expected_behavior})`;
     }
   }
