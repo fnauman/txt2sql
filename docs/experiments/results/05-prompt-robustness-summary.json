@@ -1,0 +1,664 @@
+{
+  "generatedAt": "2026-10-14T17:58:59.099Z",
+  "protocol": {
+    "cases": 16,
+    "distinctIntents": 16,
+    "variants": [
+      "base",
+      "repeat",
+      "polite",
+      "whitespace",
+      "schema_order"
+    ],
+    "split": "dev",
+    "selection": "SHA-256 ranked within source strata; distinct intents, no score-based selection",
+    "scope": "Model-boundary presentation changes; deterministic application context held fixed",
+    "confidenceUnit": "Case / distinct intent; three tweaks are not independent trials"
+  },
+  "summaries": [
+    {
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "cases": 16,
+      "completeCases": 16,
+      "byVariant": [
+        {
+          "variant": "base",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "repeat",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "polite",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "whitespace",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "schema_order",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        }
+      ],
+      "unchangedRepeatFlips": 0,
+      "allFiveCorrect": 15,
+      "allFiveWrong": 1,
+      "mixedCorrectness": 0,
+      "baselineCorrectCases": 15,
+      "lostUnderAnyTweak": 0,
+      "stableBaselineCorrectCases": 15,
+      "stableBaselineLostUnderAnyTweak": 0,
+      "changedPromptCorrect": 45,
+      "changedPromptTrials": 48,
+      "changedPromptAccuracy": 0.9375,
+      "changedPromptAccuracyCi95": {
+        "lower": 0.8125,
+        "upper": 1,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "stableBaselineLostUnderAnyTweakCi95": {
+        "lower": 0,
+        "upper": 0.2039
+      },
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 80,
+        "p50": 4077.6,
+        "p95": 6653.5
+      },
+      "returnedCostUsd": 0.028402510000000002,
+      "budget": {
+        "limitUsd": 0.2,
+        "spentUsd": 0.028402510000000002,
+        "reservedUsd": -1.734723475976807e-17,
+        "blockedCalls": 0,
+        "calls": 80
+      },
+      "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3",
+      "provenance": null,
+      "versionStatus": "legacy-run-without-source-capture"
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "cases": 16,
+      "completeCases": 16,
+      "byVariant": [
+        {
+          "variant": "base",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "repeat",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "polite",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "whitespace",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "schema_order",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        }
+      ],
+      "unchangedRepeatFlips": 0,
+      "allFiveCorrect": 15,
+      "allFiveWrong": 1,
+      "mixedCorrectness": 0,
+      "baselineCorrectCases": 15,
+      "lostUnderAnyTweak": 0,
+      "stableBaselineCorrectCases": 15,
+      "stableBaselineLostUnderAnyTweak": 0,
+      "changedPromptCorrect": 45,
+      "changedPromptTrials": 48,
+      "changedPromptAccuracy": 0.9375,
+      "changedPromptAccuracyCi95": {
+        "lower": 0.8125,
+        "upper": 1,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "stableBaselineLostUnderAnyTweakCi95": {
+        "lower": 0,
+        "upper": 0.2039
+      },
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 80,
+        "p50": 3906.3,
+        "p95": 6565.2
+      },
+      "returnedCostUsd": 0.04750670000000001,
+      "budget": {
+        "limitUsd": 0.2,
+        "spentUsd": 0.04750670000000001,
+        "reservedUsd": 1.734723475976807e-18,
+        "blockedCalls": 0,
+        "calls": 80
+      },
+      "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3",
+      "provenance": null,
+      "versionStatus": "legacy-run-without-source-capture"
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "effort": "low",
+      "cases": 16,
+      "completeCases": 16,
+      "byVariant": [
+        {
+          "variant": "base",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "repeat",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "polite",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "whitespace",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "schema_order",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        }
+      ],
+      "unchangedRepeatFlips": 0,
+      "allFiveCorrect": 15,
+      "allFiveWrong": 1,
+      "mixedCorrectness": 0,
+      "baselineCorrectCases": 15,
+      "lostUnderAnyTweak": 0,
+      "stableBaselineCorrectCases": 15,
+      "stableBaselineLostUnderAnyTweak": 0,
+      "changedPromptCorrect": 45,
+      "changedPromptTrials": 48,
+      "changedPromptAccuracy": 0.9375,
+      "changedPromptAccuracyCi95": {
+        "lower": 0.8125,
+        "upper": 1,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "stableBaselineLostUnderAnyTweakCi95": {
+        "lower": 0,
+        "upper": 0.2039
+      },
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 80,
+        "p50": 2941.8,
+        "p95": 3959.8
+      },
+      "returnedCostUsd": 0.5758339999999998,
+      "budget": {
+        "limitUsd": 1,
+        "spentUsd": 0.5758339999999998,
+        "reservedUsd": 2.220446049250313e-16,
+        "blockedCalls": 0,
+        "calls": 80
+      },
+      "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3",
+      "provenance": null,
+      "versionStatus": "legacy-run-without-source-capture"
+    },
+    {
+      "model": "google/gemini-3.8-flash",
+      "effort": "low",
+      "cases": 16,
+      "completeCases": 16,
+      "byVariant": [
+        {
+          "variant": "base",
+          "valid": 16,
+          "correct": 14,
+          "accuracy": 0.875,
+          "baselineCorrect": 14,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "repeat",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 14,
+          "losses": 0,
+          "improvements": 1,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 1
+        },
+        {
+          "variant": "polite",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 14,
+          "losses": 0,
+          "improvements": 1,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 1
+        },
+        {
+          "variant": "whitespace",
+          "valid": 16,
+          "correct": 14,
+          "accuracy": 0.875,
+          "baselineCorrect": 14,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "schema_order",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 14,
+          "losses": 0,
+          "improvements": 1,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 1
+        }
+      ],
+      "unchangedRepeatFlips": 1,
+      "allFiveCorrect": 14,
+      "allFiveWrong": 1,
+      "mixedCorrectness": 1,
+      "baselineCorrectCases": 14,
+      "lostUnderAnyTweak": 0,
+      "stableBaselineCorrectCases": 14,
+      "stableBaselineLostUnderAnyTweak": 0,
+      "changedPromptCorrect": 44,
+      "changedPromptTrials": 48,
+      "changedPromptAccuracy": 0.9166666666666666,
+      "changedPromptAccuracyCi95": {
+        "lower": 0.7708,
+        "upper": 1,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "stableBaselineLostUnderAnyTweakCi95": {
+        "lower": 0,
+        "upper": 0.2153
+      },
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 80,
+        "p50": 3476.6,
+        "p95": 5063
+      },
+      "returnedCostUsd": 0.3479210999999999,
+      "budget": {
+        "limitUsd": 0.65,
+        "spentUsd": 0.3479210999999999,
+        "reservedUsd": -2.0816681711721685e-16,
+        "blockedCalls": 0,
+        "calls": 80
+      },
+      "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3",
+      "provenance": null,
+      "versionStatus": "legacy-run-without-source-capture"
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "low",
+      "cases": 16,
+      "completeCases": 16,
+      "byVariant": [
+        {
+          "variant": "base",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "repeat",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "polite",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "whitespace",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        },
+        {
+          "variant": "schema_order",
+          "valid": 16,
+          "correct": 15,
+          "accuracy": 0.9375,
+          "baselineCorrect": 15,
+          "losses": 0,
+          "improvements": 0,
+          "conditionalWrongRate": 0,
+          "correctnessFlips": 0
+        }
+      ],
+      "unchangedRepeatFlips": 0,
+      "allFiveCorrect": 15,
+      "allFiveWrong": 1,
+      "mixedCorrectness": 0,
+      "baselineCorrectCases": 15,
+      "lostUnderAnyTweak": 0,
+      "stableBaselineCorrectCases": 15,
+      "stableBaselineLostUnderAnyTweak": 0,
+      "changedPromptCorrect": 45,
+      "changedPromptTrials": 48,
+      "changedPromptAccuracy": 0.9375,
+      "changedPromptAccuracyCi95": {
+        "lower": 0.8125,
+        "upper": 1,
+        "resamples": 10000,
+        "seed": 20261005
+      },
+      "stableBaselineLostUnderAnyTweakCi95": {
+        "lower": 0,
+        "upper": 0.2039
+      },
+      "latency": {
+        "definition": "the product loop (master data, prompt, LLM, validation, execution, retries) per question",
+        "n": 80,
+        "p50": 3159,
+        "p95": 5529.1
+      },
+      "returnedCostUsd": 0.030176679999999994,
+      "budget": {
+        "limitUsd": 0.2,
+        "spentUsd": 0.030176679999999994,
+        "reservedUsd": 2.0816681711721685e-17,
+        "blockedCalls": 0,
+        "calls": 81
+      },
+      "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3",
+      "provenance": null,
+      "versionStatus": "legacy-run-without-source-capture"
+    }
+  ],
+  "unchangedRepeatStability": [
+    {
+      "model": "claude-haiku-5-5",
+      "effort": "high",
+      "source": "generated/provider-benchmark-2026-10-14/full/claude-haiku-5-5.high.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 233,
+      "allThreeWrong": 7,
+      "mixedCorrectnessCases": 5,
+      "disagreeingCorrectnessPairs": 10,
+      "pairs": 735,
+      "pairDisagreementRate": 0.013605442176870748,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "source": "generated/provider-benchmark-2026-10-14/full/claude-haiku-5-5.low.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 233,
+      "allThreeWrong": 8,
+      "mixedCorrectnessCases": 4,
+      "disagreeingCorrectnessPairs": 8,
+      "pairs": 735,
+      "pairDisagreementRate": 0.010884353741496598,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "source": "generated/provider-benchmark-2026-10-14/full/claude-sonnet-5-5.high.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 238,
+      "allThreeWrong": 7,
+      "mixedCorrectnessCases": 0,
+      "disagreeingCorrectnessPairs": 0,
+      "pairs": 735,
+      "pairDisagreementRate": 0,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "effort": "low",
+      "source": "generated/provider-benchmark-2026-10-14/full/claude-sonnet-5-5.low.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 235,
+      "allThreeWrong": 8,
+      "mixedCorrectnessCases": 2,
+      "disagreeingCorrectnessPairs": 4,
+      "pairs": 735,
+      "pairDisagreementRate": 0.005442176870748299,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "high",
+      "source": "generated/provider-benchmark-2026-10-14/full/deepseek__deepseek-v4.1-flash.high.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 230,
+      "allThreeWrong": 9,
+      "mixedCorrectnessCases": 6,
+      "disagreeingCorrectnessPairs": 12,
+      "pairs": 735,
+      "pairDisagreementRate": 0.0163265306122449,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "low",
+      "source": "generated/provider-benchmark-2026-10-14/full/deepseek__deepseek-v4.1-flash.low.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 233,
+      "allThreeWrong": 11,
+      "mixedCorrectnessCases": 1,
+      "disagreeingCorrectnessPairs": 2,
+      "pairs": 735,
+      "pairDisagreementRate": 0.0027210884353741495,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "google/gemini-3.8-flash",
+      "effort": "low",
+      "source": "generated/provider-benchmark-2026-10-14/full/google__gemini-3.8-flash.low.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 236,
+      "allThreeWrong": 8,
+      "mixedCorrectnessCases": 1,
+      "disagreeingCorrectnessPairs": 2,
+      "pairs": 735,
+      "pairDisagreementRate": 0.0027210884353741495,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "source": "eval/baselines/gpt-6-luna.low.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 224,
+      "allThreeWrong": 10,
+      "mixedCorrectnessCases": 11,
+      "disagreeingCorrectnessPairs": 22,
+      "pairs": 735,
+      "pairDisagreementRate": 0.029931972789115645,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    },
+    {
+      "model": "gpt-4o-mini",
+      "effort": null,
+      "source": "eval/baselines/gpt-4o-mini.json",
+      "developmentOnly": true,
+      "cases": 245,
+      "repeat": 3,
+      "allThreeCorrect": 213,
+      "allThreeWrong": 26,
+      "mixedCorrectnessCases": 6,
+      "disagreeingCorrectnessPairs": 12,
+      "pairs": 735,
+      "pairDisagreementRate": 0.0163265306122449,
+      "note": "Pairs are correlated; this descriptive fraction is not an independent-trial probability."
+    }
+  ],
+  "totalReturnedCostUsd": 1.0298409899999998,
+  "plannedTotalCapUsd": 2.25
+}

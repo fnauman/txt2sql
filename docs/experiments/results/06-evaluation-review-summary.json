@@ -1,0 +1,223 @@
+{
+  "formatVersion": 1,
+  "version": "exp06-evaluation-review-2026-10-14",
+  "generatedAt": "2026-10-14T17:59:28.833Z",
+  "mode": "offline-zero-model-calls",
+  "baseGit": {
+    "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+    "dirty": true,
+    "changedFiles": 35
+  },
+  "sourceVersion": "c9b2b050f795260ced854af581d58906bf7cc7e136ee5c095784d32b46ec0a0c",
+  "sourceVersionAtFinish": "c9b2b050f795260ced854af581d58906bf7cc7e136ee5c095784d32b46ec0a0c",
+  "sourceUnchangedDuringRun": true,
+  "sourceFiles": 251,
+  "sourceSnapshot": {
+    "manifest": "generated/experiment-sources/review-2026-10-14/c9b2b050f795260ced854af581d58906bf7cc7e136ee5c095784d32b46ec0a0c/manifest.json",
+    "archive": "generated/experiment-sources/review-2026-10-14/c9b2b050f795260ced854af581d58906bf7cc7e136ee5c095784d32b46ec0a0c/source.tar.gz",
+    "archiveSha256": "7bfc3336a57d3938c2c6ca2c0dc88c0d1a07d54fd1156a9b781d68ef76a82aa3",
+    "historical04or05Source": false
+  },
+  "artifacts": [
+    {
+      "path": "generated/evaluation-review-2026-10-14/final/verification.json",
+      "sha256": "b814830f219896bd65348c5ef7785bedb9791fe572602800833ae95ffbe7841d"
+    },
+    {
+      "path": "generated/evaluation-review-2026-10-14/final/luna-offline.json",
+      "sha256": "82edb33dde2a028a334a659f5abd864da29368f8b3ac9fd1cd667a98b45cfe11"
+    }
+  ],
+  "invocationWrapper": {
+    "path": "/tmp/txt2sql-evaluation-review-final.mjs",
+    "sha256": "8bfc0bd8b5b00043f2892f0146582a8473c3779ff553363054cec4f169655aa3"
+  },
+  "fixtures": [
+    {
+      "name": "seed",
+      "database": "demo_retail",
+      "status": "current",
+      "contentHash": "094282546fe55afdbce988e38ba9f3d801fcf780348784ca1e01a18e76049cc7",
+      "expectedContentHash": "094282546fe55afdbce988e38ba9f3d801fcf780348784ca1e01a18e76049cc7"
+    },
+    {
+      "name": "v2",
+      "database": "demo_retail_v2",
+      "status": "current",
+      "contentHash": "7adec1b3bc3306324522fd0188814d894bf182ffda5a6edc4d8f941cc7ea44ca",
+      "expectedContentHash": "7adec1b3bc3306324522fd0188814d894bf182ffda5a6edc4d8f941cc7ea44ca"
+    },
+    {
+      "name": "v3",
+      "database": "demo_retail_v3",
+      "status": "current",
+      "contentHash": "51d1c42c3b88f318ba1af7694f12103a63ea648283271deebe83102cb2a3b883",
+      "expectedContentHash": "51d1c42c3b88f318ba1af7694f12103a63ea648283271deebe83102cb2a3b883"
+    }
+  ],
+  "fixturesVersion": "c6df5dfa3a922f90f41c9cb50e61e0ae5585fcd34cf1acee57d3dc2b80eeb144",
+  "promptVersion": "4358263bcf82badb3b71025f56e916a53cb97f1e054c91fe44eec8c51c8ae01e",
+  "schemaVersion": "e841a06bba0195a2e4c8c2ba2bcfa0d07ce36f31e92129e0c75c3f9a9cc8fe32",
+  "thresholds": {
+    "design": 0.95,
+    "heldout": 0
+  },
+  "datasets": [
+    {
+      "name": "core-public",
+      "definitions": 9,
+      "problems": 0,
+      "design": {
+        "total": 77,
+        "killed": 77,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 16,
+        "killed": 16,
+        "rate": 1
+      },
+      "positive": {
+        "total": 41,
+        "matched": 41,
+        "validatorAccepted": 40
+      }
+    },
+    {
+      "name": "edge-cases-public",
+      "definitions": 17,
+      "problems": 0,
+      "design": {
+        "total": 152,
+        "killed": 152,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 28,
+        "killed": 28,
+        "rate": 1
+      },
+      "positive": {
+        "total": 73,
+        "matched": 73,
+        "validatorAccepted": 72
+      }
+    },
+    {
+      "name": "hard-cases-public",
+      "definitions": 40,
+      "problems": 0,
+      "design": {
+        "total": 140,
+        "killed": 140,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 19,
+        "killed": 15,
+        "rate": 0.7895
+      },
+      "positive": {
+        "total": 34,
+        "matched": 34,
+        "validatorAccepted": 34
+      }
+    },
+    {
+      "name": "holdout-public",
+      "definitions": 149,
+      "problems": 0,
+      "design": {
+        "total": 779,
+        "killed": 779,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 74,
+        "killed": 64,
+        "rate": 0.8649
+      },
+      "positive": {
+        "total": 23,
+        "matched": 23,
+        "validatorAccepted": 23
+      }
+    },
+    {
+      "name": "paraphrase-public",
+      "definitions": 9,
+      "problems": 0,
+      "design": {
+        "total": 77,
+        "killed": 77,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 16,
+        "killed": 16,
+        "rate": 1
+      },
+      "positive": {
+        "total": 41,
+        "matched": 41,
+        "validatorAccepted": 40
+      }
+    },
+    {
+      "name": "templated-public",
+      "definitions": 189,
+      "problems": 0,
+      "design": {
+        "total": 1504,
+        "killed": 1504,
+        "rate": 1
+      },
+      "heldout": {
+        "total": 236,
+        "killed": 185,
+        "rate": 0.7839
+      },
+      "positive": {
+        "total": 59,
+        "matched": 59,
+        "validatorAccepted": 59
+      }
+    }
+  ],
+  "baselineRescore": {
+    "model": "gpt-6-luna",
+    "answerCases": 392,
+    "strictAccuracy": 0.8937,
+    "bySplit": [
+      {
+        "split": "dev",
+        "cases": 245,
+        "accuracy": 0.9401
+      },
+      {
+        "split": "holdout",
+        "cases": 147,
+        "accuracy": 0.8163
+      }
+    ],
+    "paired": 392,
+    "contingency": {
+      "bothPass": 354,
+      "regressions": 0,
+      "improvements": 0,
+      "bothFail": 38
+    },
+    "mcnemar": {
+      "regressions": 0,
+      "improvements": 0,
+      "p": 1,
+      "test": "exact two-sided (binomial on discordant pairs)"
+    },
+    "verdict": "no_significant_difference"
+  },
+  "limitations": [
+    "Known synthetic regression suite; not production generalization evidence.",
+    "Oracle control mutations reviewed during audit; new blind controls required after tuning.",
+    "No historical gold or score changes; no model API calls."
+  ]
+}

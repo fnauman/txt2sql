@@ -13,6 +13,43 @@ is the protocol on top of it.
 | 01 | [Schema scope](01-schema-scope.md) | `SCHEMA_SCOPE` (retrieved → full) | complete — adopted |
 | 02 | [Hints v2](02-hints-v2.md) | `HINTS_VERSION` (1 → 2: de-poisoned rules, temporal resolution, semantic layer) | complete — adopted |
 | 03 | [Models](03-models.md) | `MODEL_NAME` / `REASONING_EFFORT` (gpt-4o-mini → gpt-6-luna at low / medium) | complete — adopted |
+| 04 | [Provider models](04-provider-models.md) | Claude Haiku/Sonnet 5.5, Gemini 3.8 Flash, DeepSeek v4.1 Flash | complete — measured; default unchanged |
+| 05 | [Prompt sensitivity](05-prompt-robustness.md) | Presentation-only perturbations, five models at low effort | complete — diagnostic; default unchanged |
+| 06 | [Evaluation review](06-evaluation-review.md) | Offline oracle controls, baseline reproduction and validity review | complete — audit; default unchanged |
+
+## Versions and source identity
+
+[registry.json](registry.json) indexes logical experiment versions, full commit
+references, report hashes and known provenance gaps. Labels such as
+`exp04-providers-2026-10-14` are **not Git tags**. Experiments 04–06 ran on
+uncommitted code on top of `717ec52`. That code was committed afterwards
+unchanged (later edits touch tests and documentation only), but a commit made
+after a run is not that run's recorded identity.
+
+Future evaluation reports record the base Git SHA, dirty status and a SHA-256
+manifest of relevant source/config/dataset files, plus an optional
+`EXPERIMENT_LABEL`. They also recheck the manifest at completion; source drift
+is recorded and prevents baseline promotion. Prompt, schema, dataset and fixture
+provenance remain separate. The robustness runner records these fields too.
+
+Before a run from an uncommitted tree, create a recoverable local source archive:
+
+```bash
+node scripts/snapshot-experiment-source.mjs my-experiment-version
+EXPERIMENT_LABEL=my-experiment-version npm run eval -- --offline
+```
+
+The archive lives under ignored `generated/experiment-sources/`; retain it with
+the run reports. It includes allowlisted application, evaluation and dataset
+inputs, not credentials, dependencies or generated output. A matching source
+fingerprint identifies the archived bytes. Also record dependency/runtime and
+GPU-serving versions for deployments. Prefer a clean committed revision for
+decision runs; archive identities do not create Git tags.
+
+Historical limits are explicit: Experiment 04 recorded a dirty base commit but
+no source-content hash; Experiment 05 recorded neither Git nor source identity.
+Their artifact hashes identify recordings, not their exact original code.
+A current snapshot cannot retroactively repair those gaps.
 
 ## How an experiment is run
 

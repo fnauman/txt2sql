@@ -1,0 +1,226 @@
+{
+  "formatVersion": 1,
+  "registeredAt": "2026-10-14T18:01:05.353Z",
+  "labelsAreGitTags": false,
+  "note": "Logical experiment versions. A report hash identifies an artifact; it does not recover missing source at run time. Old reports remain unchanged.",
+  "experiments": [
+    {
+      "id": "01",
+      "version": "exp01-schema-scope-2026-10-06",
+      "protocol": "docs/experiments/01-schema-scope.md",
+      "candidateCommit": "606e0ee94531c18b9412922225ceaf300088845b",
+      "referenceCommit": "f5e6ffef21c955cbd4d242918a41433682103189",
+      "sourceEvidence": "Commit references recorded in the historical write-up; original holdout subsequently retired."
+    },
+    {
+      "id": "02",
+      "version": "exp02-hints-v2-2026-10-06",
+      "protocol": "docs/experiments/02-hints-v2.md",
+      "candidateCommit": "4ff6ecb4a92a48a7709ef7c5e9e13bc6edc687c4",
+      "referenceCommit": "e42828b3f7813e8debe91be559a37867d206ccda",
+      "artifact": "eval/baselines/gpt-4o-mini.json",
+      "artifactSha256": "a4339088f079773230730549df6e5f4d63449f0e507689a01d0d5fb5cafbed19"
+    },
+    {
+      "id": "03",
+      "version": "exp03-models-2026-10-07",
+      "protocol": "docs/experiments/03-models.md",
+      "candidateCommit": "a57fa44d42e8243a6a6cb9954e60ac51dc529d00",
+      "recordedClean": true,
+      "artifact": "eval/baselines/gpt-6-luna.low.json",
+      "artifactSha256": "866947f4eb399049ca5ad232d7c118391e37f82e84b020d6b9fb931e4ca2e36d",
+      "limitation": "Medium-arm full recording is not in the repository; rounded published results only."
+    },
+    {
+      "id": "04",
+      "version": "exp04-providers-2026-10-14",
+      "protocol": "docs/experiments/04-provider-models.md",
+      "directory": "generated/provider-benchmark-2026-10-14/full",
+      "summary": "docs/experiments/results/04-provider-models-summary.json",
+      "referenceCommit": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+      "referenceCommitEvidence": "Recorded by each original report; dirty working tree.",
+      "exactRunSourceRecoverable": false,
+      "limitation": "No run-time source snapshot exists for these historical runs. The current checkpoint must not be labeled as their exact source.",
+      "summarySha256": "0d760197a7db21cc21b69e88bed6bb1d7e97cbe9ec590785461b8e98882dab83",
+      "artifacts": [
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/claude-haiku-5-5.high.json",
+          "sha256": "9431af19143285711c25620db8d714090af3bbfed09322aac379740fca8648e2",
+          "generatedAt": "2026-10-14T09:46:33.939Z",
+          "model": "claude-haiku-5-5",
+          "effort": "high",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 10
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/claude-haiku-5-5.low.json",
+          "sha256": "334e410507ddca95d4bf32a70fa27b9f2594551b8a1c2cfc185ccf0ce4781514",
+          "generatedAt": "2026-10-14T09:15:52.433Z",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 10
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/claude-sonnet-5-5.high.json",
+          "sha256": "2a4fa0bad55b4aded04cfdacec4b66b248e700aa27dc1e728a0c866cb9c47243",
+          "generatedAt": "2026-10-14T09:39:03.950Z",
+          "model": "claude-sonnet-5-5",
+          "effort": "high",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 10
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/claude-sonnet-5-5.low.json",
+          "sha256": "e5e9be51ddc18ef2c80fc9058c70ebc09a5baf96a8d129a20e636edc1cab2e57",
+          "generatedAt": "2026-10-14T09:19:12.113Z",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 10
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/deepseek__deepseek-v4.1-flash.high.json",
+          "sha256": "4f14f37d75979207354a8dc6b69da8713812492394ddc6d91d2a5e0884db9cf2",
+          "generatedAt": "2026-10-14T14:19:06.781Z",
+          "model": "deepseek/deepseek-v4.1-flash",
+          "effort": "high",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 16
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/deepseek__deepseek-v4.1-flash.low.json",
+          "sha256": "22f92d587d6e54641ede1ff945a3d49b901cba5f3e85f58fee2563d8d6142eb6",
+          "generatedAt": "2026-10-14T13:54:47.011Z",
+          "model": "deepseek/deepseek-v4.1-flash",
+          "effort": "low",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 16
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        },
+        {
+          "path": "generated/provider-benchmark-2026-10-14/full/google__gemini-3.8-flash.low.json",
+          "sha256": "66171b3d5c7bb9cca754c86802df857f07f322881722c9fe62bd7ce8fbc41abf",
+          "generatedAt": "2026-10-14T14:01:59.314Z",
+          "model": "google/gemini-3.8-flash",
+          "effort": "low",
+          "recordedGit": {
+            "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+            "dirty": true,
+            "changedFiles": 14
+          },
+          "recordedSourceVersion": null,
+          "manifestHash": null
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "version": "exp05-prompt-robustness-2026-10-14",
+      "protocol": "docs/experiments/05-prompt-robustness.md",
+      "directory": "generated/prompt-robustness-2026-10-14",
+      "summary": "docs/experiments/results/05-prompt-robustness-summary.json",
+      "referenceCommit": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+      "referenceCommitEvidence": "Retrospective session reference only; original robustness reports did not record Git.",
+      "exactRunSourceRecoverable": false,
+      "limitation": "No run-time source snapshot exists for these historical runs. The current checkpoint must not be labeled as their exact source.",
+      "summarySha256": "b72201a4080ed01764dd3019bbe16abfaef9fc77b8c37193ecf500866f9e1b18",
+      "artifacts": [
+        {
+          "path": "generated/prompt-robustness-2026-10-14/claude-haiku-5-5.low.json",
+          "sha256": "bf44552fcf0aaa4a4f8882a61e825b1dcd001bf7f9a63c974a806790f77f6ce6",
+          "generatedAt": "2026-10-14T15:10:36.715Z",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "recordedGit": null,
+          "recordedSourceVersion": null,
+          "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3"
+        },
+        {
+          "path": "generated/prompt-robustness-2026-10-14/claude-sonnet-5-5.low.json",
+          "sha256": "fc8416490659d66eae63485864c773da6d6e7de58cd5c80a6c8432128704ea15",
+          "generatedAt": "2026-10-14T15:10:13.547Z",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "recordedGit": null,
+          "recordedSourceVersion": null,
+          "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3"
+        },
+        {
+          "path": "generated/prompt-robustness-2026-10-14/deepseek__deepseek-v4.1-flash.low.json",
+          "sha256": "07606fecb90dcc28f5ef1cf42f20ccb9c31f08ede11c5af13acd2e332aa94ed8",
+          "generatedAt": "2026-10-14T15:10:29.341Z",
+          "model": "deepseek/deepseek-v4.1-flash",
+          "effort": "low",
+          "recordedGit": null,
+          "recordedSourceVersion": null,
+          "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3"
+        },
+        {
+          "path": "generated/prompt-robustness-2026-10-14/google__gemini-3.8-flash.low.json",
+          "sha256": "e5a096383364be11fb0cb7f356e4d8c9a40a5c30b4f353fa15b8fe4134ade504",
+          "generatedAt": "2026-10-14T15:10:58.403Z",
+          "model": "google/gemini-3.8-flash",
+          "effort": "low",
+          "recordedGit": null,
+          "recordedSourceVersion": null,
+          "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3"
+        },
+        {
+          "path": "generated/prompt-robustness-2026-10-14/gpt-6-luna.low.json",
+          "sha256": "227b6323acfe11fc072b15d2b068c73e76e62ecbc5e0d7ddccfe76093f9db4f8",
+          "generatedAt": "2026-10-14T15:10:51.224Z",
+          "model": "gpt-6-luna",
+          "effort": "low",
+          "recordedGit": null,
+          "recordedSourceVersion": null,
+          "manifestHash": "4d8fe4f9f93d9bf19cb7036345ac8bea5e48863b8381edb4108a22747a787ae3"
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "version": "exp06-evaluation-review-2026-10-14",
+      "protocol": "docs/experiments/06-evaluation-review.md",
+      "mode": "offline-audit-zero-model-calls",
+      "artifact": "generated/evaluation-review-2026-10-14/final/luna-offline.json",
+      "artifactSha256": "82edb33dde2a028a334a659f5abd864da29368f8b3ac9fd1cd667a98b45cfe11",
+      "recordedGit": {
+        "sha": "717ec520a363c55d638ef7fd811b64dc27d7dee5",
+        "dirty": true,
+        "changedFiles": 35
+      },
+      "recordedSourceVersion": "c9b2b050f795260ced854af581d58906bf7cc7e136ee5c095784d32b46ec0a0c",
+      "sourceUnchangedDuringRun": true
+    }
+  ]
+}

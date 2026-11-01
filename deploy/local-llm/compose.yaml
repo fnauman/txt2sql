@@ -1,0 +1,46 @@
+# Preparation only: validate the chosen image/checkpoint on the target GPU.
+# Model weights must already exist locally. No model download occurs at startup.
+services:
+  inference:
+    image: ${VLLM_IMAGE:?Set a tested vLLM image pinned by digest}
+    gpus: all
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - type: bind
+        source: ${LOCAL_MODEL_PATH:?Set the absolute path of the frozen local checkpoint}
+        target: /models/sql
+        read_only: true
+    shm_size: "2gb"
+    environment:
+      VLLM_API_KEY: ${LOCAL_LLM_API_KEY:?Set a dedicated local inference API key}
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+    command:
+      - /models/sql
+      - --served-model-name
+      - local-sql
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --language-model-only
+      - --max-model-len
+      - "${LOCAL_MAX_MODEL_LEN:-8192}"
+      - --max-num-seqs
+      - "${LOCAL_MAX_NUM_SEQS:-2}"
+      - --gpu-memory-utilization
+      - "${LOCAL_GPU_FRACTION:-0.85}"
+      - --default-chat-template-kwargs
+      - '{"enable_thinking": false}'
+      - --generation-config
+      - vllm
+      - --no-enable-prefix-caching
+      - --disable-log-requests
+# No `internal: true` network: Docker does not publish ports from an internal
+# network, so the application on the host could not reach 127.0.0.1:8000.
+# Block the container's outbound traffic with a host firewall rule instead
+# (see the README).
