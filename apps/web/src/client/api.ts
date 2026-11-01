@@ -10,8 +10,8 @@ import type { HealthResponse } from './types';
 // blocking JSON route (POST /api/query) is intentionally kept server-side as a
 // drift-free fallback for CLIs, curl, and tests — it just isn't called from here.
 
-export async function loadHealth(): Promise<HealthResponse> {
-  const response = await fetch('/api/health');
+export async function loadHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  const response = await fetch('/api/health', { signal });
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload?.error?.message || 'Health request failed.');

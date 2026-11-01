@@ -478,6 +478,22 @@ h3 {
 
 /* ----- Status pills ---------------------------------------------------- */
 
+.status-retry {
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 7px 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.status-retry:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
 .status-pill,
 .status-detail {
   min-height: 34px;
