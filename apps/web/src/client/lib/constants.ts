@@ -1,8 +1,5 @@
 // Shared constants extracted from App.tsx (Phase 0 refactor — no behavior change).
 
-export const RECENT_QUERIES_KEY = 'text-to-sql.recentQueries';
-export const DASHBOARD_PINS_KEY = 'text-to-sql.dashboardPins';
-
 export const EXAMPLES = [
   'Show outstanding balance by customer',
   'Which products sold the most this month?',

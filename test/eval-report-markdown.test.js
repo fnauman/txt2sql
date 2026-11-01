@@ -155,6 +155,15 @@ test('cell escaping and truncation', () => {
   assert.equal(truncate('  a   b  ', 10), 'a b');
 });
 
+test('diagnostic oracle verification cannot be mistaken for strict quality in the report', async () => {
+  const report = await sampleReport();
+  report.verification = { skipped: false, cases: 1, problems: [], gateFailures: [], datasets: [],
+    minKillRate: 0.95, minHeldoutKillRate: 0, oraclePolicy: { name: 'regression', version: 'oracle-controls-v2' } };
+  const markdown = renderReportMarkdown(report);
+  assert.match(markdown, /Oracle policy: \*\*regression\*\*/);
+  assert.match(markdown, /diagnostic compatibility only; not eligible for baseline promotion or an oracle-quality claim/);
+});
+
 test('the outcome table splits an outcome whose repetitions moved buckets, and names unknown attempts', async () => {
   const report = await sampleReport();
   report.attribution.byOutcomeBucket.wrong_result = { model: 1, system: 1 };

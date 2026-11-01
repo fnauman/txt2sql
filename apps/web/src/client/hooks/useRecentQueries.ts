@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
-import { MAX_RECENT_QUERIES, RECENT_QUERIES_KEY } from '../lib/constants';
-import { loadJson, saveJson } from '../storage';
+import { MAX_RECENT_QUERIES } from '../lib/constants';
+import { createSessionList } from '../storage';
 
 export function useRecentQueries() {
-  const [recentQueries, setRecentQueries] = useState<string[]>(() => loadJson<string[]>(RECENT_QUERIES_KEY, []));
-
-  useEffect(() => saveJson(RECENT_QUERIES_KEY, recentQueries), [recentQueries]);
+  const [session] = useState(() => createSessionList<string>());
+  const recentQueries = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
 
   const pushRecent = useCallback((query: string) => {
-    setRecentQueries((current) => [query, ...current.filter((item) => item !== query)].slice(0, MAX_RECENT_QUERIES));
-  }, []);
+    session.update((current) => [query, ...current.filter((item) => item !== query)].slice(0, MAX_RECENT_QUERIES));
+  }, [session]);
 
-  return { recentQueries, pushRecent };
+  return { recentQueries, pushRecent, clearRecentQueries: session.clear };
 }

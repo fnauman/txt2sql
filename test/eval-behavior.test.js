@@ -231,7 +231,7 @@ test('the report keeps behavior cases out of accuracy and attribution, and repor
   const markdown = renderReportMarkdown(report, { revealHoldout: true });
   assert.match(markdown, /## Behaviour cases \(abstain \/ clarify\)\n\nBehaviour cases: abstain\/clarify — 2 cases, 0 handled correctly\./);
   assert.match(markdown, /By split: dev 100\.0% \(1 case\) · holdout 50\.0% \(1 case\)\./);
-  assert.match(markdown, /\| hard_clarify_best_customer \| Who is our best customer\? \| 1\/2 declined \| answered_instead_of_clarify \| expects clarify, model \|/);
+  assert.match(markdown, /\| hard_clarify_best_customer \| Who is our best customer\? \| 1\/2 handled \| answered_instead_of_clarify \| expects clarify, model \|/);
   assert.match(markdown, /\| split \| holdout \| 1 \| 50\.0% \| 0\/1 \|/);
   // The attribution tables leave the behaviour cases out, and say so.
   assert.match(markdown, /Excluded from accuracy: 2 abstain\/clarify cases \(4 repetitions; see Behaviour cases\)\./);
@@ -424,7 +424,8 @@ test('evaluateQuestion runs no gold and no oracle for a behavior case; executed 
     },
   });
   assert.equal(declined.status, 'validation_error');
-  assert.equal(classifyRepetition(declined, abstainCase).outcome, 'declined');
+  assert.equal(declined.responseContractVersion, 2);
+  assert.equal(classifyRepetition(declined, abstainCase).outcome, 'llm_error');
 });
 
 test('rescore keeps a behavior case as recorded (inherited): there is no gold to replay against', async () => {

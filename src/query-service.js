@@ -731,10 +731,31 @@ export async function runOptimizedQuestion({
         rawText: response.rawText,
         cleanedSql: response.sql,
         explanation: response.explanation,
+        decision: response.decision,
+        clarificationQuestions: response.clarificationQuestions,
         tablesUsed: response.tables_used,
         assumptions: response.assumptions,
       },
     });
+
+    // A completed clarification/abstention is a product result, never SQL to
+    // validate or execute. Keep billed usage and honor cancellation here too.
+    if (response.decision && response.decision !== 'answer') {
+      if (signal?.aborted) {
+        return abortWith(attemptContext, { error: createAbortError(signal), response, attemptCount: attempt + 1 });
+      }
+      const result = createSuccessResult({
+        question: normalizedQuestion, questionIndex, sql: '', rawRows: [], response,
+        llmCalls, llmUsage: getLlmUsage(), llmCost: getLlmCost(), promptTables, rankedTables,
+        schemaScope: prompt.context.schemaScope, masterDataCandidates,
+        attemptCount: attempt + 1, rowLimit, includeInsights: false,
+      });
+      result.decision = response.decision;
+      result.clarificationQuestions = response.clarificationQuestions;
+      await trace.emit('question.completed', { ...questionContext, success: true,
+        decision: result.decision, attempts: attempt + 1, llmUsage: result.llmUsage, llmCost: result.llmCost });
+      return result;
+    }
 
     const validationTimer = createTimer();
     let validated;

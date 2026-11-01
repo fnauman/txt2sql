@@ -158,3 +158,9 @@ Override the demo with `QUERIES='["…","…"]'`, and the frame with `WIDTH`/`HE
   round-trips; enforced by a default-deny `dataResidency` gate.
 - Deterministic insight cards (with runnable follow-up suggestions), local session
   dashboard pins, and an optional debug trace panel.
+- Recent questions and pins live only in this page's memory and disappear on
+  reload. **Clear session data** in the navigation cancels the active request and
+  clears the question, visible results/debug output, history and pins. Legacy
+  localStorage history/pins are deleted when storage access permits; they are
+  never loaded. Only the theme preference is persisted. This clears client state,
+  not server traces or provider logs, and does not provide user authentication.

@@ -61,9 +61,10 @@
 //                                        that SQL was rejected or failed)
 //   declined                    pass    (no SQL in any attempt: the model
 //                                        returned empty SQL or refused. The
-//                                        product has no clarification channel
-//                                        yet, so for a clarify case declining
-//                                        is the best it can do today)
+//                                        legacy recordings lack a typed decision)
+//   clarified / abstained       pass    (the matching explicit decision)
+//   wrong_behavior              model   (wrong non-answer decision)
+//   declined_answer             model   (non-answer to an answerable case)
 // Outages, timeouts, budget skips and harness errors keep their usual
 // outcomes; `behavior_counted` says whether a repetition counts in the
 // behavior score (excluded outcomes do not).
@@ -102,6 +103,10 @@ export const OUTCOME_BUCKETS = Object.freeze({
   answered_instead_of_abstain: 'model',
   answered_instead_of_clarify: 'model',
   declined: 'pass',
+  clarified: 'pass',
+  abstained: 'pass',
+  wrong_behavior: 'model',
+  declined_answer: 'model',
 });
 
 // Outcomes left out of the strict-accuracy denominator (reported separately).
@@ -127,7 +132,11 @@ export const OUTCOME_ORDER = Object.freeze([
   'cancelled',
   'answered_instead_of_abstain',
   'answered_instead_of_clarify',
+  'wrong_behavior',
+  'declined_answer',
   'declined',
+  'clarified',
+  'abstained',
 ]);
 
 export const BUCKET_ORDER = Object.freeze(['pass', 'model', 'system', 'infra', 'skipped', 'harness']);
@@ -162,7 +171,9 @@ function producedSql(repetition) {
 }
 
 // Codes with which a finished product loop returned no SQL on purpose: the
-// model sent an empty query (EMPTY_SQL) or refused (LLM_REFUSED).
+// model sent an empty query (EMPTY_SQL) or refused (LLM_REFUSED). These
+// count as handled only for version-1 recordings; version 2 requires the
+// matching explicit decision, never a failed generation or an empty answer.
 const DECLINE_CODES = new Set(['EMPTY_SQL', 'LLM_REFUSED']);
 
 /**
@@ -176,14 +187,17 @@ export function classifyBehaviorRepetition(repetition, testCase) {
   const answered = `answered_instead_of_${behavior}`;
   let outcome;
   const tags = [];
-  if (['pass', 'answered', 'result_mismatch', 'retrieval_miss'].includes(status)) {
+  if (['clarify', 'abstain'].includes(status) && !producedSql(repetition)) {
+    outcome = status !== behavior ? 'wrong_behavior' : status === 'clarify' ? 'clarified' : 'abstained';
+  } else if (['pass', 'answered', 'result_mismatch', 'retrieval_miss', 'clarify', 'abstain'].includes(status)) {
     outcome = answered;
   } else if (['validation_error', 'execution_error', 'llm_error'].includes(status) && !(status === 'llm_error' && isLlmUnavailableCode(repetition.error_code))) {
     const finalCode = finalAttempt(repetition)?.validation?.code || repetition.error_code || null;
     if (producedSql(repetition)) {
       outcome = answered;
       tags.push('not_executed');
-    } else if (DECLINE_CODES.has(finalCode) || DECLINE_CODES.has(repetition.error_code)) {
+    } else if ((repetition.responseContractVersion === undefined || repetition.responseContractVersion === 1) &&
+        (DECLINE_CODES.has(finalCode) || DECLINE_CODES.has(repetition.error_code))) {
       outcome = 'declined';
     } else {
       outcome = 'llm_error';
@@ -233,6 +247,10 @@ export function classifyRepetition(repetition, testCase = {}) {
   let outcome;
 
   switch (status) {
+    case 'clarify':
+    case 'abstain':
+      outcome = 'declined_answer';
+      break;
     case 'pass':
       outcome = 'pass';
       break;
@@ -402,7 +420,7 @@ export function summarizeCaseRepetitions(repetitions) {
   } else if (behavior && behavior.majorityHandled !== null) {
     // An abstain / clarify case (never counted): the outcome agrees with
     // majorityHandled the way an answer case's agrees with majorityPass.
-    pool = behaviorScored.filter((repetition) => (repetition.outcome === 'declined') === behavior.majorityHandled);
+    pool = behaviorScored.filter((repetition) => isHandledBehavior(repetition) === behavior.majorityHandled);
   } else {
     pool = list;
   }
@@ -433,8 +451,12 @@ export function summarizeCaseRepetitions(repetitions) {
 // Behavior score of one abstain / clarify case: repetitions that declined
 // (no SQL) over the repetitions that count for it; handled when more than
 // half did.
+function isHandledBehavior(repetition) {
+  return ['declined', 'clarified', 'abstained'].includes(repetition.outcome);
+}
+
 function summarizeBehaviorRepetitions(scored) {
-  const handled = scored.filter((repetition) => repetition.outcome === 'declined').length;
+  const handled = scored.filter(isHandledBehavior).length;
   return {
     counted: scored.length,
     handled,
@@ -468,7 +490,7 @@ export function summarizeBehavior(caseRecords) {
     counted: counted.length,
     handled,
     rate: counted.length ? Number((handled / counted.length).toFixed(4)) : null,
-    definition: 'abstain / clarify cases where the product returned no SQL in more than half of the counted repetitions',
+    definition: 'abstain / clarify cases handled by the matching response decision (or a legacy decline) in more than half of the counted repetitions',
     byBehavior,
     caseIds: records.map((record) => record.id),
   };

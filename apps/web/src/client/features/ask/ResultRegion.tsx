@@ -37,7 +37,8 @@ export function ResultRegion({
   const streaming = status === 'streaming';
   const errored = status === 'error';
   const sqlStatus = errored ? 'error' : status === 'done' ? 'done' : 'streaming';
-  const zeroRows = status === 'done' && hasColumns && result.rows.length === 0;
+  const nonAnswer = status === 'done' && (result.decision === 'clarify' || result.decision === 'abstain');
+  const zeroRows = !nonAnswer && status === 'done' && hasColumns && result.rows.length === 0;
 
   // Once complete, render the deterministic adaptive layout via the trusted
   // block registry. During streaming (and if no valid spec arrives) fall back to
@@ -59,7 +60,20 @@ export function ResultRegion({
       <div className="result-main">
         {streaming && <ProgressStepper stages={state.stages} />}
 
-        {(state.hasSql || streaming) && (
+        {nonAnswer && (
+          <section className="tool-panel" aria-live="polite">
+            <h2>{result.decision === 'clarify' ? 'A little more detail is needed' : 'This request cannot be answered from the available data'}</h2>
+            <p>{result.explanation}</p>
+            {result.clarificationQuestions && result.clarificationQuestions.length > 0 && (
+              <>
+                <ul>{result.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul>
+                <p>Update your question with these details, then ask again.</p>
+              </>
+            )}
+          </section>
+        )}
+
+        {!nonAnswer && (state.hasSql || streaming) && (
           <SqlPlanCard sql={result.sql} explanation={result.explanation} status={sqlStatus} cacheHit={cacheHit} />
         )}
 
@@ -72,9 +86,9 @@ export function ResultRegion({
           />
         )}
 
-        {!errored && (hasColumns || streaming) && (hasColumns ? <MetricStrip result={result} /> : <MetricSkeleton />)}
+        {!errored && !nonAnswer && (hasColumns || streaming) && (hasColumns ? <MetricStrip result={result} /> : <MetricSkeleton />)}
 
-        {!errored &&
+        {!errored && !nonAnswer &&
           (zeroRows ? (
             <div className="empty-state large">The query ran successfully and returned 0 rows.</div>
           ) : useSpec && layout ? (

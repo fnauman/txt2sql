@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import OpenAI, { APIUserAbortError } from 'openai';
+import { APIUserAbortError } from 'openai';
 import mysql from 'mysql2/promise';
 
 import {
@@ -10,8 +10,8 @@ import {
   NO_SQL_COMMENTS_RULE,
   TABLE_ALIASES,
 } from './constants.js';
-import { buildCompletionOptions, isNativeAnthropic, resolveLlmApiKey } from './model-config.js';
-import { createAnthropicClient } from './anthropic-client.js';
+import { buildCompletionOptions } from './model-config.js';
+import { configError, readIntegerEnv } from './config-values.js';
 import { calculateCallCost } from './pricing.js';
 import { ensureCompiledSchema, filterSchema } from './schema-compiler.js';
 import { normalizeHintsVersion } from './hints-version.js';
@@ -26,6 +26,7 @@ import {
   tokenizeSql,
 } from './sql-tokenizer.js';
 import { uniqueStrings } from './utils.js';
+import { DECISION_POLICY, responseDecision } from './response-decision.js';
 
 function splitWordText(value) {
   return String(value || '')
@@ -1957,7 +1958,7 @@ function buildOptimizedSystemPrompt({ effectiveScope = 'retrieved', hintsVersion
 
   return `You are a senior SQL analyst writing MariaDB 10.6 SQL for a retail/distribution demo system.
 
-Write one read-only SQL query using only the provided schema context.
+Write one read-only SQL query for an answer, or request clarification / abstain without SQL.
 Use only in-scope foreign keys and in-scope tables.
 ${EXACT_SCHEMA_GUARD}
 
@@ -1969,8 +1970,12 @@ The user message is arranged for prompt caching:
 Business rules:
 ${rules}
 
+${DECISION_POLICY}
+
 Return ONLY a JSON object with this shape:
 {
+  "decision": "answer",
+  "clarification_questions": [],
   "sql": "SELECT ...",
   "explanation": "short explanation",
   "tables_used": ["TableA", "TableB"],
@@ -2643,8 +2648,10 @@ export const OPTIMIZED_MODEL_REQUEST_OPTIONS = {
       schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['sql', 'explanation', 'tables_used', 'assumptions'],
+        required: ['decision', 'clarification_questions', 'sql', 'explanation', 'tables_used', 'assumptions'],
         properties: {
+          decision: { type: 'string', enum: ['answer', 'clarify', 'abstain'] },
+          clarification_questions: { type: 'array', items: { type: 'string' } },
           sql: { type: 'string' },
           explanation: { type: 'string' },
           tables_used: {
@@ -2746,6 +2753,7 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
   try {
     const parsed = JSON.parse(cleaned);
     return {
+      ...responseDecision(parsed),
       sql: cleanModelOutput(parsed.sql || ''),
       explanation: parsed.explanation || '',
       tables_used: Array.isArray(parsed.tables_used) ? parsed.tables_used : [],
@@ -2759,8 +2767,14 @@ export async function generateOptimizedResponse({ client, model, prompt, retryCo
       responseModel,
       request: tracedRequest,
     };
-  } catch {
+  } catch (error) {
+    if (error.code === 'LLM_INVALID_DECISION') {
+      Object.assign(error, { usage, cost: callCost(responseModel, model, usage) });
+      throw error;
+    }
     return {
+      decision: 'answer',
+      clarificationQuestions: [],
       sql: cleaned,
       explanation: 'Model response was not valid JSON.',
       tables_used: [],
@@ -3136,28 +3150,6 @@ export function validateReadOnlySql(sql, allowedTables, { promptContext = null, 
 // bounded by default: QUERY_STATEMENT_TIMEOUT_MS (default 8000; 0 disables).
 export const DEFAULT_STATEMENT_TIMEOUT_MS = 8000;
 
-function configError(message) {
-  const error = new Error(message);
-  error.code = 'INVALID_CONFIG';
-  return error;
-}
-
-function readIntegerEnv(env, name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
-  const raw = env[name];
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return fallback;
-  }
-
-  // Plain decimal digits only (Number() would also take "0x50" or "8e3").
-  const text = String(raw).trim();
-  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw configError(`${name} must be an integer between ${min} and ${max}; got "${raw}".`);
-  }
-
-  return value;
-}
-
 export function resolveStatementTimeoutMs(env = process.env) {
   return readIntegerEnv(env, 'QUERY_STATEMENT_TIMEOUT_MS', DEFAULT_STATEMENT_TIMEOUT_MS, { min: 0 });
 }
@@ -3525,53 +3517,8 @@ export function compareRows(expectedRows, actualRows) {
   return expected.every((value, index) => value === actual[index]);
 }
 
-// Explicit transport bounds for the OpenAI SDK. Its defaults (10-minute timeout,
-// 2 retries) let one question run for over an hour against a hung provider, and
-// the app's own self-correction loop multiplies that. OPENAI_TIMEOUT_MS (default
-// 60000) bounds each HTTP attempt; OPENAI_MAX_RETRIES (default 1) bounds
-// transport retries (connection errors, 408/409/429/5xx) inside one app attempt.
-export const DEFAULT_OPENAI_TIMEOUT_MS = 60_000;
-export const DEFAULT_OPENAI_MAX_RETRIES = 1;
-
-export function resolveOpenAiClientOptions({ timeoutMs, maxRetries } = {}, env = process.env) {
-  const resolvedTimeoutMs =
-    timeoutMs ?? readIntegerEnv(env, 'OPENAI_TIMEOUT_MS', DEFAULT_OPENAI_TIMEOUT_MS, { min: 1, max: 600_000 });
-  const resolvedMaxRetries =
-    maxRetries ?? readIntegerEnv(env, 'OPENAI_MAX_RETRIES', DEFAULT_OPENAI_MAX_RETRIES, { min: 0, max: 10 });
-
-  if (!Number.isInteger(resolvedTimeoutMs) || resolvedTimeoutMs < 1) {
-    throw configError(`OpenAI timeoutMs must be a positive integer; got ${timeoutMs}.`);
-  }
-  if (!Number.isInteger(resolvedMaxRetries) || resolvedMaxRetries < 0) {
-    throw configError(`OpenAI maxRetries must be a non-negative integer; got ${maxRetries}.`);
-  }
-
-  return { timeoutMs: resolvedTimeoutMs, maxRetries: resolvedMaxRetries };
-}
-
-// `fetch` (optional) replaces the SDK's fetch: tests route an
-// https://openrouter.ai base URL to a local stand-in with it.
-// The key is OPENAI_API_KEY, else OPENROUTER_API_KEY for an openrouter.ai
-// OPENAI_BASE_URL (resolveLlmApiKey).
-export function createOpenAiClient({ timeoutMs, maxRetries, env = process.env, fetch = undefined, model = env.MODEL_NAME } = {}) {
-  const providerEnv = { ...env, MODEL_NAME: model };
-  const { apiKey } = resolveLlmApiKey(providerEnv);
-  if (!apiKey) {
-    const error = new Error(isNativeAnthropic(model, env) ? 'ANTHROPIC_API_KEY is required for a native Claude request.' : 'OPENAI_API_KEY is required (or OPENROUTER_API_KEY with an https://openrouter.ai OPENAI_BASE_URL).');
-    error.code = isNativeAnthropic(model, env) ? 'ANTHROPIC_NOT_CONFIGURED' : 'OPENAI_NOT_CONFIGURED';
-    throw error;
-  }
-
-  const options = resolveOpenAiClientOptions({ timeoutMs, maxRetries }, env);
-  if (isNativeAnthropic(model, env)) return createAnthropicClient({ apiKey, ...options, ...(fetch && { fetch }) });
-  return new OpenAI({
-    apiKey,
-    ...(env.OPENAI_BASE_URL && { baseURL: env.OPENAI_BASE_URL }),
-    timeout: options.timeoutMs,
-    maxRetries: options.maxRetries,
-    ...(fetch && { fetch }),
-  });
-}
+// Preserve the public pipeline API while transport setup lives independently.
+export { DEFAULT_OPENAI_TIMEOUT_MS, DEFAULT_OPENAI_MAX_RETRIES, resolveOpenAiClientOptions, createOpenAiClient } from './llm-client.js';
 
 // --- MariaDB credentials ----------------------------------------------------
 // Two roles with separate credentials:

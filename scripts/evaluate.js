@@ -13,6 +13,7 @@ import { PRIMARY_FIXTURE } from '../src/eval/fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, scoreAgainstGold } from '../src/eval/oracle.js';
 import { isEvalInfraError } from '../src/eval/infra-errors.js';
 import { runOptimizedQuestion } from '../src/query-service.js';
+import { RESPONSE_CONTRACT_VERSION } from '../src/response-decision.js';
 import { createTimer, serializeError } from '../src/trace.js';
 
 // Legacy pooled reliability helpers, now in src/eval/stats.js.
@@ -51,6 +52,7 @@ function stopReason(signal) {
 function abortedResult(signal, extra = {}) {
   return {
     status: 'aborted',
+    responseContractVersion: RESPONSE_CONTRACT_VERSION,
     warnings: [],
     error: `Stopped during the gold runs: ${stopReason(signal)}.`,
     error_stage: 'aborted',
@@ -171,6 +173,7 @@ export async function evaluateQuestion({
     });
     const result = {
       status: 'expected_sql_error',
+      responseContractVersion: RESPONSE_CONTRACT_VERSION,
       warnings: [],
       error: error.message,
       error_stage: 'gold',
@@ -230,7 +233,8 @@ export async function evaluateQuestion({
   let score = null;
   const oracleTimer = createTimer();
   const behaviorCase = isBehaviorCase(testCase);
-  if (run.success && !behaviorCase) {
+  const nonAnswer = run.success && ['clarify', 'abstain'].includes(run.decision);
+  if (run.success && !behaviorCase && !nonAnswer) {
     try {
       score = await scorePrediction({
         testCase,
@@ -253,8 +257,12 @@ export async function evaluateQuestion({
   // The signal fired while the fixtures were being scored: whatever the
   // oracle returned (or threw) is not a verdict. (A behaviour case is never
   // scored.)
-  const abortedWhileScoring = run.success && !behaviorCase && Boolean(signal?.aborted);
-  if (run.success && behaviorCase) {
+  const abortedWhileScoring = run.success && !behaviorCase && !nonAnswer && Boolean(signal?.aborted);
+  if (nonAnswer) {
+    status = run.decision;
+    await trace.emit('behavior.checked', { ...caseContext, expectedBehavior: testCase.expected_behavior,
+      decision: run.decision, answered: false, retrievedTables });
+  } else if (run.success && behaviorCase) {
     status = 'answered';
     await trace.emit('behavior.checked', {
       ...caseContext,
@@ -317,6 +325,8 @@ export async function evaluateQuestion({
 
   const result = {
     status,
+    responseContractVersion: RESPONSE_CONTRACT_VERSION,
+    ...(nonAnswer ? { decision: run.decision, clarification_questions: run.clarificationQuestions || [] } : {}),
     warnings,
     generated_sql: run.sql || '',
     explanation: response?.explanation || '',

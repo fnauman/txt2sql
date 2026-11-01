@@ -816,7 +816,7 @@ function breakdownSection(report, hidden = new Set()) {
 /** "M/N declined" for a behaviour case's summary (its handled repetitions), or "excluded". */
 export function behaviorPassText(summary) {
   const behavior = summary?.behavior;
-  return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} declined` : 'excluded';
+  return behavior && behavior.counted > 0 ? `${behavior.handled}/${behavior.counted} handled` : 'excluded';
 }
 
 function casesSection(report, hidden = new Set()) {
@@ -861,9 +861,10 @@ function behaviorSection(report, hidden = new Set(), shown = displayedSummaries(
   const lines = ['## Behaviour cases (abstain / clarify)', '', text, ''];
   lines.push(
     'These questions have no correct SQL: the data cannot answer them (abstain) or they are ambiguous (clarify). A case is handled when the ' +
-      'product returned no SQL in more than half of its counted repetitions (`declined`); producing SQL is `answered_instead_of_abstain` / ' +
-      '`answered_instead_of_clarify` (model bucket, tagged `not_executed` when the SQL was rejected or failed). The product has no ' +
-      'abstention or clarification channel yet, so today it is expected to fail these. They are not in strict accuracy or the paired comparison.'
+      'product returned the matching explicit decision in more than half of its counted repetitions (`clarified` / `abstained`). ' +
+      'Older recordings use `declined` for an empty query or refusal; that legacy score is preserved. Producing SQL is ' +
+      '`answered_instead_of_abstain` / `answered_instead_of_clarify`; a wrong non-answer type is `wrong_behavior`. ' +
+      'They are not in strict accuracy or the paired comparison.'
   );
   const summary = table(
     ['Expected behaviour', 'Cases', 'Handled', 'Outcomes (majority)'],
@@ -1071,6 +1072,15 @@ function verificationSection(report) {
   if (!verification || verification.skipped) {
     lines.push('Gold and controls: not verified in this run (--skip-verify, or the benchmark profile).');
     return lines.join('\n');
+  }
+  if (verification.oraclePolicy) {
+    lines.push(`Oracle policy: **${verification.oraclePolicy.name}** (${verification.oraclePolicy.version}); ` +
+      (verification.oraclePolicy.name === 'regression' ? 'diagnostic compatibility only; not eligible for baseline promotion or an oracle-quality claim.' :
+        `design / held-out floors ${(verification.minKillRate * 100).toFixed(1)}% / ${(verification.minHeldoutKillRate * 100).toFixed(1)}%.`));
+    lines.push('');
+  } else {
+    lines.push('Oracle policy: not recorded in this historical report.');
+    lines.push('');
   }
   lines.push(
     `Gold and controls: ${verification.cases} case(s) verified on every fixture, ${verification.problems.length} with problems; ` +

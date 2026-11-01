@@ -42,7 +42,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { CASE_FIELDS, finalAttemptSql } from './rescore.js';
+import { CASE_FIELDS, finalAttemptSql, recordedResponseContractVersion } from './rescore.js';
 
 export const COMPACT_REPORT_VERSION = 1;
 
@@ -84,10 +84,13 @@ const CASE_EXTRA_FIELDS = ['datasets', 'gold_fingerprint', 'scoring_fingerprint'
 const REPETITION_FIELDS = [
   'repetition',
   'status',
+  'responseContractVersion',
   'outcome',
   'bucket',
   'counted',
   'behavior_counted',
+  'decision',
+  'clarification_questions',
   'outcome_tags',
   'warnings',
   'error',
@@ -158,7 +161,7 @@ function compactLlm(llm) {
   if (!llm) {
     return llm ?? null;
   }
-  const out = pick(llm, ['ok', 'durationMs', 'usage', 'cost', 'tablesUsed', 'code']);
+  const out = pick(llm, ['ok', 'durationMs', 'usage', 'cost', 'tablesUsed', 'code', 'decision', 'clarificationQuestions']);
   if (out.usage !== undefined) {
     out.usage = compactUsage(out.usage);
   }
@@ -322,10 +325,12 @@ export function compactReport(report) {
   out.results = (report.results || []).map((record) => {
     const compact = { ...compactCaseFields(record), ...pick(record, CASE_EXTRA_FIELDS) };
     if (Array.isArray(record.repetitions)) {
-      compact.repetitions = record.repetitions.map(compactRepetition);
+      compact.repetitions = record.repetitions.map(repetition => compactRepetition({
+        ...repetition, responseContractVersion: recordedResponseContractVersion(report, repetition),
+      }));
     } else {
       // A pre-runner record is its own (only) repetition.
-      Object.assign(compact, compactRepetition(record));
+      Object.assign(compact, compactRepetition({ ...record, responseContractVersion: recordedResponseContractVersion(report, record) }));
     }
     return compact;
   });

@@ -244,7 +244,7 @@ export async function rescoreRepetition(repetition, {
   maxAttempts = 2,
   score = scoreAgainstGold,
 }) {
-  const recorded = stripAttribution(repetition);
+  const recorded = { ...stripAttribution(repetition), responseContractVersion: recordedResponseContractVersion(null, repetition) };
   const originalStatus = recorded.status;
   if (isBehaviorCase(testCase)) {
     // No gold to re-score against: whether the recorded run produced SQL is
@@ -260,7 +260,8 @@ export async function rescoreRepetition(repetition, {
     };
   }
   const attempts = (recorded.attempts || []).map(asRecordedAttempt).sort((left, right) => left.attempt - right.attempt);
-  if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0) {
+  if (KEPT_STATUSES.has(originalStatus) || attempts.length === 0 ||
+      (['clarify', 'abstain'].includes(originalStatus) && !attempts.some(attempt => attempt.generatedSql))) {
     // A recorded gold failure whose gold passes today (this function only runs
     // after the gold check) was never sent to the model: nothing to replay,
     // but say that the recorded reason is gone.
@@ -302,6 +303,7 @@ export async function rescoreRepetition(repetition, {
   let final = null;
   let lastFailure = null;
   let stoppedOnInfra = false;
+  let terminalDecision = null;
   // Widen-on-demand (retrieved scope): after a TABLE_SCOPE rejection of an
   // in-scope table the product loop retries with that table in the prompt and
   // the allow-list, so the next recorded attempt is judged against the
@@ -316,6 +318,11 @@ export async function rescoreRepetition(repetition, {
     const sql = attempt.generatedSql;
     if (!sql) {
       replayed.push(attempt);
+      if (['clarify', 'abstain'].includes(attempt.llm?.decision)) {
+        terminalDecision = attempt.llm;
+        finalIndex = index;
+        break;
+      }
       lastFailure = { stage: 'llm', code: attempt.llm?.code ?? null, message: attempt.llm?.error?.message || 'LLM call failed' };
       continue;
     }
@@ -448,6 +455,8 @@ export async function rescoreRepetition(repetition, {
         : classifyBenchmarkStatus({ rowsMatch: false, expectedTables: testCase.expected_tables, retrievedTables: prompt.allowedTables });
     return {
       ...base,
+      decision: 'answer',
+      clarification_questions: [],
       status,
       warnings: collectBenchmarkWarnings({
         rowsMatch: status === 'pass',
@@ -482,6 +491,12 @@ export async function rescoreRepetition(repetition, {
     actual_rows_preview: [],
   };
 
+  if (terminalDecision) {
+    return { ...noAnswer, status: terminalDecision.decision, decision: terminalDecision.decision,
+      clarification_questions: terminalDecision.clarificationQuestions || [], generated_sql: '',
+      rescore: { ...rescore, inherited: true } };
+  }
+
   if (CUT_SHORT_STATUSES.has(originalStatus) && !stoppedOnInfra) {
     // What happened after the cut is unknown: keep the recorded outcome.
     return {
@@ -506,6 +521,21 @@ export async function rescoreRepetition(repetition, {
     error_code: keepOutage ? recorded.error_code : lastFailure?.code ?? null,
     rescore: { ...rescore, inherited: keepOutage },
   };
+}
+
+/**
+ * The protocol used by the recorded generation, not today's scorer. Reports
+ * written before repetitions carried it can use run provenance. A rescore's
+ * product block describes the current scorer, so its source protocol wins.
+ * Missing historical protocol metadata means version 1; never upgrade it just
+ * because today's scorer supports a newer response shape.
+ */
+export function recordedResponseContractVersion(report, repetition) {
+  if (repetition?.responseContractVersion !== undefined) return repetition.responseContractVersion;
+  if (report?.mode === 'rescore' && report.rescoredFrom?.responseContractVersion !== undefined) {
+    return report.rescoredFrom.responseContractVersion;
+  }
+  return report?.provenance?.product?.responseContractVersion ?? 1;
 }
 
 /**
@@ -541,7 +571,8 @@ export async function rescoreReportCases(report, {
       goldError = error;
     }
     const results = [];
-    for (const repetition of repetitions) {
+    for (const sourceRepetition of repetitions) {
+      const repetition = { ...sourceRepetition, responseContractVersion: recordedResponseContractVersion(report, sourceRepetition) };
       results.push(
         goldError
           ? goldErrorRepetition(repetition, goldError)

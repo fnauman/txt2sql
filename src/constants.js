@@ -54,7 +54,7 @@ export const BUSINESS_RULES = [
   'For campaign-filtered product sales, join SalesDocumentLine to Product and Product to Campaign, then filter Campaign.CampaignName with LIKE. Do not require an external campaign ID variable when Campaign is in scope.',
   'For product categories, prefer ProductCategory joined through Product.ProductCategoryId instead of stale SalesDocumentLine.CategoryNameSnapshot values when ProductCategory is in scope.',
   'For brand analysis, prefer Brand joined through Product.BrandId or ProductBrand instead of stale SalesDocumentLine.BrandNameSnapshot values when Brand is in scope.',
-  'If the business meaning is ambiguous, choose the most directly named column and state that assumption in the JSON response.',
+  'If materially different business meanings remain after applying documented defaults, ask for clarification before generating SQL.',
   'Unless requested otherwise, project only the most specific display name columns for entities: select only CustomerName for customer, only ProductName for product, only LocationName for store location, and only DocumentTypeName for document type. Do not project ID or code columns unless explicitly requested or needed for query logic.',
   'Select LedgerAccount.AccountCode and LedgerAccount.AccountName when ledger accounts are requested.',
   'For currency/amount metrics (net sales, debit, credit), round the aggregated sum to 2 decimal places using ROUND(..., 2). Alias the aggregated sum of net sales/revenue as total_net_amount, debit as total_debit, and credit as total_credit.',

@@ -56,6 +56,7 @@ import { resolveCaseControls } from './controls.js';
 import { PRIMARY_FIXTURE } from './fixtures.js';
 import { createGoldCache, executeGoldSql, GOLD_STATEMENT_TIMEOUT_MS, GoldSqlError, scoreAgainstGold } from './oracle.js';
 import { caseDefinitionFingerprint } from './suite.js';
+import { DEFAULT_MIN_KILL_RATE, DEFAULT_MIN_HELDOUT_KILL_RATE } from './oracle-policy.js';
 
 /**
  * Validates SQL the way the product does for `question`: master-data
@@ -492,36 +493,55 @@ const percent = (value) => (value === null ? 'n/a' : `${(value * 100).toFixed(1)
 /**
  * verify-dataset's kill-rate gate for one dataset's controls summary: the
  * design (non-held-out) kill rate must reach `minKillRate` and the held-out
- * rate `minHeldoutKillRate`. A group without controls is not gated. Returns
- * the failure messages (empty when the gate passes).
+ * rate `minHeldoutKillRate`. A missing tier fails when its floor is nonzero.
+ * Returns the failure messages (empty when the gate passes).
  */
-export function killRateGateFailures(summary, { datasetName, minKillRate, minHeldoutKillRate = 0 }) {
+export function killRateGateFailures(summary, { datasetName, minKillRate = DEFAULT_MIN_KILL_RATE, minHeldoutKillRate = DEFAULT_MIN_HELDOUT_KILL_RATE }) {
   const failures = [];
   if (!summary) {
     return failures;
   }
-  if (summary.design.total > 0 && summary.design.rate < minKillRate) {
+  if (minKillRate > 0 && summary.design.total === 0) failures.push(`${datasetName}: no design negative controls; oracle sensitivity is unmeasured`);
+  if (minHeldoutKillRate > 0 && summary.heldout.total === 0) failures.push(`${datasetName}: no held-out negative controls; oracle sensitivity is unmeasured`);
+  // Compare exact counts when available; the displayed rate is rounded and
+  // must not let a rate just below the floor pass.
+  const exactRate = group => Number.isInteger(group.killed) ? group.killed / group.total : group.rate;
+  if (summary.design.total > 0 && (!Number.isFinite(exactRate(summary.design)) || exactRate(summary.design) < minKillRate)) {
     failures.push(`${datasetName}: design kill rate ${percent(summary.design.rate)} < ${percent(minKillRate)}`);
   }
-  if (summary.heldout.total > 0 && summary.heldout.rate < minHeldoutKillRate) {
+  if (summary.heldout.total > 0 && (!Number.isFinite(exactRate(summary.heldout)) || exactRate(summary.heldout) < minHeldoutKillRate)) {
     failures.push(`${datasetName}: held-out kill rate ${percent(summary.heldout.rate)} < ${percent(minHeldoutKillRate)}`);
   }
   return failures;
 }
 
 /**
- * Why verify-dataset must stop before running when controls were requested
- * but none apply to any case of the datasets being verified ([{ datasetName,
- * cases }], normalized cases), or null when some do. Without this a controls
- * directory that loads but does not cover these datasets (the wrong
- * directory, or controls written for other cases) would skip every kill-rate
- * gate and exit 0; --skip-controls is the intentional opt-out.
+ * Strict coverage requires current negatives for every answer case; the
+ * diagnostic regression policy requires at least one applicable negative.
+ * Behavior cases have no gold and require no SQL controls. Report aggregate
+ * counts so coverage errors do not disclose individual holdout cases.
  */
-export function controlsCoverageFailure(datasets, controlsIndex, { controlsDir } = {}) {
+export function controlsCoverageFailure(datasets, controlsIndex, { controlsDir, requireComplete = true } = {}) {
   if (!controlsIndex) {
     return null;
   }
-  const covered = datasets.some((dataset) => dataset.cases.some((testCase) => resolveCaseControls(testCase, controlsIndex).matchedBy !== null));
+  // A matching id alone is not coverage: stale/empty/positive-only entries
+  // cannot measure whether the oracle distinguishes wrong SQL.
+  const answerDatasets = datasets.map(dataset => ({ ...dataset, cases: dataset.cases.filter(testCase => !isBehaviorCase(testCase)) }));
+  const hasNegative = testCase => {
+    const resolved = resolveCaseControls(testCase, controlsIndex);
+    return !resolved.stale && resolved.negative.length > 0;
+  };
+  const uncovered = answerDatasets.filter(dataset => dataset.cases.length > 0)
+    .map(dataset => ({ name: dataset.datasetName, missing: dataset.cases.filter(testCase => !hasNegative(testCase)).length, total: dataset.cases.length }))
+    .filter(dataset => dataset.missing > 0);
+  if (requireComplete && uncovered.length) {
+    return `Oracle controls${controlsDir ? ` in ${controlsDir}` : ''} lack current negative controls for ` +
+      uncovered.map(dataset => `${dataset.missing}/${dataset.total} answer case(s) in ${dataset.name}`).join('; ') +
+      '. Strict verification requires coverage for every answer case. Supply the missing controls or use --oracle-policy regression for a diagnostic comparison.';
+  }
+  if (answerDatasets.every(dataset => dataset.cases.length === 0)) return null;
+  const covered = answerDatasets.some(dataset => dataset.cases.some(hasNegative));
   if (covered) {
     return null;
   }
@@ -601,8 +621,9 @@ export async function verifySuite({
   validate = null,
   controlsIndex = null,
   checkControls = true,
-  minKillRate = 0.95,
-  minHeldoutKillRate = 0,
+  minKillRate = DEFAULT_MIN_KILL_RATE,
+  minHeldoutKillRate = DEFAULT_MIN_HELDOUT_KILL_RATE,
+  requireCompleteControls = true,
   fixtureNames = connections.map((entry) => entry.name),
   verify = verifyCase,
   staleKnownRejection = 'problem',
@@ -635,8 +656,13 @@ export async function verifySuite({
       results.push(entry.result);
     }
     const summary = checkControls ? summarizeControls(results, { fixtureNames }) : null;
+    const answerIndexes = dataset.cases.map((testCase, index) => !isBehaviorCase(testCase) ? index : null).filter(index => index !== null);
+    if (checkControls && requireCompleteControls) {
+      const missing = answerIndexes.filter(index => !results[index].controls?.negative?.length).length;
+      if (missing) gateFailures.push(`${dataset.name}: ${missing}/${answerIndexes.length} answer case(s) lack verified negative-control coverage`);
+    }
     const hasControls = summary && summary.design.total + summary.heldout.total + summary.positive.total > 0;
-    if (hasControls) {
+    if (hasControls || (checkControls && answerIndexes.length > 0)) {
       gateFailures.push(...killRateGateFailures(summary, { datasetName: dataset.name, minKillRate, minHeldoutKillRate }));
     }
     datasetSummaries.push({
@@ -652,5 +678,9 @@ export async function verifySuite({
       controlStatus[negativeStatusOf(control)]?.push(`${entry.id}/${control.id}`);
     }
   }
-  return { cases: verified.size, problems, notes, warnings, gateFailures, controlStatus, datasets: datasetSummaries, minKillRate, minHeldoutKillRate };
+  const baselineEligible = checkControls && requireCompleteControls && minKillRate >= DEFAULT_MIN_KILL_RATE &&
+    minHeldoutKillRate >= DEFAULT_MIN_HELDOUT_KILL_RATE && problems.length === 0 && gateFailures.length === 0 &&
+    controlStatus.invalid.length === 0 && controlStatus.unscored.length === 0;
+  return { cases: verified.size, problems, notes, warnings, gateFailures, controlStatus, datasets: datasetSummaries,
+    minKillRate, minHeldoutKillRate, controlsChecked: checkControls, baselineEligible };
 }

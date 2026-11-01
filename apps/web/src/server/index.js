@@ -141,6 +141,8 @@ function publicResult(result, trace, includeDebug, dataResidency) {
   const errorCode = result.success ? null : result.errorCode ?? null;
   const payload = {
     success: result.success,
+    decision: result.decision || 'answer',
+    clarificationQuestions: result.clarificationQuestions || [],
     question: result.question,
     sql: result.sql || '',
     rows: result.rows || [],
@@ -285,6 +287,13 @@ function createStreamingTraceLogger(res, { enabled = false, pipeline = 'web-stre
 // reducer consumes. Used for both fresh runs and cache replays (identical client
 // path); `cacheHit` rides on the sql + metrics frames to drive the cached badge.
 function streamResultFrames(res, payload, includeDebug, cacheHit) {
+  if (payload.decision && payload.decision !== 'answer') {
+    sseFrame(res, 'decision', { decision: payload.decision,
+      clarificationQuestions: payload.clarificationQuestions, explanation: payload.explanation });
+    sseFrame(res, 'metrics', { attemptCount: payload.attemptCount, llmCost: payload.llmCost, llmUsage: payload.llmUsage, cacheHit });
+    if (includeDebug && payload.debug) sseFrame(res, 'debug', payload.debug);
+    return;
+  }
   if (payload.sql) {
     sseFrame(res, 'sql', {
       sql: payload.sql,

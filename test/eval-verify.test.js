@@ -198,7 +198,7 @@ test('a surviving negative control is reported, not a problem; summarizeControls
   const summary = summarizeControls([result], { fixtureNames: ['seed', 'v2'] });
   assert.equal(summary.design.rate, 0.5);
   assert.deepEqual(summary.design.survivors, ['c1/m2 (metric: equivalent here)']);
-  assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95 }), ['d: design kill rate 50.0% < 95.0%']);
+  assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95, minHeldoutKillRate: 0 }), ['d: design kill rate 50.0% < 95.0%']);
 });
 
 test('a negative control that fails to execute is invalid, not killed, and a problem', async () => {
@@ -265,7 +265,7 @@ test('an infrastructure error leaves a negative control unscored, never killed',
   const summary = summarizeControls([result], { fixtureNames: ['seed', 'v2'] });
   assert.deepEqual([summary.design.killed, summary.design.rate], [0, 0]);
   assert.deepEqual(summary.design.unscored, ['c1/m1 (v2: PROTOCOL_CONNECTION_LOST)']);
-  assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95 }), ['d: design kill rate 0.0% < 95.0%']);
+  assert.deepEqual(killRateGateFailures(summary, { datasetName: 'd', minKillRate: 0.95, minHeldoutKillRate: 0 }), ['d: design kill rate 0.0% < 95.0%']);
 });
 
 test('a negative control whose verdict rests on a cut-off mapping search is undecided, not killed', async () => {
@@ -324,13 +324,18 @@ test('controls written for a different gold are reported as stale and not run', 
   assert.deepEqual(result.controls.negative, []);
 });
 
-test('kill-rate gate: the floor is inclusive, held-out has its own floor, empty groups are not gated', () => {
-  const summary = (design, heldout = { total: 0, rate: null }) => ({ design, heldout });
+test('kill-rate gate: strict defaults measure both tiers; floors are inclusive and missing tiers fail', () => {
+  const summary = (design, heldout = { total: 20, rate: 1 }) => ({ design, heldout });
   const gate = (value, options = {}) => killRateGateFailures(value, { datasetName: 'd', minKillRate: 0.95, ...options });
   assert.deepEqual(gate(summary({ total: 20, rate: 0.95 })), [], 'exactly at the floor passes');
   assert.deepEqual(gate(summary({ total: 20, rate: 0.9499 })), ['d: design kill rate 95.0% < 95.0%']);
-  assert.deepEqual(gate(summary({ total: 0, rate: null })), []);
-  assert.deepEqual(gate(summary({ total: 20, rate: 1 }, { total: 10, rate: 0.5 })), [], 'no held-out floor by default');
+  assert.deepEqual(gate(summary({ total: 0, rate: null })), ['d: no design negative controls; oracle sensitivity is unmeasured']);
+  assert.deepEqual(gate(summary({ total: 20, rate: 1 }, { total: 10, rate: 0.5 })), ['d: held-out kill rate 50.0% < 95.0%']);
+  assert.deepEqual(gate(summary({ total: 20, rate: 1 }, { total: 0, rate: null })), ['d: no held-out negative controls; oracle sensitivity is unmeasured']);
+  assert.deepEqual(gate(summary({ total: 20, rate: 1 }, { total: 10, rate: 0.5 }), { minHeldoutKillRate: 0 }), [], 'explicit diagnostic bypass');
+  assert.match(gate(summary({ total: 20, rate: 1 }, { total: 10, rate: null }))[0], /held-out kill rate n\/a/);
+  assert.match(gate(summary({ total: 20001, killed: 19000, rate: 0.95 }))[0], /design kill rate/,
+    'rounding the displayed rate up to 95% cannot pass an exact rate below the floor');
   assert.deepEqual(gate(summary({ total: 20, rate: 1 }, { total: 10, rate: 0.5 }), { minHeldoutKillRate: 0.6 }), ['d: held-out kill rate 50.0% < 60.0%']);
   assert.deepEqual(gate(null), []);
 });

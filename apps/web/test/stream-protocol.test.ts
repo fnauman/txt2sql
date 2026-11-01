@@ -12,6 +12,23 @@ function apply(actions: StreamAction[]) {
   return actions.reduce((state, action) => streamReducer(state, action), initialStreamState());
 }
 
+test('a clarification decision survives metrics/done without becoming an empty SQL table', () => {
+  const state = apply([
+    { event: '@start', data: { question: 'Show sales' } },
+    { event: 'decision', data: { decision: 'clarify', clarificationQuestions: ['Which sales metric?'], explanation: 'Choose a metric first.' } },
+    { event: 'metrics', data: { attemptCount: 1 } },
+    { event: 'done' },
+  ]);
+  assert.equal(state.status, 'done');
+  assert.equal(state.result.success, true);
+  assert.equal(state.result.decision, 'clarify');
+  assert.deepEqual(state.result.clarificationQuestions, ['Which sales metric?']);
+  assert.equal(state.result.explanation, 'Choose a metric first.');
+  assert.equal(state.hasSql, false);
+  assert.equal(state.hasColumns, false);
+  assert.equal(state.hasRows, false);
+});
+
 test('parseFrame parses an event/data frame', () => {
   const frame = parseFrame('event: sql\ndata: {"sql":"SELECT 1"}');
   assert.deepEqual(frame, { event: 'sql', data: { sql: 'SELECT 1' } });

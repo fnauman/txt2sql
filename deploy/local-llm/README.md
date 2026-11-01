@@ -1,9 +1,14 @@
 # Local inference pilot
 
 Preparation for a single GPU serving this application's SQL model. The Compose
-file has been parsed, but **no GPU inference has been run**: `nvidia-smi` could
-not communicate with a driver in the review environment. Image/checkpoint
-compatibility, throughput, VRAM, and SQL accuracy remain to be measured.
+file has been parsed, but **no GPU inference has been run**. On 2026-11-01 a
+host-level check found a GeForce GTX 1060 with 6,144 MiB and driver 580.178.04;
+the sandbox itself could not access the driver. Docker was reachable from the
+host, with runc/containerd runtimes and no inference container running. This
+machine cannot validate the 24 GB laptop or 80 GB workstation configurations
+below. No checkpoint was downloaded or inference container launched.
+Image/checkpoint compatibility, throughput, VRAM, and SQL accuracy remain to be
+measured on the intended GPU.
 
 ## Hardware and first candidates
 
@@ -133,3 +138,38 @@ and an audited egress policy for the whole application. Review the
 Compare electricity, equipment amortization and operational effort per correct
 answer with hosted cost at expected utilization; do not assume zero API charges
 mean lower total cost.
+
+## Repeatable endpoint smoke check
+
+After starting the local engine, use the application configuration above:
+
+```bash
+# Settings validation only: no HTTP request, model download or database access.
+node scripts/smoke-local-llm.mjs --dotenv /absolute/path/app-local.env
+
+# One synthetic completion, using the application's current strict JSON schema.
+node scripts/smoke-local-llm.mjs --dotenv /absolute/path/app-local.env --run \
+  --output generated/local-llm-smoke.json
+```
+
+The command requires model name `local-sql` and an explicit loopback `/v1`
+endpoint (`127.0.0.1`, `localhost` or `[::1]`). It refuses hosted endpoints,
+credentials in URLs and redirects; it has no hosted fallback. It uses the
+dedicated local API secret from `OPENAI_API_KEY` without printing or saving it.
+`--output` creates a private report and refuses to overwrite an existing file.
+
+`--run` makes one request with no SDK retries and a ten-second deadline. It
+checks valid structured JSON and the table-free query `SELECT 1 AS smoke_value`,
+but never executes SQL. The smoke request uses an output cap of 256 tokens;
+`LOCAL_SMOKE_MAX_TOKENS` can set 32–4096 and `LOCAL_SMOKE_TIMEOUT_MS` can set
+100–120000 milliseconds. The synthetic prompt contains no application data.
+Returned model text is not included in the report. A timeout, refused or
+truncated response, malformed JSON, unsafe SQL or unexpected answer fails the
+command. Tests use an injected transport to cover these paths and caller
+cancellation without an inference server.
+
+A passing smoke check establishes only endpoint/schema compatibility for this
+synthetic request. It does not establish SQL accuracy, corrective-retry quality,
+GPU memory release after cancellation, or acceptable concurrent load. Those
+remain the acceptance experiment above; a simulated transport test is not a
+successful GPU run.

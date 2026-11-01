@@ -1,3 +1,4 @@
+import { upgradeLegacyPrompt } from './helpers/response-contract.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -127,10 +128,10 @@ test('auto is full while the full schema block fits SCHEMA_FULL_MAX_TOKENS, else
 // buildOptimizedPrompt before schema scopes existed (its prompt version is the
 // committed baseline's; test/eval-provenance.test.js checks that), and so
 // before HINTS_VERSION existed: hints version 1.
-test('retrieved scope reproduces main\'s prompt and allow-list byte for byte (hints version 1)', () => {
+test('retrieved scope preserves the historical context and allow-list with response contract v2', () => {
   for (const expected of MAIN_PROMPTS.prompts) {
     const prompt = promptFor(expected.question, 'retrieved', { hintsVersion: 1 });
-    assert.equal(prompt.system, expected.system, expected.question);
+    assert.equal(prompt.system, upgradeLegacyPrompt(expected.system), expected.question);
     assert.equal(prompt.user, expected.user, expected.question);
     assert.deepEqual(prompt.tables.map((table) => table.tableName), expected.allowedTables);
     assert.equal(prompt.context.schemaScope.effective, 'retrieved');

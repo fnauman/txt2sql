@@ -9,7 +9,8 @@
 // prompt context. Then the case's controls (datasets/controls) run through the
 // multi-fixture oracle: every positive control must match on every fixture and
 // pass the validator; negative controls must be killed. The kill rate of the
-// non-held-out negatives must reach --min-kill-rate (default 0.95).
+// design and later-authored negatives must each reach 0.95 per dataset under
+// the default strict policy. Historical --oracle-policy regression is diagnostic.
 //
 // Schema/data drift that would silently break a gold query is caught here
 // instead of being misread as a model failure during evaluation: every
@@ -30,7 +31,7 @@
 //   npm run verify-dataset -- --write-pins          # rewrite expected_row_counts
 //     (refused unless every fixture is current: run npm run seed-fixtures first)
 //   options: --fixtures seed,v2,v3  --controls-dir <dir>  --skip-controls
-//            --min-kill-rate 0.95  --min-heldout-kill-rate 0  --report-file <path>
+//            --oracle-policy strict|regression --report-file <path>
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,17 +55,19 @@ import { loadNarrowSchema, resolveEffectiveSchemaScope, writeJsonFile } from '..
 import { describeHintsVersion, resolveHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig } from '../src/schema-scope.js';
 import { runScriptMain } from '../src/eval/script-exit.js';
+import { oraclePolicyNotice, resolveOraclePolicy } from '../src/eval/oracle-policy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MODELS_DIR = path.resolve(__dirname, '../models');
 const SCHEMA_PATH = path.resolve(__dirname, '../generated/schema.json');
 
-export const DEFAULT_MIN_KILL_RATE = 0.95;
+export { DEFAULT_MIN_KILL_RATE } from '../src/eval/oracle-policy.js';
 
 const USAGE = `Usage: npm run verify-dataset -- [--dataset <name> | --dataset-file <path>] [--datasets-dir <dir>]
   [--fixtures seed,v2,v3] [--controls-dir <dir>] [--skip-controls] [--write-pins]
-  [--min-kill-rate 0.95] [--min-heldout-kill-rate 0] [--report-file <path>]
+  [--oracle-policy strict|regression] [--min-kill-rate 0.95] [--min-heldout-kill-rate 0.95] [--report-file <path>]
+  strict: both floors >= 0.95; regression: historical diagnostic only (held-out floor 0)
 ${ENV_USAGE}`;
 
 async function resolveDatasetTargets(argv) {
@@ -181,8 +184,14 @@ export async function main(argv = process.argv.slice(2)) {
   const fixtureNames = fixtures.map((fixture) => fixture.name);
   const writePins = hasOptionFlag(argv, '--write-pins');
   const checkControls = !hasOptionFlag(argv, '--skip-controls');
-  const minKillRate = parseRate(argv, '--min-kill-rate', DEFAULT_MIN_KILL_RATE);
-  const minHeldoutKillRate = parseRate(argv, '--min-heldout-kill-rate', 0);
+  const oraclePolicy = resolveOraclePolicy({
+    name: getOptionValue(argv, '--oracle-policy') || 'strict',
+    minKillRate: parseRate(argv, '--min-kill-rate', null),
+    minHeldoutKillRate: parseRate(argv, '--min-heldout-kill-rate', null),
+  });
+  const { minKillRate, minHeldoutKillRate } = oraclePolicy;
+  console.log(oraclePolicyNotice(oraclePolicy));
+  if (!checkControls) console.log('Oracle controls skipped: diagnostic verification only.');
   const reportFile = getOptionValue(argv, '--report-file');
   const controlsDir = path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR);
   const controlsIndex = checkControls ? await loadControlsIndex({ controlsDir }) : null;
@@ -202,7 +211,7 @@ export async function main(argv = process.argv.slice(2)) {
     );
   }
   const datasetInfos = datasetEntries.filter((entry) => entry.info).map((entry) => entry.info);
-  const coverageFailure = datasetInfos.length > 0 ? controlsCoverageFailure(datasetInfos, controlsIndex, { controlsDir }) : null;
+  const coverageFailure = datasetInfos.length > 0 ? controlsCoverageFailure(datasetInfos, controlsIndex, { controlsDir, requireComplete: oraclePolicy.name === 'strict' }) : null;
   if (coverageFailure) {
     throw new Error(coverageFailure);
   }
@@ -234,6 +243,7 @@ export async function main(argv = process.argv.slice(2)) {
     fixtures: [],
     minKillRate,
     minHeldoutKillRate,
+    oraclePolicy,
     datasets: [],
   };
 
@@ -322,6 +332,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (reportFile) {
+    report.gateFailures = gateFailures;
+    report.totalFailures = totalFailures;
+    report.qualityPassed = checkControls && oraclePolicy.name === 'strict' && totalFailures === 0 && gateFailures.length === 0;
     await writeJsonFile(path.resolve(reportFile), report);
     console.log(`\nReport: ${path.resolve(reportFile)}`);
   }

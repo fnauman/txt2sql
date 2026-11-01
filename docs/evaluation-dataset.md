@@ -6,6 +6,30 @@ templated generator and the hand-written hard cases, behaviour (abstain /
 clarify) cases, the multi-fixture oracle and its controls, the value-aware
 comparison spec, `npm run eval` and its report, and the known limits.
 
+**Current quality policy (`oracle-controls-v2`).** Verification defaults to
+`--oracle-policy strict`: both design and later-authored negative controls
+must reach **95% per dataset**, with current negative-control coverage for
+every answer case. Missing tiers, stale/empty/positive-only coverage, invalid
+controls and infrastructure errors cannot establish oracle sensitivity. The
+95% requirement applies the existing design-control tolerance equally to
+both tiers; it was not chosen to fit their measured scores. The known
+78–87% rates below fail this policy. No fixture, gold, frozen holdout or
+historical baseline was changed to make them pass.
+
+For historical comparisons only, use `--oracle-policy regression` on
+`verify-dataset` or `eval`. It preserves the former 95% design / 0% held-out
+floors, labels reports as diagnostic, and cannot promote a new baseline.
+Explicitly lowering either floor requires this policy. Skipping verification
+or controls also prevents baseline promotion. CI runs historical compatibility
+with that explicit policy and publishes a separate **advisory strict quality
+audit** with its outcome, log and JSON artifact. A green CI badge alone does
+not certify that audit passed.
+
+The existing v2 holdout has been reused in model comparisons. “Fresh” below
+describes its original construction, not current independence. A new sealed
+evaluation needs independently authored schemas, intents and controls after
+the business contract is agreed; see [the evaluation contract work](evaluation-contract.md).
+
 | Asset | Path |
 |---|---|
 | Original benchmarks (dev) | `datasets/core-public.json` (9), `datasets/paraphrase-public.json` (9), `datasets/edge-cases-public.json` (17) |
@@ -629,13 +653,16 @@ not carry one (`expected_sql`, alternatives, a comparison or pins are errors).
 The default, `'answer'`, is every other case.
 
 - **Run**: no gold runs before the product loop and nothing is scored after
-  it; executed SQL is status `answered`.
-- **Attribution**: SQL in any attempt is `answered_instead_of_abstain` /
+  it; executed SQL is status `answered`. Response contract v2 can complete
+  with status `clarify` or `abstain` without validating or executing SQL.
+- **Attribution**: the matching typed decision, with no SQL in any attempt,
+  is `clarified` / `abstained`; the wrong non-answer type is `wrong_behavior`.
+  SQL in any attempt is `answered_instead_of_abstain` /
   `answered_instead_of_clarify` (model bucket; tagged `not_executed` when the
-  SQL was rejected or failed). No SQL in any attempt, because the model sent
-  an empty query (`EMPTY_SQL`) or refused (`LLM_REFUSED`), is `declined`:
-  handled correctly. Outages, timeouts and budget skips keep their usual
-  outcomes and do not count for the behaviour score. Any SQL counts as not
+  SQL was rejected or failed). Untyped historical recordings that returned
+  an empty query (`EMPTY_SQL`) or refused (`LLM_REFUSED`), with no SQL in any
+  attempt, retain their `declined` score. Outages, timeouts and budget skips
+  keep their usual outcomes and do not count for the behaviour score. Any SQL counts as not
   clarifying, even SQL that hedges well: a per-customer breakdown for "How much
   did Summit Grocers buy in March 2026?" is `answered_instead_of_clarify` (that
   reading is scored by the answer case
@@ -643,21 +670,23 @@ The default, `'answer'`, is every other case.
 - **Report**: never in strict accuracy, the legacy totals, the attribution
   tables, the guardrail matrix or the paired comparison; `report.json`'s
   `behavior` block and report.md's "Behaviour cases: abstain/clarify — N
-  cases, M handled correctly" section report them. A case is handled when it
-  declined in more than half of its counted repetitions.
+  cases, M handled correctly" section report them. A case is handled when
+  more than half of its counted repetitions have the matching decision (or
+  a legacy decline).
 - **verify-dataset** runs nothing for them (no gold, no pins, no controls); a
   rescore keeps them as recorded. **evaluate-retrieval** leaves them out of
   the recall numbers (no expected tables) and lists them under
   `behavior_cases` with the tables retrieval would offer.
 
-**Why the product fails them today.** The product has no abstention or
-clarification channel: the response schema has no field for "cannot answer"
-or for a question back, retrieval falls back to some tables for any question
-(nonsense included), and the prompt asks for SQL. So every behaviour case is
-expected to be `answered_instead_of_*` until that changes (audit finding D5).
-They are in the suite to measure that gap and to score the fix when it comes;
-keeping them out of strict accuracy stops them from hiding answer-quality
-changes.
+**Historical gap and current contract.** The recorded baseline product had
+no abstention or clarification channel and failed the development behaviour
+cases. [Response contract v2](response-contract.md) now provides typed decisions
+and clarification questions, which the API, UI and evaluator carry through.
+This implementation has deterministic tests; its effect on real model behavior
+has not yet been measured in a new paid evaluation. Historical scores remain
+unchanged. Keeping behaviour cases out of strict accuracy prevents them from
+hiding answer-quality changes; a non-answer to an answerable case is still a
+counted model failure (`declined_answer`).
 
 ## Known validator rejections
 
@@ -1150,8 +1179,10 @@ and those of questions flagged `known_validator_rejection` (rejected with the
 same code, a note). Per dataset the gate counts each control once per case
 that resolves it: templated design 1504/1504 (held-out 185/236), hard cases
 design 140/140 (held-out 15/19); the design gate (>= 0.95) passes for every
-dataset, and held-out rates are reported, not gated (`--min-heldout-kill-rate`
-defaults to 0).
+dataset. These historical measurements used the former held-out floor of 0;
+under today's strict policy the three sub-95% held-out rates fail. Use
+`--oracle-policy regression` only to reproduce the historical compatibility
+check, with the diagnostic limitation recorded in the report.
 
 A negative control counts as killed only when it executes on every fixture
 and does not match: one that fails to execute (a bad column, a timeout) is
@@ -1266,11 +1297,13 @@ npm run eval -- --help                              # every flag
    datasets, in process, with the verify-dataset gates: no case problem (an
    invalid or unscored negative control is one: a control that does not
    execute is never a kill), and each dataset's design kill rate at least
-   `--min-kill-rate` (0.95; held-out floor `--min-heldout-kill-rate`, default
-   0; undecided controls count as not killed). A missing or empty controls
-   directory, or one whose controls apply to none of the datasets, stops the
-   run too. A failure stops the run with exit 2 before any LLM call;
-   `--skip-verify` runs anyway, `--skip-controls` verifies the gold only.
+   `--min-kill-rate` and `--min-heldout-kill-rate` (both 0.95 under the
+   default strict policy; undecided controls count as not killed). Missing
+   negative-control tiers or uncovered answer cases fail too. A failure stops
+   the run with exit 2 before any LLM call. `--oracle-policy regression`
+   reproduces the historical diagnostic gate; `--skip-verify` runs anyway,
+   `--skip-controls` verifies gold only. None of those diagnostic bypasses
+   can write a baseline.
 4. **The run** (needs `OPENAI_API_KEY`; `OPENAI_BASE_URL` for an
    OpenAI-compatible endpoint; `MODEL_NAME` or `--model`, and for a reasoning
    model `REASONING_EFFORT` or `--reasoning-effort`, checked per model family
@@ -1794,8 +1827,10 @@ spend.) Rescoring and `--offline` cost nothing.
   ASCII-only normalization fails them today, and so does retrieval on most new
   vocabulary and named entities (with the full schema scope that only weakens
   the ranking hint; under the retrieved scope it is a table-scope rejection).
-- **Behaviour cases** are 12 (10 dev, 2 holdout) and are scored only on whether SQL was produced;
-  a future clarification answer will need its own check.
+- **Behaviour cases** are 12 (10 dev, 2 holdout). Current scoring checks the
+  matching decision type and absence of SQL; legacy recordings retain their
+  decline score. The semantic usefulness of clarification questions and the
+  correctness of an abstention explanation still need independent review.
 - **Ambiguity is partly encoded as alternatives**: where two readings are both
   defensible, either passes; a reading the dataset did not foresee fails.
 - **Temporal**: the product's normalizer understands month-name + year only;

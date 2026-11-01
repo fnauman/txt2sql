@@ -5,6 +5,42 @@ Review date: 2026-10-14. Base commit:
 changes reviewed here were committed afterwards. Experiment labels, artifact hashes and provenance gaps are indexed in
 [the registry](experiments/registry.json). The default model remains unchanged.
 
+## Implementation update (2026-11-01)
+
+The readiness follow-up implements strict, fail-closed oracle control coverage
+and equal 95% design/later-authored detection floors; historical comparison now
+requires an explicit regression policy and cannot promote a baseline. See the
+[evaluation contract](evaluation-contract.md) for the still-required business
+sign-off and sealed-set procedure. Existing wrong-control misses remain visible;
+fixtures and historical scores were not changed to make the gate pass.
+
+[Response contract v2](response-contract.md) adds typed clarification and
+abstention with no SQL execution, UI presentation, API/SSE transport and separate
+behavior scoring. The prompt changes; the old model scores have not been
+remeasured. Browser history and pins are now memory-only, legacy persisted data
+is removed when accessible, and Clear session data cancels and clears the page.
+This does not add multi-user identity or database tenant isolation.
+
+The [local runbook](../deploy/local-llm/README.md) now includes a loopback-only
+structured-output smoke tool and its limits. Host-level inspection found a
+6 GB GTX 1060, rather than either target hardware tier. No inference service
+was launched. Transport construction and configuration parsing were extracted
+from the large pipeline while preserving its public exports.
+
+Validation completed for this implementation: the required unit/API/web tests,
+web typecheck and build, and disposable real-MariaDB integration all pass.
+The strict real-database verifier fails on the three already-documented
+held-out-control gaps with no case problems; the explicitly diagnostic verifier
+and offline regression gate pass with the recorded SQL outcomes unchanged.
+The throwaway database was removed after validation. No paid model evaluation
+or actual inference deployment was performed.
+
+Next acceptance work: business semantics, new independent discriminating
+fixtures and sealed questions, measured behavior/answer quality under the new
+prompt, user/tenant access architecture, and actual target-GPU/load validation.
+The dated assessment below is retained as context; references to earlier
+capabilities and gate settings describe that October review.
+
 ## 1. Repair the evaluation contract before selecting another winner
 
 The current suite is useful as a regression suite, not sufficient evidence of

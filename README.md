@@ -184,8 +184,8 @@ Common variables:
 - `OPENAI_TIMEOUT_MS` (per HTTP attempt, default `60000`) and `OPENAI_MAX_RETRIES` (SDK transport retries, default `1`)
 - `QUERY_STATEMENT_TIMEOUT_MS` (MariaDB statement timeout for generated SQL and master-data lookups on every path, default `8000`; `0` disables)
 - `WEB_QUERY_MAX_RETRIES` (extra model attempts after a failed generation, validation or execution, `0` to `5`, default `1`). Despite the `WEB_` prefix, the `optimized` CLI reads it too, and an invalid value stops it
-- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved HINTS_VERSION=1 MODEL_NAME=gpt-4o-mini` reproduces the product loop of the retrieved-scope baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`); the current committed baselines ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
-- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` reproduces the prompts, semantic plans and validator decisions from before hints v2 (the version-1 baselines') byte for byte. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
+- `SCHEMA_SCOPE` (`auto`, `full` or `retrieved`, default `auto`), `SCHEMA_FULL_MAX_TOKENS` (default `8000`) and `SCHEMA_WIDEN_ON_DEMAND` (default on when `auto` falls back to `retrieved`, off for an explicit `SCHEMA_SCOPE=retrieved`): how much schema the optimized prompt shows and which tables the validator allows. `full` sends every in-scope table as one stable prompt prefix and allows them all, with retrieval as a ranking hint; `retrieved` sends and allows the retrieved tables (the behaviour before this setting existed, prompt for prompt and retry for retry) and, with `SCHEMA_WIDEN_ON_DEMAND=1`, retries a `TABLE_SCOPE` rejection of an in-scope table with that table added; `auto` is `full` while the full schema block fits `SCHEMA_FULL_MAX_TOKENS` estimated tokens (characters / 4), else `retrieved`. The web server, the `optimized` CLI, `npm run eval`, `verify-dataset` and `measure-prompt-cache` all read them, and an invalid value stops them. `SCHEMA_SCOPE=retrieved HINTS_VERSION=1 MODEL_NAME=gpt-4o-mini` selects the schema/hints/model configuration of the retrieved-scope baseline, `eval/baselines/gpt-4o-mini.json` at commit `1aa30a3` (prompt version `0c314451d4b7`). Reproducing its exact generation prompt also requires its recorded source commit: response contract v2 changes the current prompt for both hints versions. The current committed baselines ran `auto` (full on this schema). See [docs/experiments/01-schema-scope.md](docs/experiments/01-schema-scope.md)
+- `HINTS_VERSION` (`1` or `2`, default `2`): the generation of the optimized prompt's knowledge layer. `2` ("hints v2") leaves a month unresolved when it is part of a longer date phrase it does not resolve (day ranges, parts of a month, periods ending in it, open ranges, to-date tails; a pattern list, not a full date grammar), uses unambiguous business rules (posting date, brand path, ranking limits, count / single-total / time-grain answer shapes, money words, units, cancellations, campaigns, ledger accounts), reads the semantic-layer overlay `metadata/semantic-layer.hints-v2.json` on top of `metadata/semantic-layer.json` (turnover / spend, average order value, open amount, units, ...), states metric default filters in the hints, ignores generic words in retrieval and does not read an account name such as "account 4000 (Sales Revenue)" as a sales metric. `1` retains the pre-hints-v2 knowledge-layer behavior for semantic planning and validation. Response contract v2 applies to both hints versions, so an exact historical generation prompt requires the recorded source commit. Read by the same entry points as `SCHEMA_SCOPE`; an invalid value stops them. See [docs/experiments/02-hints-v2.md](docs/experiments/02-hints-v2.md)
 
 See [.env.example](.env.example) for a starting point.
 
@@ -287,7 +287,7 @@ npm run benchmark -- --dataset edge-cases-public          # public edge-case sui
 npm run benchmark -- --dataset edge-cases-public --tag join_path
 ```
 
-`npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run (an abstain / clarify case fails when it is not declined: the model answers it, or its call fails without SQL). The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
+`npm run benchmark` and `npm run evaluate` are the evaluation runner (`npm run eval`, see [Evaluation](#evaluation)) with the benchmark profile: one dataset (default `core-public`), no Docker start, no fixture seeding, no verification, and exit code 1 when any case fails in a single run (an abstain / clarify case needs the matching typed decision without SQL; legacy recorded declines retain their historical score). The benchmark calls the model for every case (up to 2 attempts per case, and again for every repetition with `--repeat`), so it costs money; `verify-dataset` below does not.
 
 ### Datasets and the scoring oracle
 
@@ -309,7 +309,7 @@ one suite of 404 unique cases over 217 intents (see [Evaluation](#evaluation)):
   relative dates with an explicit as-of date, named entities, zero-row
   answers, and 10 unanswerable or ambiguous questions whose right behaviour is
   to abstain or ask (no gold SQL; reported apart from accuracy);
-- `holdout-public` (149 cases over 77 intents): a fresh holdout (v2), authored
+- `holdout-public` (149 cases over 77 intents): the existing holdout (v2), authored
   blind on 2026-10-06 and frozen, every case `holdout`: new shapes (shares,
   ratios, receivables ageing, trial balance, running totals, window
   functions), named entities, explicit tie-breaks, relative dates with an
@@ -380,6 +380,19 @@ as smoke signals, and use the whole suite with repetitions (`npm run eval --
 
 ## Evaluation
 
+Oracle verification now defaults to the [strict quality policy](docs/evaluation-contract.md)
+with 95% detection required in both control tiers. It intentionally reports the
+known sensitivity gaps in the existing suite. To reproduce historical SQL
+regression results, use `npm run eval -- --offline --gate --oracle-policy regression`;
+that diagnostic policy cannot promote a baseline or certify model quality.
+
+
+The current optimized product uses [response contract v2](docs/response-contract.md):
+it can ask for clarification or explain that the available data cannot answer a
+request, without executing SQL. Existing benchmark figures describe the earlier
+contract and have not been remeasured with this prompt.
+
+
 One command runs the whole evaluation:
 
 ```bash
@@ -399,12 +412,12 @@ with 2-3 phrasings each, built by `npm run build-eval-dataset`), 40
 hand-written hard cases (new vocabulary, Swedish, typos, relative dates with an
 as-of date, named entities, zero-row answers, and 10 unanswerable or ambiguous
 questions where the right behaviour is to abstain or ask, reported apart from
-accuracy) and a fresh holdout (`datasets/holdout-public.json`, 149 cases over
+accuracy) and the existing holdout (`datasets/holdout-public.json`, 149 cases over
 77 intents, authored blind on 2026-10-06). Every case is `dev` or `holdout`:
 the 255 cases over 140 intents of the first five datasets are dev, and the
 149 fresh cases are the holdout. The 45 intents (81 cases) that used to be
 holdout were read during the error analysis of Experiment 1, so they are dev
-now, tagged `formerly_holdout`. The fresh holdout is new intents whose
+now, tagged `formerly_holdout`. The existing holdout is new intents whose
 questions avoid every multi-word phrase of the semantic layer and its tuned
 word "revenue" (single words such as customer, store or units still match
 it), so it measures new intents in partly new wording. It is frozen by
@@ -450,15 +463,15 @@ of [Experiment 3](docs/experiments/03-models.md)):
 | Measure | Result |
 |---|---|
 | Strict accuracy (392 answer cases, every split) | **89.4%** |
-| By split | dev **94.0%** (245 cases, 95% CI 91.2%–96.6%) · fresh holdout **81.6%** (147 cases) |
+| By split | dev **94.0%** (245 cases, 95% CI 91.2%–96.6%) · existing holdout **81.6%** (147 cases) |
 | Failures by cause (repetitions, dev cases) | model 44, every one a wrong result · system 0 (no known validator rejections, retrieval misses or guardrail false rejections) · infrastructure 0 |
 | Guardrails over every dev attempt | no guardrail rejection: false-rejection rate 0%, recall 0.0% (none of the 44 wrong queries was caught: they are valid SQL with the wrong meaning) |
-| Abstain / clarify cases handled | 0 of 10 dev cases (the product always answers; not in accuracy); 2 holdout cases, outcomes not shown |
+| Abstain / clarify cases handled | 0 of 10 dev cases (the recorded product always answered; not in accuracy); 2 holdout cases, outcomes not shown |
 | Cost and latency | $0.3276 for the whole run · dev cases: $0.00024 per question, $0.00027 per correct answer, p50 3.04 s, p95 5.73 s, retry rate 0.3% |
 
 The reference it replaced, gpt-4o-mini on the same prompt and suite
 (`eval/baselines/gpt-4o-mini.json`, kept for comparisons), scored 73.6%:
-dev 88.3%, fresh holdout 49.2%, $0.00060 per correct answer, p95 4.40 s. How
+dev 88.3%, existing holdout 49.2%, $0.00060 per correct answer, p95 4.40 s. How
 it got here, each step a paired experiment against the previous baseline:
 [Experiment 1](docs/experiments/01-schema-scope.md) (full-schema prompting:
 68.8% → 72.8% on the earlier 255-case suite),
@@ -578,7 +591,7 @@ capability map is keyed by the model id without a vendor prefix, so
 | `claude-haiku-5-5`, `claude-sonnet-5-5` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`) | `medium` (Haiku) / `high` (Sonnet), the provider defaults; sent and recorded. Native requests go to api.anthropic.com (see [Anthropic](#anthropic)) |
 | `gemini-3.8-flash` (OpenRouter `google/gemini-3.8-flash`) | yes | `low`, `medium`, `high` | `medium`, sent and recorded |
 | `deepseek-v4.1-flash` (OpenRouter `deepseek/deepseek-v4.1-flash`) | yes | `low`, `high`, `max` | `high`, sent and recorded |
-| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the request of the gpt-4o-mini reference baseline, byte for byte |
+| `gpt-4o*`, `gpt-4.1*` | no | none allowed (setting one stops the run) | `temperature: 0`, `max_completion_tokens` 1200 (basic) / 3200 (optimized): the gpt-4o-mini reference baseline's sampling/output-token settings; the optimized response schema now uses contract v2 |
 | `gpt-6*` (e.g. `gpt-6-luna`, `gpt-6-sol`) | yes | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `gpt-6-luna`, the default model: `low` (the product default); the others: `medium` (the provider default); sent and recorded |
 | `gpt-6-astra`, `gpt-6.1-sol` | yes | `low`, `medium`, `high`, `xhigh`, `max` (no `none`: the API rejects it) | `medium` (6.1 Sol's provider default; Astra's page states none, so it is sent explicitly) |
 | `gpt-5.5*` | yes | `none`, `low`, `medium`, `high`, `xhigh` | `medium` (the provider default), sent and recorded |
@@ -923,7 +936,7 @@ The `SELECT`-only query user is what stops anything the validator misses from wr
 - Missing foreign keys are ignored on purpose rather than guessed.
 - The local bootstrap uses the copied models to create a practical starter schema, not a byte-for-byte production clone.
 - Generated files are written to `generated/` and are excluded from git.
-- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`), `hard-cases-public` (hand-written, including abstain / clarify cases) and `holdout-public` (the fresh holdout v2, built by `npm run build-holdout-dataset`), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits (the first five are all dev; `holdout-public` is the holdout, frozen by `datasets/holdout-manifest.json`); their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
+- Evaluation datasets live under `datasets/`: `core-public` and `paraphrase-public` (the original smoke and paraphrase cases), `edge-cases-public` (the core cases plus targeted edge cases), `templated-public` (generated by `npm run build-eval-dataset`), `hard-cases-public` (hand-written, including abstain / clarify cases) and `holdout-public` (the existing holdout v2, built by `npm run build-holdout-dataset`), de-duplicated by `npm run eval` into one suite with `dev` / `holdout` splits (the first five are all dev; `holdout-public` is the holdout, frozen by `datasets/holdout-manifest.json`); their oracle controls are under `datasets/controls/`. Composition, splits, scoring and the value-aware comparator are documented in `docs/evaluation-dataset.md`.
 - The *why* behind the pipeline and the web app — design decisions, trade-offs, and the invariants — is in `docs/architecture.md`.
 - Measured product changes (one variable, paired against the committed baseline) are written up in `docs/experiments/` (protocol in `docs/experiments/README.md`).
 

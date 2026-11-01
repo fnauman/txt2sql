@@ -73,6 +73,7 @@ export function extractAttempts(events) {
         attempt.generatedSql = entry.response?.cleanedSql ?? null;
         attempt.llm = {
           ok: true,
+          ...(entry.response?.decision ? { decision: entry.response.decision, clarificationQuestions: entry.response.clarificationQuestions || [] } : {}),
           durationMs,
           usage: entry.response?.usage ?? null,
           cost: entry.response?.cost ?? null,
