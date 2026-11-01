@@ -564,11 +564,11 @@ test('the runner block records every parsed flag, paths repo-relative', () => {
 });
 
 test('--write-baseline only replaces the baseline with a clean, complete run', () => {
-  const report = { budget: { skippedCases: [] } };
+  const report = { budget: { skippedCases: [] }, provenance: { sourceUnchangedDuringRun: true } };
   assert.equal(baselineRefusal(report, { code: 0, reasons: [] }), null);
   assert.match(baselineRefusal(report, { code: 2, reasons: ['9 repetition(s): LLM provider outage errors (llm_outage)'] }), /exited 2 \(9 repetition/);
   assert.match(baselineRefusal(report, { code: 1, reasons: ['significantly worse'] }), /exited 1/);
-  assert.match(baselineRefusal({ budget: { skippedCases: ['a', 'b'] } }, { code: 0, reasons: [] }), /2 case\(s\) were skipped by the budget/);
+  assert.match(baselineRefusal({ ...report, budget: { skippedCases: ['a', 'b'] } }, { code: 0, reasons: [] }), /2 case\(s\) were skipped by the budget/);
 });
 
 test('--write-baseline never replaces the default baseline with a filtered or partial suite', () => {
