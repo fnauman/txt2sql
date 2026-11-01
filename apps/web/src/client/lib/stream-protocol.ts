@@ -33,6 +33,7 @@ export const STAGE_LABELS: Record<PipelineStage, string> = {
 };
 
 export interface StreamState {
+  requestId: number;
   status: 'idle' | 'streaming' | 'done' | 'error';
   stages: Record<PipelineStage, StageStatus>;
   result: QueryResponse;
@@ -46,7 +47,7 @@ export interface StreamState {
   errorStage: ErrorStage | null;
 }
 
-export type StreamAction = { event: string; data?: any };
+export type StreamAction = { event: string; data?: any; requestId?: number };
 
 function idleStages(): Record<PipelineStage, StageStatus> {
   return STAGE_ORDER.reduce((acc, stage) => {
@@ -83,6 +84,7 @@ function emptyResult(question = ''): QueryResponse {
 
 export function initialStreamState(question = ''): StreamState {
   return {
+    requestId: 0,
     status: 'idle',
     stages: idleStages(),
     result: emptyResult(question),
@@ -104,9 +106,17 @@ function asErrorStage(value: unknown): ErrorStage | null {
 }
 
 export function streamReducer(state: StreamState, action: StreamAction): StreamState {
+  // A reset invalidates already queued transition frames as well as network
+  // callbacks. The request ID is assigned locally, never trusted from SSE data.
+  if (action.event !== '@start' && action.event !== '@reset' && action.requestId !== undefined && action.requestId !== state.requestId) {
+    return state;
+  }
   switch (action.event) {
+    case '@reset':
+      return { ...initialStreamState(), requestId: action.requestId ?? state.requestId + 1 };
     case '@start': {
       const next = initialStreamState(action.data?.question || '');
+      next.requestId = action.requestId ?? state.requestId + 1;
       next.status = 'streaming';
       next.stages.planning = 'active';
       return next;
@@ -141,6 +151,16 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
           assumptions: action.data.assumptions ?? state.result.assumptions,
           promptTables: action.data.promptTables ?? state.result.promptTables,
           rankedTables: action.data.rankedTables ?? state.result.rankedTables,
+        },
+      };
+    case 'decision':
+      return {
+        ...state,
+        result: {
+          ...state.result,
+          decision: action.data.decision,
+          clarificationQuestions: action.data.clarificationQuestions ?? [],
+          explanation: action.data.explanation ?? state.result.explanation,
         },
       };
     case 'columns':

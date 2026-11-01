@@ -28,8 +28,10 @@ const RESPONSE_FORMAT = {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['sql', 'explanation', 'tables_used', 'assumptions'],
+      required: ['decision', 'clarification_questions', 'sql', 'explanation', 'tables_used', 'assumptions'],
       properties: {
+        decision: { type: 'string', enum: ['answer', 'clarify', 'abstain'] },
+        clarification_questions: { type: 'array', items: { type: 'string' } },
         sql: { type: 'string' },
         explanation: { type: 'string' },
         tables_used: { type: 'array', items: { type: 'string' } },
@@ -103,7 +105,7 @@ async function lastBodyOf(call) {
   return last.body;
 }
 
-test('gpt-4o-mini: the optimized and basic requests are byte for byte unchanged', async () => {
+test('gpt-4o-mini: request options are stable apart from the versioned optimized response contract', async () => {
   const client = localClient();
   const optimized = await lastBodyOf(() => generateOptimizedResponse({ client, model: 'gpt-4o-mini', prompt }));
   assert.equal(optimized, wire({ model: 'gpt-4o-mini', temperature: 0, max_completion_tokens: 3200, response_format: RESPONSE_FORMAT, messages }));
@@ -166,7 +168,7 @@ test('no effort set: gpt-6-luna (the default model) sends the product default ef
   assert.equal(mini, wire({ model: 'gpt-5.4-mini', temperature: 0, max_completion_tokens: 3200, response_format: RESPONSE_FORMAT, messages }));
 });
 
-test('the default configuration sends the request its committed default baseline recorded', async () => {
+test('the default configuration preserves baseline request options with the new response schema', async () => {
   const config = resolveModelConfig({ env: {} });
   const baseline = JSON.parse(fs.readFileSync(defaultBaselineForEnv({}), 'utf8'));
   assert.deepEqual([baseline.provenance.product.model, baseline.provenance.product.reasoningEffort], [config.model, config.reasoningEffort]);

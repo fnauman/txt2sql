@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { businessRulesFor, FEW_SHOT_EXAMPLES } from '../constants.js';
+import { RESPONSE_CONTRACT_VERSION } from '../response-decision.js';
 import { normalizeHintsVersion } from '../hints-version.js';
 import { buildCompletionOptions, isNativeAnthropic } from '../model-config.js';
 import { OPTIMIZED_MODEL_REQUEST_OPTIONS, buildOptimizedPrompt, resolveEffectiveSchemaScope } from '../pipeline.js';
@@ -239,6 +240,7 @@ export function describeProductConfig(schema, schemaScope = undefined, hintsVers
   return {
     schemaScope: resolveEffectiveSchemaScope(schema, schemaScope),
     hintsVersion: normalizeHintsVersion(hintsVersion),
+    responseContractVersion: RESPONSE_CONTRACT_VERSION,
     ...describeModelProduct(modelConfig, model),
   };
 }

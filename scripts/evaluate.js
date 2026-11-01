@@ -230,7 +230,8 @@ export async function evaluateQuestion({
   let score = null;
   const oracleTimer = createTimer();
   const behaviorCase = isBehaviorCase(testCase);
-  if (run.success && !behaviorCase) {
+  const nonAnswer = run.success && ['clarify', 'abstain'].includes(run.decision);
+  if (run.success && !behaviorCase && !nonAnswer) {
     try {
       score = await scorePrediction({
         testCase,
@@ -253,8 +254,12 @@ export async function evaluateQuestion({
   // The signal fired while the fixtures were being scored: whatever the
   // oracle returned (or threw) is not a verdict. (A behaviour case is never
   // scored.)
-  const abortedWhileScoring = run.success && !behaviorCase && Boolean(signal?.aborted);
-  if (run.success && behaviorCase) {
+  const abortedWhileScoring = run.success && !behaviorCase && !nonAnswer && Boolean(signal?.aborted);
+  if (nonAnswer) {
+    status = run.decision;
+    await trace.emit('behavior.checked', { ...caseContext, expectedBehavior: testCase.expected_behavior,
+      decision: run.decision, answered: false, retrievedTables });
+  } else if (run.success && behaviorCase) {
     status = 'answered';
     await trace.emit('behavior.checked', {
       ...caseContext,
@@ -317,6 +322,7 @@ export async function evaluateQuestion({
 
   const result = {
     status,
+    ...(nonAnswer ? { decision: run.decision, clarification_questions: run.clarificationQuestions || [] } : {}),
     warnings,
     generated_sql: run.sql || '',
     explanation: response?.explanation || '',

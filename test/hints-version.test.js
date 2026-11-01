@@ -1,3 +1,4 @@
+import { upgradeLegacyPrompt } from './helpers/response-contract.js';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -54,7 +55,7 @@ test('resolveHintsVersion: 2 by default, 1 or 2 accepted, anything else is a con
 // (exp/schema-scope) before HINTS_VERSION existed: 20 questions chosen to cover
 // every hints-v2 change (temporal phrases, posting dates, brands, money words,
 // counts, totals, ledger metrics), in both schema scopes.
-test('HINTS_VERSION=1 reproduces the base branch prompts and semantic plans byte for byte (20 questions, both scopes)', () => {
+test('HINTS_VERSION=1 preserves historical hints and adds response contract v2 (20 questions, both scopes)', () => {
   assert.equal(V1.prompts.length, 20);
   for (const expected of V1.prompts) {
     const plan = buildSemanticPlan(expected.question, { hintsVersion: 1 });
@@ -62,14 +63,16 @@ test('HINTS_VERSION=1 reproduces the base branch prompts and semantic plans byte
     assert.equal(JSON.stringify(plan), JSON.stringify(expected.semanticPlan), `${expected.question}: key order too`);
 
     const full = buildOptimizedPrompt(schema, expected.question, { semanticPlan: plan, schemaScope: 'full', hintsVersion: 1 });
-    assert.equal(full.system, V1.full.system, expected.question);
+    assert.equal(full.system, upgradeLegacyPrompt(V1.full.system), expected.question);
     assert.equal(sha256(full.user), expected.full.userSha256, expected.question);
     assert.equal(full.user.slice(full.user.indexOf('Question-specific context:')), expected.full.questionContext, expected.question);
     assert.deepEqual(full.tables.map((table) => table.tableName), expected.full.allowedTables);
     assert.equal(full.context.hintsVersion, 1);
 
     const retrieved = buildOptimizedPrompt(schema, expected.question, { semanticPlan: plan, schemaScope: 'retrieved', hintsVersion: 1 });
-    assert.equal(sha256(retrieved.system), V1.retrieved.systemSha256, expected.question);
+    const legacyRetrieved = V1.full.system.replace('In-scope schema context comes first: it lists every in-scope table and is the same for every question.', 'In-scope schema context comes first and may be reused across questions with the same retrieved tables.');
+    assert.equal(sha256(legacyRetrieved), V1.retrieved.systemSha256);
+    assert.equal(retrieved.system, upgradeLegacyPrompt(legacyRetrieved), expected.question);
     assert.equal(sha256(retrieved.user), expected.retrieved.userSha256, expected.question);
     assert.deepEqual(retrieved.tables.map((table) => table.tableName), expected.retrieved.allowedTables);
 

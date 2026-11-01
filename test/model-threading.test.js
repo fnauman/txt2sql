@@ -340,6 +340,7 @@ test('provenance records the model, its source, the effort and the request optio
     {
       schemaScope: undefined,
       hintsVersion: undefined,
+      responseContractVersion: 2,
       model: 'gpt-6-luna',
       modelSource: 'MODEL_NAME',
       reasoningEffort: 'low',

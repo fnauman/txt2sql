@@ -88,6 +88,8 @@ const REPETITION_FIELDS = [
   'bucket',
   'counted',
   'behavior_counted',
+  'decision',
+  'clarification_questions',
   'outcome_tags',
   'warnings',
   'error',
@@ -158,7 +160,7 @@ function compactLlm(llm) {
   if (!llm) {
     return llm ?? null;
   }
-  const out = pick(llm, ['ok', 'durationMs', 'usage', 'cost', 'tablesUsed', 'code']);
+  const out = pick(llm, ['ok', 'durationMs', 'usage', 'cost', 'tablesUsed', 'code', 'decision', 'clarificationQuestions']);
   if (out.usage !== undefined) {
     out.usage = compactUsage(out.usage);
   }

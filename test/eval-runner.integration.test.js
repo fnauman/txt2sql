@@ -160,7 +160,10 @@ function evalEnv() {
 const LEGACY = ['--dataset', 'core-public,paraphrase-public,edge-cases-public'];
 
 function evalArgs(args, outputDir) {
-  return [path.join(REPO_ROOT, 'scripts/eval.js'), '--no-docker', '--no-baseline', '--output-dir', outputDir, ...args];
+  // Historical full-suite compatibility deliberately uses the diagnostic
+  // policy. Baseline writes and explicit strict-policy tests use strict.
+  const policy = args.includes('--write-baseline') || args.includes('--oracle-policy') ? [] : ['--oracle-policy', 'regression'];
+  return [path.join(REPO_ROOT, 'scripts/eval.js'), '--no-docker', '--no-baseline', '--output-dir', outputDir, ...policy, ...args];
 }
 
 function runEval(args, label) {
@@ -560,10 +563,19 @@ test('npm run eval: a missing controls directory, or controls for other cases, s
   const otherDir = path.join(outputRoot, 'other-controls');
   await fs.mkdir(otherDir, { recursive: true });
   await fs.writeFile(path.join(otherDir, 'other.json'), JSON.stringify({ not_a_case_here: { negative: [{ id: 'm1', type: 'join_path', sql: 'SELECT 1' }] } }));
-  const uncovered = await runEval(['--offline', '--dataset', 'core-public', '--controls-dir', otherDir], 'controls-uncovered');
+  const uncovered = await runEval(['--offline', '--oracle-policy', 'strict', '--dataset', 'core-public', '--controls-dir', otherDir], 'controls-uncovered');
   assert.equal(uncovered.code, 2, uncovered.stdout + uncovered.stderr);
-  assert.match(uncovered.stdout + uncovered.stderr, /No oracle controls in .*other-controls apply to core-public/);
+  assert.match(uncovered.stdout + uncovered.stderr, /Oracle controls in .*other-controls lack current negative controls for 9\/9 answer case\(s\) in core-public/);
   assert.doesNotMatch(uncovered.stdout, /^Verify:/m, 'stopped before verification');
+});
+
+test('strict oracle quality exposes the known sensitivity gaps before any model call', { skip }, async () => {
+  const before = llmRequests;
+  const run = await runEval(['--offline', '--oracle-policy', 'strict'], 'strict-quality');
+  assert.equal(run.code, 2, run.stdout + run.stderr);
+  assert.match(run.stdout + run.stderr, /held-out kill rate .* < 95\.0%/);
+  assert.match(run.stdout + run.stderr, /no LLM call was made/);
+  assert.equal(llmRequests, before);
 });
 
 test('npm run eval --write-baseline: a run of one dataset never replaces the default baseline', { skip }, async () => {
@@ -572,7 +584,7 @@ test('npm run eval --write-baseline: a run of one dataset never replaces the def
   const model = `subset-guard-${process.pid}`;
   const target = path.join(REPO_ROOT, 'eval/baselines', `${model}.json`);
   try {
-    const run = await runEval(['--dataset', 'core-public', '--model', model, '--write-baseline', '--skip-verify'], 'baseline-subset');
+    const run = await runEval(['--dataset', 'core-public', '--model', model, '--write-baseline'], 'baseline-subset');
     assert.equal(run.code, 2, run.stdout + run.stderr);
     const suiteSize = (await selectSuite()).entries.length;
     assert.match(run.stdout + run.stderr, new RegExp(`--write-baseline refused before the run: the run selects 9 of the default suite's ${suiteSize} case\\(s\\)`));

@@ -1,21 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
-import { DASHBOARD_PINS_KEY, MAX_DASHBOARD_PINS } from '../lib/constants';
-import { loadJson, saveJson } from '../storage';
+import { MAX_DASHBOARD_PINS } from '../lib/constants';
+import { createSessionList } from '../storage';
 import type { DashboardPin } from '../types';
 
 export function usePins() {
-  const [pins, setPins] = useState<DashboardPin[]>(() => loadJson<DashboardPin[]>(DASHBOARD_PINS_KEY, []));
-
-  useEffect(() => saveJson(DASHBOARD_PINS_KEY, pins), [pins]);
+  const [session] = useState(() => createSessionList<DashboardPin>());
+  const pins = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
 
   const addPin = useCallback((pin: DashboardPin) => {
-    setPins((current) => [pin, ...current].slice(0, MAX_DASHBOARD_PINS));
-  }, []);
+    session.update((current) => [pin, ...current].slice(0, MAX_DASHBOARD_PINS));
+  }, [session]);
 
   const removePin = useCallback((id: string) => {
-    setPins((current) => current.filter((pin) => pin.id !== id));
-  }, []);
+    session.update((current) => current.filter((pin) => pin.id !== id));
+  }, [session]);
 
-  return { pins, addPin, removePin };
+  return { pins, addPin, removePin, clearPins: session.clear };
 }

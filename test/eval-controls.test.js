@@ -118,9 +118,10 @@ test('controlsCoverageFailure: controls that apply to none of the verified cases
   const index = await loadControlsIndex({ controlsDir });
   const covered = { datasetName: 'core', cases: [{ id: 'c1', intentId: 'count_customers', expected_sql: GOLD }] };
   const other = { datasetName: 'other', cases: [{ id: 'x1', intentId: 'other_intent', expected_sql: 'SELECT 2 AS n' }] };
-  assert.equal(controlsCoverageFailure([covered, other], index, { controlsDir }), null);
+  assert.equal(controlsCoverageFailure([covered, other], index, { controlsDir, requireComplete: false }), null);
+  assert.match(controlsCoverageFailure([covered, other], index, { controlsDir }), /1\/1 answer case\(s\) in other.*every answer case/);
   assert.equal(controlsCoverageFailure([other], null, { controlsDir }), null, '--skip-controls: no index, no gate');
-  const failure = controlsCoverageFailure([other], index, { controlsDir });
+  const failure = controlsCoverageFailure([other], index, { controlsDir, requireComplete: false });
   assert.match(failure, /^No oracle controls in .* apply to other, so no kill-rate gate would run\. .*--skip-controls/);
 });
 
@@ -155,9 +156,24 @@ test('verify-dataset stops on a mistyped --controls-dir before touching any data
   const unrelated = await tempControls({ 'x.json': { not_a_core_case: { negative: [{ id: 'm1', sql: 'SELECT 1' }] } } });
   await assert.rejects(run(unrelated), (error) => {
     assert.equal(error.code, 1);
-    assert.match(error.stderr, /Dataset verification failed: No oracle controls in .* apply to core-public/);
+    assert.match(error.stderr, /Dataset verification failed: Oracle controls in .* lack current negative controls for 9\/9 answer case\(s\) in core-public/);
     return true;
   });
+});
+
+test('strict coverage rejects stale, empty and positive-only matches and ignores behavior-only cases', async () => {
+  const controlsDir = await tempControls({ 'controls.json': {
+    stale: { gold_fingerprint: 'outdated', negative: [{ id: 'm1', sql: 'SELECT 2' }] },
+    empty: { negative: [] },
+    positive: { positive: [{ id: 'p1', sql: GOLD }] },
+    good: { gold_fingerprint: goldFingerprint(GOLD), negative: [{ id: 'm1', sql: 'SELECT 2' }] },
+  } });
+  const index = await loadControlsIndex({ controlsDir });
+  const cases = ['stale', 'empty', 'positive', 'good'].map(id => ({ id, expected_sql: GOLD }));
+  const failure = controlsCoverageFailure([{ datasetName: 'synthetic', cases }], index);
+  assert.match(failure, /3\/4 answer case\(s\) in synthetic/);
+  assert.doesNotMatch(failure, /stale|positive/, 'aggregate counts do not reveal case ids');
+  assert.equal(controlsCoverageFailure([{ datasetName: 'behavior', cases: [{ id: 'clarify', expected_behavior: 'clarify' }] }], index), null);
 });
 
 // --- the committed controls -------------------------------------------------

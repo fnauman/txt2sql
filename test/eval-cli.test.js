@@ -31,6 +31,8 @@ test('eval defaults: everything on, the whole suite, 4 workers, 120 s deadline',
   assert.deepEqual([options.repeat, options.concurrency, options.caseTimeoutMs, options.budgetUsd], [1, 4, 120000, null]);
   assert.deepEqual([options.model, options.reasoningEffort], ['gpt-6-luna', 'low']);
   assert.equal(options.minKillRate, 0.95);
+  assert.equal(options.minHeldoutKillRate, 0.95);
+  assert.equal(options.oraclePolicy.name, 'strict');
   assert.equal(options.failOnAnyFailure, false);
   assert.equal(parseEvalArgs([], { env: { MODEL_NAME: 'gpt-5.4-mini' } }).model, 'gpt-5.4-mini');
   assert.equal(parseEvalArgs(['--model', 'gpt-5.4'], { env: { MODEL_NAME: 'gpt-5.4-mini' } }).model, 'gpt-5.4');
@@ -376,6 +378,7 @@ test('verifySuite checks a case shared by two datasets once and applies the kill
     connections: [{ name: 'seed' }, { name: 'v2' }],
     verify,
     minKillRate: 0.95,
+    minHeldoutKillRate: 0, // This test isolates design-control aggregation.
   });
   assert.deepEqual(calls, ['shared', 'other']);
   assert.equal(result.cases, 2);
@@ -426,7 +429,7 @@ test('the in-process verify gate: invalid and unscored controls are problems (ex
     controls: { source: 'x', matchedBy: 'id', positive: [], negative: [...Array.from({ length: 30 }, (_, index) => killed(`m${index}`)), extra] },
   });
   const run = (extra) =>
-    verifySuite({ datasets: [{ name: 'core', cases: [testCase] }], connections: [{ name: 'seed' }, { name: 'v2' }], verify: negativeWith(extra), minKillRate: 0.95 });
+    verifySuite({ datasets: [{ name: 'core', cases: [testCase] }], connections: [{ name: 'seed' }, { name: 'v2' }], verify: negativeWith(extra), minKillRate: 0.95, minHeldoutKillRate: 0 });
 
   const invalid = await run({ id: 'mx', type: 'cancel', heldout: false, status: 'invalid', killed: false, killedOn: [], errors: [{ fixture: 'v2', code: 'ER_BAD_FIELD_ERROR', infra: false }] });
   assert.deepEqual(invalid.controlStatus, { undecided: [], invalid: ['c1/mx'], unscored: [] });
@@ -555,7 +558,7 @@ test('unknown flags name the closest known one', () => {
 });
 
 test('the runner block records every parsed flag, paths repo-relative', () => {
-  const options = parseEvalArgs(['--gate', '--min-accuracy', '0.5', '--skip-controls', '--min-kill-rate', '0.9', '--no-seed', '--compare', 'eval/baselines/x.json'], { env: {} });
+  const options = parseEvalArgs(['--gate', '--min-accuracy', '0.5', '--skip-controls', '--oracle-policy', 'regression', '--min-kill-rate', '0.9', '--no-seed', '--compare', 'eval/baselines/x.json'], { env: {} });
   const flags = describeRunnerFlags(options);
   assert.equal('argv' in flags, false);
   assert.deepEqual([flags.gate, flags.minAccuracy, flags.checkControls, flags.minKillRate, flags.seed], [true, 0.5, false, 0.9, false]);
@@ -564,11 +567,20 @@ test('the runner block records every parsed flag, paths repo-relative', () => {
 });
 
 test('--write-baseline only replaces the baseline with a clean, complete run', () => {
-  const report = { budget: { skippedCases: [] }, provenance: { sourceUnchangedDuringRun: true } };
+  const report = { budget: { skippedCases: [] }, provenance: { sourceUnchangedDuringRun: true }, verification: {
+    skipped: false, oraclePolicy: { name: 'strict', baselineEligible: true }, controlsChecked: true, baselineEligible: true,
+    minKillRate: 0.95, minHeldoutKillRate: 0.95, problems: [], gateFailures: [],
+  } };
   assert.equal(baselineRefusal(report, { code: 0, reasons: [] }), null);
   assert.match(baselineRefusal(report, { code: 2, reasons: ['9 repetition(s): LLM provider outage errors (llm_outage)'] }), /exited 2 \(9 repetition/);
   assert.match(baselineRefusal(report, { code: 1, reasons: ['significantly worse'] }), /exited 1/);
   assert.match(baselineRefusal({ ...report, budget: { skippedCases: ['a', 'b'] } }, { code: 0, reasons: [] }), /2 case\(s\) were skipped by the budget/);
+  for (const verification of [undefined, { ...report.verification, skipped: true }, { ...report.verification, controlsChecked: false },
+    { ...report.verification, oraclePolicy: { name: 'regression', baselineEligible: false } },
+    { ...report.verification, baselineEligible: false }, { ...report.verification, minHeldoutKillRate: 0 }, { ...report.verification, minHeldoutKillRate: undefined },
+    { ...report.verification, gateFailures: ['known sensitivity gap'] }]) {
+    assert.match(baselineRefusal({ ...report, verification }, { code: 0, reasons: [] }), /strict oracle verification/);
+  }
 });
 
 test('--write-baseline never replaces the default baseline with a filtered or partial suite', () => {

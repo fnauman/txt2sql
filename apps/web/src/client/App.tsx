@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { BarChart3, LayoutDashboard, Loader2, Moon, RefreshCcw, Search, Sun, TableProperties, X } from 'lucide-react';
+import { BarChart3, LayoutDashboard, Loader2, Moon, RefreshCcw, Search, Sun, TableProperties, Trash2, X } from 'lucide-react';
 
 import { useHealth } from './hooks/useHealth';
 import { usePins } from './hooks/usePins';
@@ -23,11 +23,18 @@ export default function App() {
   const [includeInsights, setIncludeInsights] = useState(true);
   const { health, status: healthStatus, refresh: refreshHealth } = useHealth();
   const { theme, toggle: toggleTheme } = useTheme();
-  const { recentQueries, pushRecent } = useRecentQueries();
-  const { pins, addPin, removePin } = usePins();
-  const { state, run, cancel } = useQueryStream();
+  const { recentQueries, pushRecent, clearRecentQueries } = useRecentQueries();
+  const { pins, addPin, removePin, clearPins } = usePins();
+  const { state, run, cancel, clear } = useQueryStream();
   const result = state.result;
   const loading = state.status === 'streaming';
+
+  const clearSession = () => {
+    clear();
+    clearRecentQueries();
+    clearPins();
+    setQuestion('');
+  };
 
   const executeQuery = async (nextQuestion = question) => {
     const trimmed = nextQuestion.trim();
@@ -85,6 +92,9 @@ export default function App() {
         </button>
         <button className={view === 'dashboard' ? 'active' : ''} type="button" onClick={() => setView('dashboard')} title="Dashboard" aria-label="Dashboard">
           <LayoutDashboard size={21} />
+        </button>
+        <button type="button" onClick={clearSession} title="Clear this page's question, results, history and pins" aria-label="Clear session data">
+          <Trash2 size={20} />
         </button>
         <button
           className="theme-toggle"

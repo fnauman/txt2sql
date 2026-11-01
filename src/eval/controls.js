@@ -14,7 +14,7 @@
 // - negative: plausible-but-wrong SQL (a "mutant"). The oracle must kill it:
 //   fail to match the gold (and every alternative) on at least one fixture.
 //   `heldout: true` marks mutants written after the fixtures were designed
-//   (reported separately; no kill-rate floor).
+//   (reported separately, with the same 95% floor under the strict policy).
 // - positive: a correct alternative to the gold. It must match the gold (or an
 //   alternative) on every fixture AND pass the production validator.
 //

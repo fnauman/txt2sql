@@ -60,6 +60,17 @@ a few days.
   redacted for callers without the token.
 - **Browser features are default-deny.** Client-side data features are gated to
   the synthetic demo database only; the browser never sends SQL.
+- **Browser query data stays in page memory.** Recent questions, pinned results,
+  visible rows and debug output are not written to localStorage or sessionStorage.
+  Reloading or closing the page discards this state. The **Clear session data**
+  navigation button cancels the active request and clears the question, result,
+  recent history and dashboard pins. Late stream frames cannot restore a cleared
+  result. On startup and clear, the app attempts to delete the two sensitive
+  localStorage entries written by older releases; storage restrictions can prevent
+  that deletion, but those values are never loaded. The theme preference remains
+  persistent. This control clears browser state only: it does not delete server
+  traces, downloaded exports, browser/OS artifacts or provider logs, and it is
+  not authentication, logout or a user/tenant boundary.
 
 ## Known gaps
 

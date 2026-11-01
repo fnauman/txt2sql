@@ -57,6 +57,7 @@ import { runScriptMain } from '../src/eval/script-exit.js';
 import { ensureFixtures, HarnessError, preflightDatabase } from '../src/eval/setup.js';
 import { describeFilters, filterSuiteEntries, parseList, resolveCaseIdAliases, scoringFingerprint, selectSuite, SPLITS } from '../src/eval/suite.js';
 import { controlsCoverageFailure, createValidatorProbe, verifySuite } from '../src/eval/verify.js';
+import { DEFAULT_MIN_KILL_RATE, oraclePolicyNotice, resolveOraclePolicy } from '../src/eval/oracle-policy.js';
 import { createOpenAiClient, loadNarrowSchema, resolveEffectiveSchemaScope, resolveStatementTimeoutMs, writeJsonFile } from '../src/pipeline.js';
 import { describeHintsVersion, resolveHintsVersion, sameHintsVersion } from '../src/hints-version.js';
 import { describeSchemaScope, resolveSchemaScopeConfig, sameSchemaScopeBehaviour } from '../src/schema-scope.js';
@@ -83,7 +84,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const MODELS_DIR = path.resolve(REPO_ROOT, 'models');
 const SCHEMA_PATH = path.resolve(REPO_ROOT, 'generated/schema.json');
 export const DEFAULT_BASELINES_DIR = path.resolve(REPO_ROOT, 'eval/baselines');
-export const DEFAULT_MIN_KILL_RATE = 0.95;
+export { DEFAULT_MIN_KILL_RATE } from '../src/eval/oracle-policy.js';
 const PROFILES = ['eval', 'benchmark'];
 
 export const USAGE = `Usage: npm run eval -- [options]
@@ -118,7 +119,8 @@ Setup:
   --skip-controls             verify gold only (no kill-rate gate)
   --controls-dir <dir>        default datasets/controls
   --min-kill-rate 0.95        design kill-rate floor per dataset
-  --min-heldout-kill-rate 0   held-out kill-rate floor per dataset
+  --min-heldout-kill-rate 0.95 held-out kill-rate floor per dataset
+  --oracle-policy strict    strict (default) or regression (diagnostic; no baseline promotion)
   --refresh-schema            recompile generated/schema.json from models/
 Compare and gate:
   --compare <report.json>     baseline to compare with (default eval/baselines/<model>[.<effort>].json
@@ -185,6 +187,7 @@ const VALUE_FLAGS = new Set([
   '--controls-dir',
   '--min-kill-rate',
   '--min-heldout-kill-rate',
+  '--oracle-policy',
   '--compare',
   '--min-accuracy',
   '--baseline-file',
@@ -359,6 +362,16 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     throw usageError(`--profile must be one of ${PROFILES.join(', ')}; got "${profile}".`);
   }
   const benchmark = profile === 'benchmark';
+  let oraclePolicy;
+  try {
+    oraclePolicy = resolveOraclePolicy({
+      name: getOptionValue(argv, '--oracle-policy') || 'strict',
+      minKillRate: parseNumber(argv, '--min-kill-rate', null, { min: 0, max: 1 }),
+      minHeldoutKillRate: parseNumber(argv, '--min-heldout-kill-rate', null, { min: 0, max: 1 }),
+    });
+  } catch (error) {
+    throw usageError(error.message);
+  }
   const datasetFiles = parseList(getOptionValue(argv, '--dataset-file') || getOptionValue(argv, '--dev-set'));
   let datasetNames = parseList(getOptionValue(argv, '--dataset'));
   if (benchmark && datasetNames.length === 0 && datasetFiles.length === 0) {
@@ -414,8 +427,9 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
     verify: !benchmark && !hasOptionFlag(argv, '--skip-verify'),
     checkControls: !hasOptionFlag(argv, '--skip-controls'),
     controlsDir: path.resolve(getOptionValue(argv, '--controls-dir') || DEFAULT_CONTROLS_DIR),
-    minKillRate: parseNumber(argv, '--min-kill-rate', DEFAULT_MIN_KILL_RATE, { min: 0, max: 1 }),
-    minHeldoutKillRate: parseNumber(argv, '--min-heldout-kill-rate', 0, { min: 0, max: 1 }),
+    oraclePolicy,
+    minKillRate: oraclePolicy.minKillRate,
+    minHeldoutKillRate: oraclePolicy.minHeldoutKillRate,
     refreshSchema: hasOptionFlag(argv, '--refresh-schema'),
     compare: compare ? path.resolve(compare) : null,
     noBaseline: hasOptionFlag(argv, '--no-baseline'),
@@ -437,6 +451,9 @@ export function parseEvalArgs(argv, { profile: defaultProfile = 'eval', env = pr
   };
   if (options.writeBaseline && (options.rescore || options.offline)) {
     throw usageError('--write-baseline only applies to a live run.');
+  }
+  if (options.writeBaseline && (oraclePolicy.name !== 'strict' || !options.verify || !options.checkControls)) {
+    throw usageError('--write-baseline requires strict oracle verification with controls; regression policy, --skip-verify and --skip-controls are diagnostic only.');
   }
   if (options.baselineFile && !options.writeBaseline) {
     throw usageError('--baseline-file only applies with --write-baseline.');
@@ -1034,6 +1051,14 @@ export function baselineRefusal(report, exit) {
   if (exit.code !== 0) {
     return `the run exited ${exit.code} (${exit.reasons.join('; ')})`;
   }
+  if (report.verification?.skipped !== false || report.verification?.oraclePolicy?.name !== 'strict' ||
+      report.verification?.oraclePolicy?.baselineEligible !== true || report.verification?.controlsChecked !== true ||
+      report.verification?.baselineEligible !== true ||
+      !Number.isFinite(report.verification.minKillRate) || report.verification.minKillRate < DEFAULT_MIN_KILL_RATE ||
+      !Number.isFinite(report.verification.minHeldoutKillRate) || report.verification.minHeldoutKillRate < DEFAULT_MIN_KILL_RATE ||
+      report.verification.problems?.length !== 0 || report.verification.gateFailures?.length !== 0) {
+    return 'strict oracle verification with controls did not pass; diagnostic runs cannot become baselines';
+  }
   const skipped = report.budget?.skippedCases?.length || 0;
   if (skipped > 0) {
     return `${skipped} case(s) were skipped by the budget`;
@@ -1564,6 +1589,7 @@ async function runRescore({ options, cli, schema, schemaScope, hintsVersion, mod
       promptVersion: source.provenance?.promptVersion || null,
       schemaScope: recordedScope,
       hintsVersion: recordedHintsVersion,
+      responseContractVersion: source.provenance?.product?.responseContractVersion ?? 1,
       reasoningEffort: recordedModelConfig.reasoningEffort,
       reportVersion: source.reportVersion || 1,
       compact: isCompactReport(source),
@@ -1608,6 +1634,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
   for (const line of describeModelNotices(modelConfig)) {
     cli.log(line);
   }
+  cli.log(oraclePolicyNotice(options.oraclePolicy || resolveOraclePolicy()));
   // Configuration problems fail before anything is started, seeded or spent.
   await checkGateBaseline(options, cli);
   let schemaScope;
@@ -1706,7 +1733,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
         ? controlsCoverageFailure(
             selection.datasets.map((dataset) => ({ datasetName: dataset.name, cases: dataset.cases })),
             controlsIndex,
-            { controlsDir: repoRelative(options.controlsDir) }
+            { controlsDir: repoRelative(options.controlsDir), requireComplete: options.oraclePolicy?.name !== 'regression' }
           )
         : null;
       if (coverageFailure) {
@@ -1727,6 +1754,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
           checkControls: options.checkControls,
           minKillRate: options.minKillRate,
           minHeldoutKillRate: options.minHeldoutKillRate,
+          requireCompleteControls: options.oraclePolicy?.name !== 'regression',
           // A stale flag means the product now accepts a gold it used to
           // reject: worth a warning, never a reason not to measure it.
           staleKnownRejection: 'warning',
@@ -1737,7 +1765,7 @@ export async function runEval(options, { cli = createCliOutput({ traceToStdout: 
         }
         throw error;
       }
-      verification = { skipped: false, ...result };
+      verification = { skipped: false, ...result, oraclePolicy: options.oraclePolicy, controlsChecked: options.checkControls };
       cli.log(`Verify: ${result.cases} unique case(s) on ${connections.length} fixture(s), ${result.problems.length} with problems.`);
       printVerification(cli, result);
       const refusal = verificationRefusal(result);

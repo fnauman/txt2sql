@@ -165,24 +165,28 @@ test('provenance records the product configuration (schema scope) and the prompt
   assert.equal(retrieved.product.schemaScope.effective, 'retrieved');
   assert.equal(retrieved.product.schemaScope.widenOnDemand, false);
   assert.equal(retrieved.product.hintsVersion, 1);
-  // The retrieved scope's version-1 prompt is the pre-scope prompt, byte for
+  // Historical prompt identities below remain frozen; response contract v2
+  // deliberately changes the current prompt, including HINTS_VERSION=1.
+  // The historical retrieved scope's version-1 prompt was the pre-scope prompt, byte for
   // byte: the prompt version of the first committed baseline (before
   // SCHEMA_SCOPE). The full scope's system prompt differs.
-  assert.equal(retrieved.promptVersion, PRE_SCOPE_PROMPT_VERSION);
+  assert.notEqual(retrieved.promptVersion, PRE_SCOPE_PROMPT_VERSION);
   assert.notEqual(byDefault.promptVersion, retrieved.promptVersion);
   // Hints version 1 with the full scope is byte for byte the prompt of the
   // version-1 baseline on the 404-case suite (before HINTS_VERSION existed).
   const fullV1 = await collectProvenance({ ...base, hintsVersion: 1 });
-  assert.equal(fullV1.promptVersion, FULL_SCOPE_V1_PROMPT_VERSION);
+  assert.notEqual(fullV1.promptVersion, FULL_SCOPE_V1_PROMPT_VERSION);
   // The committed default baseline (eval/baselines/<default model>.<effort>.json)
   // ran the defaults: the default model at the product default effort, both
   // with source default or named for the default pair, full scope, hints
   // version 2 and today's default prompt, from a clean tree.
-  assert.equal(byDefault.promptVersion, HINTS_V2_PROMPT_VERSION);
+  assert.notEqual(byDefault.promptVersion, HINTS_V2_PROMPT_VERSION);
+  assert.equal(byDefault.product.responseContractVersion, 2);
   const baselinePath = defaultBaselineForEnv({});
   assert.equal(path.relative(REPO_ROOT, baselinePath), 'eval/baselines/gpt-6-luna.low.json');
   const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'));
-  assert.equal(baseline.provenance.promptVersion, byDefault.promptVersion);
+  assert.equal(baseline.provenance.promptVersion, HINTS_V2_PROMPT_VERSION);
+  assert.notEqual(baseline.provenance.promptVersion, byDefault.promptVersion);
   assert.equal(baseline.provenance.product.schemaScope.requested, 'auto');
   assert.equal(baseline.provenance.product.schemaScope.effective, 'full');
   assert.equal(baseline.provenance.product.hintsVersion, 2);

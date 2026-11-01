@@ -1048,3 +1048,30 @@ test('data residency follows the configured query user (DB_USER defaults to demo
     assert.equal(health.json.dataResidency, 'server-only');
   });
 });
+
+
+for (const decision of ['clarify', 'abstain']) {
+  test(`${decision} is an HTTP/SSE product result with no data frames or SQL`, async () => {
+    const { factory } = createRuntimeFactory();
+    const questions = decision === 'clarify' ? ['Which date basis should apply?'] : [];
+    const { runQuestion } = recordingRunner(args => ({
+      ...successResult(args.question), decision, clarificationQuestions: questions,
+      sql: '', rows: [], columns: [], visualizations: [], insights: [], rowCount: 0, totalRowCount: 0,
+      response: { sql: '', explanation: 'More information is needed.', tables_used: [], assumptions: [] },
+    }));
+    await withApp({ config: testConfig(), runtimeFactory: factory, runQuestion }, async app => {
+      const blocking = await app.request({ method: 'POST', path: '/api/query', body: { question: 'Show entries' } });
+      assert.equal(blocking.status, 200);
+      assert.equal(blocking.json.decision, decision);
+      assert.equal(blocking.json.sql, '');
+      assert.deepEqual(blocking.json.clarificationQuestions, questions);
+      const stream = await app.request({ method: 'POST', path: '/api/query/stream', body: { question: 'Show entries' } });
+      const frames = parseSse(stream.text);
+      const answer = frames.find(frame => frame.event === 'decision');
+      assert.equal(answer.data.decision, decision);
+      assert.deepEqual(answer.data.clarificationQuestions, questions);
+      assert.ok(!frames.some(frame => ['sql', 'rows', 'columns', 'layout'].includes(frame.event)));
+      assert.equal(frames.at(-1).event, 'done');
+    });
+  });
+}

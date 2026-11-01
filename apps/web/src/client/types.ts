@@ -76,6 +76,8 @@ export interface QueryError {
 }
 
 export interface QueryResponse {
+  decision?: 'answer' | 'clarify' | 'abstain';
+  clarificationQuestions?: string[];
   success: boolean;
   question: string;
   sql: string;

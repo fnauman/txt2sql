@@ -221,6 +221,11 @@ async function main() {
         continue;
       }
 
+      if (result.decision && result.decision !== 'answer') {
+        cli.log(`Decision: ${result.decision}`);
+        for (const question of result.clarificationQuestions || []) cli.log(`Clarification: ${question}`);
+        continue;
+      }
       printRows(result.rows, cli);
     }
   } finally {

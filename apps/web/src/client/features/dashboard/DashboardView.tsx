@@ -11,6 +11,7 @@ export function DashboardView({ pins, onRemove }: { pins: DashboardPin[]; onRemo
       <div className="view-title">
         <p className="eyebrow">Session dashboard</p>
         <h1>Pinned results</h1>
+        <p>Pins stay in this page until you reload or clear session data.</p>
       </div>
       {pins.length === 0 ? (
         <div className="empty-dashboard">Pin a table or chart from a query result to build your dashboard.</div>
