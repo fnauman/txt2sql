@@ -75,8 +75,8 @@ after(async () => {
 
 const FAKE_KEY = 'fake-key-for-a-local-stub';
 
-// The bytes the SDK puts on the wire for a request body (it indents by 2).
-const wire = (body) => JSON.stringify(body, null, 2);
+// The bytes the SDK puts on the wire for a request body (compact since openai v5).
+const wire = (body) => JSON.stringify(body);
 
 function localClient(env = {}) {
   return createOpenAiClient({ env: { OPENAI_API_KEY: FAKE_KEY, OPENAI_BASE_URL: baseUrl, OPENAI_MAX_RETRIES: '0', ...env } });
